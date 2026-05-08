@@ -5,14 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"sync"
 	"time"
 
 	"github.com/shinpr/galley/internal/config"
+	"github.com/shinpr/galley/internal/queue"
 	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/internal/workspace"
@@ -28,6 +27,7 @@ type Options struct {
 	EnvironmentProfileFile string
 	Once                   bool
 	MaxConcurrentTasks     int
+	MaxConcurrentPerRepo   int
 	PollInterval           time.Duration
 	ClaimTTL               time.Duration
 	HeartbeatInterval      time.Duration
@@ -35,8 +35,10 @@ type Options struct {
 	OpenPR                 bool
 	PollPRComments         bool
 	ReplyPRComments        bool
+	CleanupWorktrees       bool
 	PRBase                 string
 	SupervisorCommand      []string
+	ShutdownTimeout        time.Duration
 	Explicit               ExplicitOptions
 }
 
@@ -47,6 +49,7 @@ type ExplicitOptions struct {
 	QualityProfileFile     bool
 	EnvironmentProfileFile bool
 	MaxConcurrentTasks     bool
+	MaxConcurrentPerRepo   bool
 	PollInterval           bool
 	ClaimTTL               bool
 	HeartbeatInterval      bool
@@ -54,11 +57,10 @@ type ExplicitOptions struct {
 	OpenPR                 bool
 	PollPRComments         bool
 	ReplyPRComments        bool
+	CleanupWorktrees       bool
 	PRBase                 bool
 	SupervisorCommand      bool
 }
-
-var errClaimConflict = errors.New("claim conflict")
 
 // Run starts the daemon loop.
 func Run(ctx context.Context, opts Options) error {
@@ -68,7 +70,7 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 	opts = opts.withDefaults()
-	if err := ensureLayout(opts.Root); err != nil {
+	if err := queue.EnsureLayout(opts.Root); err != nil {
 		return err
 	}
 	if opts.Once {
@@ -76,6 +78,11 @@ func Run(ctx context.Context, opts Options) error {
 		for {
 			if opts.PollPRComments {
 				if err := pollPRComments(ctx, opts); err != nil && firstErr == nil {
+					firstErr = err
+				}
+			}
+			if opts.CleanupWorktrees {
+				if err := cleanupWorktrees(ctx, opts); err != nil && firstErr == nil {
 					firstErr = err
 				}
 			}
@@ -96,6 +103,11 @@ func Run(ctx context.Context, opts Options) error {
 	for {
 		if opts.PollPRComments {
 			if err := pollPRComments(ctx, opts); err != nil {
+				return err
+			}
+		}
+		if opts.CleanupWorktrees {
+			if err := cleanupWorktrees(ctx, opts); err != nil {
 				return err
 			}
 		}
@@ -134,6 +146,9 @@ func (opts Options) withManifest() (Options, error) {
 	if !opts.Explicit.MaxConcurrentTasks {
 		opts.MaxConcurrentTasks = defaults.MaxConcurrentTasks
 	}
+	if !opts.Explicit.MaxConcurrentPerRepo {
+		opts.MaxConcurrentPerRepo = defaults.MaxConcurrentPerRepo
+	}
 	if !opts.Explicit.PollInterval {
 		opts.PollInterval = defaults.PollInterval
 	}
@@ -154,6 +169,9 @@ func (opts Options) withManifest() (Options, error) {
 	}
 	if !opts.Explicit.ReplyPRComments {
 		opts.ReplyPRComments = defaults.ReplyPRComments
+	}
+	if !opts.Explicit.CleanupWorktrees {
+		opts.CleanupWorktrees = defaults.CleanupWorktrees
 	}
 	if !opts.Explicit.PRBase {
 		opts.PRBase = defaults.PRBase
@@ -177,11 +195,20 @@ func (opts Options) withDefaults() Options {
 	if opts.MaxConcurrentTasks <= 0 {
 		opts.MaxConcurrentTasks = 1
 	}
+	if !opts.Explicit.MaxConcurrentPerRepo && opts.MaxConcurrentPerRepo == 0 {
+		opts.MaxConcurrentPerRepo = 1
+	}
+	if opts.MaxConcurrentPerRepo < 0 {
+		opts.MaxConcurrentPerRepo = 0
+	}
 	if opts.PollInterval <= 0 {
 		opts.PollInterval = 10 * time.Second
 	}
 	if opts.ClaimTTL <= 0 {
 		opts.ClaimTTL = 30 * time.Minute
+	}
+	if opts.ShutdownTimeout <= 0 {
+		opts.ShutdownTimeout = 5 * time.Minute
 	}
 	if opts.HeartbeatInterval <= 0 {
 		opts.HeartbeatInterval = opts.ClaimTTL / 4
@@ -199,13 +226,18 @@ func (opts Options) withDefaults() Options {
 }
 
 func processAvailable(ctx context.Context, opts Options) (int, error) {
-	if err := ensureLayout(opts.Root); err != nil {
+	select {
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	default:
+	}
+	if err := queue.EnsureLayout(opts.Root); err != nil {
 		return 0, err
 	}
-	if err := recoverStaleClaims(opts.Root, opts.ClaimTTL, time.Now()); err != nil {
+	if err := queue.RecoverStaleClaims(opts.Root, opts.ClaimTTL, time.Now()); err != nil {
 		return 0, err
 	}
-	queued, err := queuedTasks(opts.Root)
+	queued, err := queue.QueuedTasks(opts.Root)
 	if err != nil {
 		return 0, err
 	}
@@ -220,15 +252,38 @@ func processAvailable(ctx context.Context, opts Options) (int, error) {
 
 	var wg sync.WaitGroup
 	errs := make(chan error, limit)
+	taskCtx, stopTaskCtx := gracefulTaskContext(ctx, opts.ShutdownTimeout)
+	defer stopTaskCtx()
 	claimedCount := 0
 	var firstClaimErr error
+	repoCounts := queue.RunningRepoCounts(opts.Root)
+	stopClaiming := false
 	for _, queuedPath := range queued {
-		if claimedCount >= limit {
+		if claimedCount >= limit || stopClaiming {
 			break
 		}
-		claimed, err := claimTask(opts.Root, queuedPath)
+		select {
+		case <-ctx.Done():
+			if firstClaimErr == nil {
+				firstClaimErr = ctx.Err()
+			}
+			stopClaiming = true
+			continue
+		default:
+		}
+		repoKey := ""
+		if opts.MaxConcurrentPerRepo > 0 {
+			loaded, loadErr := task.Load(queuedPath)
+			if loadErr == nil {
+				repoKey = loaded.Scope.CWD
+				if repoKey != "" && repoCounts[repoKey] >= opts.MaxConcurrentPerRepo {
+					continue
+				}
+			}
+		}
+		claimed, err := queue.ClaimTask(opts.Root, queuedPath)
 		if err != nil {
-			if errors.Is(err, errClaimConflict) {
+			if errors.Is(err, queue.ErrClaimConflict) {
 				continue
 			}
 			if firstClaimErr == nil {
@@ -237,10 +292,13 @@ func processAvailable(ctx context.Context, opts Options) (int, error) {
 			continue
 		}
 		claimedCount++
+		if repoKey != "" {
+			repoCounts[repoKey]++
+		}
 		wg.Add(1)
 		go func(path string) {
 			defer wg.Done()
-			if err := processClaimedTask(ctx, opts, path); err != nil {
+			if err := processClaimedTask(taskCtx, ctx, opts, path); err != nil {
 				errs <- err
 			}
 		}(claimed)
@@ -257,153 +315,37 @@ func processAvailable(ctx context.Context, opts Options) (int, error) {
 	return claimedCount, firstErr
 }
 
-func ensureLayout(root string) error {
-	for _, path := range []string{
-		filepath.Join(root, "tasks", "queued"),
-		filepath.Join(root, "tasks", "draft"),
-		filepath.Join(root, "tasks", "ready"),
-		filepath.Join(root, "tasks", "running"),
-		filepath.Join(root, "tasks", "done"),
-		filepath.Join(root, "tasks", "failed"),
-		filepath.Join(root, "runs"),
-	} {
-		if err := os.MkdirAll(path, 0o755); err != nil {
-			return fmt.Errorf("create %s: %w", path, err)
+func gracefulTaskContext(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
+	stop := context.AfterFunc(parent, func() {
+		if timeout <= 0 {
+			cancel()
+			return
 		}
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+		<-timer.C
+		cancel()
+	})
+	return ctx, func() {
+		stop()
+		cancel()
 	}
-	return nil
 }
 
-func queuedTasks(root string) ([]string, error) {
-	pattern := filepath.Join(root, "tasks", "queued", "*.yaml")
-	matches, err := filepath.Glob(pattern)
-	if err != nil {
-		return nil, err
-	}
-	sort.Strings(matches)
-	return matches, nil
-}
-
-func claimTask(root, queuedPath string) (string, error) {
-	runningPath := filepath.Join(root, "tasks", "running", filepath.Base(queuedPath))
-	lockPath := runningPath + ".lock"
-	lockFile, err := os.OpenFile(lockPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		if errors.Is(err, os.ErrExist) {
-			return "", fmt.Errorf("%w: claim %s lock already exists at %s", errClaimConflict, queuedPath, lockPath)
-		}
-		return "", fmt.Errorf("reserve claim %s: %w", queuedPath, err)
-	}
-	defer os.Remove(lockPath)
-	if err := lockFile.Close(); err != nil {
-		return "", fmt.Errorf("reserve claim %s: %w", queuedPath, err)
-	}
-	if _, err := os.Stat(runningPath); err == nil {
-		return "", fmt.Errorf("%w: running task already exists at %s", errClaimConflict, runningPath)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("inspect running task %s: %w", runningPath, err)
-	}
-	if err := os.Rename(queuedPath, runningPath); err != nil {
-		return "", fmt.Errorf("claim %s: %w", queuedPath, err)
-	}
-	return runningPath, nil
-}
-
-func recoverStaleClaims(root string, ttl time.Duration, now time.Time) error {
-	runningDir := filepath.Join(root, "tasks", "running")
-	entries, err := os.ReadDir(runningDir)
-	if err != nil {
-		return fmt.Errorf("read running dir %s: %w", runningDir, err)
-	}
-	for _, entry := range entries {
-		path := filepath.Join(runningDir, entry.Name())
-		info, err := entry.Info()
-		if err != nil {
-			return fmt.Errorf("stat %s: %w", path, err)
-		}
-		if now.Sub(info.ModTime()) < ttl {
-			continue
-		}
-		if filepath.Ext(entry.Name()) == ".lock" {
-			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("remove stale lock %s: %w", path, err)
-			}
-			continue
-		}
-		if entry.Type().IsRegular() && filepath.Ext(entry.Name()) == ".yaml" {
-			if err := requeueRunningTask(root, path); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func requeueRunningTask(root, runningPath string) error {
+func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningPath string) error {
 	loaded, err := task.Load(runningPath)
 	if err != nil {
-		return fmt.Errorf("load stale running task %s: %w", runningPath, err)
-	}
-	loaded.Status = "queued"
-	if err := task.Save(runningPath, loaded); err != nil {
-		return err
-	}
-	queuedPath := filepath.Join(root, "tasks", "queued", filepath.Base(runningPath))
-	if err := noOverwriteRename(runningPath, queuedPath); err != nil {
-		return fmt.Errorf("requeue stale task %s: %w", runningPath, err)
-	}
-	return nil
-}
-
-func noOverwriteRename(src, dst string) error {
-	file, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		if errors.Is(err, os.ErrExist) {
-			return fmt.Errorf("%w: destination exists at %s", fs.ErrExist, dst)
-		}
-		return err
-	}
-	if err := file.Close(); err != nil {
-		_ = os.Remove(dst)
-		return err
-	}
-	if err := os.Rename(src, dst); err != nil {
-		_ = os.Remove(dst)
-		return err
-	}
-	return nil
-}
-
-func processClaimedTask(ctx context.Context, opts Options, runningPath string) error {
-	loaded, err := task.Load(runningPath)
-	if err != nil {
-		_ = moveTask(opts.Root, runningPath, "failed", nil)
-		return err
+		return failTaskMove(opts.Root, runningPath, nil, err)
 	}
 	loaded.Status = "running"
 	if err := task.Save(runningPath, loaded); err != nil {
-		_ = moveTask(opts.Root, runningPath, "failed", nil)
-		return err
+		return failTaskMove(opts.Root, runningPath, nil, err)
 	}
 	stopHeartbeat := startHeartbeat(ctx, runningPath, opts.HeartbeatInterval)
 	defer stopHeartbeat()
 
-	runID := fmt.Sprintf("%s-%d", loaded.ID, time.Now().UnixNano())
-	runDir := filepath.Join(opts.Root, "runs", runID)
-	if err := os.MkdirAll(runDir, 0o755); err != nil {
-		_ = moveTask(opts.Root, runningPath, "failed", &loaded)
-		return fmt.Errorf("create run dir %s: %w", runDir, err)
-	}
-	if err := copyFile(runningPath, filepath.Join(runDir, "task.yaml")); err != nil {
-		_ = moveTask(opts.Root, runningPath, "failed", &loaded)
-		return err
-	}
-
 	validation := task.Validate(loaded)
-	if err := writeJSON(filepath.Join(runDir, "validation.json"), validation); err != nil {
-		_ = moveTask(opts.Root, runningPath, "failed", &loaded)
-		return err
-	}
 	if !validation.Valid() {
 		loaded.Status = "failed"
 		loaded.Attempts = append(loaded.Attempts, task.Attempt{
@@ -414,8 +356,20 @@ func processClaimedTask(ctx context.Context, opts Options, runningPath string) e
 			SupervisorVerdict: "validation_failed",
 			Summary:           "Task validation failed before executor run.",
 		})
-		_ = moveTask(opts.Root, runningPath, "failed", &loaded)
-		return fmt.Errorf("task validation failed: %s", loaded.ID)
+		return failTaskMove(opts.Root, runningPath, &loaded, fmt.Errorf("task validation failed: %v", validation.Errors))
+	}
+
+	runID := fmt.Sprintf("%s-%d", loaded.ID, time.Now().UnixNano())
+	runDir := filepath.Join(opts.Root, "runs", runID)
+	if err := os.MkdirAll(runDir, 0o700); err != nil {
+		return failTaskMove(opts.Root, runningPath, &loaded, fmt.Errorf("create run dir %s: %w", runDir, err))
+	}
+	if err := copyFile(runningPath, filepath.Join(runDir, "task.yaml")); err != nil {
+		return failTaskMove(opts.Root, runningPath, &loaded, err)
+	}
+
+	if err := writeJSON(filepath.Join(runDir, "validation.json"), validation); err != nil {
+		return failTaskMove(opts.Root, runningPath, &loaded, err)
 	}
 
 	prepared, err := workspace.Prepare(ctx, loaded.Scope.CWD, loaded.Worktree)
@@ -429,13 +383,11 @@ func processClaimedTask(ctx context.Context, opts Options, runningPath string) e
 			SupervisorVerdict: "workspace_failed",
 			Summary:           err.Error(),
 		})
-		_ = moveTask(opts.Root, runningPath, "failed", &loaded)
-		return err
+		return failTaskMove(opts.Root, runningPath, &loaded, err)
 	}
 	if err := writeJSON(filepath.Join(runDir, "workspace.json"), prepared); err != nil {
 		loaded.Status = "failed"
-		_ = moveTask(opts.Root, runningPath, "failed", &loaded)
-		return err
+		return failTaskMove(opts.Root, runningPath, &loaded, err)
 	}
 	if prepared.WorktreeReused && prepared.Dirty {
 		loaded.Risks = append(loaded.Risks, task.Risk{
@@ -447,17 +399,15 @@ func processClaimedTask(ctx context.Context, opts Options, runningPath string) e
 		})
 		if err := task.Save(runningPath, loaded); err != nil {
 			loaded.Status = "failed"
-			_ = moveTask(opts.Root, runningPath, "failed", &loaded)
-			return err
+			return failTaskMove(opts.Root, runningPath, &loaded, err)
 		}
 	}
 	if err := copyFile(runningPath, filepath.Join(runDir, "task.effective.yaml")); err != nil {
 		loaded.Status = "failed"
-		_ = moveTask(opts.Root, runningPath, "failed", &loaded)
-		return err
+		return failTaskMove(opts.Root, runningPath, &loaded, err)
 	}
 
-	return runSupervisorLoop(ctx, opts, runningPath, &loaded, prepared, runDir, runID)
+	return runSupervisorLoop(ctx, shutdownCtx, opts, runningPath, &loaded, prepared, runDir, runID)
 }
 
 func startHeartbeat(ctx context.Context, path string, interval time.Duration) func() {
@@ -500,6 +450,14 @@ func moveTask(root, currentPath, state string, updated *task.Task) error {
 	return nil
 }
 
+func failTaskMove(root, runningPath string, updated *task.Task, primary error) error {
+	if moveErr := moveTask(root, runningPath, "failed", updated); moveErr != nil {
+		fmt.Fprintf(os.Stderr, "galley: failed to move task %s to failed: %v (primary: %v)\n", runningPath, moveErr, primary)
+		return errors.Join(primary, moveErr)
+	}
+	return primary
+}
+
 func claudeStatus(result runner.RunResult, err error) string {
 	if err == nil {
 		return "completed"
@@ -518,7 +476,7 @@ func verificationStatus(err error) string {
 }
 
 func writeJSON(path string, value any) error {
-	file, err := os.Create(path)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return fmt.Errorf("create %s: %w", path, err)
 	}
@@ -536,7 +494,7 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return fmt.Errorf("read %s: %w", src, err)
 	}
-	if err := os.WriteFile(dst, data, 0o644); err != nil {
+	if err := os.WriteFile(dst, data, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", dst, err)
 	}
 	return nil

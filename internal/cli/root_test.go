@@ -95,20 +95,20 @@ func TestTaskRequeueText(t *testing.T) {
 
 func TestTaskQueueText(t *testing.T) {
 	taskPath := writeCLITaskYAML(t)
-	readyPath := filepath.Join(t.TempDir(), "tasks", "ready", "task.yaml")
-	if err := os.MkdirAll(filepath.Dir(readyPath), 0o755); err != nil {
+	draftPath := filepath.Join(t.TempDir(), "tasks", "draft", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(draftPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(taskPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	data = []byte(strings.Replace(string(data), `status: "queued"`, `status: "ready"`, 1))
-	if err := os.WriteFile(readyPath, data, 0o600); err != nil {
+	data = []byte(strings.Replace(string(data), `status: "queued"`, `status: "draft"`, 1))
+	if err := os.WriteFile(draftPath, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	stdout, stderr, err := executeCommand("task", "queue", "--reason", "ready for daemon", readyPath)
+	stdout, stderr, err := executeCommand("task", "queue", "--reason", "draft approved for daemon", draftPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,8 +118,38 @@ func TestTaskQueueText(t *testing.T) {
 	if !strings.Contains(stdout, "queued: task-cli-test") || !strings.Contains(stdout, "moved:") {
 		t.Fatalf("stdout got %q", stdout)
 	}
-	if _, err := os.Stat(filepath.Join(filepath.Dir(filepath.Dir(readyPath)), "queued", "task.yaml")); err != nil {
+	if _, err := os.Stat(filepath.Join(filepath.Dir(filepath.Dir(draftPath)), "queued", "task.yaml")); err != nil {
 		t.Fatalf("queued task missing: %v", err)
+	}
+}
+
+func TestTaskArchiveText(t *testing.T) {
+	taskPath := writeCLITaskYAML(t)
+	donePath := filepath.Join(t.TempDir(), "tasks", "done", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(donePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(taskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = []byte(strings.Replace(string(data), `status: "queued"`, `status: "accepted"`, 1))
+	if err := os.WriteFile(donePath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, err := executeCommand("task", "archive", "--reason", "done", donePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr got %q", stderr)
+	}
+	if !strings.Contains(stdout, "archived: task-cli-test") || !strings.Contains(stdout, "moved:") {
+		t.Fatalf("stdout got %q", stdout)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(filepath.Dir(donePath)), "archived", "task.yaml")); err != nil {
+		t.Fatalf("archived task missing: %v", err)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/shinpr/galley/internal/profile"
 	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/task"
 )
@@ -20,10 +21,12 @@ type Verdict struct {
 // Evidence is the local evidence available to the deterministic supervisor.
 type Evidence struct {
 	Task         task.Task
+	Profiles     profile.Bundle
 	Claude       runner.ClaudeResult
 	ParseError   error
 	RunError     error
 	DiffDirty    bool
+	Diff         string
 	DiffError    error
 	Attempt      int
 	AttemptsLeft int
@@ -82,6 +85,7 @@ func Evaluate(e Evidence) Verdict {
 			gaps = append(gaps, fmt.Sprintf("verification failed: %s (%s)", verification.Command, verification.Reason))
 		}
 	}
+	gaps = append(gaps, qualityProfileGaps(e)...)
 	if !e.DiffDirty {
 		gaps = append(gaps, "Executor reported completion but produced no git diff in the execution workspace.")
 	}
@@ -95,16 +99,56 @@ func Evaluate(e Evidence) Verdict {
 	}
 }
 
-func acceptanceRevision(e Evidence, gaps []string) Verdict {
-	verdict := finalOrRevision(e, "acceptance_gaps")
-	verdict.AcceptanceGaps = gaps
-	if verdict.Status == "needs_revision" {
-		verdict.NextWorkOrder = RenderCorrectiveWorkOrder(e.Task, verdict)
+func qualityProfileGaps(e Evidence) []string {
+	if e.Profiles.Quality == nil {
+		return nil
 	}
-	return verdict
+	var gaps []string
+	for _, check := range e.Profiles.Quality.RequiredChecks {
+		if !check.Required {
+			continue
+		}
+		if !requiredCheckPassed(check, e) {
+			gaps = append(gaps, fmt.Sprintf("required quality check %s did not pass using preferred commands: %s", check.ID, strings.Join(check.PreferredCommands, ", ")))
+		}
+	}
+	return gaps
+}
+
+func requiredCheckPassed(check profile.RequiredCheck, e Evidence) bool {
+	for _, command := range check.PreferredCommands {
+		if command == "" {
+			continue
+		}
+		for _, verification := range e.Claude.Verification {
+			if verification.Status == "passed" && sameCommand(verification.Command, command) {
+				return true
+			}
+		}
+		for _, verification := range e.Task.Verification.Commands {
+			if verification.Status == "passed" && sameCommand(verification.Cmd, command) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func sameCommand(got, want string) bool {
+	got = strings.TrimSpace(got)
+	want = strings.TrimSpace(want)
+	return got == want || strings.Contains(got, want)
+}
+
+func acceptanceRevision(e Evidence, gaps []string) Verdict {
+	return buildVerdict(e, "acceptance_gaps", gaps, nil)
 }
 
 func finalOrRevision(e Evidence, summary string, findings ...string) Verdict {
+	return buildVerdict(e, summary, nil, findings)
+}
+
+func buildVerdict(e Evidence, summary string, acceptanceGaps, qualityFindings []string) Verdict {
 	status := "needs_revision"
 	if e.AttemptsLeft <= 0 || e.RunError != nil {
 		status = "needs_supervisor_review"
@@ -112,7 +156,8 @@ func finalOrRevision(e Evidence, summary string, findings ...string) Verdict {
 	verdict := Verdict{
 		Status:          status,
 		Summary:         summary,
-		QualityFindings: findings,
+		AcceptanceGaps:  acceptanceGaps,
+		QualityFindings: qualityFindings,
 	}
 	if status == "needs_revision" {
 		verdict.NextWorkOrder = RenderCorrectiveWorkOrder(e.Task, verdict)
@@ -125,7 +170,7 @@ func RenderCorrectiveWorkOrder(t task.Task, verdict Verdict) string {
 	var b strings.Builder
 	b.WriteString("# Corrective Work Order\n\n")
 	b.WriteString("Continue the same task. The supervisor reviewed the prior attempt and found gaps.\n\n")
-	b.WriteString("Do not restart from scratch. Inspect the current diff and repository state, then fix only the listed gaps.\n\n")
+	b.WriteString("Build on the current workspace state. Inspect the current diff and repository state, then fix the listed gaps while preserving correct work already present.\n\n")
 	fmt.Fprintf(&b, "Task ID: `%s`\n\n", t.ID)
 	fmt.Fprintf(&b, "## Goal\n\n%s\n\n", t.Goal)
 	if len(verdict.AcceptanceGaps) > 0 {
@@ -147,6 +192,8 @@ func RenderCorrectiveWorkOrder(t task.Task, verdict Verdict) string {
 	b.WriteString("- Fix each listed gap.\n")
 	b.WriteString("- Run focused verification for changed behavior.\n")
 	b.WriteString("- Update decisions and risks if your previous assumptions change.\n")
-	b.WriteString("- Return the standard executor JSON.\n")
+	b.WriteString("- Return one JSON object as the entire response body.\n")
+	b.WriteString("- Use status `completed`, `completed_with_risks`, or `hard_stop`.\n")
+	b.WriteString("- Use acceptance status `satisfied`, `partially_satisfied`, or `not_satisfied`.\n")
 	return b.String()
 }

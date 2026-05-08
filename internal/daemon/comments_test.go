@@ -4,14 +4,18 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/shinpr/galley/internal/queue"
 	"github.com/shinpr/galley/internal/task"
+	"github.com/shinpr/galley/internal/vcs"
 )
 
 func TestParsePRCommand(t *testing.T) {
-	command, ok := parsePRCommand(prComment{ID: 123, Body: "Looks close.\n/galley rerun fix AC2\n"})
+	t.Parallel()
+	command, ok := parsePRCommand(vcs.PRComment{ID: 123, Body: "Looks close.\n/galley rerun fix AC2\n"})
 	if !ok {
 		t.Fatal("expected command")
 	}
@@ -23,7 +27,7 @@ func TestParsePRCommand(t *testing.T) {
 func TestPollPRCommentsRequeuesTaskOnce(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
-	if err := ensureLayout(root); err != nil {
+	if err := queue.EnsureLayout(root); err != nil {
 		t.Fatal(err)
 	}
 	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
@@ -57,7 +61,7 @@ fi
 	if requeued.Status != "queued" {
 		t.Fatalf("status got %q", requeued.Status)
 	}
-	if !containsString(requeued.PR.ProcessedCommentIDs, "42") {
+	if !slices.Contains(requeued.PR.ProcessedCommentIDs, "42") {
 		t.Fatalf("processed comments got %#v", requeued.PR.ProcessedCommentIDs)
 	}
 	if len(requeued.Risks) == 0 || !strings.Contains(requeued.Risks[len(requeued.Risks)-1].Detail, "tighten tests") {
@@ -76,7 +80,7 @@ fi
 func TestPollPRCommentsPostsReply(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
-	if err := ensureLayout(root); err != nil {
+	if err := queue.EnsureLayout(root); err != nil {
 		t.Fatal(err)
 	}
 	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
@@ -118,7 +122,7 @@ fi
 func TestPollPRCommentsDoesNotMarkFailedRequeueProcessed(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
-	if err := ensureLayout(root); err != nil {
+	if err := queue.EnsureLayout(root); err != nil {
 		t.Fatal(err)
 	}
 	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
@@ -150,26 +154,7 @@ fi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if containsString(stillDone.PR.ProcessedCommentIDs, "42") {
+	if slices.Contains(stillDone.PR.ProcessedCommentIDs, "42") {
 		t.Fatalf("comment should not be marked processed after failed requeue: %#v", stillDone.PR.ProcessedCommentIDs)
 	}
-}
-
-func TestDecodePRCommentsSlurpPages(t *testing.T) {
-	comments, err := decodePRComments(`[[{"id":1,"body":"first"}],[{"id":2,"body":"second"}]]`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(comments) != 2 || comments[0].ID != 1 || comments[1].ID != 2 {
-		t.Fatalf("comments got %#v", comments)
-	}
-}
-
-func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }

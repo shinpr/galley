@@ -1,6 +1,11 @@
 package runner
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestExtractClaudeResultFromPlainJSON(t *testing.T) {
 	t.Parallel()
@@ -22,6 +27,24 @@ func TestExtractClaudeResultFromStreamJSONResultString(t *testing.T) {
 		t.Fatal(err)
 	}
 	if result.Status != "completed_with_risks" {
+		t.Fatalf("status got %q", result.Status)
+	}
+}
+
+func TestExtractClaudeResultFileReadsBeyondTailSizedNoise(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "claude.stdout.jsonl")
+	noise := strings.Repeat("x", 70*1024)
+	stdout := `{"type":"assistant","message":"` + noise + `"}` + "\n" +
+		`{"type":"result","result":"{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"file.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"checked\"],\"notes\":\"ok\"}],\"verification\":[{\"command\":\"test -f file.txt\",\"status\":\"passed\",\"reason\":\"file exists\",\"output_excerpt\":\"\"}],\"decisions\":[],\"risks\":[]}"}`
+	if err := os.WriteFile(path, []byte(stdout), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := ExtractClaudeResultFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "completed" {
 		t.Fatalf("status got %q", result.Status)
 	}
 }

@@ -9,46 +9,59 @@ import (
 	"time"
 
 	"github.com/shinpr/galley/internal/profile"
+	"github.com/shinpr/galley/internal/result"
 	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/supervisor"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/internal/workspace"
 )
 
-func runSupervisorLoop(ctx context.Context, opts Options, runningPath string, loaded *task.Task, prepared workspace.Prepared, runDir, runID string) error {
+func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPath string, loaded *task.Task, prepared workspace.Prepared, runDir, runID string) error {
+	fmt.Fprintf(os.Stderr, "galley: task %s running in %s (run_id=%s)\n", loaded.ID, prepared.CWD, runID)
 	profiles, err := profile.LoadBundle(opts.QualityProfileFile, opts.EnvironmentProfileFile)
 	if err != nil {
 		loaded.Status = "failed"
-		_ = moveTask(opts.Root, runningPath, "failed", loaded)
-		return err
+		return failTaskMove(opts.Root, runningPath, loaded, err)
 	}
 	if err := writeJSON(filepath.Join(runDir, "profiles.json"), profiles); err != nil {
 		loaded.Status = "failed"
-		_ = moveTask(opts.Root, runningPath, "failed", loaded)
-		return err
+		return failTaskMove(opts.Root, runningPath, loaded, err)
 	}
-	prompt := task.RenderWorkOrderWithProfiles(*loaded, profiles)
+	prompt := task.RenderWorkOrderWithProfiles(executionTask(*loaded, prepared.CWD), profiles)
 	budget := attemptBudget(loaded.ExecutionPolicy.LoopBudget)
+	consecutiveNoDiff := 0
 	for attempt := 1; budget < 0 || attempt <= budget; attempt++ {
+		fmt.Fprintf(os.Stderr, "galley: task %s attempt %d/%s starting\n", loaded.ID, attempt, loaded.ExecutionPolicy.LoopBudget.String())
 		attemptDir := filepath.Join(runDir, fmt.Sprintf("attempt-%d", attempt))
-		if err := os.MkdirAll(attemptDir, 0o755); err != nil {
+		if err := os.MkdirAll(attemptDir, 0o700); err != nil {
 			loaded.Status = "failed"
-			_ = moveTask(opts.Root, runningPath, "failed", loaded)
-			return fmt.Errorf("create attempt dir %s: %w", attemptDir, err)
+			return failTaskMove(opts.Root, runningPath, loaded, fmt.Errorf("create attempt dir %s: %w", attemptDir, err))
 		}
-		outcome, err := runExecutorAttempt(ctx, opts, *loaded, prepared.CWD, attemptDir, prompt)
+		effectiveTask := executionTask(*loaded, prepared.CWD)
+		effectiveTaskPath := filepath.Join(attemptDir, "task.effective.yaml")
+		if err := task.Save(effectiveTaskPath, effectiveTask); err != nil {
+			loaded.Status = "failed"
+			return failTaskMove(opts.Root, runningPath, loaded, err)
+		}
+		outcome, err := runExecutorAttempt(ctx, opts, effectiveTask, profiles, prepared.CWD, attemptDir, prompt, effectiveTaskPath)
 		if err != nil {
 			loaded.Status = "failed"
-			_ = moveTask(opts.Root, runningPath, "failed", loaded)
-			return err
+			return failTaskMove(opts.Root, runningPath, loaded, err)
 		}
 		mergeAttemptEvidence(loaded, outcome, runID, prepared.CWD)
+		if outcome.DiffErr == nil && !outcome.DiffDirty {
+			consecutiveNoDiff++
+		} else {
+			consecutiveNoDiff = 0
+		}
 		evidence := supervisor.Evidence{
 			Task:         *loaded,
+			Profiles:     profiles,
 			Claude:       outcome.ClaudeResult,
 			ParseError:   outcome.ParseErr,
 			RunError:     outcome.RunErr,
 			DiffDirty:    outcome.DiffDirty,
+			Diff:         outcome.Diff,
 			DiffError:    outcome.DiffErr,
 			Attempt:      attempt,
 			AttemptsLeft: attemptsLeft(budget, attempt),
@@ -56,25 +69,48 @@ func runSupervisorLoop(ctx context.Context, opts Options, runningPath string, lo
 		verdict, err := evaluateSupervisor(ctx, opts, evidence, attemptDir, prepared.CWD)
 		if err != nil {
 			loaded.Status = "failed"
-			_ = moveTask(opts.Root, runningPath, "failed", loaded)
-			return err
+			return failTaskMove(opts.Root, runningPath, loaded, err)
 		}
 		if err := writeJSON(filepath.Join(attemptDir, "supervisor_verdict.json"), verdict); err != nil {
 			loaded.Status = "failed"
-			_ = moveTask(opts.Root, runningPath, "failed", loaded)
-			return err
+			return failTaskMove(opts.Root, runningPath, loaded, err)
 		}
+		fmt.Fprintf(os.Stderr, "galley: task %s attempt %d verdict=%s summary=%s\n", loaded.ID, attempt, verdict.Status, verdict.Summary)
 		loaded.Attempts[len(loaded.Attempts)-1].SupervisorVerdict = verdict.Status
 		loaded.Attempts[len(loaded.Attempts)-1].Summary = fmt.Sprintf("%s; run_id=%s; attempt=%d; workspace=%s", verdict.Summary, runID, attempt, prepared.CWD)
 		if err := task.Save(runningPath, *loaded); err != nil {
 			loaded.Status = "failed"
-			_ = moveTask(opts.Root, runningPath, "failed", loaded)
-			return err
+			return failTaskMove(opts.Root, runningPath, loaded, err)
+		}
+		if shutdownCtx.Err() != nil && verdict.Status == "needs_revision" {
+			loaded.Status = "needs_supervisor_review"
+			loaded.Risks = append(loaded.Risks, task.Risk{
+				ID:                   fmt.Sprintf("shutdown-%d", len(loaded.Risks)+1),
+				Type:                 "partial_verification",
+				Detail:               "Shutdown was requested after an attempt that needs revision; Galley did not start another retry attempt.",
+				Mitigation:           "Review the run evidence and requeue the task when ready.",
+				HumanReviewSuggested: true,
+			})
+			fmt.Fprintf(os.Stderr, "galley: task %s stopped after attempt %d due to shutdown\n", loaded.ID, attempt)
+			return moveTask(opts.Root, runningPath, "failed", loaded)
+		}
+		if verdict.Status == "needs_revision" && consecutiveNoDiff >= 2 {
+			loaded.Status = "needs_supervisor_review"
+			loaded.Risks = append(loaded.Risks, task.Risk{
+				ID:                   fmt.Sprintf("progress-%d", len(loaded.Risks)+1),
+				Type:                 "partial_verification",
+				Detail:               "Two consecutive executor attempts produced no git diff.",
+				Mitigation:           "A supervisor should inspect the task, work order, and executor logs before requeueing.",
+				HumanReviewSuggested: true,
+			})
+			fmt.Fprintf(os.Stderr, "galley: task %s stopped by progress invariant: consecutive no-diff attempts\n", loaded.ID)
+			return moveTask(opts.Root, runningPath, "failed", loaded)
 		}
 
 		switch verdict.Status {
 		case "accepted":
 			if opts.CommitOnAccept {
+				fmt.Fprintf(os.Stderr, "galley: task %s accepted; finalizing commit/pr\n", loaded.ID)
 				if err := finalizeAcceptedChange(ctx, opts, loaded, prepared.CWD, runDir, runID); err != nil {
 					loaded.Status = "needs_supervisor_review"
 					loaded.Risks = append(loaded.Risks, task.Risk{
@@ -84,14 +120,14 @@ func runSupervisorLoop(ctx context.Context, opts Options, runningPath string, lo
 						Mitigation:           "The executor diff and run evidence were stored; a supervisor should inspect and finish commit or PR creation.",
 						HumanReviewSuggested: true,
 					})
-					_ = moveTask(opts.Root, runningPath, "failed", loaded)
-					return err
+					return failTaskMove(opts.Root, runningPath, loaded, err)
 				}
 			}
 			loaded.Status = "accepted"
 			if opts.OpenPR {
 				loaded.Status = "pr_opened"
 			}
+			fmt.Fprintf(os.Stderr, "galley: task %s completed with status=%s\n", loaded.ID, loaded.Status)
 			return moveTask(opts.Root, runningPath, "done", loaded)
 		case "needs_revision":
 			prompt = verdict.NextWorkOrder
@@ -105,7 +141,13 @@ func runSupervisorLoop(ctx context.Context, opts Options, runningPath string, lo
 		}
 	}
 	loaded.Status = "needs_supervisor_review"
+	fmt.Fprintf(os.Stderr, "galley: task %s exhausted attempts; needs supervisor review\n", loaded.ID)
 	return moveTask(opts.Root, runningPath, "failed", loaded)
+}
+
+func executionTask(loaded task.Task, workDir string) task.Task {
+	loaded.Scope.CWD = workDir
+	return loaded
 }
 
 func evaluateSupervisor(ctx context.Context, opts Options, evidence supervisor.Evidence, attemptDir, workDir string) (supervisor.Verdict, error) {
@@ -134,10 +176,11 @@ type attemptOutcome struct {
 	ClaudeResult runner.ClaudeResult
 	ParseErr     error
 	DiffDirty    bool
+	Diff         string
 	DiffErr      error
 }
 
-func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, workDir, attemptDir, prompt string) (attemptOutcome, error) {
+func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, profiles profile.Bundle, workDir, attemptDir, prompt, taskFile string) (attemptOutcome, error) {
 	claudeOpts := runner.FromTask(loaded)
 	claudeOpts.WorkDir = workDir
 	claudeOpts.SystemPromptFile = opts.SystemPromptFile
@@ -153,9 +196,10 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, wor
 	}
 
 	started := time.Now().UTC()
+	stdoutPath := filepath.Join(attemptDir, "claude.stdout.jsonl")
 	runResult, runErr := runner.RunCommand(ctx, commandPlan, runner.RunOptions{
 		Timeout:    time.Duration(loaded.ExecutionPolicy.TimeoutMS) * time.Millisecond,
-		StdoutPath: filepath.Join(attemptDir, "claude.stdout.jsonl"),
+		StdoutPath: stdoutPath,
 		StderrPath: filepath.Join(attemptDir, "claude.stderr.log"),
 	})
 	completed := time.Now().UTC()
@@ -165,19 +209,22 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, wor
 
 	diffSnapshot, diffErr := workspace.CaptureSnapshot(ctx, workDir)
 	diffDirty := false
+	diffText := ""
 	if diffErr == nil {
 		diffDirty = diffSnapshot.Dirty
+		diffText = diffSnapshot.Diff
 		if err := writeJSON(filepath.Join(attemptDir, "git_status.json"), diffSnapshot); err != nil {
 			return attemptOutcome{}, err
 		}
-		if err := os.WriteFile(filepath.Join(attemptDir, "diff.patch"), []byte(diffSnapshot.Diff), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(attemptDir, "diff.patch"), []byte(diffSnapshot.Diff), 0o600); err != nil {
 			return attemptOutcome{}, fmt.Errorf("write diff.patch: %w", err)
 		}
 	}
 
-	claudeResult, parseErr := runner.ExtractClaudeResult(runResult.Stdout)
+	resultPath := filepath.Join(attemptDir, "claude_result.json")
+	claudeResult, parseErr := resolveClaudeResult(ctx, stdoutPath, runResult.Stdout, taskFile, resultPath, workDir, profiles)
 	if parseErr == nil {
-		if err := writeJSON(filepath.Join(attemptDir, "claude_result.json"), claudeResult); err != nil {
+		if err := writeJSON(resultPath, claudeResult); err != nil {
 			return attemptOutcome{}, err
 		}
 	}
@@ -190,8 +237,34 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, wor
 		ClaudeResult: claudeResult,
 		ParseErr:     parseErr,
 		DiffDirty:    diffDirty,
+		Diff:         diffText,
 		DiffErr:      diffErr,
 	}, nil
+}
+
+func resolveClaudeResult(ctx context.Context, stdoutPath, stdoutTail, taskFile, resultPath, workDir string, profiles profile.Bundle) (runner.ClaudeResult, error) {
+	claudeResult, claudeErr := runner.ExtractClaudeResultFile(stdoutPath)
+	if claudeErr == nil && claudeResult.Status == "hard_stop" {
+		return claudeResult, nil
+	}
+	generated, generatedErr := result.Complete(ctx, result.CompleteOptions{
+		TaskFile: taskFile,
+		Output:   resultPath,
+		WorkDir:  workDir,
+		Summary:  "Task implementation completed and verification was recorded by deterministic Galley result generation.",
+		Profiles: profiles,
+	})
+	if generatedErr == nil {
+		return generated, nil
+	}
+	if claudeErr == nil {
+		return claudeResult, nil
+	}
+	tailResult, tailErr := runner.ExtractClaudeResult(stdoutTail)
+	if tailErr == nil {
+		return tailResult, nil
+	}
+	return runner.ClaudeResult{}, fmt.Errorf("resolve Claude result: deterministic generation failed: %w; stdout file parse failed: %v; stdout tail parse failed: %v", generatedErr, claudeErr, tailErr)
 }
 
 func mergeAttemptEvidence(loaded *task.Task, outcome attemptOutcome, runID, workDir string) {
@@ -285,6 +358,7 @@ func mapAcceptanceStatus(status string) string {
 	case "satisfied":
 		return "satisfied"
 	case "partially_satisfied", "not_satisfied":
+		// Task YAML stores conservative task state; the full Claude status remains in claude_result.json.
 		return "not_satisfied"
 	default:
 		return "unknown"

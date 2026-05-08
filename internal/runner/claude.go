@@ -26,12 +26,15 @@ type ClaudeOptions struct {
 	IncludeHookEvents bool
 }
 
-// ClaudeCommand is an execution plan suitable for exec.Command plus cmd.Dir.
-type ClaudeCommand struct {
+// Command is an execution plan suitable for exec.Command plus cmd.Dir.
+type Command struct {
 	WorkDir  string   `json:"work_dir"`
 	Argv     []string `json:"argv"`
 	Warnings []string `json:"warnings,omitempty"`
 }
+
+// ClaudeCommand is kept as a compatibility alias for Claude command plans.
+type ClaudeCommand = Command
 
 // FromTask maps a validated Galley task into Claude runner options.
 func FromTask(t task.Task) ClaudeOptions {
@@ -75,9 +78,9 @@ func ClaudeArgv(opts ClaudeOptions) ([]string, error) {
 //
 // Prompt and schema files are read from paths supplied by the caller. Callers
 // that cross a trust boundary should validate those paths before calling this.
-func ClaudeCommandPlan(opts ClaudeOptions) (ClaudeCommand, error) {
+func ClaudeCommandPlan(opts ClaudeOptions) (Command, error) {
 	if opts.Prompt == "" {
-		return ClaudeCommand{}, fmt.Errorf("prompt is required")
+		return Command{}, fmt.Errorf("prompt is required")
 	}
 	if opts.PromptMode == "" {
 		opts.PromptMode = "replace"
@@ -98,7 +101,7 @@ func ClaudeCommandPlan(opts ClaudeOptions) (ClaudeCommand, error) {
 	if opts.SystemPromptFile != "" {
 		systemPrompt, err := readOptionFile("system prompt", opts.SystemPromptFile)
 		if err != nil {
-			return ClaudeCommand{}, err
+			return Command{}, err
 		}
 		switch opts.PromptMode {
 		case "replace":
@@ -106,13 +109,13 @@ func ClaudeCommandPlan(opts ClaudeOptions) (ClaudeCommand, error) {
 		case "append":
 			argv = append(argv, "--append-system-prompt", systemPrompt)
 		default:
-			return ClaudeCommand{}, fmt.Errorf("unsupported prompt mode %q", opts.PromptMode)
+			return Command{}, fmt.Errorf("unsupported prompt mode %q", opts.PromptMode)
 		}
 	}
 	if opts.JSONSchemaFile != "" {
 		schema, err := readOptionFile("JSON schema", opts.JSONSchemaFile)
 		if err != nil {
-			return ClaudeCommand{}, err
+			return Command{}, err
 		}
 		argv = append(argv, "--json-schema", schema)
 	}
@@ -127,7 +130,7 @@ func ClaudeCommandPlan(opts ClaudeOptions) (ClaudeCommand, error) {
 	}
 
 	argv = append(argv, opts.Prompt)
-	return ClaudeCommand{WorkDir: opts.WorkDir, Argv: argv, Warnings: warnings}, nil
+	return Command{WorkDir: opts.WorkDir, Argv: argv, Warnings: warnings}, nil
 }
 
 // ClaudeShellPreview returns a human-oriented shell preview of a Claude Code run.

@@ -19,6 +19,7 @@ func RenderWorkOrderWithProfiles(t Task, profiles profile.Bundle) string {
 	fmt.Fprintf(&b, "Mode: `%s`\n", t.Mode)
 	fmt.Fprintf(&b, "Supervisor: `%s` / `%s`\n\n", t.Supervisor.Provider, t.Supervisor.Mode)
 	fmt.Fprintf(&b, "## Goal\n\n%s\n\n", t.Goal)
+	renderReviewContext(&b, t)
 
 	fmt.Fprintf(&b, "## Acceptance Criteria\n\n")
 	for _, ac := range t.AcceptanceCriteria {
@@ -49,6 +50,45 @@ func RenderWorkOrderWithProfiles(t Task, profiles profile.Bundle) string {
 	fmt.Fprintf(&b, "- Return exactly one JSON object matching the configured schema.\n")
 
 	return b.String()
+}
+
+func renderReviewContext(b *strings.Builder, t Task) {
+	var requeueInstructions []Risk
+	var otherRisks []Risk
+	for _, risk := range t.Risks {
+		if strings.HasPrefix(risk.ID, "requeue-") {
+			requeueInstructions = append(requeueInstructions, risk)
+			continue
+		}
+		otherRisks = append(otherRisks, risk)
+	}
+	if t.PR.URL != "" || len(requeueInstructions) > 0 {
+		fmt.Fprintf(b, "## PR Review Context\n\n")
+		if t.PR.URL != "" {
+			fmt.Fprintf(b, "- PR: `%s`\n", t.PR.URL)
+		}
+		if t.Supervisor.ReviewIterations > 0 {
+			fmt.Fprintf(b, "- review iteration: `%d`\n", t.Supervisor.ReviewIterations)
+		}
+		for _, instruction := range requeueInstructions {
+			fmt.Fprintf(b, "- additional instruction `%s`: %s\n", instruction.ID, instruction.Detail)
+		}
+		fmt.Fprintf(b, "\n")
+	}
+	if len(otherRisks) > 0 {
+		fmt.Fprintf(b, "## Existing Risks\n\n")
+		for _, risk := range otherRisks {
+			fmt.Fprintf(b, "- `%s` %s: %s\n  Mitigation: %s\n", risk.ID, risk.Type, risk.Detail, risk.Mitigation)
+		}
+		fmt.Fprintf(b, "\n")
+	}
+	if len(t.Decisions) > 0 {
+		fmt.Fprintf(b, "## Prior Decisions\n\n")
+		for _, decision := range t.Decisions {
+			fmt.Fprintf(b, "- `%s` %s -> %s\n  Rationale: %s\n", decision.ID, decision.Question, decision.Chosen, decision.Rationale)
+		}
+		fmt.Fprintf(b, "\n")
+	}
 }
 
 func renderProfileContext(b *strings.Builder, profiles profile.Bundle) {

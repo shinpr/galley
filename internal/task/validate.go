@@ -4,18 +4,20 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 )
 
 var (
 	validModes               = []string{"hitl", "afk"}
-	validStatuses            = []string{"draft", "ready", "queued", "running", "needs_supervisor_review", "accepted", "pr_opened", "failed"}
+	validStatuses            = []string{"draft", "queued", "running", "needs_supervisor_review", "accepted", "pr_opened", "failed", "closed", "merged", "archived"}
 	validPermissions         = []string{"read-only", "safe-edit", "yolo"}
 	validSupervisorProviders = []string{"codex", "claude", "manual"}
 	validSupervisorModes     = []string{"review_only", "review_and_repair", "approve_only"}
 	validPromptModes         = []string{"replace", "append"}
 	validAFKDecisionPolicies = []string{"choose-smallest-reversible"}
+	validTaskIDPattern       = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 )
 
 // Validate runs structural and environment validation for a task.
@@ -32,6 +34,9 @@ func ValidateStructural(t Task) ValidationResult {
 	var result ValidationResult
 
 	require(&result, t.ID != "", "id is required")
+	if t.ID != "" {
+		require(&result, validTaskIDPattern.MatchString(t.ID), "id must contain only letters, numbers, dot, underscore, and dash")
+	}
 	require(&result, slices.Contains(validModes, t.Mode), "mode must be one of: %s", strings.Join(validModes, ", "))
 	require(&result, slices.Contains(validStatuses, t.Status), "status must be one of: %s", strings.Join(validStatuses, ", "))
 	require(&result, t.Goal != "", "goal is required")
@@ -130,10 +135,38 @@ func validateWorktree(result *ValidationResult, t Task) {
 	}
 	require(result, t.Worktree.Enabled, "worktree.enabled must be true for AFK tasks")
 	require(result, t.Worktree.Branch != "", "worktree.branch is required for AFK tasks")
+	if t.Worktree.Branch != "" {
+		require(result, validGitBranchName(t.Worktree.Branch), "worktree.branch must be a valid git branch name")
+	}
 	require(result, t.Worktree.Path != "", "worktree.path is required for AFK tasks")
 	if t.Worktree.Path != "" && filepath.IsAbs(t.Worktree.Path) {
 		result.Warnings = append(result.Warnings, "worktree.path is absolute; relative paths are easier to relocate")
+	} else if t.Worktree.Path != "" {
+		clean := filepath.Clean(t.Worktree.Path)
+		if clean == ".." || strings.HasPrefix(clean, "../") {
+			result.Errors = append(result.Errors, fmt.Sprintf("worktree.path contains parent traversal path %q", t.Worktree.Path))
+		}
 	}
+}
+
+var gitBranchSegmentPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+func validGitBranchName(branch string) bool {
+	if branch == "" || strings.HasPrefix(branch, "-") || strings.HasPrefix(branch, "/") || strings.HasSuffix(branch, "/") {
+		return false
+	}
+	if strings.Contains(branch, "..") || strings.ContainsAny(branch, " ~^:?*[\\") || strings.Contains(branch, "@{") {
+		return false
+	}
+	for _, segment := range strings.Split(branch, "/") {
+		if segment == "" || segment == "." || strings.HasPrefix(segment, ".") || strings.HasSuffix(segment, ".") || strings.HasSuffix(segment, ".lock") {
+			return false
+		}
+		if !gitBranchSegmentPattern.MatchString(segment) {
+			return false
+		}
+	}
+	return true
 }
 
 func validateSupervisor(result *ValidationResult, t Task) {

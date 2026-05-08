@@ -21,6 +21,7 @@ type Defaults struct {
 	QualityProfileFile     string        `yaml:"quality_profile_file" json:"quality_profile_file"`
 	EnvironmentProfileFile string        `yaml:"environment_profile_file" json:"environment_profile_file"`
 	MaxConcurrentTasks     int           `yaml:"max_concurrent_tasks" json:"max_concurrent_tasks"`
+	MaxConcurrentPerRepo   int           `yaml:"max_concurrent_per_repo" json:"max_concurrent_per_repo"`
 	PollInterval           time.Duration `yaml:"poll_interval" json:"poll_interval"`
 	ClaimTTL               time.Duration `yaml:"claim_ttl" json:"claim_ttl"`
 	HeartbeatInterval      time.Duration `yaml:"heartbeat_interval" json:"heartbeat_interval"`
@@ -28,6 +29,7 @@ type Defaults struct {
 	OpenPR                 bool          `yaml:"open_pr" json:"open_pr"`
 	PollPRComments         bool          `yaml:"poll_pr_comments" json:"poll_pr_comments"`
 	ReplyPRComments        bool          `yaml:"reply_pr_comments" json:"reply_pr_comments"`
+	CleanupWorktrees       bool          `yaml:"cleanup_worktrees" json:"cleanup_worktrees"`
 	PRBase                 string        `yaml:"pr_base" json:"pr_base"`
 	SupervisorCommand      []string      `yaml:"supervisor_command" json:"supervisor_command"`
 }
@@ -65,6 +67,9 @@ func ValidateManifest(manifest Manifest) ValidationResult {
 	}
 	if manifest.Defaults.MaxConcurrentTasks < 0 {
 		result.Errors = append(result.Errors, "defaults.max_concurrent_tasks cannot be negative")
+	}
+	if manifest.Defaults.MaxConcurrentPerRepo < 0 {
+		result.Errors = append(result.Errors, "defaults.max_concurrent_per_repo cannot be negative")
 	}
 	return result
 }

@@ -18,7 +18,42 @@ func newTaskCommand() *cobra.Command {
 	cmd.AddCommand(newTaskWorkOrderCommand())
 	cmd.AddCommand(newTaskQueueCommand())
 	cmd.AddCommand(newTaskRequeueCommand())
+	cmd.AddCommand(newTaskArchiveCommand())
 
+	return cmd
+}
+
+func newTaskArchiveCommand() *cobra.Command {
+	var output string
+	var reason string
+
+	cmd := &cobra.Command{
+		Use:   "archive TASK.yaml",
+		Short: "Move a reviewed Galley task YAML into the archived state",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			result, err := task.Archive(args[0], task.ArchiveOptions{Reason: reason})
+			if err != nil {
+				return err
+			}
+			switch output {
+			case "json":
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetIndent("", "  ")
+				return enc.Encode(result)
+			case "text":
+				fmt.Fprintf(cmd.OutOrStdout(), "archived: %s\n", result.Task.ID)
+				if result.From != result.To {
+					fmt.Fprintf(cmd.OutOrStdout(), "moved: %s -> %s\n", result.From, result.To)
+				}
+				return nil
+			default:
+				return fmt.Errorf("unsupported output format %q", output)
+			}
+		},
+	}
+	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text or json")
+	cmd.Flags().StringVar(&reason, "reason", "", "Reason to record in the task YAML")
 	return cmd
 }
 

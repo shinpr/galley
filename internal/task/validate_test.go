@@ -1,6 +1,7 @@
 package task
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -97,6 +98,20 @@ func TestValidateStructuralRejectsInvalidCases(t *testing.T) {
 			want: "execution_policy.loop_budget cannot be both infinite and counted",
 		},
 		{
+			name: "invalid task id",
+			mutate: func(task *Task) {
+				task.ID = "../outside"
+			},
+			want: "id must contain only letters",
+		},
+		{
+			name: "ready status removed",
+			mutate: func(task *Task) {
+				task.Status = "ready"
+			},
+			want: "status must be one of",
+		},
+		{
 			name: "invalid mode",
 			mutate: func(task *Task) {
 				task.Mode = "daemon"
@@ -164,16 +179,34 @@ func TestValidateStructuralRejectsInvalidCases(t *testing.T) {
 			mutate: func(task *Task) {
 				task.Mode = "afk"
 				task.ExecutionPolicy.AFKDecisionPolicy = "ask-human"
-				task.Worktree = Worktree{Enabled: true, Branch: "agent/test", Path: "../worktrees/test"}
+				task.Worktree = Worktree{Enabled: true, Branch: "agent/test", Path: filepath.Join(t.TempDir(), "worktrees", "test")}
 			},
 			want: "execution_policy.afk_decision_policy must be one of",
+		},
+		{
+			name: "invalid worktree branch",
+			mutate: func(task *Task) {
+				task.Mode = "afk"
+				task.ExecutionPolicy.AFKDecisionPolicy = "choose-smallest-reversible"
+				task.Worktree = Worktree{Enabled: true, Branch: "-bad", Path: filepath.Join(t.TempDir(), "worktrees", "test")}
+			},
+			want: "worktree.branch must be a valid git branch name",
+		},
+		{
+			name: "parent worktree path",
+			mutate: func(task *Task) {
+				task.Mode = "afk"
+				task.ExecutionPolicy.AFKDecisionPolicy = "choose-smallest-reversible"
+				task.Worktree = Worktree{Enabled: true, Branch: "agent/test", Path: "../../worktrees/test"}
+			},
+			want: `worktree.path contains parent traversal path "../../worktrees/test"`,
 		},
 		{
 			name: "afk human decision missing chosen",
 			mutate: func(task *Task) {
 				task.Mode = "afk"
 				task.ExecutionPolicy.AFKDecisionPolicy = "choose-smallest-reversible"
-				task.Worktree = Worktree{Enabled: true, Branch: "agent/test", Path: "../worktrees/test"}
+				task.Worktree = Worktree{Enabled: true, Branch: "agent/test", Path: filepath.Join(t.TempDir(), "worktrees", "test")}
 				task.Decisions = []Decision{{ID: "D1", NeedsHumanReview: true}}
 			},
 			want: `decision "D1" needs a chosen value for AFK mode`,

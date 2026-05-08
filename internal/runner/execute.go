@@ -17,7 +17,8 @@ type RunOptions struct {
 	Timeout    time.Duration
 	StdoutPath string
 	StderrPath string
-	TailBytes  int
+	// TailBytes controls in-memory stdout/stderr tail size. Zero uses the default; negative keeps all output.
+	TailBytes int
 }
 
 // RunResult reports the observable result of a subprocess run.
@@ -30,7 +31,7 @@ type RunResult struct {
 }
 
 // RunCommand executes a command plan without going through a shell.
-func RunCommand(ctx context.Context, command ClaudeCommand, opts RunOptions) (RunResult, error) {
+func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResult, error) {
 	started := time.Now()
 	if len(command.Argv) == 0 {
 		return RunResult{}, fmt.Errorf("argv is empty")
@@ -118,7 +119,7 @@ func captureWriter(buffer io.Writer, path string) (io.Writer, io.Closer, error) 
 	if path == "" {
 		return buffer, closeFunc(nil), nil
 	}
-	file, err := os.Create(path)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create capture file %s: %w", path, err)
 	}
@@ -140,9 +141,6 @@ func (b *tailBuffer) Write(p []byte) (int, error) {
 	defer b.mu.Unlock()
 	if b.limit < 0 {
 		b.data = append(b.data, p...)
-		return len(p), nil
-	}
-	if b.limit == 0 {
 		return len(p), nil
 	}
 	b.data = append(b.data, p...)

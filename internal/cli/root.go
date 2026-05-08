@@ -21,6 +21,7 @@ func NewRootCommand() *cobra.Command {
 	cmd.AddCommand(newTaskCommand())
 	cmd.AddCommand(newClaudeCommand())
 	cmd.AddCommand(newProfileCommand())
+	cmd.AddCommand(newResultCommand())
 
 	return cmd
 }

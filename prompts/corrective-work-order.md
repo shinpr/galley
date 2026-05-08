@@ -2,7 +2,7 @@
 
 Continue the same task. Codex reviewed your prior attempt and found gaps.
 
-Do not restart from scratch. Inspect the current diff and repository state, then fix only the listed gaps.
+Build on the current workspace state. Inspect the current diff and repository state, then fix the listed gaps while preserving correct work already present.
 
 ## Required Behavior
 

@@ -7,7 +7,7 @@ BIN_DIR="$TMP_DIR/bin"
 REPO_DIR="$TMP_DIR/repo"
 WORKFLOW_DIR="$TMP_DIR/workflow"
 
-mkdir -p "$BIN_DIR" "$WORKFLOW_DIR/tasks/ready"
+mkdir -p "$BIN_DIR" "$WORKFLOW_DIR/tasks/draft"
 
 go build -o "$TMP_DIR/galley" "$ROOT_DIR/cmd/galley"
 go build -o "$TMP_DIR/galleyd" "$ROOT_DIR/cmd/galleyd"
@@ -29,10 +29,10 @@ echo "smoke repo" > "$REPO_DIR/README.md"
 git -C "$REPO_DIR" add README.md
 git -C "$REPO_DIR" commit -m initial >/dev/null
 
-cat > "$WORKFLOW_DIR/tasks/ready/smoke.yaml" <<YAML
+cat > "$WORKFLOW_DIR/tasks/draft/smoke.yaml" <<YAML
 id: "task-smoke"
 mode: "afk"
-status: "ready"
+status: "draft"
 goal: "Create a smoke output file."
 acceptance_criteria:
   - id: "AC1"
@@ -55,7 +55,7 @@ execution_policy:
 worktree:
   enabled: true
   branch: "agent/smoke"
-  path: "../worktrees/smoke"
+  path: "$TMP_DIR/worktrees/smoke"
 supervisor:
   provider: "codex"
   mode: "review_and_repair"
@@ -80,8 +80,8 @@ pr:
   status: ""
 YAML
 
-"$TMP_DIR/galley" task validate "$WORKFLOW_DIR/tasks/ready/smoke.yaml" >/dev/null
-"$TMP_DIR/galley" task queue "$WORKFLOW_DIR/tasks/ready/smoke.yaml" --reason "local smoke" >/dev/null
+"$TMP_DIR/galley" task validate "$WORKFLOW_DIR/tasks/draft/smoke.yaml" >/dev/null
+"$TMP_DIR/galley" task queue "$WORKFLOW_DIR/tasks/draft/smoke.yaml" --reason "local smoke" >/dev/null
 "$TMP_DIR/galleyd" --once --root "$WORKFLOW_DIR" --system-prompt-file "$ROOT_DIR/prompts/claude-executor-full.md" --json-schema-file "$ROOT_DIR/schemas/claude-result.schema.json" >/dev/null
 
 DONE_TASK="$WORKFLOW_DIR/tasks/done/smoke.yaml"

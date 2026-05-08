@@ -25,7 +25,7 @@ execution_policy:
 worktree:
   enabled: true
   branch: "agent/task-20260508-afk-001"
-  path: "../worktrees/task-20260508-afk-001"
+  path: "/tmp/galley-worktrees/task-20260508-afk-001"
 supervisor:
   provider: "codex"
   mode: "review_and_repair"

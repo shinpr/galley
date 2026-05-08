@@ -1,8 +1,10 @@
 package runner
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -91,7 +93,40 @@ func ExtractClaudeResult(stdout string) (ClaudeResult, error) {
 	return ClaudeResult{}, fmt.Errorf("structured Claude result not found")
 }
 
+// ExtractClaudeResultFile parses Claude's structured result from a captured stdout file.
+func ExtractClaudeResultFile(path string) (ClaudeResult, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return ClaudeResult{}, fmt.Errorf("open Claude stdout %s: %w", path, err)
+	}
+	defer file.Close()
+
+	reader := bufio.NewReader(file)
+	var firstErr error
+	for {
+		line, readErr := reader.ReadString('\n')
+		if line != "" {
+			result, found, err := extractClaudeResultLine(strings.TrimSpace(line))
+			if found && err == nil {
+				return result, nil
+			}
+			if found && firstErr == nil && err != nil {
+				firstErr = err
+			}
+		}
+		if readErr != nil {
+			break
+		}
+	}
+	if firstErr != nil {
+		return ClaudeResult{}, firstErr
+	}
+	return ClaudeResult{}, fmt.Errorf("structured Claude result not found")
+}
+
 // Validate checks the lightweight executor result contract used by the daemon.
+// Empty arrays are valid, but nil slices are rejected because the JSON contract
+// requires explicit array fields for stable downstream evidence handling.
 func (r ClaudeResult) Validate() error {
 	switch r.Status {
 	case "completed", "completed_with_risks", "hard_stop":
@@ -198,6 +233,35 @@ func parseClaudeResult(text string) (ClaudeResult, bool) {
 		return ClaudeResult{}, false
 	}
 	return parseRawClaudeResult([]byte(text[start : end+1]))
+}
+
+func extractClaudeResultLine(line string) (ClaudeResult, bool, error) {
+	if line == "" {
+		return ClaudeResult{}, false, nil
+	}
+	if result, ok := parseClaudeResult(line); ok {
+		return result, true, result.Validate()
+	}
+	var event map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(line), &event); err != nil {
+		return ClaudeResult{}, false, nil
+	}
+	for _, key := range []string{"result", "response", "message"} {
+		raw, ok := event[key]
+		if !ok {
+			continue
+		}
+		var text string
+		if err := json.Unmarshal(raw, &text); err == nil {
+			if result, ok := parseClaudeResult(text); ok {
+				return result, true, result.Validate()
+			}
+		}
+		if result, ok := parseRawClaudeResult(raw); ok {
+			return result, true, result.Validate()
+		}
+	}
+	return ClaudeResult{}, false, nil
 }
 
 func parseRawClaudeResult(data []byte) (ClaudeResult, bool) {

@@ -1,7 +1,9 @@
 package workspace
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +11,9 @@ import (
 
 	"github.com/shinpr/galley/internal/task"
 )
+
+// ErrDirtyWorktree indicates cleanup was skipped because the worktree has local changes.
+var ErrDirtyWorktree = errors.New("dirty worktree")
 
 // Snapshot records git evidence for a prepared workspace.
 type Snapshot struct {
@@ -27,6 +32,15 @@ type Prepared struct {
 	StatusPorcelain string `json:"status_porcelain,omitempty"`
 	Branch          string `json:"branch,omitempty"`
 	Path            string `json:"path,omitempty"`
+}
+
+// CleanupResult records the result of a worktree cleanup attempt.
+type CleanupResult struct {
+	Path            string `json:"path"`
+	Removed         bool   `json:"removed"`
+	AlreadyMissing  bool   `json:"already_missing,omitempty"`
+	Dirty           bool   `json:"dirty,omitempty"`
+	StatusPorcelain string `json:"status_porcelain,omitempty"`
 }
 
 // Prepare creates an isolated git worktree when the task requests one.
@@ -112,7 +126,7 @@ func gitOutput(ctx context.Context, cwd string, args ...string) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	return string(bytesTrimSpace(output)), nil
+	return string(bytes.TrimSpace(output)), nil
 }
 
 func statusPorcelain(ctx context.Context, cwd string) (string, bool) {
@@ -141,16 +155,34 @@ func CaptureSnapshot(ctx context.Context, cwd string) (Snapshot, error) {
 	}, nil
 }
 
-func bytesTrimSpace(data []byte) []byte {
-	for len(data) > 0 && (data[0] == ' ' || data[0] == '\n' || data[0] == '\t' || data[0] == '\r') {
-		data = data[1:]
+// Remove removes a clean git worktree for a completed task.
+func Remove(ctx context.Context, sourceCWD string, spec task.Worktree) (CleanupResult, error) {
+	if !spec.Enabled || spec.Path == "" {
+		return CleanupResult{}, nil
 	}
-	for len(data) > 0 {
-		last := data[len(data)-1]
-		if last != ' ' && last != '\n' && last != '\t' && last != '\r' {
-			break
-		}
-		data = data[:len(data)-1]
+	worktreePath := spec.Path
+	if !filepath.IsAbs(worktreePath) {
+		worktreePath = filepath.Join(sourceCWD, worktreePath)
 	}
-	return data
+	worktreePath = filepath.Clean(worktreePath)
+	result := CleanupResult{Path: worktreePath}
+	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		result.AlreadyMissing = true
+		return result, nil
+	} else if err != nil {
+		return result, fmt.Errorf("inspect worktree path %s: %w", worktreePath, err)
+	}
+	status, dirty := statusPorcelain(ctx, worktreePath)
+	result.StatusPorcelain = status
+	result.Dirty = dirty
+	if dirty {
+		return result, fmt.Errorf("%w: %s", ErrDirtyWorktree, worktreePath)
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", sourceCWD, "worktree", "remove", worktreePath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return result, fmt.Errorf("git worktree remove: %w: %s", err, string(output))
+	}
+	result.Removed = true
+	return result, nil
 }

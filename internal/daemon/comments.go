@@ -2,23 +2,15 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/url"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 
-	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/task"
+	"github.com/shinpr/galley/internal/vcs"
 )
-
-type prComment struct {
-	ID      int64  `json:"id"`
-	Body    string `json:"body"`
-	HTMLURL string `json:"html_url"`
-}
 
 type prCommand struct {
 	CommentID string
@@ -59,7 +51,7 @@ func processTaskPRComments(ctx context.Context, opts Options, path string) error
 	if loaded.PR.URL == "" {
 		return nil
 	}
-	comments, err := fetchPRComments(ctx, opts.Root, loaded.PR.URL)
+	comments, err := vcs.FetchPRComments(ctx, opts.Root, loaded.PR.URL)
 	if err != nil {
 		return err
 	}
@@ -78,7 +70,7 @@ func processTaskPRComments(ctx context.Context, opts Options, path string) error
 				return err
 			}
 			if opts.ReplyPRComments {
-				return postPRComment(ctx, opts.Root, loaded.PR.URL, fmt.Sprintf("Galley noted comment %s; task is already %s.", command.CommentID, loaded.Status))
+				return vcs.PostPRComment(ctx, opts.Root, loaded.PR.URL, fmt.Sprintf("Galley noted comment %s; task is already %s.", command.CommentID, loaded.Status))
 			}
 			return nil
 		}
@@ -90,84 +82,14 @@ func processTaskPRComments(ctx context.Context, opts Options, path string) error
 			return err
 		}
 		if opts.ReplyPRComments {
-			return postPRComment(ctx, opts.Root, loaded.PR.URL, fmt.Sprintf("Galley requeued task `%s` from comment %s. Reason: %s", loaded.ID, command.CommentID, command.Reason))
+			return vcs.PostPRComment(ctx, opts.Root, loaded.PR.URL, fmt.Sprintf("Galley requeued task `%s` from comment %s. Reason: %s", loaded.ID, command.CommentID, command.Reason))
 		}
 		return nil
 	}
 	return nil
 }
 
-func fetchPRComments(ctx context.Context, root, prURL string) ([]prComment, error) {
-	owner, repo, number, err := parseGitHubPRURL(prURL)
-	if err != nil {
-		return nil, err
-	}
-	apiPath := fmt.Sprintf("repos/%s/%s/issues/%s/comments", owner, repo, number)
-	result, err := runner.RunCommand(ctx, runner.ClaudeCommand{
-		WorkDir: root,
-		Argv:    []string{"gh", "api", apiPath, "--paginate", "--slurp"},
-	}, runner.RunOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("gh api PR comments failed: %w", err)
-	}
-	comments, err := decodePRComments(result.Stdout)
-	if err != nil {
-		return nil, fmt.Errorf("decode PR comments: %w", err)
-	}
-	return comments, nil
-}
-
-func postPRComment(ctx context.Context, root, prURL, body string) error {
-	owner, repo, number, err := parseGitHubPRURL(prURL)
-	if err != nil {
-		return err
-	}
-	apiPath := fmt.Sprintf("repos/%s/%s/issues/%s/comments", owner, repo, number)
-	result, err := runner.RunCommand(ctx, runner.ClaudeCommand{
-		WorkDir: root,
-		Argv:    []string{"gh", "api", apiPath, "-f", "body=" + body},
-	}, runner.RunOptions{})
-	if err != nil {
-		return fmt.Errorf("gh api post PR comment failed: %w", err)
-	}
-	if strings.TrimSpace(result.Stdout) == "" {
-		return nil
-	}
-	return nil
-}
-
-func decodePRComments(stdout string) ([]prComment, error) {
-	var pages [][]prComment
-	if err := json.Unmarshal([]byte(stdout), &pages); err == nil {
-		var comments []prComment
-		for _, page := range pages {
-			comments = append(comments, page...)
-		}
-		return comments, nil
-	}
-	var comments []prComment
-	if err := json.Unmarshal([]byte(stdout), &comments); err != nil {
-		return nil, err
-	}
-	return comments, nil
-}
-
-func parseGitHubPRURL(raw string) (string, string, string, error) {
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		return "", "", "", fmt.Errorf("parse PR URL: %w", err)
-	}
-	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
-	if len(parts) < 4 || parts[2] != "pull" {
-		return "", "", "", fmt.Errorf("unsupported PR URL: %s", raw)
-	}
-	if parts[0] == "" || parts[1] == "" || parts[3] == "" {
-		return "", "", "", fmt.Errorf("unsupported PR URL: %s", raw)
-	}
-	return parts[0], parts[1], parts[3], nil
-}
-
-func parsePRCommand(comment prComment) (prCommand, bool) {
+func parsePRCommand(comment vcs.PRComment) (prCommand, bool) {
 	for _, line := range strings.Split(comment.Body, "\n") {
 		line = strings.TrimSpace(line)
 		for _, prefix := range []string{"/galley rerun", "/galley requeue"} {

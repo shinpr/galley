@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shinpr/galley/internal/queue"
 	"github.com/shinpr/galley/internal/task"
+	"github.com/shinpr/galley/internal/workspace"
 )
 
 func TestRunOnceMovesTaskToDoneAndWritesRunEvidence(t *testing.T) {
@@ -56,7 +57,7 @@ func TestRunOnceMovesTaskToDoneAndWritesRunEvidence(t *testing.T) {
 	if !strings.Contains(doneTask.Attempts[0].Summary, "workspace=") {
 		t.Fatalf("attempt summary missing workspace: %q", doneTask.Attempts[0].Summary)
 	}
-	if len(doneTask.Verification.Commands) != 1 || doneTask.Verification.Commands[0].Status != "passed" {
+	if len(doneTask.Verification.Commands) < 2 || doneTask.Verification.Commands[1].Status != "passed" {
 		t.Fatalf("verification got %#v", doneTask.Verification.Commands)
 	}
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "task.yaml"), 1)
@@ -345,6 +346,43 @@ func TestRunOnceCompletedWithoutDiffNeedsSupervisorReview(t *testing.T) {
 	}
 }
 
+func TestRunOnceStopsAfterConsecutiveNoDiffAttempts(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+	writeFakeClaude(t, "echo '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"claimed\"],\"notes\":\"claimed\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonTask(t, taskPath, repo)
+	setLoopBudget(t, taskPath, 5)
+
+	err := Run(context.Background(), Options{
+		Root:               root,
+		SystemPromptFile:   promptPath,
+		JSONSchemaFile:     schemaPath,
+		Once:               true,
+		MaxConcurrentTasks: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failedTask, err := task.Load(filepath.Join(root, "tasks", "failed", "task.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failedTask.Status != "needs_supervisor_review" {
+		t.Fatalf("status got %q", failedTask.Status)
+	}
+	if len(failedTask.Attempts) != 2 {
+		t.Fatalf("attempts got %d", len(failedTask.Attempts))
+	}
+	if len(failedTask.Risks) == 0 || !strings.Contains(failedTask.Risks[len(failedTask.Risks)-1].Detail, "no git diff") {
+		t.Fatalf("progress risk missing: %#v", failedTask.Risks)
+	}
+}
+
 func TestRunOnceDrainsQueue(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo1 := initDaemonGitRepo(t)
@@ -399,44 +437,6 @@ func TestRunOnceContinuesAfterTaskFailure(t *testing.T) {
 	assertGlobCount(t, filepath.Join(root, "tasks", "queued", "*.yaml"), 0)
 	assertGlobCount(t, filepath.Join(root, "tasks", "failed", "*.yaml"), 1)
 	assertGlobCount(t, filepath.Join(root, "tasks", "done", "*.yaml"), 1)
-}
-
-func TestClaimTaskDoesNotOverwriteRunningTask(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	queuedDir := filepath.Join(root, "tasks", "queued")
-	runningDir := filepath.Join(root, "tasks", "running")
-	if err := os.MkdirAll(queuedDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(runningDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	queuedPath := filepath.Join(queuedDir, "task.yaml")
-	runningPath := filepath.Join(runningDir, "task.yaml")
-	if err := os.WriteFile(queuedPath, []byte("queued"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(runningPath, []byte("running"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	_, err := claimTask(root, queuedPath)
-	if err == nil {
-		t.Fatal("expected claim error")
-	}
-	if !errors.Is(err, errClaimConflict) {
-		t.Fatalf("expected claim conflict, got %v", err)
-	}
-	data, err := os.ReadFile(runningPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != "running" {
-		t.Fatalf("running task was overwritten: %q", string(data))
-	}
-	if _, err := os.Stat(runningPath + ".lock"); !os.IsNotExist(err) {
-		t.Fatalf("lock should be cleaned up, err=%v", err)
-	}
 }
 
 func TestProcessAvailableSkipsClaimConflict(t *testing.T) {
@@ -505,9 +505,76 @@ func TestProcessAvailableSkipsConflictAndClaimsLaterTask(t *testing.T) {
 	assertGlobCount(t, filepath.Join(root, "tasks", "queued", "a-conflict.yaml"), 1)
 }
 
+func TestProcessAvailableHonorsMaxConcurrentPerRepo(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+	writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	queueDir := filepath.Join(root, "tasks", "queued")
+	runningDir := filepath.Join(root, "tasks", "running")
+	if err := os.MkdirAll(queueDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(runningDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonTask(t, filepath.Join(runningDir, "active.yaml"), repo)
+	writeDaemonTask(t, filepath.Join(queueDir, "queued.yaml"), repo)
+
+	processed, err := processAvailable(context.Background(), Options{
+		Root:                 root,
+		SystemPromptFile:     promptPath,
+		JSONSchemaFile:       schemaPath,
+		MaxConcurrentTasks:   2,
+		MaxConcurrentPerRepo: 1,
+		ClaimTTL:             time.Hour,
+	}.withDefaults())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 0 {
+		t.Fatalf("processed got %d", processed)
+	}
+	assertGlobCount(t, filepath.Join(root, "tasks", "queued", "queued.yaml"), 1)
+}
+
+func TestProcessAvailableAllowsDifferentRepos(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo1 := initDaemonGitRepo(t)
+	repo2 := initDaemonGitRepo(t)
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+	writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	queueDir := filepath.Join(root, "tasks", "queued")
+	runningDir := filepath.Join(root, "tasks", "running")
+	if err := os.MkdirAll(queueDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(runningDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonTask(t, filepath.Join(runningDir, "active.yaml"), repo1)
+	writeDaemonTask(t, filepath.Join(queueDir, "queued.yaml"), repo2)
+
+	processed, err := processAvailable(context.Background(), Options{
+		Root:                 root,
+		SystemPromptFile:     promptPath,
+		JSONSchemaFile:       schemaPath,
+		MaxConcurrentTasks:   2,
+		MaxConcurrentPerRepo: 1,
+		ClaimTTL:             time.Hour,
+	}.withDefaults())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 1 {
+		t.Fatalf("processed got %d", processed)
+	}
+	assertGlobCount(t, filepath.Join(root, "tasks", "done", "queued.yaml"), 1)
+}
+
 func TestProcessAvailableDoesNotBlockOnMultipleClaimErrors(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	if err := ensureLayout(root); err != nil {
+	if err := queue.EnsureLayout(root); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"a.yaml", "b.yaml"} {
@@ -532,6 +599,110 @@ func TestProcessAvailableDoesNotBlockOnMultipleClaimErrors(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("processAvailable blocked on claim errors")
+	}
+}
+
+func TestProcessAvailableLetsClaimedTaskFinishAfterShutdown(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+	writeFakeClaude(t, "sleep 0.05\necho change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	queueDir := filepath.Join(root, "tasks", "queued")
+	if err := os.MkdirAll(queueDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonTask(t, filepath.Join(queueDir, "task.yaml"), repo)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	processed, err := processAvailable(ctx, Options{
+		Root:               root,
+		SystemPromptFile:   promptPath,
+		JSONSchemaFile:     schemaPath,
+		MaxConcurrentTasks: 1,
+		ClaimTTL:           time.Hour,
+		ShutdownTimeout:    time.Second,
+	}.withDefaults())
+	if err == nil {
+		t.Fatal("expected canceled context before claim")
+	}
+	if processed != 0 {
+		t.Fatalf("processed got %d", processed)
+	}
+
+	ctx, cancel = context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := processAvailable(ctx, Options{
+			Root:               root,
+			SystemPromptFile:   promptPath,
+			JSONSchemaFile:     schemaPath,
+			MaxConcurrentTasks: 1,
+			ClaimTTL:           time.Hour,
+			ShutdownTimeout:    time.Second,
+		}.withDefaults())
+		done <- err
+	}()
+	time.Sleep(10 * time.Millisecond)
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	assertGlobCount(t, filepath.Join(root, "tasks", "done", "task.yaml"), 1)
+}
+
+func TestShutdownStopsBeforeRetryAttempt(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+	attemptLog := filepath.Join(t.TempDir(), "attempts.log")
+	writeFakeClaude(t, "echo attempt >> "+attemptLog+"\nsleep 0.05\necho change >> daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	supervisorPath := filepath.Join(t.TempDir(), "supervisor")
+	if err := os.WriteFile(supervisorPath, []byte("#!/bin/sh\ncat >/dev/null\necho '{\"status\":\"needs_revision\",\"summary\":\"external wants retry\",\"acceptance_gaps\":[\"retry\"],\"quality_findings\":[],\"next_work_order\":\"try again\"}'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	queueDir := filepath.Join(root, "tasks", "queued")
+	if err := os.MkdirAll(queueDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonTask(t, filepath.Join(queueDir, "task.yaml"), repo)
+	setLoopBudget(t, filepath.Join(queueDir, "task.yaml"), 2)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := processAvailable(ctx, Options{
+			Root:               root,
+			SystemPromptFile:   promptPath,
+			JSONSchemaFile:     schemaPath,
+			MaxConcurrentTasks: 1,
+			ClaimTTL:           time.Hour,
+			ShutdownTimeout:    time.Second,
+			SupervisorCommand:  []string{supervisorPath},
+		}.withDefaults())
+		done <- err
+	}()
+	time.Sleep(10 * time.Millisecond)
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(attemptLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(data), "attempt"); got != 1 {
+		t.Fatalf("attempt count got %d, log=%q", got, string(data))
+	}
+	failedTask, err := task.Load(filepath.Join(root, "tasks", "failed", "task.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failedTask.Status != "needs_supervisor_review" {
+		t.Fatalf("status got %q", failedTask.Status)
+	}
+	if len(failedTask.Risks) == 0 || !strings.Contains(failedTask.Risks[len(failedTask.Risks)-1].ID, "shutdown-") {
+		t.Fatalf("shutdown risk missing: %#v", failedTask.Risks)
 	}
 }
 
@@ -565,57 +736,10 @@ func TestRunOnceStopsWhenOnlyClaimConflictsRemain(t *testing.T) {
 	assertGlobCount(t, filepath.Join(root, "tasks", "running", "*.yaml"), 1)
 }
 
-func TestRecoverStaleClaimsRequeuesRunningTaskAndRemovesLock(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	if err := ensureLayout(root); err != nil {
-		t.Fatal(err)
-	}
-	runningPath := filepath.Join(root, "tasks", "running", "task.yaml")
-	writeDaemonTask(t, runningPath, repo)
-	loaded, err := task.Load(runningPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	loaded.Status = "running"
-	if err := task.Save(runningPath, loaded); err != nil {
-		t.Fatal(err)
-	}
-	lockPath := runningPath + ".lock"
-	if err := os.WriteFile(lockPath, []byte("lock"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	old := time.Now().Add(-2 * time.Hour)
-	if err := os.Chtimes(runningPath, old, old); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chtimes(lockPath, old, old); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := recoverStaleClaims(root, time.Hour, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
-		t.Fatalf("expected stale lock removed, err=%v", err)
-	}
-	queuedPath := filepath.Join(root, "tasks", "queued", "task.yaml")
-	requeued, err := task.Load(queuedPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if requeued.Status != "queued" {
-		t.Fatalf("status got %q", requeued.Status)
-	}
-	if _, err := os.Stat(runningPath); !os.IsNotExist(err) {
-		t.Fatalf("expected running task moved, err=%v", err)
-	}
-}
-
 func TestHeartbeatKeepsRunningTaskFresh(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
-	if err := ensureLayout(root); err != nil {
+	if err := queue.EnsureLayout(root); err != nil {
 		t.Fatal(err)
 	}
 	runningPath := filepath.Join(root, "tasks", "running", "task.yaml")
@@ -628,7 +752,7 @@ func TestHeartbeatKeepsRunningTaskFresh(t *testing.T) {
 	time.Sleep(30 * time.Millisecond)
 	stop()
 
-	if err := recoverStaleClaims(root, time.Hour, time.Now()); err != nil {
+	if err := queue.RecoverStaleClaims(root, time.Hour, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(runningPath); err != nil {
@@ -639,9 +763,115 @@ func TestHeartbeatKeepsRunningTaskFresh(t *testing.T) {
 	}
 }
 
+func TestCleanupWorktreesKeepsOpenPRWorktree(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	if err := queue.EnsureLayout(root); err != nil {
+		t.Fatal(err)
+	}
+	taskPath := filepath.Join(root, "tasks", "done", "task.yaml")
+	writeDaemonTask(t, taskPath, repo)
+	doneTask, worktreePath := prepareDonePRTask(t, taskPath, repo, "open")
+	writeFakeCommand(t, "gh", "echo '{\"state\":\"open\",\"merged\":false}'\n")
+
+	if err := cleanupWorktrees(context.Background(), Options{Root: root}.withDefaults()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(worktreePath); err != nil {
+		t.Fatalf("open PR worktree should remain: %v", err)
+	}
+	reloaded, err := task.Load(taskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.PR.Status != doneTask.PR.Status || len(reloaded.Attempts) != len(doneTask.Attempts) {
+		t.Fatalf("open PR task should not be updated: %#v", reloaded.PR)
+	}
+}
+
+func TestCleanupWorktreesRemovesCleanMergedPRWorktree(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	if err := queue.EnsureLayout(root); err != nil {
+		t.Fatal(err)
+	}
+	taskPath := filepath.Join(root, "tasks", "done", "task.yaml")
+	writeDaemonTask(t, taskPath, repo)
+	_, worktreePath := prepareDonePRTask(t, taskPath, repo, "open")
+	writeFakeCommand(t, "gh", "echo '{\"state\":\"closed\",\"merged\":true}'\n")
+
+	if err := cleanupWorktrees(context.Background(), Options{Root: root}.withDefaults()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Fatalf("merged PR worktree should be removed, err=%v", err)
+	}
+	reloaded, err := task.Load(taskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.PR.Status != "merged" {
+		t.Fatalf("pr status got %q", reloaded.PR.Status)
+	}
+	if len(reloaded.Attempts) == 0 || reloaded.Attempts[len(reloaded.Attempts)-1].SupervisorVerdict != "cleanup" {
+		t.Fatalf("cleanup attempt missing: %#v", reloaded.Attempts)
+	}
+}
+
+func TestCleanupWorktreesSkipsDirtyClosedPRWorktree(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	if err := queue.EnsureLayout(root); err != nil {
+		t.Fatal(err)
+	}
+	taskPath := filepath.Join(root, "tasks", "done", "task.yaml")
+	writeDaemonTask(t, taskPath, repo)
+	_, worktreePath := prepareDonePRTask(t, taskPath, repo, "open")
+	if err := os.WriteFile(filepath.Join(worktreePath, "dirty.txt"), []byte("dirty\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeFakeCommand(t, "gh", "echo '{\"state\":\"closed\",\"merged\":false}'\n")
+
+	if err := cleanupWorktrees(context.Background(), Options{Root: root}.withDefaults()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(worktreePath); err != nil {
+		t.Fatalf("dirty worktree should remain: %v", err)
+	}
+	reloaded, err := task.Load(taskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.PR.Status != "closed" {
+		t.Fatalf("pr status got %q", reloaded.PR.Status)
+	}
+	if !hasCleanupRisk(reloaded.Risks) {
+		t.Fatalf("cleanup risk missing: %#v", reloaded.Risks)
+	}
+}
+
 func writeFakeClaude(t *testing.T, body string) {
 	t.Helper()
 	writeFakeCommand(t, "claude", body)
+}
+
+func prepareDonePRTask(t *testing.T, taskPath, repo, prStatus string) (task.Task, string) {
+	t.Helper()
+	loaded, err := task.Load(taskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := workspace.Prepare(context.Background(), repo, loaded.Worktree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Status = "pr_opened"
+	loaded.PR.URL = "https://github.com/example/galley/pull/123"
+	loaded.PR.Status = prStatus
+	if err := task.Save(taskPath, loaded); err != nil {
+		t.Fatal(err)
+	}
+	return loaded, prepared.CWD
 }
 
 func writeFakeCommand(t *testing.T, name, body string) {
@@ -696,6 +926,7 @@ func writeDaemonTask(t *testing.T, path, repo string) {
 	t.Helper()
 	name := filepath.Base(path)
 	name = name[:len(name)-len(filepath.Ext(name))]
+	worktreePath := filepath.Join(filepath.Dir(repo), "worktrees", name)
 	body := `id: "task-daemon-test"
 mode: "afk"
 status: "queued"
@@ -703,7 +934,7 @@ goal: "Test daemon."
 acceptance_criteria:
   - id: "AC1"
     text: "Runs."
-    verification: "fake claude exits 0"
+    verification: "test -f daemon-output.txt"
     status: "pending"
 scope:
   cwd: "` + repo + `"
@@ -721,7 +952,7 @@ execution_policy:
 worktree:
   enabled: true
   branch: "agent/` + name + `"
-  path: "../worktrees/` + name + `"
+  path: "` + worktreePath + `"
 supervisor:
   provider: "codex"
   mode: "review_and_repair"

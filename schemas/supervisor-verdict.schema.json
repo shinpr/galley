@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Galley Supervisor Verdict",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "summary", "acceptance_gaps", "quality_findings", "next_work_order"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["accepted", "needs_revision", "needs_supervisor_review", "hard_stop"]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "acceptance_gaps": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "quality_findings": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "next_work_order": { "type": "string" }
+  }
+}

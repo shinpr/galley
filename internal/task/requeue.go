@@ -71,15 +71,7 @@ func Requeue(path string, opts RequeueOptions) (RequeueResult, error) {
 }
 
 func queuedPathFor(path string) string {
-	dir := filepath.Dir(path)
-	if filepath.Base(dir) == "queued" {
-		return path
-	}
-	parent := filepath.Dir(dir)
-	if filepath.Base(parent) == "tasks" {
-		return filepath.Join(parent, "queued", filepath.Base(path))
-	}
-	return path
+	return siblingTaskPath(path, "queued")
 }
 
 func writeMovedTask(src, dst string, loaded Task) error {

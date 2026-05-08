@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -99,6 +100,55 @@ func TestPrepareSkipsWhenDisabled(t *testing.T) {
 	}
 	if prepared.CWD != dir || prepared.WorktreeCreated {
 		t.Fatalf("unexpected prepared workspace: %#v", prepared)
+	}
+}
+
+func TestRemoveCleanWorktree(t *testing.T) {
+	repo := initGitRepo(t)
+	spec := task.Worktree{
+		Enabled: true,
+		Branch:  "agent/remove-worktree",
+		Path:    "../worktrees/remove-worktree",
+	}
+	prepared, err := Prepare(context.Background(), repo, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := Remove(context.Background(), repo, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Removed {
+		t.Fatalf("expected removed: %#v", result)
+	}
+	if _, err := os.Stat(prepared.CWD); !os.IsNotExist(err) {
+		t.Fatalf("expected worktree removed, err=%v", err)
+	}
+}
+
+func TestRemoveDirtyWorktreeIsSkipped(t *testing.T) {
+	repo := initGitRepo(t)
+	spec := task.Worktree{
+		Enabled: true,
+		Branch:  "agent/dirty-remove-worktree",
+		Path:    "../worktrees/dirty-remove-worktree",
+	}
+	prepared, err := Prepare(context.Background(), repo, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(prepared.CWD, "dirty.txt"), []byte("dirty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Remove(context.Background(), repo, spec)
+	if !errors.Is(err, ErrDirtyWorktree) {
+		t.Fatalf("expected dirty error, got %v", err)
+	}
+	if !result.Dirty {
+		t.Fatalf("expected dirty result: %#v", result)
+	}
+	if _, statErr := os.Stat(prepared.CWD); statErr != nil {
+		t.Fatalf("dirty worktree should remain: %v", statErr)
 	}
 }
 

@@ -50,6 +50,7 @@ func cleanupTaskWorktree(ctx context.Context, opts Options, path string) error {
 	cleanupResult, err := workspace.Remove(ctx, loaded.Scope.CWD, loaded.Worktree)
 	if err != nil {
 		if errors.Is(err, workspace.ErrDirtyWorktree) {
+			loaded.Status = finalStatus
 			loaded.PR.Status = finalStatus
 			if !hasCleanupRisk(loaded.Risks) {
 				loaded.Risks = append(loaded.Risks, task.Risk{
@@ -65,8 +66,10 @@ func cleanupTaskWorktree(ctx context.Context, opts Options, path string) error {
 		return err
 	}
 	if cleanupResult.AlreadyMissing && alreadyFinal {
-		return nil
+		loaded.Status = finalStatus
+		return task.Save(path, loaded)
 	}
+	loaded.Status = finalStatus
 	loaded.PR.Status = finalStatus
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	loaded.Attempts = append(loaded.Attempts, task.Attempt{

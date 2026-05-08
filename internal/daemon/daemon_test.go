@@ -78,7 +78,7 @@ func TestRunOnceUsesExternalSupervisorCommand(t *testing.T) {
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
 	writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
 	supervisorPath := filepath.Join(t.TempDir(), "supervisor")
-	if err := os.WriteFile(supervisorPath, []byte("#!/bin/sh\ncat >/dev/null\necho '{\"status\":\"accepted\",\"summary\":\"external accepted\"}'\n"), 0o700); err != nil {
+	if err := os.WriteFile(supervisorPath, []byte("#!/bin/sh\ncat >/dev/null\necho '{\"status\":\"accepted\",\"summary\":\"external accepted\",\"acceptance_gaps\":[],\"quality_findings\":[],\"reviewed_files\":[\"daemon-output.txt\"],\"acceptance_evidence\":[{\"ac_id\":\"AC1\",\"evidence\":[\"diff\"]}],\"findings\":[],\"residual_risks\":[],\"confidence\":\"high\",\"next_work_order\":\"\"}'\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
@@ -152,6 +152,39 @@ fi
 	}
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", "supervisor_verdict.json"), 1)
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-2", "supervisor_verdict.json"), 1)
+}
+
+func TestRunOncePreservesExecutorDecisionsWithDeterministicVerification(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+	writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"chose a small reversible path\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[{\"question\":\"Which implementation should be used?\",\"chosen\":\"small reversible change\",\"rationale\":\"It satisfies AC1 with minimal blast radius.\",\"reversibility\":\"high\",\"needs_human_review\":true}],\"risks\":[]}'\n")
+	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonTask(t, taskPath, repo)
+
+	err := Run(context.Background(), Options{
+		Root:               root,
+		SystemPromptFile:   promptPath,
+		JSONSchemaFile:     schemaPath,
+		Once:               true,
+		MaxConcurrentTasks: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doneTask, err := task.Load(filepath.Join(root, "tasks", "done", "task.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doneTask.Decisions) != 1 {
+		t.Fatalf("decisions got %#v", doneTask.Decisions)
+	}
+	if doneTask.Decisions[0].Chosen != "small reversible change" || !doneTask.Decisions[0].NeedsHumanReview {
+		t.Fatalf("decision got %#v", doneTask.Decisions[0])
+	}
 }
 
 func TestRunOnceOpenPRCommitsPushesAndUpdatesTask(t *testing.T) {
@@ -658,7 +691,7 @@ func TestShutdownStopsBeforeRetryAttempt(t *testing.T) {
 	attemptLog := filepath.Join(t.TempDir(), "attempts.log")
 	writeFakeClaude(t, "echo attempt >> "+attemptLog+"\nsleep 0.05\necho change >> daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
 	supervisorPath := filepath.Join(t.TempDir(), "supervisor")
-	if err := os.WriteFile(supervisorPath, []byte("#!/bin/sh\ncat >/dev/null\necho '{\"status\":\"needs_revision\",\"summary\":\"external wants retry\",\"acceptance_gaps\":[\"retry\"],\"quality_findings\":[],\"next_work_order\":\"try again\"}'\n"), 0o700); err != nil {
+	if err := os.WriteFile(supervisorPath, []byte("#!/bin/sh\ncat >/dev/null\necho '{\"status\":\"needs_revision\",\"summary\":\"external wants retry\",\"acceptance_gaps\":[\"retry\"],\"quality_findings\":[],\"reviewed_files\":[\"daemon-output.txt\"],\"acceptance_evidence\":[],\"findings\":[{\"severity\":\"medium\",\"category\":\"acceptance\",\"file\":\"daemon-output.txt\",\"summary\":\"retry\",\"blocks_acceptance\":true}],\"residual_risks\":[],\"confidence\":\"high\",\"next_work_order\":\"try again\"}'\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	queueDir := filepath.Join(root, "tasks", "queued")
@@ -813,6 +846,9 @@ func TestCleanupWorktreesRemovesCleanMergedPRWorktree(t *testing.T) {
 	if reloaded.PR.Status != "merged" {
 		t.Fatalf("pr status got %q", reloaded.PR.Status)
 	}
+	if reloaded.Status != "merged" {
+		t.Fatalf("task status got %q", reloaded.Status)
+	}
 	if len(reloaded.Attempts) == 0 || reloaded.Attempts[len(reloaded.Attempts)-1].SupervisorVerdict != "cleanup" {
 		t.Fatalf("cleanup attempt missing: %#v", reloaded.Attempts)
 	}
@@ -844,6 +880,9 @@ func TestCleanupWorktreesSkipsDirtyClosedPRWorktree(t *testing.T) {
 	}
 	if reloaded.PR.Status != "closed" {
 		t.Fatalf("pr status got %q", reloaded.PR.Status)
+	}
+	if reloaded.Status != "closed" {
+		t.Fatalf("task status got %q", reloaded.Status)
 	}
 	if !hasCleanupRisk(reloaded.Risks) {
 		t.Fatalf("cleanup risk missing: %#v", reloaded.Risks)

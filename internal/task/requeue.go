@@ -13,6 +13,7 @@ import (
 type RequeueOptions struct {
 	Reason              string
 	ProcessedCommentIDs []string
+	RevisionRequests    []RevisionRequest
 }
 
 // RequeueResult describes the file move and updated task state.
@@ -31,6 +32,7 @@ func Requeue(path string, opts RequeueOptions) (RequeueResult, error) {
 	if loaded.Status == "queued" {
 		return RequeueResult{}, fmt.Errorf("task %s is already queued", loaded.ID)
 	}
+	ApplyDefaults(&loaded)
 	loaded.Status = "queued"
 	loaded.Supervisor.ApprovalStatus = "pending"
 	loaded.Supervisor.ReviewIterations++
@@ -39,13 +41,27 @@ func Requeue(path string, opts RequeueOptions) (RequeueResult, error) {
 			loaded.PR.ProcessedCommentIDs = append(loaded.PR.ProcessedCommentIDs, commentID)
 		}
 	}
+	for _, request := range opts.RevisionRequests {
+		if request.ID == "" {
+			request.ID = fmt.Sprintf("revision-%d", len(loaded.RevisionRequests)+1)
+		}
+		if request.Status == "" {
+			request.Status = "pending"
+		}
+		if request.Source == "" {
+			request.Source = "manual"
+		}
+		if !containsRevisionRequest(loaded.RevisionRequests, request.ID) {
+			loaded.RevisionRequests = append(loaded.RevisionRequests, request)
+		}
+	}
 	if opts.Reason != "" {
-		loaded.Risks = append(loaded.Risks, Risk{
-			ID:                   fmt.Sprintf("requeue-%d", len(loaded.Risks)+1),
-			Type:                 "other",
-			Detail:               opts.Reason,
-			Mitigation:           "Task was returned to the queue for another executor attempt.",
-			HumanReviewSuggested: false,
+		loaded.Decisions = append(loaded.Decisions, Decision{
+			ID:            fmt.Sprintf("requeue-%d", len(loaded.Decisions)+1),
+			Question:      "Why was this task requeued?",
+			Chosen:        opts.Reason,
+			Rationale:     "A reviewer or PR comment requested another executor attempt.",
+			Reversibility: "high",
 		})
 	}
 	loaded.Attempts = append(loaded.Attempts, Attempt{
@@ -117,6 +133,15 @@ func firstNonEmpty(values ...string) string {
 func containsString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsRevisionRequest(values []RevisionRequest, wantID string) bool {
+	for _, value := range values {
+		if value.ID == wantID {
 			return true
 		}
 	}

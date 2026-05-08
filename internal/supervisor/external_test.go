@@ -10,27 +10,57 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/shinpr/galley/internal/profile"
+	"github.com/shinpr/galley/internal/task"
 )
 
 func TestRunExternal(t *testing.T) {
 	dir := t.TempDir()
 	command := filepath.Join(dir, "supervisor")
-	if err := os.WriteFile(command, []byte("#!/bin/sh\ncat >/dev/null\necho '{\"status\":\"accepted\",\"summary\":\"external ok\"}'\n"), 0o700); err != nil {
+	if err := os.WriteFile(command, []byte("#!/bin/sh\ncat >/dev/null\necho '{\"status\":\"accepted\",\"summary\":\"external ok\",\"acceptance_gaps\":[],\"quality_findings\":[],\"reviewed_files\":[],\"acceptance_evidence\":[],\"findings\":[],\"residual_risks\":[],\"confidence\":\"high\",\"next_work_order\":\"\"}'\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := RunExternal(context.Background(), ExternalOptions{Argv: []string{command}}, Evidence{})
+	artifactDir := filepath.Join(dir, "artifacts")
+	workDir := filepath.Join(dir, "worktree")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	verdict, err := RunExternal(context.Background(), ExternalOptions{Argv: []string{command}, WorkDir: workDir, ArtifactDir: artifactDir}, Evidence{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if verdict.Status != "accepted" {
 		t.Fatalf("verdict got %#v", verdict)
 	}
+	for _, name := range []string{"supervisor_request.json", "supervisor_stdout.log", "supervisor_stderr.log"} {
+		if _, err := os.Stat(filepath.Join(artifactDir, name)); err != nil {
+			t.Fatalf("artifact %s missing: %v", name, err)
+		}
+	}
+	requestData, err := os.ReadFile(filepath.Join(artifactDir, "supervisor_request.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(requestData), `"worktree_cwd":"`+workDir+`"`) {
+		t.Fatalf("request JSON missing worktree cwd: %s", requestData)
+	}
 }
 
 func TestValidateVerdictRejectsNeedsRevisionWithoutWorkOrder(t *testing.T) {
-	err := ValidateVerdict(Verdict{Status: "needs_revision", Summary: "gaps"})
+	err := ValidateVerdict(Verdict{Status: "needs_revision", Summary: "gaps", Confidence: "high"})
 	if err == nil {
 		t.Fatal("expected validation error")
+	}
+}
+
+func TestValidateVerdictRequiresConfidence(t *testing.T) {
+	err := ValidateVerdict(Verdict{Status: "accepted", Summary: "ok"})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "confidence") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -56,14 +86,130 @@ func TestSupervisorVerdictSchemaStatusEnumMatchesValidator(t *testing.T) {
 		t.Fatalf("schema status enum got %#v, want %#v", got, want)
 	}
 	for _, status := range got {
-		if err := ValidateVerdict(Verdict{Status: status, Summary: "ok", NextWorkOrder: "work"}); err != nil && status != "needs_revision" {
+		if err := ValidateVerdict(Verdict{Status: status, Summary: "ok", Confidence: "high", NextWorkOrder: "work"}); err != nil && status != "needs_revision" {
 			t.Fatalf("validator rejected schema status %q: %v", status, err)
 		}
 		if status == "needs_revision" {
-			if err := ValidateVerdict(Verdict{Status: status, Summary: "ok", NextWorkOrder: "work"}); err != nil {
+			if err := ValidateVerdict(Verdict{Status: status, Summary: "ok", Confidence: "high", NextWorkOrder: "work"}); err != nil {
 				t.Fatalf("validator rejected needs_revision with work order: %v", err)
 			}
 		}
+	}
+}
+
+func TestValidateVerdictForEvidenceRejectsAcceptedWithoutRepositoryReview(t *testing.T) {
+	err := ValidateVerdictForEvidence(Verdict{
+		Status:             "accepted",
+		Summary:            "ok",
+		AcceptanceEvidence: []AcceptanceEvidence{{ACID: "AC1", Evidence: []string{"diff"}}},
+		Confidence:         "high",
+	}, Evidence{
+		Task:      task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},
+		DiffDirty: true,
+	})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "reviewed_files") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateVerdictForEvidenceRejectsAcceptedWithoutACEvidence(t *testing.T) {
+	err := ValidateVerdictForEvidence(Verdict{
+		Status:        "accepted",
+		Summary:       "ok",
+		ReviewedFiles: []string{"file.go"},
+		Confidence:    "high",
+	}, Evidence{
+		Task:      task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},
+		DiffDirty: true,
+	})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "AC1") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateVerdictForEvidenceRejectsAcceptedWithBlockingFinding(t *testing.T) {
+	err := ValidateVerdictForEvidence(Verdict{
+		Status:             "accepted",
+		Summary:            "ok",
+		ReviewedFiles:      []string{"file.go"},
+		AcceptanceEvidence: []AcceptanceEvidence{{ACID: "AC1", Evidence: []string{"diff"}}},
+		Findings:           []Finding{{Severity: "medium", Category: "correctness", Summary: "ordering bug", BlocksAcceptance: false}},
+		Confidence:         "high",
+	}, Evidence{
+		Task:      task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},
+		DiffDirty: true,
+	})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "blocks_acceptance") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateVerdictForEvidenceDefaultAllowsLowSeverityFinding(t *testing.T) {
+	err := ValidateVerdictForEvidence(Verdict{
+		Status:             "accepted",
+		Summary:            "ok",
+		ReviewedFiles:      []string{"file.go"},
+		AcceptanceEvidence: []AcceptanceEvidence{{ACID: "AC1", Evidence: []string{"diff"}}},
+		Findings:           []Finding{{Severity: "low", Category: "style", Summary: "wording", BlocksAcceptance: false}},
+		Confidence:         "medium",
+	}, Evidence{
+		Task:      task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},
+		DiffDirty: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateVerdictForEvidenceBlockingSeveritiesCanRequireLowSeverityFinding(t *testing.T) {
+	err := ValidateVerdictForEvidence(Verdict{
+		Status:             "accepted",
+		Summary:            "ok",
+		ReviewedFiles:      []string{"file.go"},
+		AcceptanceEvidence: []AcceptanceEvidence{{ACID: "AC1", Evidence: []string{"diff"}}},
+		Findings:           []Finding{{Severity: "low", Category: "style", Summary: "wording", BlocksAcceptance: false}},
+		Confidence:         "medium",
+	}, Evidence{
+		Task: task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},
+		Profiles: profile.Bundle{Quality: &profile.Quality{PassPolicy: profile.PassPolicy{
+			BlockingSeverities: []string{"critical", "high", "medium", "low"},
+		}}},
+		DiffDirty: true,
+	})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "blocks_acceptance") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateVerdictForEvidenceRejectsBlocksAcceptanceMismatch(t *testing.T) {
+	err := ValidateVerdictForEvidence(Verdict{
+		Status:             "accepted",
+		Summary:            "ok",
+		ReviewedFiles:      []string{"file.go"},
+		AcceptanceEvidence: []AcceptanceEvidence{{ACID: "AC1", Evidence: []string{"diff"}}},
+		Findings:           []Finding{{Severity: "low", Category: "style", Summary: "wording", BlocksAcceptance: true}},
+		Confidence:         "medium",
+	}, Evidence{
+		Task:      task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},
+		DiffDirty: true,
+	})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "blocks_acceptance") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -76,6 +222,9 @@ func TestNewExternalRequestSerializesErrorsAsStrings(t *testing.T) {
 		DiffDirty:    true,
 		Attempt:      2,
 		AttemptsLeft: 1,
+		Task: task.Task{Scope: task.Scope{
+			CWD: "/source/repo",
+		}},
 	})
 	data, err := json.Marshal(request)
 	if err != nil {
@@ -87,6 +236,7 @@ func TestNewExternalRequestSerializesErrorsAsStrings(t *testing.T) {
 		`"run_error":"executor failed"`,
 		`"diff_error":"diff failed"`,
 		`"diff_dirty":true`,
+		`"source_cwd":"/source/repo"`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("request JSON missing %s: %s", want, text)
@@ -113,6 +263,8 @@ func TestProviderSupervisorScriptsUseProviderPrompts(t *testing.T) {
 				"prompts/codex-supervisor-review.md",
 				"--output-schema",
 				"supervisor-verdict.schema.json",
+				"--json",
+				"codex_supervisor_events.jsonl",
 			},
 		},
 		{
@@ -124,9 +276,12 @@ func TestProviderSupervisorScriptsUseProviderPrompts(t *testing.T) {
 				"--system-prompt",
 				"--json-schema",
 				"--output-format text",
+				"--tools default",
+				"--allowedTools",
+				"claude_supervisor_debug.log",
 				"supervisor-verdict.schema.json",
 			},
-			wantNot: []string{"--append-system-prompt"},
+			wantNot: []string{"--append-system-prompt", `--tools ""`},
 		},
 	}
 	for _, tt := range tests {
@@ -165,7 +320,7 @@ func TestClaudeSupervisorScriptEmitsVerdictFromClaude(t *testing.T) {
 	script := `#!/bin/sh
 printf '%s\n' "$@" >"$GALLEY_FAKE_CLAUDE_ARGS"
 cat >"$GALLEY_FAKE_CLAUDE_STDIN"
-printf '{"status":"accepted","summary":"fake claude ok","acceptance_gaps":[],"quality_findings":[],"next_work_order":""}\n'
+printf '{"status":"accepted","summary":"fake claude ok","acceptance_gaps":[],"quality_findings":[],"reviewed_files":[],"acceptance_evidence":[],"findings":[],"residual_risks":[],"confidence":"high","next_work_order":""}\n'
 `
 	if err := os.WriteFile(fakeClaude, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
@@ -193,7 +348,7 @@ printf '{"status":"accepted","summary":"fake claude ok","acceptance_gaps":[],"qu
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"--system-prompt", "--json-schema", "--output-format", "text"} {
+	for _, want := range []string{"--system-prompt", "--json-schema", "--output-format", "text", "--tools", "default", "--allowedTools"} {
 		if !strings.Contains(string(args), want) {
 			t.Fatalf("claude args missing %q: %s", want, args)
 		}

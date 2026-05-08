@@ -1,8 +1,4 @@
 id: "default"
-review_loops:
-  default_max: 2
-  afk_max: 3
-  hitl_max: 1
 required_checks:
   - id: "tests"
     preferred_commands:

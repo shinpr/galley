@@ -12,6 +12,7 @@ func RenderWorkOrder(t Task) string {
 }
 
 func RenderWorkOrderWithProfiles(t Task, profiles profile.Bundle) string {
+	t = Defaulted(t)
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "# Galley Work Order\n\n")
@@ -72,6 +73,21 @@ func renderReviewContext(b *strings.Builder, t Task) {
 		}
 		for _, instruction := range requeueInstructions {
 			fmt.Fprintf(b, "- additional instruction `%s`: %s\n", instruction.ID, instruction.Detail)
+		}
+		fmt.Fprintf(b, "\n")
+	}
+	if len(t.RevisionRequests) > 0 {
+		fmt.Fprintf(b, "## Revision Requests\n\n")
+		fmt.Fprintf(b, "Treat every pending revision request as an additional acceptance criterion for this attempt. Do not report `completed` unless each pending request is addressed or explicitly escalated with a reason.\n\n")
+		for _, request := range t.RevisionRequests {
+			if request.Status == "addressed" {
+				continue
+			}
+			fmt.Fprintf(b, "- `%s` source=`%s`", request.ID, request.Source)
+			if request.CommentID != "" {
+				fmt.Fprintf(b, " comment=`%s`", request.CommentID)
+			}
+			fmt.Fprintf(b, ": %s\n", request.Text)
 		}
 		fmt.Fprintf(b, "\n")
 	}

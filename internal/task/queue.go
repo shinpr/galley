@@ -24,6 +24,7 @@ func Queue(path string, opts QueueOptions) (QueueResult, error) {
 	if loaded.Status != "draft" {
 		return QueueResult{}, fmt.Errorf("task %s status %q cannot be queued with task queue; use task requeue for reviewed tasks", loaded.ID, loaded.Status)
 	}
+	ApplyDefaults(&loaded)
 	loaded.Status = "queued"
 	validation := Validate(loaded)
 	if !validation.Valid() {

@@ -348,6 +348,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	if err != nil {
 		return failTaskMove(opts.Root, runningPath, nil, err)
 	}
+	task.ApplyDefaults(&loaded)
 	loaded.Status = "running"
 	if err := task.Save(runningPath, loaded); err != nil {
 		return failTaskMove(opts.Root, runningPath, nil, err)

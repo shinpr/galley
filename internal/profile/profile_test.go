@@ -66,6 +66,22 @@ pass_policy:
 	}
 }
 
+func TestValidateQualityRejectsInvalidPassPolicyReviewStrength(t *testing.T) {
+	result := ValidateQuality(Quality{
+		ID: "bad",
+		PassPolicy: PassPolicy{
+			BlockingSeverities: []string{"critical", "minor"},
+		},
+	})
+	if result.Valid() {
+		t.Fatal("expected invalid profile")
+	}
+	text := strings.Join(result.Errors, "\n")
+	if !strings.Contains(text, "blocking_severities") {
+		t.Fatalf("errors missing blocking_severities: %#v", result.Errors)
+	}
+}
+
 func TestLoadBundleRejectsInvalidEnvironment(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "environment.yaml")
 	body := `id: bad

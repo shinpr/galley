@@ -11,11 +11,31 @@ import (
 
 // Verdict is the deterministic supervisor decision for one executor attempt.
 type Verdict struct {
-	Status          string   `json:"status"`
-	Summary         string   `json:"summary"`
-	AcceptanceGaps  []string `json:"acceptance_gaps,omitempty"`
-	QualityFindings []string `json:"quality_findings,omitempty"`
-	NextWorkOrder   string   `json:"next_work_order,omitempty"`
+	Status             string               `json:"status"`
+	Summary            string               `json:"summary"`
+	AcceptanceGaps     []string             `json:"acceptance_gaps,omitempty"`
+	QualityFindings    []string             `json:"quality_findings,omitempty"`
+	ReviewedFiles      []string             `json:"reviewed_files,omitempty"`
+	AcceptanceEvidence []AcceptanceEvidence `json:"acceptance_evidence,omitempty"`
+	Findings           []Finding            `json:"findings,omitempty"`
+	ResidualRisks      []string             `json:"residual_risks,omitempty"`
+	Confidence         string               `json:"confidence,omitempty"`
+	NextWorkOrder      string               `json:"next_work_order,omitempty"`
+}
+
+// AcceptanceEvidence links one task or revision acceptance item to concrete evidence.
+type AcceptanceEvidence struct {
+	ACID     string   `json:"ac_id"`
+	Evidence []string `json:"evidence"`
+}
+
+// Finding is a structured supervisor review issue.
+type Finding struct {
+	Severity         string `json:"severity"`
+	Category         string `json:"category"`
+	File             string `json:"file,omitempty"`
+	Summary          string `json:"summary"`
+	BlocksAcceptance bool   `json:"blocks_acceptance"`
 }
 
 // Evidence is the local evidence available to the deterministic supervisor.
@@ -46,11 +66,7 @@ func Evaluate(e Evidence) Verdict {
 
 	switch e.Claude.Status {
 	case "hard_stop":
-		reason := "Claude reported a hard stop."
-		if e.Claude.HardStop != nil && e.Claude.HardStop.Reason != "" {
-			reason = e.Claude.HardStop.Reason
-		}
-		return Verdict{Status: "hard_stop", Summary: reason, QualityFindings: []string{reason}}
+		return hardStopVerdict(e)
 	case "completed_with_risks":
 		return finalOrRevision(e, "completed_with_risks", "Claude completed with risks that require supervisor review.")
 	case "completed":
@@ -86,6 +102,7 @@ func Evaluate(e Evidence) Verdict {
 		}
 	}
 	gaps = append(gaps, qualityProfileGaps(e)...)
+	gaps = append(gaps, revisionRequestGaps(e)...)
 	if !e.DiffDirty {
 		gaps = append(gaps, "Executor reported completion but produced no git diff in the execution workspace.")
 	}
@@ -94,9 +111,76 @@ func Evaluate(e Evidence) Verdict {
 	}
 
 	return Verdict{
-		Status:  "accepted",
-		Summary: "Task accepted by deterministic supervisor checks.",
+		Status:             "accepted",
+		Summary:            "Task accepted by deterministic supervisor checks.",
+		AcceptanceEvidence: deterministicAcceptanceEvidence(e),
+		Confidence:         "high",
 	}
+}
+
+func hardStopVerdict(e Evidence) Verdict {
+	reason := "Claude reported a hard stop."
+	if e.Claude.HardStop != nil && e.Claude.HardStop.Reason != "" {
+		reason = e.Claude.HardStop.Reason
+	}
+	findings := []string{"executor returned hard_stop: " + reason}
+	if e.Claude.HardStop != nil {
+		if len(e.Claude.HardStop.Attempted) > 0 {
+			findings = append(findings, "attempted before hard_stop: "+strings.Join(e.Claude.HardStop.Attempted, "; "))
+		}
+		if len(e.Claude.HardStop.NeededToContinue) > 0 {
+			findings = append(findings, "executor claimed these unblock requirements: "+strings.Join(e.Claude.HardStop.NeededToContinue, "; "))
+		}
+	}
+	if hardStopRequiresHuman(e.Claude.HardStop) {
+		return Verdict{
+			Status:          "hard_stop",
+			Summary:         reason,
+			QualityFindings: findings,
+			Findings:        findingsFromGaps(nil, findings),
+			Confidence:      "high",
+		}
+	}
+	return finalOrRevision(e, "retryable_hard_stop", findings...)
+}
+
+func hardStopRequiresHuman(stop *runner.ClaudeHardStop) bool {
+	if stop == nil {
+		return false
+	}
+	text := strings.ToLower(stop.Reason + " " + strings.Join(stop.NeededToContinue, " "))
+	blockers := []string{
+		"secret",
+		"credential",
+		"token",
+		"api key",
+		"paid service",
+		"external service",
+		"unavailable service",
+		"destructive",
+		"outside allowed",
+		"outside write scope",
+		"permission policy",
+		"human approval",
+		"mutually contradictory",
+	}
+	for _, blocker := range blockers {
+		if strings.Contains(text, blocker) {
+			return true
+		}
+	}
+	return false
+}
+
+func revisionRequestGaps(e Evidence) []string {
+	var gaps []string
+	for _, request := range e.Task.RevisionRequests {
+		if request.Status == "addressed" {
+			continue
+		}
+		gaps = append(gaps, fmt.Sprintf("revision request %s remains pending: %s", request.ID, request.Text))
+	}
+	return gaps
 }
 
 func qualityProfileGaps(e Evidence) []string {
@@ -158,11 +242,53 @@ func buildVerdict(e Evidence, summary string, acceptanceGaps, qualityFindings []
 		Summary:         summary,
 		AcceptanceGaps:  acceptanceGaps,
 		QualityFindings: qualityFindings,
+		Findings:        findingsFromGaps(acceptanceGaps, qualityFindings),
+		Confidence:      "high",
 	}
 	if status == "needs_revision" {
 		verdict.NextWorkOrder = RenderCorrectiveWorkOrder(e.Task, verdict)
 	}
 	return verdict
+}
+
+func deterministicAcceptanceEvidence(e Evidence) []AcceptanceEvidence {
+	var evidence []AcceptanceEvidence
+	for _, ac := range e.Task.AcceptanceCriteria {
+		var values []string
+		for _, reported := range e.Claude.AcceptanceCriteria {
+			if reported.ID == ac.ID {
+				values = append(values, reported.Evidence...)
+			}
+		}
+		for _, verification := range e.Claude.Verification {
+			if sameCommand(verification.Command, ac.Verification) && verification.Status == "passed" {
+				values = append(values, fmt.Sprintf("%s passed", verification.Command))
+			}
+		}
+		evidence = append(evidence, AcceptanceEvidence{ACID: ac.ID, Evidence: values})
+	}
+	return evidence
+}
+
+func findingsFromGaps(acceptanceGaps, qualityFindings []string) []Finding {
+	var findings []Finding
+	for _, gap := range acceptanceGaps {
+		findings = append(findings, Finding{
+			Severity:         "medium",
+			Category:         "acceptance",
+			Summary:          gap,
+			BlocksAcceptance: true,
+		})
+	}
+	for _, finding := range qualityFindings {
+		findings = append(findings, Finding{
+			Severity:         "medium",
+			Category:         "quality",
+			Summary:          finding,
+			BlocksAcceptance: true,
+		})
+	}
+	return findings
 }
 
 // RenderCorrectiveWorkOrder asks the executor to continue from the current diff.
@@ -173,6 +299,16 @@ func RenderCorrectiveWorkOrder(t task.Task, verdict Verdict) string {
 	b.WriteString("Build on the current workspace state. Inspect the current diff and repository state, then fix the listed gaps while preserving correct work already present.\n\n")
 	fmt.Fprintf(&b, "Task ID: `%s`\n\n", t.ID)
 	fmt.Fprintf(&b, "## Goal\n\n%s\n\n", t.Goal)
+	if len(t.RevisionRequests) > 0 {
+		b.WriteString("## Pending Revision Requests\n\n")
+		for _, request := range t.RevisionRequests {
+			if request.Status == "addressed" {
+				continue
+			}
+			fmt.Fprintf(&b, "- `%s`: %s\n", request.ID, request.Text)
+		}
+		b.WriteString("\n")
+	}
 	if len(verdict.AcceptanceGaps) > 0 {
 		b.WriteString("## Acceptance Gaps\n\n")
 		for _, gap := range verdict.AcceptanceGaps {
@@ -184,6 +320,17 @@ func RenderCorrectiveWorkOrder(t task.Task, verdict Verdict) string {
 		b.WriteString("## Quality Findings\n\n")
 		for _, finding := range verdict.QualityFindings {
 			fmt.Fprintf(&b, "- %s\n", finding)
+		}
+		b.WriteString("\n")
+	}
+	if len(verdict.Findings) > 0 {
+		b.WriteString("## Structured Findings\n\n")
+		for _, finding := range verdict.Findings {
+			location := finding.File
+			if location == "" {
+				location = "n/a"
+			}
+			fmt.Fprintf(&b, "- `%s` `%s` `%s`: %s\n", finding.Severity, finding.Category, location, finding.Summary)
 		}
 		b.WriteString("\n")
 	}

@@ -2,6 +2,7 @@
 /galley.exe
 /galleyd
 /galleyd.exe
+/bin/
 
 # Local agent/tool state
 /.claude/

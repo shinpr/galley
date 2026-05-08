@@ -24,6 +24,19 @@ func TestParsePRCommand(t *testing.T) {
 	}
 }
 
+func TestParsePRCommandKeepsMultilineInstruction(t *testing.T) {
+	t.Parallel()
+	command, ok := parsePRCommand(vcs.PRComment{ID: 123, Body: "/galley rerun\nPlease update the CLI help.\nAlso keep tests passing."})
+	if !ok {
+		t.Fatal("expected command")
+	}
+	for _, want := range []string{"Please update the CLI help.", "Also keep tests passing."} {
+		if !strings.Contains(command.Reason, want) {
+			t.Fatalf("reason missing %q: %q", want, command.Reason)
+		}
+	}
+}
+
 func TestPollPRCommentsRequeuesTaskOnce(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
@@ -64,8 +77,8 @@ fi
 	if !slices.Contains(requeued.PR.ProcessedCommentIDs, "42") {
 		t.Fatalf("processed comments got %#v", requeued.PR.ProcessedCommentIDs)
 	}
-	if len(requeued.Risks) == 0 || !strings.Contains(requeued.Risks[len(requeued.Risks)-1].Detail, "tighten tests") {
-		t.Fatalf("risks got %#v", requeued.Risks)
+	if len(requeued.RevisionRequests) != 1 || requeued.RevisionRequests[0].Text != "tighten tests" || requeued.RevisionRequests[0].Status != "pending" {
+		t.Fatalf("revision requests got %#v", requeued.RevisionRequests)
 	}
 
 	if err := pollPRComments(context.Background(), Options{Root: root}.withDefaults()); err != nil {

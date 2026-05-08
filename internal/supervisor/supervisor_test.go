@@ -111,6 +111,40 @@ func TestEvaluateAcceptsPassedQualityProfileChecks(t *testing.T) {
 	}
 }
 
+func TestEvaluateRequiresPendingRevisionRequests(t *testing.T) {
+	verdict := Evaluate(Evidence{
+		Task: task.Task{
+			AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "Change is implemented."}},
+			RevisionRequests: []task.RevisionRequest{{
+				ID:     "pr-comment-42",
+				Source: "pr_comment",
+				Text:   "Change the help text.",
+				Status: "pending",
+			}},
+		},
+		Claude: runner.ClaudeResult{
+			Status:             "completed",
+			Summary:            "done",
+			FilesModified:      []string{"file.go"},
+			AcceptanceCriteria: []runner.ClaudeAcceptanceCriterion{{ID: "AC1", Status: "satisfied", Evidence: []string{"diff"}}},
+			Verification:       []runner.ClaudeVerification{},
+			Decisions:          []runner.ClaudeDecision{},
+			Risks:              []runner.ClaudeRisk{},
+		},
+		DiffDirty:    true,
+		AttemptsLeft: 1,
+	})
+	if verdict.Status != "needs_revision" {
+		t.Fatalf("status got %q", verdict.Status)
+	}
+	if len(verdict.AcceptanceGaps) == 0 || !strings.Contains(strings.Join(verdict.AcceptanceGaps, "\n"), "pr-comment-42") {
+		t.Fatalf("acceptance gaps got %#v", verdict.AcceptanceGaps)
+	}
+	if !strings.Contains(verdict.NextWorkOrder, "Pending Revision Requests") {
+		t.Fatalf("next work order should include revision requests: %q", verdict.NextWorkOrder)
+	}
+}
+
 func TestEvaluateRequestsRevisionWhenAttemptsRemain(t *testing.T) {
 	verdict := Evaluate(Evidence{
 		Task:         task.Task{ID: "T1", Goal: "Fix it"},
@@ -125,7 +159,7 @@ func TestEvaluateRequestsRevisionWhenAttemptsRemain(t *testing.T) {
 	}
 }
 
-func TestEvaluateHardStopDoesNotRequestRevision(t *testing.T) {
+func TestEvaluateHardStopStopsOnExternalBlocker(t *testing.T) {
 	verdict := Evaluate(Evidence{
 		Claude: runner.ClaudeResult{
 			Status:             "hard_stop",
@@ -141,5 +175,35 @@ func TestEvaluateHardStopDoesNotRequestRevision(t *testing.T) {
 	})
 	if verdict.Status != "hard_stop" {
 		t.Fatalf("status got %q", verdict.Status)
+	}
+}
+
+func TestEvaluateHardStopRequestsRevisionWhenRetryable(t *testing.T) {
+	verdict := Evaluate(Evidence{
+		Task: task.Task{ID: "T1", Goal: "Implement the feature"},
+		Claude: runner.ClaudeResult{
+			Status:             "hard_stop",
+			Summary:            "blocked",
+			FilesModified:      []string{},
+			AcceptanceCriteria: []runner.ClaudeAcceptanceCriterion{},
+			Verification:       []runner.ClaudeVerification{},
+			Decisions:          []runner.ClaudeDecision{},
+			Risks:              []runner.ClaudeRisk{},
+			HardStop: &runner.ClaudeHardStop{
+				Reason:           "This seems outside my role.",
+				Attempted:        []string{"read the task"},
+				NeededToContinue: []string{"a clearer implementation path"},
+			},
+		},
+		AttemptsLeft: 1,
+	})
+	if verdict.Status != "needs_revision" {
+		t.Fatalf("status got %q", verdict.Status)
+	}
+	if !strings.Contains(verdict.NextWorkOrder, "executor returned hard_stop") {
+		t.Fatalf("next work order missing hard stop reason: %q", verdict.NextWorkOrder)
+	}
+	if !strings.Contains(verdict.NextWorkOrder, "a clearer implementation path") {
+		t.Fatalf("next work order missing unblock claim: %q", verdict.NextWorkOrder)
 	}
 }

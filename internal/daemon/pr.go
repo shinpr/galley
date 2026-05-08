@@ -10,12 +10,29 @@ import (
 
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/internal/vcs"
+	"github.com/shinpr/galley/internal/workspace"
 )
 
 func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task, workDir, runDir, runID string) error {
 	prBodyPath := filepath.Join(runDir, "pr_body.md")
 	if err := os.WriteFile(prBodyPath, []byte(renderPRBody(*loaded, runID)), 0o600); err != nil {
 		return fmt.Errorf("write pr body: %w", err)
+	}
+
+	snapshot, snapshotErr := workspace.CaptureSnapshot(ctx, workDir)
+	if snapshotErr == nil && !snapshot.Dirty {
+		if loaded.PR.URL != "" {
+			loaded.PR.Status = "open"
+			return nil
+		}
+		if !opts.OpenPR {
+			loaded.PR.Status = "not_requested"
+			return nil
+		}
+		return fmt.Errorf("accepted task has no git diff to commit and no existing PR")
+	}
+	if snapshotErr != nil {
+		return fmt.Errorf("capture final diff: %w", snapshotErr)
 	}
 
 	commitMessage := fmt.Sprintf("galley: %s", firstNonEmpty(loaded.ID, "accepted task"))
@@ -76,15 +93,51 @@ func renderPRBody(loaded task.Task, runID string) string {
 		b.WriteString("\n## Decisions\n\n")
 		for _, decision := range loaded.Decisions {
 			fmt.Fprintf(&b, "- `%s` %s -> %s\n", decision.ID, decision.Question, decision.Chosen)
+			if decision.Rationale != "" {
+				fmt.Fprintf(&b, "  - Rationale: %s\n", decision.Rationale)
+			}
+			if decision.Reversibility != "" {
+				fmt.Fprintf(&b, "  - Reversibility: %s\n", decision.Reversibility)
+			}
+			if decision.NeedsHumanReview {
+				fmt.Fprintf(&b, "  - Human review suggested: true\n")
+			}
 		}
 	}
-	if len(loaded.Risks) > 0 {
+	risks := prVisibleRisks(loaded)
+	if len(risks) > 0 {
 		b.WriteString("\n## Risks\n\n")
-		for _, risk := range loaded.Risks {
+		for _, risk := range risks {
 			fmt.Fprintf(&b, "- `%s` %s: %s\n  - Mitigation: %s\n", risk.ID, risk.Type, risk.Detail, risk.Mitigation)
 		}
 	}
 	return b.String()
+}
+
+func prVisibleRisks(loaded task.Task) []task.Risk {
+	var risks []task.Risk
+	for _, risk := range loaded.Risks {
+		if isResolvedAttemptRisk(risk) {
+			continue
+		}
+		risks = append(risks, risk)
+	}
+	return risks
+}
+
+func isResolvedAttemptRisk(risk task.Risk) bool {
+	for _, prefix := range []string{
+		"workspace-dirty-",
+		"claude-risk-",
+		"git-diff-empty-",
+		"claude-result-parse-",
+		"git-diff-",
+	} {
+		if strings.HasPrefix(risk.ID, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func firstNonEmpty(values ...string) string {

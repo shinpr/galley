@@ -3,7 +3,18 @@
   "title": "Galley Supervisor Verdict",
   "type": "object",
   "additionalProperties": false,
-  "required": ["status", "summary", "acceptance_gaps", "quality_findings", "next_work_order"],
+  "required": [
+    "status",
+    "summary",
+    "acceptance_gaps",
+    "quality_findings",
+    "reviewed_files",
+    "acceptance_evidence",
+    "findings",
+    "residual_risks",
+    "confidence",
+    "next_work_order"
+  ],
   "properties": {
     "status": {
       "type": "string",
@@ -20,6 +31,48 @@
     "quality_findings": {
       "type": "array",
       "items": { "type": "string" }
+    },
+    "reviewed_files": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "acceptance_evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ac_id", "evidence"],
+        "properties": {
+          "ac_id": { "type": "string", "minLength": 1 },
+          "evidence": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "category", "file", "summary", "blocks_acceptance"],
+        "properties": {
+          "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
+          "category": { "type": "string", "minLength": 1 },
+          "file": { "type": "string" },
+          "summary": { "type": "string", "minLength": 1 },
+          "blocks_acceptance": { "type": "boolean" }
+        }
+      }
+    },
+    "residual_risks": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["high", "medium", "low"]
     },
     "next_work_order": { "type": "string" }
   }

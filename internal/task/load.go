@@ -31,6 +31,7 @@ func LoadAndValidate(path string) (ValidationResult, error) {
 	if err != nil {
 		return ValidationResult{}, err
 	}
+	ApplyDefaults(&loaded)
 	result := Validate(loaded)
 	result.Task = loaded
 	return result, nil

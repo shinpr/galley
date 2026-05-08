@@ -12,17 +12,10 @@ import (
 // Quality describes review requirements that should shape executor verification.
 type Quality struct {
 	ID                   string               `yaml:"id" json:"id"`
-	ReviewLoops          ReviewLoops          `yaml:"review_loops" json:"review_loops"`
 	RequiredChecks       []RequiredCheck      `yaml:"required_checks" json:"required_checks"`
 	ReviewDimensions     []ReviewDimension    `yaml:"review_dimensions" json:"review_dimensions"`
 	EvidenceRequirements EvidenceRequirements `yaml:"evidence_requirements" json:"evidence_requirements"`
 	PassPolicy           PassPolicy           `yaml:"pass_policy" json:"pass_policy"`
-}
-
-type ReviewLoops struct {
-	DefaultMax int `yaml:"default_max" json:"default_max"`
-	AFKMax     int `yaml:"afk_max" json:"afk_max"`
-	HITLMax    int `yaml:"hitl_max" json:"hitl_max"`
 }
 
 type RequiredCheck struct {
@@ -44,9 +37,10 @@ type EvidenceRequirements struct {
 }
 
 type PassPolicy struct {
-	RequiredDimensionsMustPass bool `yaml:"required_dimensions_must_pass" json:"required_dimensions_must_pass"`
-	MinScore                   int  `yaml:"min_score" json:"min_score"`
-	UnresolvedHighAllowed      int  `yaml:"unresolved_high_findings_allowed" json:"unresolved_high_findings_allowed"`
+	RequiredDimensionsMustPass bool     `yaml:"required_dimensions_must_pass" json:"required_dimensions_must_pass"`
+	MinScore                   int      `yaml:"min_score" json:"min_score"`
+	UnresolvedHighAllowed      int      `yaml:"unresolved_high_findings_allowed" json:"unresolved_high_findings_allowed"`
+	BlockingSeverities         []string `yaml:"blocking_severities" json:"blocking_severities"`
 }
 
 // Environment describes local execution capabilities and constraints.
@@ -126,6 +120,9 @@ func ValidateQuality(q Quality) ValidationResult {
 	result := ValidationResult{Kind: "quality", ID: q.ID}
 	require(&result, q.ID != "", "id is required")
 	require(&result, q.PassPolicy.MinScore >= 0 && q.PassPolicy.MinScore <= 100, "pass_policy.min_score must be 0..100")
+	for i, severity := range q.PassPolicy.BlockingSeverities {
+		require(&result, validFindingSeverity(severity), "pass_policy.blocking_severities[%d] is invalid", i)
+	}
 	for i, check := range q.RequiredChecks {
 		prefix := fmt.Sprintf("required_checks[%d]", i)
 		require(&result, check.ID != "", "%s.id is required", prefix)
@@ -140,6 +137,15 @@ func ValidateQuality(q Quality) ValidationResult {
 		require(&result, dim.Pass != "", "%s.pass is required", prefix)
 	}
 	return result
+}
+
+func validFindingSeverity(value string) bool {
+	switch value {
+	case "critical", "high", "medium", "low":
+		return true
+	default:
+		return false
+	}
 }
 
 func ValidateEnvironment(env Environment) ValidationResult {

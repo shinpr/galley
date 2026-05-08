@@ -48,7 +48,7 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 			loaded.Status = "failed"
 			return failTaskMove(opts.Root, runningPath, loaded, err)
 		}
-		mergeAttemptEvidence(loaded, outcome, runID, prepared.CWD)
+		mergeAttemptEvidence(loaded, outcome, runID, prepared.CWD, attemptDir)
 		if outcome.DiffErr == nil && !outcome.DiffDirty {
 			consecutiveNoDiff++
 		} else {
@@ -109,6 +109,7 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 
 		switch verdict.Status {
 		case "accepted":
+			markRevisionRequestsAddressed(loaded, verdict.Summary)
 			if opts.CommitOnAccept {
 				fmt.Fprintf(os.Stderr, "galley: task %s accepted; finalizing commit/pr\n", loaded.ID)
 				if err := finalizeAcceptedChange(ctx, opts, loaded, prepared.CWD, runDir, runID); err != nil {
@@ -155,9 +156,10 @@ func evaluateSupervisor(ctx context.Context, opts Options, evidence supervisor.E
 		return supervisor.Evaluate(evidence), nil
 	}
 	verdict, err := supervisor.RunExternal(ctx, supervisor.ExternalOptions{
-		Argv:    opts.SupervisorCommand,
-		WorkDir: workDir,
-		Timeout: time.Duration(evidence.Task.ExecutionPolicy.TimeoutMS) * time.Millisecond,
+		Argv:        opts.SupervisorCommand,
+		WorkDir:     workDir,
+		Timeout:     time.Duration(evidence.Task.ExecutionPolicy.TimeoutMS) * time.Millisecond,
+		ArtifactDir: attemptDir,
 	}, evidence)
 	if err != nil {
 		return supervisor.Verdict{}, err
@@ -255,6 +257,9 @@ func resolveClaudeResult(ctx context.Context, stdoutPath, stdoutTail, taskFile, 
 		Profiles: profiles,
 	})
 	if generatedErr == nil {
+		if claudeErr == nil {
+			return mergeExecutorJudgment(generated, claudeResult), nil
+		}
 		return generated, nil
 	}
 	if claudeErr == nil {
@@ -267,7 +272,29 @@ func resolveClaudeResult(ctx context.Context, stdoutPath, stdoutTail, taskFile, 
 	return runner.ClaudeResult{}, fmt.Errorf("resolve Claude result: deterministic generation failed: %w; stdout file parse failed: %v; stdout tail parse failed: %v", generatedErr, claudeErr, tailErr)
 }
 
-func mergeAttemptEvidence(loaded *task.Task, outcome attemptOutcome, runID, workDir string) {
+func mergeExecutorJudgment(generated, reported runner.ClaudeResult) runner.ClaudeResult {
+	if reported.Summary != "" {
+		generated.Summary = generated.Summary + " Executor summary: " + reported.Summary
+	}
+	generated.Decisions = append(generated.Decisions, reported.Decisions...)
+	generated.Risks = append(generated.Risks, reported.Risks...)
+	if reported.Status == "completed_with_risks" && generated.Status == "completed" && len(reported.Risks) > 0 {
+		generated.Status = "completed_with_risks"
+	}
+	return generated
+}
+
+func markRevisionRequestsAddressed(loaded *task.Task, evidence string) {
+	for i := range loaded.RevisionRequests {
+		if loaded.RevisionRequests[i].Status == "addressed" {
+			continue
+		}
+		loaded.RevisionRequests[i].Status = "addressed"
+		loaded.RevisionRequests[i].Evidence = evidence
+	}
+}
+
+func mergeAttemptEvidence(loaded *task.Task, outcome attemptOutcome, runID, workDir, attemptDir string) {
 	loaded.Attempts = append(loaded.Attempts, task.Attempt{
 		Number:            len(loaded.Attempts) + 1,
 		StartedAt:         outcome.Started.Format(time.RFC3339Nano),
@@ -279,7 +306,7 @@ func mergeAttemptEvidence(loaded *task.Task, outcome attemptOutcome, runID, work
 	loaded.Verification.Commands = append(loaded.Verification.Commands, task.VerificationCommand{
 		Cmd:           "claude -p",
 		Status:        verificationStatus(outcome.RunErr),
-		OutputExcerpt: outcome.RunResult.Stdout,
+		OutputExcerpt: fmt.Sprintf("executor stdout/stderr captured under %s; run_result.json contains bounded tails", attemptDir),
 	})
 	if outcome.DiffErr != nil {
 		loaded.Risks = append(loaded.Risks, task.Risk{
@@ -372,7 +399,7 @@ func attemptBudget(b task.LoopBudget) int {
 	if b.Count > 0 {
 		return b.Count
 	}
-	return 1
+	return task.DefaultLoopBudget
 }
 
 func attemptsLeft(budget, attempt int) int {

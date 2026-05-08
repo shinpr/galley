@@ -24,7 +24,16 @@ func TestRequeueMovesFailedTaskToQueued(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := Requeue(failedPath, RequeueOptions{Reason: "address review", ProcessedCommentIDs: []string{"42"}})
+	result, err := Requeue(failedPath, RequeueOptions{
+		Reason:              "address review",
+		ProcessedCommentIDs: []string{"42"},
+		RevisionRequests: []RevisionRequest{{
+			ID:        "pr-comment-42",
+			Source:    "pr_comment",
+			CommentID: "42",
+			Text:      "address review",
+		}},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,8 +51,11 @@ func TestRequeueMovesFailedTaskToQueued(t *testing.T) {
 	if requeued.Supervisor.ReviewIterations != 1 {
 		t.Fatalf("review iterations got %d", requeued.Supervisor.ReviewIterations)
 	}
-	if len(requeued.Risks) != 1 || !strings.Contains(requeued.Risks[0].Detail, "address review") {
-		t.Fatalf("risks got %#v", requeued.Risks)
+	if len(requeued.Decisions) != 1 || !strings.Contains(requeued.Decisions[0].Chosen, "address review") {
+		t.Fatalf("decisions got %#v", requeued.Decisions)
+	}
+	if len(requeued.RevisionRequests) != 1 || requeued.RevisionRequests[0].Status != "pending" || requeued.RevisionRequests[0].Text != "address review" {
+		t.Fatalf("revision requests got %#v", requeued.RevisionRequests)
 	}
 	if len(requeued.PR.ProcessedCommentIDs) != 1 || requeued.PR.ProcessedCommentIDs[0] != "42" {
 		t.Fatalf("processed comments got %#v", requeued.PR.ProcessedCommentIDs)

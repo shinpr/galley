@@ -41,6 +41,7 @@ func Complete(ctx context.Context, opts CompleteOptions) (runner.ClaudeResult, e
 	if err != nil {
 		return runner.ClaudeResult{}, err
 	}
+	task.ApplyDefaults(&loaded)
 	if validation := task.Validate(loaded); !validation.Valid() {
 		return runner.ClaudeResult{}, fmt.Errorf("invalid task %s: %s", opts.TaskFile, strings.Join(validation.Errors, "; "))
 	}

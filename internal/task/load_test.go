@@ -78,6 +78,22 @@ func TestLoadAndValidateReadsValidTask(t *testing.T) {
 	}
 }
 
+func TestLoadAndValidateDefaultsLoopBudget(t *testing.T) {
+	t.Parallel()
+	path := writeTaskYAML(t, "")
+
+	result, err := LoadAndValidate(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Valid() {
+		t.Fatalf("expected valid task, got %#v", result.Errors)
+	}
+	if result.Task.ExecutionPolicy.LoopBudget.Count != DefaultLoopBudget {
+		t.Fatalf("loop budget got %#v", result.Task.ExecutionPolicy.LoopBudget)
+	}
+}
+
 func TestLoadRejectsUnknownField(t *testing.T) {
 	t.Parallel()
 	path := writeTaskYAML(t, "loop_budget: 3")
@@ -107,6 +123,34 @@ func TestLoadWrapsMissingFile(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "read ") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSaveRoundTripsVerificationOutputWithJSONLAndIndentedText(t *testing.T) {
+	t.Parallel()
+	path := writeTaskYAML(t, "loop_budget: 3")
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	excerpt := "   leading indented text\n" +
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","input":{"old_string":"  x\n  y"}}]}}` + "\n" +
+		"  less indented tail"
+	loaded.Verification.Commands = []VerificationCommand{{
+		Cmd:           "claude -p",
+		Status:        "passed",
+		OutputExcerpt: excerpt,
+	}}
+
+	if err := Save(path, loaded); err != nil {
+		t.Fatal(err)
+	}
+	roundTripped, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := roundTripped.Verification.Commands[0].OutputExcerpt; got != excerpt {
+		t.Fatalf("output excerpt did not round trip:\nwant %q\n got %q", excerpt, got)
 	}
 }
 

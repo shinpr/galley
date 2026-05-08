@@ -18,3 +18,48 @@ func TestPRTitleTruncatesRunes(t *testing.T) {
 		t.Fatalf("title is invalid UTF-8: %q", title)
 	}
 }
+
+func TestRenderPRBodyOmitsResolvedAttemptRisks(t *testing.T) {
+	t.Parallel()
+	body := renderPRBody(task.Task{
+		ID:   "T1",
+		Goal: "Ship it",
+		Risks: []task.Risk{
+			{ID: "claude-risk-1", Type: "partial_verification", Detail: "old test failed", Mitigation: "rerun"},
+			{ID: "workspace-dirty-2", Type: "technical_debt", Detail: "old dirty tree", Mitigation: "recorded"},
+			{ID: "security-1", Type: "security", Detail: "manual review still needed", Mitigation: "review"},
+		},
+	}, "run-1")
+	if strings.Contains(body, "old test failed") || strings.Contains(body, "old dirty tree") {
+		t.Fatalf("PR body leaked resolved attempt risks:\n%s", body)
+	}
+	if !strings.Contains(body, "manual review still needed") {
+		t.Fatalf("PR body missing active risk:\n%s", body)
+	}
+}
+
+func TestRenderPRBodyIncludesDecisionRationale(t *testing.T) {
+	t.Parallel()
+	body := renderPRBody(task.Task{
+		ID:   "T1",
+		Goal: "Ship it",
+		Decisions: []task.Decision{{
+			ID:               "claude-decision-1",
+			Question:         "Which API shape should metadata filters use?",
+			Chosen:           "Record<string,string>",
+			Rationale:        "Matches CLI key=value flags and MCP object schema.",
+			Reversibility:    "high",
+			NeedsHumanReview: true,
+		}},
+	}, "run-1")
+	for _, want := range []string{
+		"Record<string,string>",
+		"Matches CLI key=value flags",
+		"Reversibility: high",
+		"Human review suggested: true",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("PR body missing %q:\n%s", want, body)
+		}
+	}
+}

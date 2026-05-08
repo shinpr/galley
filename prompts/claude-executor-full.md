@@ -40,6 +40,8 @@ Return `status: "hard_stop"` when the next necessary step is blocked by one of t
 
 The hard-stop JSON must include attempted work, evidence, and exact unblock requirements.
 
+Before returning `hard_stop`, verify that the blocker is not recoverable by local investigation, a narrower implementation path, dependency installation allowed by the task, an alternate verification command, or a reversible assumption recorded in `decisions`. If a prior supervisor work order mentions an earlier `hard_stop`, investigate a different path before returning the same hard-stop reason again.
+
 # Execution Workflow
 
 1. Read the task YAML or work order and extract goal, acceptance criteria, allowed paths, verification commands, quality profile, and environment profile.

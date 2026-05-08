@@ -72,16 +72,17 @@ func TestValidateStructuralRejectsInvalidCases(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name   string
-		mutate func(*Task)
-		want   string
+		name        string
+		mutate      func(*Task)
+		want        string
+		wantWarning string
 	}{
 		{
-			name: "missing loop budget",
+			name: "missing loop budget uses default",
 			mutate: func(task *Task) {
 				task.ExecutionPolicy.LoopBudget = LoopBudget{}
 			},
-			want: "execution_policy.loop_budget is required",
+			wantWarning: "execution_policy.loop_budget is empty; defaulting to 10",
 		},
 		{
 			name: "zero loop budget",
@@ -220,8 +221,14 @@ func TestValidateStructuralRejectsInvalidCases(t *testing.T) {
 			task := validTask(t)
 			tt.mutate(&task)
 			result := ValidateStructural(task)
-			if !contains(result.Errors, tt.want) {
+			if tt.want != "" && !contains(result.Errors, tt.want) {
 				t.Fatalf("expected error containing %q, got %#v", tt.want, result.Errors)
+			}
+			if tt.wantWarning != "" && !contains(result.Warnings, tt.wantWarning) {
+				t.Fatalf("expected warning containing %q, got %#v", tt.wantWarning, result.Warnings)
+			}
+			if tt.want == "" && !result.Valid() {
+				t.Fatalf("expected valid task, got errors %#v", result.Errors)
 			}
 		})
 	}

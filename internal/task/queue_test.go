@@ -34,6 +34,38 @@ func TestQueueMovesDraftTaskToQueued(t *testing.T) {
 	}
 }
 
+func TestQueueDefaultsLoopBudget(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	draftPath := filepath.Join(root, "tasks", "draft", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(draftPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := writeTaskYAML(t, "")
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Status = "draft"
+	if err := Save(draftPath, loaded); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Queue(draftPath, QueueOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Task.ExecutionPolicy.LoopBudget.Count != DefaultLoopBudget {
+		t.Fatalf("loop budget got %#v", result.Task.ExecutionPolicy.LoopBudget)
+	}
+	reloaded, err := Load(filepath.Join(root, "tasks", "queued", "task.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.ExecutionPolicy.LoopBudget.Count != DefaultLoopBudget {
+		t.Fatalf("saved loop budget got %#v", reloaded.ExecutionPolicy.LoopBudget)
+	}
+}
+
 func TestQueueRejectsNonAuthoringStatuses(t *testing.T) {
 	t.Parallel()
 	for _, status := range []string{"ready", "queued", "running", "needs_supervisor_review", "accepted", "pr_opened", "failed"} {

@@ -113,12 +113,15 @@ func validateScope(result *ValidationResult, t Task) {
 }
 
 func validateExecutionPolicy(result *ValidationResult, t Task) {
-	if !t.ExecutionPolicy.LoopBudget.Set {
-		result.Errors = append(result.Errors, "execution_policy.loop_budget is required")
-	} else if t.ExecutionPolicy.LoopBudget.Infinite && t.ExecutionPolicy.LoopBudget.Count != 0 {
+	budget := t.ExecutionPolicy.LoopBudget
+	if !budget.Set {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("execution_policy.loop_budget is empty; defaulting to %d", DefaultLoopBudget))
+		budget = LoopBudget{Count: DefaultLoopBudget, Set: true}
+	}
+	if budget.Infinite && budget.Count != 0 {
 		result.Errors = append(result.Errors, "execution_policy.loop_budget cannot be both infinite and counted")
-	} else if !t.ExecutionPolicy.LoopBudget.Infinite {
-		require(result, t.ExecutionPolicy.LoopBudget.Count > 0, "execution_policy.loop_budget must be positive")
+	} else if !budget.Infinite {
+		require(result, budget.Count > 0, "execution_policy.loop_budget must be positive")
 	}
 	require(result, t.ExecutionPolicy.TimeoutMS > 0, "execution_policy.timeout_ms must be positive")
 	if t.Mode == "afk" {

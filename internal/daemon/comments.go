@@ -77,6 +77,13 @@ func processTaskPRComments(ctx context.Context, opts Options, path string) error
 		_, err := task.Requeue(path, task.RequeueOptions{
 			Reason:              command.Reason,
 			ProcessedCommentIDs: []string{command.CommentID},
+			RevisionRequests: []task.RevisionRequest{{
+				ID:        "pr-comment-" + command.CommentID,
+				Source:    "pr_comment",
+				CommentID: command.CommentID,
+				Text:      command.Reason,
+				Status:    "pending",
+			}},
 		})
 		if err != nil {
 			return err
@@ -90,11 +97,18 @@ func processTaskPRComments(ctx context.Context, opts Options, path string) error
 }
 
 func parsePRCommand(comment vcs.PRComment) (prCommand, bool) {
-	for _, line := range strings.Split(comment.Body, "\n") {
+	lines := strings.Split(comment.Body, "\n")
+	for i, line := range lines {
 		line = strings.TrimSpace(line)
 		for _, prefix := range []string{"/galley rerun", "/galley requeue"} {
 			if line == prefix || strings.HasPrefix(line, prefix+" ") {
 				reason := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+				if trailing := strings.TrimSpace(strings.Join(lines[i+1:], "\n")); trailing != "" {
+					if reason != "" {
+						reason += "\n\n"
+					}
+					reason += trailing
+				}
 				if reason == "" {
 					reason = "PR comment requested another Galley run."
 				}

@@ -20,6 +20,7 @@ type Task struct {
 	Executor           Executor              `yaml:"executor" json:"executor"`
 	Decisions          []Decision            `yaml:"decisions" json:"decisions"`
 	Risks              []Risk                `yaml:"risks" json:"risks"`
+	RevisionRequests   []RevisionRequest     `yaml:"revision_requests,omitempty" json:"revision_requests,omitempty"`
 	Attempts           []Attempt             `yaml:"attempts" json:"attempts"`
 	Verification       Verification          `yaml:"verification" json:"verification"`
 	PR                 PR                    `yaml:"pr" json:"pr"`
@@ -96,6 +97,9 @@ func (b LoopBudget) MarshalYAML() (any, error) {
 	if b.Infinite {
 		return "infinite", nil
 	}
+	if !b.Set {
+		return DefaultLoopBudget, nil
+	}
 	return b.Count, nil
 }
 
@@ -153,6 +157,16 @@ type Risk struct {
 	HumanReviewSuggested bool   `yaml:"human_review_suggested" json:"human_review_suggested"`
 }
 
+// RevisionRequest records a PR comment or review instruction that must be addressed before acceptance.
+type RevisionRequest struct {
+	ID        string `yaml:"id" json:"id"`
+	Source    string `yaml:"source" json:"source"`
+	CommentID string `yaml:"comment_id,omitempty" json:"comment_id,omitempty"`
+	Text      string `yaml:"text" json:"text"`
+	Status    string `yaml:"status" json:"status"`
+	Evidence  string `yaml:"evidence,omitempty" json:"evidence,omitempty"`
+}
+
 // Attempt records one executor and supervisor loop iteration.
 type Attempt struct {
 	Number            int    `yaml:"number" json:"number"`
@@ -173,6 +187,33 @@ type VerificationCommand struct {
 	Cmd           string `yaml:"cmd" json:"cmd"`
 	Status        string `yaml:"status" json:"status"`
 	OutputExcerpt string `yaml:"output_excerpt" json:"output_excerpt"`
+}
+
+// MarshalYAML keeps captured command output in a quoted scalar. Raw tool logs
+// can contain JSONL and uneven leading whitespace, which yaml.v3 may otherwise
+// encode as a block scalar that is not safely round-trippable.
+func (c VerificationCommand) MarshalYAML() (any, error) {
+	return &yaml.Node{
+		Kind: yaml.MappingNode,
+		Tag:  "!!map",
+		Content: []*yaml.Node{
+			yamlStringNode("cmd", yaml.LiteralStyle),
+			yamlStringNode(c.Cmd, 0),
+			yamlStringNode("status", yaml.LiteralStyle),
+			yamlStringNode(c.Status, 0),
+			yamlStringNode("output_excerpt", yaml.LiteralStyle),
+			yamlStringNode(c.OutputExcerpt, yaml.DoubleQuotedStyle),
+		},
+	}, nil
+}
+
+func yamlStringNode(value string, style yaml.Style) *yaml.Node {
+	return &yaml.Node{
+		Kind:  yaml.ScalarNode,
+		Tag:   "!!str",
+		Value: value,
+		Style: style,
+	}
 }
 
 // PR records pull request state for AFK workflows.

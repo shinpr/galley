@@ -16,7 +16,7 @@ scope:
     - ".env.local"
   permission: "safe-edit"
 execution_policy:
-  loop_budget: 8
+  loop_budget: 10
   timeout_ms: 1200000
   afk_decision_policy: "choose-smallest-reversible"
   stop_on_destructive_operation: true

@@ -46,18 +46,21 @@ func TestRenderWorkOrderIncludesPRReviewInstructions(t *testing.T) {
 	}
 	loaded.PR.URL = "https://github.com/shinpr/sandbox/pull/3"
 	loaded.Supervisor.ReviewIterations = 2
-	loaded.Risks = append(loaded.Risks, Risk{
-		ID:         "requeue-1",
-		Type:       "other",
-		Detail:     "Please rename the proof file and update the README.",
-		Mitigation: "Task was returned to the queue for another executor attempt.",
+	loaded.RevisionRequests = append(loaded.RevisionRequests, RevisionRequest{
+		ID:        "pr-comment-42",
+		Source:    "pr_comment",
+		CommentID: "42",
+		Text:      "Please rename the proof file and update the README.",
+		Status:    "pending",
 	})
 
 	workOrder := RenderWorkOrder(loaded)
 	for _, want := range []string{
 		"## PR Review Context",
+		"## Revision Requests",
 		"https://github.com/shinpr/sandbox/pull/3",
 		"review iteration: `2`",
+		"additional acceptance criterion",
 		"Please rename the proof file and update the README.",
 	} {
 		if !strings.Contains(workOrder, want) {

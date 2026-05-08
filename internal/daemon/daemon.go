@@ -65,12 +65,8 @@ type ExplicitOptions struct {
 // Run starts the daemon loop.
 func Run(ctx context.Context, opts Options) error {
 	var err error
-	opts, err = opts.withManifest()
+	opts, err = Preflight(opts)
 	if err != nil {
-		return err
-	}
-	opts = opts.withDefaults()
-	if err := queue.EnsureLayout(opts.Root); err != nil {
 		return err
 	}
 	if opts.Once {
@@ -120,6 +116,20 @@ func Run(ctx context.Context, opts Options) error {
 		case <-ticker.C:
 		}
 	}
+}
+
+// Preflight resolves daemon options and verifies startup prerequisites.
+func Preflight(opts Options) (Options, error) {
+	var err error
+	opts, err = opts.withManifest()
+	if err != nil {
+		return Options{}, err
+	}
+	opts = opts.withDefaults()
+	if err := queue.EnsureLayout(opts.Root); err != nil {
+		return Options{}, err
+	}
+	return opts, nil
 }
 
 func (opts Options) withManifest() (Options, error) {

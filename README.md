@@ -149,6 +149,10 @@ The default shell output is a human preview. It renders prompt and schema files 
 go run ./cmd/galleyd --once --root .agent-workflow --manifest-file examples/repos.yaml
 go run ./cmd/galleyd --once --root .agent-workflow --open-pr --pr-base main --quality-profile-file examples/quality-default.yaml --environment-profile-file examples/environment-local.yaml
 go run ./cmd/galleyd --once --root .agent-workflow --poll-pr-comments --reply-pr-comments
+go build -o ./bin/galleyd ./cmd/galleyd
+./bin/galleyd --root .agent-workflow start
+./bin/galleyd --root .agent-workflow status
+./bin/galleyd --root .agent-workflow stop
 ```
 
 `--root` points at the workflow directory and defaults to `.agent-workflow`.
@@ -156,6 +160,14 @@ go run ./cmd/galleyd --once --root .agent-workflow --poll-pr-comments --reply-pr
 `galleyd --once` processes the current queue in bounded concurrent batches. `--max-concurrent-per-repo` limits simultaneously running source repositories so local services, branch operations, and CI quotas are less likely to collide.
 
 Without `--once`, `galleyd` runs continuously and checks for work every `--poll-interval`.
+
+`galleyd start` launches the daemon in the background. It writes a PID file and appends stdout/stderr to a log file. By default those files are `.agent-workflow/galleyd.pid` and `.agent-workflow/galleyd.log`; override them with `--pid-file` and `--log-file`.
+
+`galleyd stop` reads the PID file, sends `SIGTERM`, waits up to `--stop-timeout`, and removes the PID file when it still points at the stopped process. `galleyd status` reports whether the PID file points at a live process.
+
+Use the same built `galleyd` binary for `start`, `status`, and `stop`. PID verification records the executable path, so `go run ./cmd/galleyd ... start` is not suitable for background daemon control because later `go run` invocations use different temporary binaries.
+
+Foreground and background daemons use the same shutdown path. On `SIGINT` or `SIGTERM`, Galley stops claiming new queued tasks, lets active attempts finish until `--shutdown-timeout`, records evidence, and avoids starting another retry attempt after shutdown is requested.
 
 ## Supervisor Behavior
 
@@ -225,6 +237,7 @@ If a task sets `executor.max_turns`, Galley records a warning because Claude Cod
 
 - Galley is intended for trusted local repositories and local filesystems. Queue claims rely on no-overwrite file creation plus atomic rename behavior on the same filesystem.
 - Running multiple `galleyd` processes is supported by claim conflict handling, but shared network filesystems may not provide the same rename and mtime behavior as a local disk.
+- Background control uses a local PID file. Avoid sharing the same `--pid-file` across unrelated processes, and prefer one workflow root per managed daemon.
 - Running tasks heartbeat their YAML mtime while the executor loop is active. `--heartbeat-interval` defaults to `min(claim-ttl/4, 1m)`.
 - Avoid very short `--claim-ttl` values. Filesystems with coarse mtime resolution can make overly aggressive stale-claim detection noisy.
 - PR comment polling uses `gh api`; choose a polling interval that respects GitHub API rate limits for your account and repository count.

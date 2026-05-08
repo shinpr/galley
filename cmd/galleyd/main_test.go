@@ -1,0 +1,45 @@
+package main
+
+import (
+	"bytes"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestForegroundArgsRemovesStartCommand(t *testing.T) {
+	t.Parallel()
+	got := foregroundArgs([]string{"--root", "workflow", "start", "--poll-interval", "1s"}, "start")
+	want := []string{"--root", "workflow", "--poll-interval", "1s"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("args got %#v, want %#v", got, want)
+	}
+}
+
+func TestStatusReportsNotRunning(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	cmd := newCommand()
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"--root", root, "status"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "galleyd not running") {
+		t.Fatalf("stdout got %q", stdout.String())
+	}
+}
+
+func TestStopMissingPIDReturnsNotRunning(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	cmd := newCommand()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"--root", root, "--pid-file", filepath.Join(root, "missing.pid"), "stop"})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "daemon is not running") {
+		t.Fatalf("expected not running error, got %v", err)
+	}
+}

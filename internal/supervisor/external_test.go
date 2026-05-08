@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -93,5 +94,120 @@ func TestNewExternalRequestSerializesErrorsAsStrings(t *testing.T) {
 	}
 	if strings.Contains(text, `"ParseError"`) || strings.Contains(text, `"RunError"`) {
 		t.Fatalf("request leaked Go field names: %s", text)
+	}
+}
+
+func TestProviderSupervisorScriptsUseProviderPrompts(t *testing.T) {
+	tests := []struct {
+		name         string
+		scriptPath   string
+		promptPath   string
+		wantContains []string
+		wantNot      []string
+	}{
+		{
+			name:       "codex",
+			scriptPath: filepath.Join("..", "..", "scripts", "codex-supervisor.sh"),
+			promptPath: filepath.Join("..", "..", "prompts", "codex-supervisor-review.md"),
+			wantContains: []string{
+				"prompts/codex-supervisor-review.md",
+				"--output-schema",
+				"supervisor-verdict.schema.json",
+			},
+		},
+		{
+			name:       "claude",
+			scriptPath: filepath.Join("..", "..", "scripts", "claude-supervisor.sh"),
+			promptPath: filepath.Join("..", "..", "prompts", "claude-supervisor-review.md"),
+			wantContains: []string{
+				"prompts/claude-supervisor-review.md",
+				"--system-prompt",
+				"--json-schema",
+				"--output-format text",
+				"supervisor-verdict.schema.json",
+			},
+			wantNot: []string{"--append-system-prompt"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			script, err := os.ReadFile(tt.scriptPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prompt, err := os.ReadFile(tt.promptPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(prompt) == 0 {
+				t.Fatalf("%s is empty", tt.promptPath)
+			}
+			text := string(script)
+			for _, want := range tt.wantContains {
+				if !strings.Contains(text, want) {
+					t.Fatalf("%s missing %q", tt.scriptPath, want)
+				}
+			}
+			for _, banned := range tt.wantNot {
+				if strings.Contains(text, banned) {
+					t.Fatalf("%s contains banned token %q", tt.scriptPath, banned)
+				}
+			}
+		})
+	}
+}
+
+func TestClaudeSupervisorScriptEmitsVerdictFromClaude(t *testing.T) {
+	dir := t.TempDir()
+	fakeClaude := filepath.Join(dir, "claude")
+	argsPath := filepath.Join(dir, "args.txt")
+	stdinPath := filepath.Join(dir, "stdin.md")
+	script := `#!/bin/sh
+printf '%s\n' "$@" >"$GALLEY_FAKE_CLAUDE_ARGS"
+cat >"$GALLEY_FAKE_CLAUDE_STDIN"
+printf '{"status":"accepted","summary":"fake claude ok","acceptance_gaps":[],"quality_findings":[],"next_work_order":""}\n'
+`
+	if err := os.WriteFile(fakeClaude, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(filepath.Join("..", "..", "scripts", "claude-supervisor.sh"))
+	cmd.Stdin = strings.NewReader(`{"evidence":{"attempt":1}}`)
+	cmd.Env = append(os.Environ(),
+		"PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"GALLEY_FAKE_CLAUDE_ARGS="+argsPath,
+		"GALLEY_FAKE_CLAUDE_STDIN="+stdinPath,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("script failed: %v\n%s", err, out)
+	}
+	var verdict Verdict
+	if err := json.Unmarshal(out, &verdict); err != nil {
+		t.Fatalf("script did not emit verdict JSON: %v\n%s", err, out)
+	}
+	if verdict.Status != "accepted" {
+		t.Fatalf("verdict got %#v", verdict)
+	}
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"--system-prompt", "--json-schema", "--output-format", "text"} {
+		if !strings.Contains(string(args), want) {
+			t.Fatalf("claude args missing %q: %s", want, args)
+		}
+	}
+	prompt, err := os.ReadFile(stdinPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"evidence"`, `"attempt":1`} {
+		if !strings.Contains(string(prompt), want) {
+			t.Fatalf("claude stdin missing %q: %s", want, prompt)
+		}
+	}
+	if strings.Contains(string(prompt), "# Evidence JSON") {
+		t.Fatalf("claude stdin should be pure JSON, got: %s", prompt)
 	}
 }

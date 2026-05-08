@@ -1,0 +1,97 @@
+package daemon
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+func TestOptionsWithManifestAppliesDefaultsWhenNotExplicit(t *testing.T) {
+	manifestPath := writeOptionsManifest(t, `version: 1
+defaults:
+  system_prompt_file: manifest-prompt.md
+  json_schema_file: manifest-schema.json
+  max_concurrent_tasks: 4
+  poll_interval: 2s
+  open_pr: true
+  poll_pr_comments: true
+  pr_base: develop
+`)
+	opts, err := (Options{ManifestFile: manifestPath}).withManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.SystemPromptFile != "manifest-prompt.md" {
+		t.Fatalf("system prompt got %q", opts.SystemPromptFile)
+	}
+	if opts.JSONSchemaFile != "manifest-schema.json" {
+		t.Fatalf("schema got %q", opts.JSONSchemaFile)
+	}
+	if opts.MaxConcurrentTasks != 4 {
+		t.Fatalf("max concurrent got %d", opts.MaxConcurrentTasks)
+	}
+	if opts.PollInterval != 2*time.Second {
+		t.Fatalf("poll interval got %s", opts.PollInterval)
+	}
+	if !opts.OpenPR || !opts.PollPRComments || opts.PRBase != "develop" {
+		t.Fatalf("manifest bool/string defaults not applied: %#v", opts)
+	}
+}
+
+func TestOptionsWithManifestKeepsExplicitValues(t *testing.T) {
+	manifestPath := writeOptionsManifest(t, `version: 1
+defaults:
+  system_prompt_file: manifest-prompt.md
+  json_schema_file: manifest-schema.json
+  max_concurrent_tasks: 4
+  poll_interval: 2s
+  open_pr: true
+  poll_pr_comments: true
+  pr_base: develop
+`)
+	opts, err := (Options{
+		ManifestFile:       manifestPath,
+		SystemPromptFile:   "cli-prompt.md",
+		MaxConcurrentTasks: 9,
+		PollInterval:       5 * time.Second,
+		OpenPR:             false,
+		PollPRComments:     false,
+		PRBase:             "main",
+		Explicit: ExplicitOptions{
+			SystemPromptFile:   true,
+			MaxConcurrentTasks: true,
+			PollInterval:       true,
+			OpenPR:             true,
+			PollPRComments:     true,
+			PRBase:             true,
+		},
+	}).withManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.SystemPromptFile != "cli-prompt.md" {
+		t.Fatalf("system prompt got %q", opts.SystemPromptFile)
+	}
+	if opts.MaxConcurrentTasks != 9 || opts.PollInterval != 5*time.Second {
+		t.Fatalf("numeric explicit values overwritten: %#v", opts)
+	}
+	if opts.OpenPR || opts.PollPRComments {
+		t.Fatalf("explicit false bools overwritten: %#v", opts)
+	}
+	if opts.PRBase != "main" {
+		t.Fatalf("pr base got %q", opts.PRBase)
+	}
+	if opts.JSONSchemaFile != "manifest-schema.json" {
+		t.Fatalf("non-explicit schema should come from manifest, got %q", opts.JSONSchemaFile)
+	}
+}
+
+func writeOptionsManifest(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "repos.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}

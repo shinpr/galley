@@ -1,0 +1,26 @@
+id: "default"
+review_loops:
+  default_max: 2
+  afk_max: 3
+  hitl_max: 1
+required_checks:
+  - id: "tests"
+    preferred_commands:
+      - "go test ./..."
+    required: true
+review_dimensions:
+  - id: "acceptance"
+    weight: 5
+    required: true
+    pass: "Every acceptance criterion has implementation evidence or an explicit waived reason."
+  - id: "regression"
+    weight: 5
+    required: true
+    pass: "Existing behavior in touched paths remains compatible."
+evidence_requirements:
+  file_line_references: true
+  command_outputs: true
+pass_policy:
+  required_dimensions_must_pass: true
+  min_score: 85
+  unresolved_high_findings_allowed: 0

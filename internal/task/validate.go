@@ -1,0 +1,184 @@
+package task
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+)
+
+var (
+	validModes               = []string{"hitl", "afk"}
+	validStatuses            = []string{"draft", "ready", "queued", "running", "needs_supervisor_review", "accepted", "pr_opened", "failed"}
+	validPermissions         = []string{"read-only", "safe-edit", "yolo"}
+	validSupervisorProviders = []string{"codex", "claude", "manual"}
+	validSupervisorModes     = []string{"review_only", "review_and_repair", "approve_only"}
+	validPromptModes         = []string{"replace", "append"}
+	validAFKDecisionPolicies = []string{"choose-smallest-reversible"}
+)
+
+// Validate runs structural and environment validation for a task.
+func Validate(t Task) ValidationResult {
+	result := ValidateStructural(t)
+	envResult := ValidateEnvironment(t)
+	result.Errors = append(result.Errors, envResult.Errors...)
+	result.Warnings = append(result.Warnings, envResult.Warnings...)
+	return result
+}
+
+// ValidateStructural checks task fields without touching the filesystem.
+func ValidateStructural(t Task) ValidationResult {
+	var result ValidationResult
+
+	require(&result, t.ID != "", "id is required")
+	require(&result, slices.Contains(validModes, t.Mode), "mode must be one of: %s", strings.Join(validModes, ", "))
+	require(&result, slices.Contains(validStatuses, t.Status), "status must be one of: %s", strings.Join(validStatuses, ", "))
+	require(&result, t.Goal != "", "goal is required")
+
+	validateAcceptance(&result, t)
+	validateScope(&result, t)
+	validateExecutionPolicy(&result, t)
+	validateWorktree(&result, t)
+	validateSupervisor(&result, t)
+	validateExecutor(&result, t)
+
+	if t.Mode == "afk" && len(t.Decisions) > 0 {
+		for _, d := range t.Decisions {
+			if d.NeedsHumanReview && d.Chosen == "" {
+				result.Errors = append(result.Errors, fmt.Sprintf("decision %q needs a chosen value for AFK mode", d.ID))
+			}
+		}
+	}
+
+	return result
+}
+
+// ValidateEnvironment checks local filesystem assumptions such as scope.cwd.
+func ValidateEnvironment(t Task) ValidationResult {
+	var result ValidationResult
+	if t.Scope.CWD == "" || !filepath.IsAbs(t.Scope.CWD) {
+		return result
+	}
+	stat, err := os.Stat(t.Scope.CWD)
+	if err != nil || !stat.IsDir() {
+		result.Errors = append(result.Errors, fmt.Sprintf("scope.cwd must exist and be a directory: %s", t.Scope.CWD))
+	}
+	return result
+}
+
+func validateAcceptance(result *ValidationResult, t Task) {
+	require(result, len(t.AcceptanceCriteria) > 0, "acceptance_criteria must contain at least one criterion")
+	seen := map[string]bool{}
+	for i, ac := range t.AcceptanceCriteria {
+		prefix := fmt.Sprintf("acceptance_criteria[%d]", i)
+		require(result, ac.ID != "", "%s.id is required", prefix)
+		if ac.ID != "" {
+			if seen[ac.ID] {
+				result.Errors = append(result.Errors, fmt.Sprintf("%s.id %q is duplicated", prefix, ac.ID))
+			}
+			seen[ac.ID] = true
+		}
+		require(result, ac.Text != "", "%s.text is required", prefix)
+		require(result, ac.Verification != "", "%s.verification is required", prefix)
+		if ac.Status == "" {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("%s.status is empty; treating as pending", prefix))
+		}
+	}
+}
+
+func validateScope(result *ValidationResult, t Task) {
+	require(result, t.Scope.CWD != "", "scope.cwd is required")
+	if t.Scope.CWD != "" {
+		if !filepath.IsAbs(t.Scope.CWD) {
+			result.Errors = append(result.Errors, "scope.cwd must be an absolute path")
+		}
+	}
+	require(result, len(t.Scope.AllowedPaths) > 0, "scope.allowed_paths must contain at least one relative path")
+	for _, p := range t.Scope.AllowedPaths {
+		validateRelativePath(result, "scope.allowed_paths", p)
+		if p == "." || p == "./" {
+			result.Warnings = append(result.Warnings, "scope.allowed_paths includes the whole repository")
+		}
+	}
+	for _, p := range t.Scope.ForbiddenPaths {
+		validateRelativePath(result, "scope.forbidden_paths", p)
+	}
+	require(result, slices.Contains(validPermissions, t.Scope.Permission), "scope.permission must be one of: %s", strings.Join(validPermissions, ", "))
+}
+
+func validateExecutionPolicy(result *ValidationResult, t Task) {
+	if !t.ExecutionPolicy.LoopBudget.Set {
+		result.Errors = append(result.Errors, "execution_policy.loop_budget is required")
+	} else if t.ExecutionPolicy.LoopBudget.Infinite && t.ExecutionPolicy.LoopBudget.Count != 0 {
+		result.Errors = append(result.Errors, "execution_policy.loop_budget cannot be both infinite and counted")
+	} else if !t.ExecutionPolicy.LoopBudget.Infinite {
+		require(result, t.ExecutionPolicy.LoopBudget.Count > 0, "execution_policy.loop_budget must be positive")
+	}
+	require(result, t.ExecutionPolicy.TimeoutMS > 0, "execution_policy.timeout_ms must be positive")
+	if t.Mode == "afk" {
+		require(result, t.ExecutionPolicy.AFKDecisionPolicy != "", "execution_policy.afk_decision_policy is required for AFK tasks")
+		if t.ExecutionPolicy.AFKDecisionPolicy != "" {
+			require(result, slices.Contains(validAFKDecisionPolicies, t.ExecutionPolicy.AFKDecisionPolicy), "execution_policy.afk_decision_policy must be one of: %s", strings.Join(validAFKDecisionPolicies, ", "))
+		}
+	}
+}
+
+func validateWorktree(result *ValidationResult, t Task) {
+	if t.Mode != "afk" {
+		return
+	}
+	require(result, t.Worktree.Enabled, "worktree.enabled must be true for AFK tasks")
+	require(result, t.Worktree.Branch != "", "worktree.branch is required for AFK tasks")
+	require(result, t.Worktree.Path != "", "worktree.path is required for AFK tasks")
+	if t.Worktree.Path != "" && filepath.IsAbs(t.Worktree.Path) {
+		result.Warnings = append(result.Warnings, "worktree.path is absolute; relative paths are easier to relocate")
+	}
+}
+
+func validateSupervisor(result *ValidationResult, t Task) {
+	require(result, slices.Contains(validSupervisorProviders, t.Supervisor.Provider), "supervisor.provider must be one of: %s", strings.Join(validSupervisorProviders, ", "))
+	require(result, slices.Contains(validSupervisorModes, t.Supervisor.Mode), "supervisor.mode must be one of: %s", strings.Join(validSupervisorModes, ", "))
+	if t.Supervisor.ApprovalStatus == "" {
+		result.Warnings = append(result.Warnings, "supervisor.approval_status is empty; treating as pending")
+	}
+	require(result, t.Supervisor.ReviewIterations >= 0, "supervisor.review_iterations cannot be negative")
+}
+
+func validateExecutor(result *ValidationResult, t Task) {
+	require(result, t.Executor.CLI == "claude", "executor.cli must be claude for this implementation slice")
+	require(result, t.Executor.Model != "", "executor.model is required")
+	require(result, t.Executor.Effort != "", "executor.effort is required")
+	require(result, t.Executor.PromptProfile != "", "executor.prompt_profile is required")
+	if t.Executor.PromptMode == "" {
+		result.Warnings = append(result.Warnings, "executor.prompt_mode is empty; defaulting to replace")
+	} else {
+		require(result, slices.Contains(validPromptModes, t.Executor.PromptMode), "executor.prompt_mode must be one of: %s", strings.Join(validPromptModes, ", "))
+	}
+	require(result, t.Executor.MaxBudgetUSD >= 0, "executor.max_budget_usd cannot be negative")
+	require(result, t.Executor.MaxTurns >= 0, "executor.max_turns cannot be negative")
+	if t.Executor.MaxTurns > 0 {
+		result.Warnings = append(result.Warnings, "executor.max_turns is not applied because Claude Code 2.1.132 does not expose --max-turns")
+	}
+}
+
+func validateRelativePath(result *ValidationResult, field, p string) {
+	if p == "" {
+		result.Errors = append(result.Errors, fmt.Sprintf("%s contains an empty path", field))
+		return
+	}
+	if filepath.IsAbs(p) {
+		result.Errors = append(result.Errors, fmt.Sprintf("%s contains absolute path %q", field, p))
+	}
+	clean := filepath.Clean(p)
+	if clean == ".." || strings.HasPrefix(clean, "../") {
+		result.Errors = append(result.Errors, fmt.Sprintf("%s contains parent traversal path %q", field, p))
+	}
+}
+
+func require(result *ValidationResult, ok bool, format string, args ...any) {
+	if ok {
+		return
+	}
+	result.Errors = append(result.Errors, fmt.Sprintf(format, args...))
+}

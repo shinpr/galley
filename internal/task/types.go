@@ -1,0 +1,195 @@
+package task
+
+import (
+	"fmt"
+
+	"go.yaml.in/yaml/v3"
+)
+
+// Task is the top-level Galley task YAML contract.
+type Task struct {
+	ID                 string                `yaml:"id" json:"id"`
+	Mode               string                `yaml:"mode" json:"mode"`
+	Status             string                `yaml:"status" json:"status"`
+	Goal               string                `yaml:"goal" json:"goal"`
+	AcceptanceCriteria []AcceptanceCriterion `yaml:"acceptance_criteria" json:"acceptance_criteria"`
+	Scope              Scope                 `yaml:"scope" json:"scope"`
+	ExecutionPolicy    ExecutionPolicy       `yaml:"execution_policy" json:"execution_policy"`
+	Worktree           Worktree              `yaml:"worktree" json:"worktree"`
+	Supervisor         Supervisor            `yaml:"supervisor" json:"supervisor"`
+	Executor           Executor              `yaml:"executor" json:"executor"`
+	Decisions          []Decision            `yaml:"decisions" json:"decisions"`
+	Risks              []Risk                `yaml:"risks" json:"risks"`
+	Attempts           []Attempt             `yaml:"attempts" json:"attempts"`
+	Verification       Verification          `yaml:"verification" json:"verification"`
+	PR                 PR                    `yaml:"pr" json:"pr"`
+}
+
+// AcceptanceCriterion describes one observable completion requirement.
+type AcceptanceCriterion struct {
+	ID           string `yaml:"id" json:"id"`
+	Text         string `yaml:"text" json:"text"`
+	Verification string `yaml:"verification" json:"verification"`
+	Status       string `yaml:"status" json:"status"`
+}
+
+// Scope constrains where and how a task may operate.
+type Scope struct {
+	CWD            string   `yaml:"cwd" json:"cwd"`
+	AllowedPaths   []string `yaml:"allowed_paths" json:"allowed_paths"`
+	ForbiddenPaths []string `yaml:"forbidden_paths" json:"forbidden_paths"`
+	Permission     string   `yaml:"permission" json:"permission"`
+}
+
+// ExecutionPolicy describes loop, timeout, and escalation behavior.
+type ExecutionPolicy struct {
+	LoopBudget                       LoopBudget `yaml:"loop_budget" json:"loop_budget"`
+	TimeoutMS                        int        `yaml:"timeout_ms" json:"timeout_ms"`
+	AFKDecisionPolicy                string     `yaml:"afk_decision_policy" json:"afk_decision_policy"`
+	StopOnDestructiveOperation       bool       `yaml:"stop_on_destructive_operation" json:"stop_on_destructive_operation"`
+	StopOnMissingSecret              bool       `yaml:"stop_on_missing_secret" json:"stop_on_missing_secret"`
+	StopOnExternalServiceUnavailable bool       `yaml:"stop_on_external_service_unavailable" json:"stop_on_external_service_unavailable"`
+}
+
+// LoopBudget is either a positive attempt count or the string "infinite".
+type LoopBudget struct {
+	Count    int  `json:"count,omitempty"`
+	Infinite bool `json:"infinite,omitempty"`
+	Set      bool `json:"-"`
+}
+
+// UnmarshalYAML accepts a positive integer or the literal string "infinite".
+func (b *LoopBudget) UnmarshalYAML(value *yaml.Node) error {
+	b.Set = true
+	switch value.Kind {
+	case yaml.ScalarNode:
+		switch value.Tag {
+		case "!!int":
+			var count int
+			if err := value.Decode(&count); err != nil {
+				return err
+			}
+			b.Count = count
+			b.Infinite = false
+			return nil
+		case "!!str":
+			var text string
+			if err := value.Decode(&text); err != nil {
+				return err
+			}
+			if text != "infinite" {
+				return fmt.Errorf("loop_budget string value must be \"infinite\"")
+			}
+			b.Count = 0
+			b.Infinite = true
+			return nil
+		default:
+			return fmt.Errorf("loop_budget must be a positive integer or \"infinite\"")
+		}
+	default:
+		return fmt.Errorf("loop_budget must be a positive integer or \"infinite\"")
+	}
+}
+
+// MarshalYAML encodes the budget as an integer or the literal string "infinite".
+func (b LoopBudget) MarshalYAML() (any, error) {
+	if b.Infinite {
+		return "infinite", nil
+	}
+	return b.Count, nil
+}
+
+// String formats the budget for prompts and diagnostics.
+func (b LoopBudget) String() string {
+	if b.Infinite {
+		return "infinite"
+	}
+	return fmt.Sprintf("%d", b.Count)
+}
+
+// Worktree describes the optional isolated workspace for AFK execution.
+type Worktree struct {
+	Enabled bool   `yaml:"enabled" json:"enabled"`
+	Branch  string `yaml:"branch" json:"branch"`
+	Path    string `yaml:"path" json:"path"`
+}
+
+// Supervisor configures the review authority for a task.
+type Supervisor struct {
+	Provider         string `yaml:"provider" json:"provider"`
+	Mode             string `yaml:"mode" json:"mode"`
+	ApprovalRequired bool   `yaml:"approval_required" json:"approval_required"`
+	ApprovalStatus   string `yaml:"approval_status" json:"approval_status"`
+	ReviewIterations int    `yaml:"review_iterations" json:"review_iterations"`
+}
+
+// Executor configures the implementation worker for a task.
+type Executor struct {
+	CLI           string  `yaml:"cli" json:"cli"`
+	Model         string  `yaml:"model" json:"model"`
+	Effort        string  `yaml:"effort" json:"effort"`
+	PromptProfile string  `yaml:"prompt_profile" json:"prompt_profile"`
+	PromptMode    string  `yaml:"prompt_mode" json:"prompt_mode"`
+	MaxBudgetUSD  float64 `yaml:"max_budget_usd" json:"max_budget_usd"`
+	MaxTurns      int     `yaml:"max_turns" json:"max_turns"`
+}
+
+// Decision records an ambiguity resolved during execution.
+type Decision struct {
+	ID               string `yaml:"id" json:"id"`
+	Question         string `yaml:"question" json:"question"`
+	Chosen           string `yaml:"chosen" json:"chosen"`
+	Rationale        string `yaml:"rationale" json:"rationale"`
+	Reversibility    string `yaml:"reversibility" json:"reversibility"`
+	NeedsHumanReview bool   `yaml:"needs_human_review" json:"needs_human_review"`
+}
+
+// Risk records uncertainty or incomplete verification that remains after execution.
+type Risk struct {
+	ID                   string `yaml:"id" json:"id"`
+	Type                 string `yaml:"type" json:"type"`
+	Detail               string `yaml:"detail" json:"detail"`
+	Mitigation           string `yaml:"mitigation" json:"mitigation"`
+	HumanReviewSuggested bool   `yaml:"human_review_suggested" json:"human_review_suggested"`
+}
+
+// Attempt records one executor and supervisor loop iteration.
+type Attempt struct {
+	Number            int    `yaml:"number" json:"number"`
+	StartedAt         string `yaml:"started_at" json:"started_at"`
+	CompletedAt       string `yaml:"completed_at" json:"completed_at"`
+	ClaudeStatus      string `yaml:"claude_status" json:"claude_status"`
+	SupervisorVerdict string `yaml:"supervisor_verdict" json:"supervisor_verdict"`
+	Summary           string `yaml:"summary" json:"summary"`
+}
+
+// Verification contains command evidence collected for a task.
+type Verification struct {
+	Commands []VerificationCommand `yaml:"commands" json:"commands"`
+}
+
+// VerificationCommand records the result of one verification command.
+type VerificationCommand struct {
+	Cmd           string `yaml:"cmd" json:"cmd"`
+	Status        string `yaml:"status" json:"status"`
+	OutputExcerpt string `yaml:"output_excerpt" json:"output_excerpt"`
+}
+
+// PR records pull request state for AFK workflows.
+type PR struct {
+	URL                 string   `yaml:"url" json:"url"`
+	Status              string   `yaml:"status" json:"status"`
+	ProcessedCommentIDs []string `yaml:"processed_comment_ids,omitempty" json:"processed_comment_ids,omitempty"`
+}
+
+// ValidationResult contains task validation errors and warnings.
+type ValidationResult struct {
+	Task     Task     `json:"task"`
+	Errors   []string `json:"errors"`
+	Warnings []string `json:"warnings"`
+}
+
+// Valid reports whether validation produced no errors.
+func (r ValidationResult) Valid() bool {
+	return len(r.Errors) == 0
+}

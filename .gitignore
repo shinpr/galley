@@ -1,0 +1,16 @@
+/galley
+/galley.exe
+/galleyd
+/galleyd.exe
+
+# Local agent/tool state
+/.claude/
+/.agent-workflow/
+/worktrees/
+
+# Test and coverage output
+/coverage.out
+/*.test
+
+# OS/editor noise
+.DS_Store

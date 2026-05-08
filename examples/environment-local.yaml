@@ -1,0 +1,9 @@
+id: "local-dev"
+cwd: "/Users/shinpr/Projects/galley"
+commands:
+  test_unit: "go test ./..."
+  build: "go build ./cmd/galley"
+constraints:
+  network: "approval_required"
+  secrets_policy: "never_read_env_files"
+  destructive_commands: "deny"

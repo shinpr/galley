@@ -1,0 +1,170 @@
+package task
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestLoadDecodesKnownYAML(t *testing.T) {
+	t.Parallel()
+	path := writeTaskYAML(t, "loop_budget: 3")
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ID != "task-load-test" {
+		t.Fatalf("id got %q", loaded.ID)
+	}
+	if loaded.ExecutionPolicy.LoopBudget.Count != 3 {
+		t.Fatalf("loop budget got %#v", loaded.ExecutionPolicy.LoopBudget)
+	}
+}
+
+func TestLoadDecodesInfiniteLoopBudget(t *testing.T) {
+	t.Parallel()
+	path := writeTaskYAML(t, `loop_budget: "infinite"`)
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.ExecutionPolicy.LoopBudget.Infinite {
+		t.Fatalf("loop budget got %#v", loaded.ExecutionPolicy.LoopBudget)
+	}
+}
+
+func TestLoadRejectsStringNumberLoopBudget(t *testing.T) {
+	t.Parallel()
+	path := writeTaskYAML(t, `loop_budget: "3"`)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), `loop_budget string value must be "infinite"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadRejectsNonScalarLoopBudget(t *testing.T) {
+	t.Parallel()
+	path := writeTaskYAML(t, "loop_budget: [1, 2, 3]")
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), `loop_budget must be a positive integer or "infinite"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadAndValidateReadsValidTask(t *testing.T) {
+	t.Parallel()
+	path := writeTaskYAML(t, "loop_budget: 3")
+
+	result, err := LoadAndValidate(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Valid() {
+		t.Fatalf("expected valid task, got %#v", result.Errors)
+	}
+	if result.Task.ID != "task-load-test" {
+		t.Fatalf("id got %q", result.Task.ID)
+	}
+}
+
+func TestLoadRejectsUnknownField(t *testing.T) {
+	t.Parallel()
+	path := writeTaskYAML(t, "loop_budget: 3")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(data, []byte("unknown_field: true\n")...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = Load(path)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "field unknown_field not found") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadWrapsMissingFile(t *testing.T) {
+	t.Parallel()
+
+	_, err := Load(filepath.Join(t.TempDir(), "missing.yaml"))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "read ") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func writeTaskYAML(t *testing.T, loopBudgetLine string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "task.yaml")
+	body := `id: "task-load-test"
+mode: "hitl"
+status: "queued"
+goal: "Test loading."
+acceptance_criteria:
+  - id: "AC1"
+    text: "Loads."
+    verification: "go test ./..."
+    status: "pending"
+scope:
+  cwd: "` + dir + `"
+  allowed_paths:
+    - "internal/task"
+  forbidden_paths: []
+  permission: "safe-edit"
+execution_policy:
+  ` + loopBudgetLine + `
+  timeout_ms: 600000
+  afk_decision_policy: ""
+  stop_on_destructive_operation: true
+  stop_on_missing_secret: false
+  stop_on_external_service_unavailable: false
+worktree:
+  enabled: false
+  branch: ""
+  path: ""
+supervisor:
+  provider: "codex"
+  mode: "review_and_repair"
+  approval_required: true
+  approval_status: "pending"
+  review_iterations: 0
+executor:
+  cli: "claude"
+  model: "opus"
+  effort: "high"
+  prompt_profile: "codexized-claude-executor-v1"
+  prompt_mode: "replace"
+  max_budget_usd: 0
+  max_turns: 0
+decisions: []
+risks: []
+attempts: []
+verification:
+  commands: []
+pr:
+  url: ""
+  status: ""
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}

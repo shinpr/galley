@@ -1,0 +1,50 @@
+id: "task-20260508-afk-001"
+mode: "afk"
+status: "queued"
+goal: "Implement a small, self-contained maintenance task and open a PR with evidence."
+acceptance_criteria:
+  - id: "AC1"
+    text: "The requested change is implemented within the allowed paths."
+    verification: "Relevant focused test or build command passes, or a limitation is recorded."
+    status: "pending"
+scope:
+  cwd: "/Users/shinpr/Projects/galley"
+  allowed_paths:
+    - "."
+  forbidden_paths:
+    - ".env"
+    - ".env.local"
+  permission: "safe-edit"
+execution_policy:
+  loop_budget: 8
+  timeout_ms: 1200000
+  afk_decision_policy: "choose-smallest-reversible"
+  stop_on_destructive_operation: true
+  stop_on_missing_secret: false
+  stop_on_external_service_unavailable: false
+worktree:
+  enabled: true
+  branch: "agent/task-20260508-afk-001"
+  path: "../worktrees/task-20260508-afk-001"
+supervisor:
+  provider: "codex"
+  mode: "review_and_repair"
+  approval_required: true
+  approval_status: "pending"
+  review_iterations: 0
+executor:
+  cli: "claude"
+  model: "opus"
+  effort: "high"
+  prompt_profile: "codexized-claude-executor-v1"
+  prompt_mode: "replace"
+  max_budget_usd: 10
+  max_turns: 0
+decisions: []
+risks: []
+attempts: []
+verification:
+  commands: []
+pr:
+  url: ""
+  status: ""

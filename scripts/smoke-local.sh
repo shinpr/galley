@@ -1,0 +1,94 @@
+#!/bin/sh
+set -eu
+
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+TMP_DIR="$(mktemp -d)"
+BIN_DIR="$TMP_DIR/bin"
+REPO_DIR="$TMP_DIR/repo"
+WORKFLOW_DIR="$TMP_DIR/workflow"
+
+mkdir -p "$BIN_DIR" "$WORKFLOW_DIR/tasks/ready"
+
+go build -o "$TMP_DIR/galley" "$ROOT_DIR/cmd/galley"
+go build -o "$TMP_DIR/galleyd" "$ROOT_DIR/cmd/galleyd"
+
+cat > "$BIN_DIR/claude" <<'SH'
+#!/bin/sh
+cat > /dev/null
+echo "smoke" > smoke-output.txt
+echo '{"status":"completed","summary":"smoke done","files_modified":["smoke-output.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["smoke-output.txt"],"notes":"created smoke output"}],"verification":[{"command":"test -f smoke-output.txt","status":"passed","reason":"file exists","output_excerpt":"ok"}],"decisions":[],"risks":[]}'
+SH
+chmod +x "$BIN_DIR/claude"
+
+export PATH="$BIN_DIR:$PATH"
+
+git init "$REPO_DIR" >/dev/null
+git -C "$REPO_DIR" config user.email smoke@example.com
+git -C "$REPO_DIR" config user.name "Galley Smoke"
+echo "smoke repo" > "$REPO_DIR/README.md"
+git -C "$REPO_DIR" add README.md
+git -C "$REPO_DIR" commit -m initial >/dev/null
+
+cat > "$WORKFLOW_DIR/tasks/ready/smoke.yaml" <<YAML
+id: "task-smoke"
+mode: "afk"
+status: "ready"
+goal: "Create a smoke output file."
+acceptance_criteria:
+  - id: "AC1"
+    text: "smoke-output.txt exists in the execution worktree."
+    verification: "test -f smoke-output.txt"
+    status: "pending"
+scope:
+  cwd: "$REPO_DIR"
+  allowed_paths:
+    - "."
+  forbidden_paths: []
+  permission: "safe-edit"
+execution_policy:
+  loop_budget: 1
+  timeout_ms: 120000
+  afk_decision_policy: "choose-smallest-reversible"
+  stop_on_destructive_operation: true
+  stop_on_missing_secret: false
+  stop_on_external_service_unavailable: false
+worktree:
+  enabled: true
+  branch: "agent/smoke"
+  path: "../worktrees/smoke"
+supervisor:
+  provider: "codex"
+  mode: "review_and_repair"
+  approval_required: true
+  approval_status: "pending"
+  review_iterations: 0
+executor:
+  cli: "claude"
+  model: "opus"
+  effort: "high"
+  prompt_profile: "codexized-claude-executor-v1"
+  prompt_mode: "replace"
+  max_budget_usd: 0
+  max_turns: 0
+decisions: []
+risks: []
+attempts: []
+verification:
+  commands: []
+pr:
+  url: ""
+  status: ""
+YAML
+
+"$TMP_DIR/galley" task validate "$WORKFLOW_DIR/tasks/ready/smoke.yaml" >/dev/null
+"$TMP_DIR/galley" task queue "$WORKFLOW_DIR/tasks/ready/smoke.yaml" --reason "local smoke" >/dev/null
+"$TMP_DIR/galleyd" --once --root "$WORKFLOW_DIR" --system-prompt-file "$ROOT_DIR/prompts/claude-executor-full.md" --json-schema-file "$ROOT_DIR/schemas/claude-result.schema.json" >/dev/null
+
+DONE_TASK="$WORKFLOW_DIR/tasks/done/smoke.yaml"
+test -f "$DONE_TASK"
+grep -q 'status: accepted' "$DONE_TASK"
+find "$WORKFLOW_DIR/runs" -name supervisor_verdict.json -print -quit | grep -q supervisor_verdict.json
+
+echo "Galley local smoke passed"
+echo "workflow_root=$WORKFLOW_DIR"
+echo "repo=$REPO_DIR"

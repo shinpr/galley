@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Galley Claude Executor Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "summary", "files_modified", "acceptance_criteria", "verification", "decisions", "risks"],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": { "const": "hard_stop" }
+        },
+        "required": ["status"]
+      },
+      "then": {
+        "required": ["hard_stop"]
+      },
+      "else": {
+        "not": {
+          "required": ["hard_stop"]
+        }
+      }
+    }
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["completed", "completed_with_risks", "hard_stop"]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "files_modified": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "acceptance_criteria": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status", "evidence", "notes"],
+        "properties": {
+          "id": { "type": "string" },
+          "status": {
+            "type": "string",
+            "enum": ["satisfied", "partially_satisfied", "not_satisfied"]
+          },
+          "evidence": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "verification": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["command", "status", "reason", "output_excerpt"],
+        "properties": {
+          "command": { "type": "string" },
+          "status": {
+            "type": "string",
+            "enum": ["passed", "failed", "skipped"]
+          },
+          "reason": { "type": "string" },
+          "output_excerpt": { "type": "string" }
+        }
+      }
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["question", "chosen", "rationale", "reversibility", "needs_human_review"],
+        "properties": {
+          "question": { "type": "string" },
+          "chosen": { "type": "string" },
+          "rationale": { "type": "string" },
+          "reversibility": {
+            "type": "string",
+            "enum": ["high", "medium", "low"]
+          },
+          "needs_human_review": { "type": "boolean" }
+        }
+      }
+    },
+    "risks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "detail", "mitigation", "needs_human_review"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["ambiguous_requirement", "partial_verification", "external_dependency", "technical_debt", "other"]
+          },
+          "detail": { "type": "string" },
+          "mitigation": { "type": "string" },
+          "needs_human_review": { "type": "boolean" }
+        }
+      }
+    },
+    "hard_stop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "attempted", "needed_to_continue"],
+      "properties": {
+        "reason": { "type": "string" },
+        "attempted": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "needed_to_continue": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,288 @@
+package task
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestValidateAcceptsWellFormedHITLTask(t *testing.T) {
+	t.Parallel()
+	task := validTask(t)
+	result := Validate(task)
+	if !result.Valid() {
+		t.Fatalf("expected valid task, got errors: %#v", result.Errors)
+	}
+}
+
+func TestValidateRejectsAbsoluteAllowedPath(t *testing.T) {
+	t.Parallel()
+	task := validTask(t)
+	task.Scope.AllowedPaths = []string{"/tmp"}
+
+	result := Validate(task)
+	if result.Valid() {
+		t.Fatal("expected invalid task")
+	}
+}
+
+func TestValidateRequiresAFKWorktree(t *testing.T) {
+	t.Parallel()
+	task := validTask(t)
+	task.Mode = "afk"
+	task.ExecutionPolicy.AFKDecisionPolicy = "choose-smallest-reversible"
+
+	result := Validate(task)
+	if result.Valid() {
+		t.Fatal("expected invalid AFK task without worktree")
+	}
+}
+
+func TestValidateStructuralDoesNotStatCWD(t *testing.T) {
+	t.Parallel()
+	task := validTask(t)
+	task.Scope.CWD = "/definitely/missing/galley"
+
+	result := ValidateStructural(task)
+	if !result.Valid() {
+		t.Fatalf("expected structural validation to ignore missing cwd, got %#v", result.Errors)
+	}
+
+	envResult := ValidateEnvironment(task)
+	if envResult.Valid() {
+		t.Fatal("expected environment validation to reject missing cwd")
+	}
+}
+
+func TestValidateWarnsWhenMaxTurnsIsConfigured(t *testing.T) {
+	t.Parallel()
+	task := validTask(t)
+	task.Executor.MaxTurns = 3
+
+	result := ValidateStructural(task)
+	if !result.Valid() {
+		t.Fatalf("expected valid task, got errors: %#v", result.Errors)
+	}
+	if len(result.Warnings) == 0 {
+		t.Fatal("expected max_turns warning")
+	}
+}
+
+func TestValidateStructuralRejectsInvalidCases(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		mutate func(*Task)
+		want   string
+	}{
+		{
+			name: "missing loop budget",
+			mutate: func(task *Task) {
+				task.ExecutionPolicy.LoopBudget = LoopBudget{}
+			},
+			want: "execution_policy.loop_budget is required",
+		},
+		{
+			name: "zero loop budget",
+			mutate: func(task *Task) {
+				task.ExecutionPolicy.LoopBudget = LoopBudget{Count: 0, Set: true}
+			},
+			want: "execution_policy.loop_budget must be positive",
+		},
+		{
+			name: "mixed infinite loop budget",
+			mutate: func(task *Task) {
+				task.ExecutionPolicy.LoopBudget = LoopBudget{Count: 3, Infinite: true, Set: true}
+			},
+			want: "execution_policy.loop_budget cannot be both infinite and counted",
+		},
+		{
+			name: "invalid mode",
+			mutate: func(task *Task) {
+				task.Mode = "daemon"
+			},
+			want: "mode must be one of",
+		},
+		{
+			name: "invalid status",
+			mutate: func(task *Task) {
+				task.Status = "waiting"
+			},
+			want: "status must be one of",
+		},
+		{
+			name: "invalid permission",
+			mutate: func(task *Task) {
+				task.Scope.Permission = "root"
+			},
+			want: "scope.permission must be one of",
+		},
+		{
+			name: "invalid supervisor provider",
+			mutate: func(task *Task) {
+				task.Supervisor.Provider = "robot"
+			},
+			want: "supervisor.provider must be one of",
+		},
+		{
+			name: "invalid supervisor mode",
+			mutate: func(task *Task) {
+				task.Supervisor.Mode = "judge"
+			},
+			want: "supervisor.mode must be one of",
+		},
+		{
+			name: "invalid prompt mode",
+			mutate: func(task *Task) {
+				task.Executor.PromptMode = "merge"
+			},
+			want: "executor.prompt_mode must be one of",
+		},
+		{
+			name: "duplicate ac id",
+			mutate: func(task *Task) {
+				task.AcceptanceCriteria = append(task.AcceptanceCriteria, task.AcceptanceCriteria[0])
+			},
+			want: `acceptance_criteria[1].id "AC1" is duplicated`,
+		},
+		{
+			name: "empty allowed path",
+			mutate: func(task *Task) {
+				task.Scope.AllowedPaths = []string{""}
+			},
+			want: "scope.allowed_paths contains an empty path",
+		},
+		{
+			name: "parent allowed path",
+			mutate: func(task *Task) {
+				task.Scope.AllowedPaths = []string{"../foo"}
+			},
+			want: `scope.allowed_paths contains parent traversal path "../foo"`,
+		},
+		{
+			name: "invalid afk policy",
+			mutate: func(task *Task) {
+				task.Mode = "afk"
+				task.ExecutionPolicy.AFKDecisionPolicy = "ask-human"
+				task.Worktree = Worktree{Enabled: true, Branch: "agent/test", Path: "../worktrees/test"}
+			},
+			want: "execution_policy.afk_decision_policy must be one of",
+		},
+		{
+			name: "afk human decision missing chosen",
+			mutate: func(task *Task) {
+				task.Mode = "afk"
+				task.ExecutionPolicy.AFKDecisionPolicy = "choose-smallest-reversible"
+				task.Worktree = Worktree{Enabled: true, Branch: "agent/test", Path: "../worktrees/test"}
+				task.Decisions = []Decision{{ID: "D1", NeedsHumanReview: true}}
+			},
+			want: `decision "D1" needs a chosen value for AFK mode`,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			task := validTask(t)
+			tt.mutate(&task)
+			result := ValidateStructural(task)
+			if !contains(result.Errors, tt.want) {
+				t.Fatalf("expected error containing %q, got %#v", tt.want, result.Errors)
+			}
+		})
+	}
+}
+
+func TestValidateStructuralAcceptsInfiniteLoopBudget(t *testing.T) {
+	t.Parallel()
+	task := validTask(t)
+	task.ExecutionPolicy.LoopBudget = LoopBudget{Infinite: true, Set: true}
+
+	result := ValidateStructural(task)
+	if !result.Valid() {
+		t.Fatalf("expected valid task, got %#v", result.Errors)
+	}
+}
+
+func TestValidateStructuralWarnsOnWholeRepoAllowedPath(t *testing.T) {
+	t.Parallel()
+	task := validTask(t)
+	task.Scope.AllowedPaths = []string{"./"}
+
+	result := ValidateStructural(task)
+	if !result.Valid() {
+		t.Fatalf("expected valid task, got %#v", result.Errors)
+	}
+	if !contains(result.Warnings, "scope.allowed_paths includes the whole repository") {
+		t.Fatalf("expected whole repo warning, got %#v", result.Warnings)
+	}
+}
+
+func TestRenderWorkOrderIncludesTaskDetails(t *testing.T) {
+	t.Parallel()
+	task := validTask(t)
+	got := RenderWorkOrder(task)
+
+	for _, want := range []string{
+		"# Galley Work Order",
+		"Task ID: `task-test`",
+		"## Acceptance Criteria",
+		"- `AC1`: It works.",
+		"- allowed paths: `internal/task`",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("work order missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func contains(values []string, want string) bool {
+	for _, value := range values {
+		if strings.Contains(value, want) {
+			return true
+		}
+	}
+	return false
+}
+
+func validTask(t *testing.T) Task {
+	t.Helper()
+	return Task{
+		ID:     "task-test",
+		Mode:   "hitl",
+		Status: "queued",
+		Goal:   "Test the validator.",
+		AcceptanceCriteria: []AcceptanceCriterion{
+			{
+				ID:           "AC1",
+				Text:         "It works.",
+				Verification: "go test ./...",
+				Status:       "pending",
+			},
+		},
+		Scope: Scope{
+			CWD:          t.TempDir(),
+			AllowedPaths: []string{"internal/task"},
+			Permission:   "safe-edit",
+		},
+		ExecutionPolicy: ExecutionPolicy{
+			LoopBudget:                 LoopBudget{Count: 3, Set: true},
+			TimeoutMS:                  600000,
+			StopOnDestructiveOperation: true,
+		},
+		Supervisor: Supervisor{
+			Provider:         "codex",
+			Mode:             "review_and_repair",
+			ApprovalRequired: true,
+			ApprovalStatus:   "pending",
+		},
+		Executor: Executor{
+			CLI:           "claude",
+			Model:         "opus",
+			Effort:        "high",
+			PromptProfile: "codexized-claude-executor-v1",
+			PromptMode:    "replace",
+		},
+	}
+}

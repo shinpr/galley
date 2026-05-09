@@ -1,6 +1,5 @@
 #!/bin/sh
 set -eu
-set -o pipefail 2>/dev/null || true
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 TMP_DIR="$(mktemp -d)"

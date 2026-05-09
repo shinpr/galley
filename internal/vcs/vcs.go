@@ -11,14 +11,22 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/shinpr/galley/internal/jsonio"
 	"github.com/shinpr/galley/internal/runner"
 )
 
 // PRComment is the subset of a GitHub issue comment Galley consumes.
 type PRComment struct {
-	ID      int64  `json:"id"`
-	Body    string `json:"body"`
-	HTMLURL string `json:"html_url"`
+	ID                int64         `json:"id"`
+	Body              string        `json:"body"`
+	HTMLURL           string        `json:"html_url"`
+	AuthorAssociation string        `json:"author_association"`
+	User              PRCommentUser `json:"user"`
+}
+
+// PRCommentUser is the subset of a GitHub comment user Galley records.
+type PRCommentUser struct {
+	Login string `json:"login"`
 }
 
 // PullRequestState is the subset of GitHub PR state Galley consumes.
@@ -27,8 +35,8 @@ type PullRequestState struct {
 	Merged bool   `json:"merged"`
 }
 
-// AddAllowedPaths stages only the task allowed paths and writes command evidence.
-func AddAllowedPaths(ctx context.Context, workDir, runDir string, allowedPaths []string) error {
+// AddAllowedPaths stages only the task allowed paths and unstages forbidden paths.
+func AddAllowedPaths(ctx context.Context, workDir, runDir string, allowedPaths, forbiddenPaths []string) error {
 	if len(allowedPaths) == 0 {
 		return fmt.Errorf("git add allowed paths is empty")
 	}
@@ -43,7 +51,27 @@ func AddAllowedPaths(ctx context.Context, workDir, runDir string, allowedPaths [
 	if err != nil {
 		return fmt.Errorf("git add failed: %w", err)
 	}
-	return writeJSON(filepath.Join(runDir, "git_add_result.json"), result)
+	if err := writeJSON(filepath.Join(runDir, "git_add_result.json"), result); err != nil {
+		return err
+	}
+	if len(forbiddenPaths) == 0 {
+		return nil
+	}
+	resetArgv := append([]string{"git", "reset", "-q", "--"}, forbiddenPaths...)
+	resetResult, err := runner.RunCommand(ctx, runner.Command{
+		WorkDir: workDir,
+		Argv:    resetArgv,
+	}, runner.RunOptions{
+		StdoutPath: filepath.Join(runDir, "git_reset_forbidden.stdout.log"),
+		StderrPath: filepath.Join(runDir, "git_reset_forbidden.stderr.log"),
+	})
+	if writeErr := writeJSON(filepath.Join(runDir, "git_reset_forbidden_result.json"), resetResult); writeErr != nil {
+		return writeErr
+	}
+	if err != nil {
+		return fmt.Errorf("git reset forbidden paths failed: %w", err)
+	}
+	return nil
 }
 
 // Commit creates a git commit and writes command evidence.
@@ -119,14 +147,27 @@ func FetchPRComments(ctx context.Context, root, prURL string) ([]PRComment, erro
 		return nil, err
 	}
 	apiPath := fmt.Sprintf("repos/%s/%s/issues/%s/comments", owner, repo, number)
-	result, err := runner.RunCommand(ctx, runner.Command{
+	stdoutFile, err := os.CreateTemp("", "galley-pr-comments-*.json")
+	if err != nil {
+		return nil, fmt.Errorf("create PR comments temp file: %w", err)
+	}
+	stdoutPath := stdoutFile.Name()
+	if err := stdoutFile.Close(); err != nil {
+		return nil, fmt.Errorf("close PR comments temp file: %w", err)
+	}
+	defer os.Remove(stdoutPath)
+	_, err = runner.RunCommand(ctx, runner.Command{
 		WorkDir: root,
 		Argv:    []string{"gh", "api", apiPath, "--paginate", "--slurp"},
-	}, runner.RunOptions{})
+	}, runner.RunOptions{StdoutPath: stdoutPath})
 	if err != nil {
 		return nil, fmt.Errorf("gh api PR comments failed: %w", err)
 	}
-	comments, err := DecodePRComments(result.Stdout)
+	output, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		return nil, fmt.Errorf("read PR comments response: %w", err)
+	}
+	comments, err := DecodePRComments(string(output))
 	if err != nil {
 		return nil, fmt.Errorf("decode PR comments: %w", err)
 	}
@@ -140,9 +181,14 @@ func PostPRComment(ctx context.Context, root, prURL, body string) error {
 		return err
 	}
 	apiPath := fmt.Sprintf("repos/%s/%s/issues/%s/comments", owner, repo, number)
+	payload, err := json.Marshal(map[string]string{"body": body})
+	if err != nil {
+		return fmt.Errorf("encode PR comment body: %w", err)
+	}
 	_, err = runner.RunCommand(ctx, runner.Command{
 		WorkDir: root,
-		Argv:    []string{"gh", "api", apiPath, "-f", "body=" + body},
+		Argv:    []string{"gh", "api", "-X", "POST", apiPath, "--input", "-"},
+		Stdin:   string(payload),
 	}, runner.RunOptions{})
 	if err != nil {
 		return fmt.Errorf("gh api post PR comment failed: %w", err)
@@ -218,15 +264,5 @@ func ExtractFirstHTTPSURL(stdout string) string {
 }
 
 func writeJSON(path string, value any) error {
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
-		return fmt.Errorf("create %s: %w", path, err)
-	}
-	defer file.Close()
-	enc := json.NewEncoder(file)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(value); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	return nil
+	return jsonio.Write(path, value)
 }

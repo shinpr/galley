@@ -2,10 +2,12 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 )
@@ -49,6 +51,9 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 	if command.WorkDir != "" {
 		cmd.Dir = command.WorkDir
 	}
+	if command.Stdin != "" {
+		cmd.Stdin = strings.NewReader(command.Stdin)
+	}
 
 	tailBytes := opts.TailBytes
 	if tailBytes == 0 {
@@ -60,17 +65,18 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 	if err != nil {
 		return RunResult{}, err
 	}
-	defer stdoutFile.Close()
 	stderrWriter, stderrFile, err := captureWriter(stderr, opts.StderrPath)
 	if err != nil {
+		_ = stdoutFile.Close()
 		return RunResult{}, err
 	}
-	defer stderrFile.Close()
 
 	cmd.Stdout = stdoutWriter
 	cmd.Stderr = stderrWriter
 
 	if err := cmd.Start(); err != nil {
+		_ = stdoutFile.Close()
+		_ = stderrFile.Close()
 		return RunResult{}, fmt.Errorf("start %s: %w", command.Argv[0], err)
 	}
 
@@ -97,13 +103,14 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 	if cmd.ProcessState != nil {
 		result.ExitCode = cmd.ProcessState.ExitCode()
 	}
+	closeErr := errors.Join(stdoutFile.Close(), stderrFile.Close())
 	if result.TimedOut {
-		return result, fmt.Errorf("command timed out after %s", opts.Timeout)
+		return result, errors.Join(fmt.Errorf("command timed out after %s", opts.Timeout), closeErr)
 	}
 	if runErr != nil {
-		return result, fmt.Errorf("run %s: %w", command.Argv[0], runErr)
+		return result, errors.Join(fmt.Errorf("run %s: %w", command.Argv[0], runErr), closeErr)
 	}
-	return result, nil
+	return result, closeErr
 }
 
 type closeFunc func() error

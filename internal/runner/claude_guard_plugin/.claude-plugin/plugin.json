@@ -1,0 +1,9 @@
+{
+  "name": "galley-claude-guard",
+  "description": "Session-only guard hooks for Galley Claude executor runs.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Galley"
+  },
+  "license": "MIT"
+}

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -15,7 +14,7 @@ import (
 // ErrNotRunning indicates the PID file is absent or points at a dead process.
 var ErrNotRunning = errors.New("daemon is not running")
 
-// ErrUnverifiedProcess indicates the PID exists but cannot be identified as galleyd.
+// ErrUnverifiedProcess indicates the PID exists but cannot be identified as the Galley daemon.
 var ErrUnverifiedProcess = errors.New("pid file process identity is not verified")
 
 // Paths contains daemon control file paths.
@@ -34,7 +33,6 @@ type PIDFile struct {
 	ProcessStartedAt string   `json:"process_started_at,omitempty"`
 	Token            string   `json:"token,omitempty"`
 	HeartbeatAt      string   `json:"heartbeat_at,omitempty"`
-	Legacy           bool     `json:"-"`
 }
 
 // Status describes the state represented by a PID file.
@@ -48,10 +46,10 @@ type Status struct {
 // ResolvePaths returns default control paths under root when explicit paths are empty.
 func ResolvePaths(root, pidFile, logFile string) Paths {
 	if pidFile == "" {
-		pidFile = filepath.Join(root, "galleyd.pid")
+		pidFile = filepath.Join(root, "galley-daemon.pid")
 	}
 	if logFile == "" {
-		logFile = filepath.Join(root, "galleyd.log")
+		logFile = filepath.Join(root, "galley-daemon.log")
 	}
 	return Paths{PIDFile: pidFile, LogFile: logFile}
 }
@@ -160,7 +158,7 @@ func ReadPID(path string) (int, error) {
 	return meta.PID, nil
 }
 
-// ReadPIDFile reads PID metadata. Bare PID files are accepted as legacy metadata.
+// ReadPIDFile reads PID metadata.
 func ReadPIDFile(path string) (PIDFile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -172,11 +170,7 @@ func ReadPIDFile(path string) (PIDFile, error) {
 		meta.Root = cleanPath(meta.Root)
 		return meta, nil
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil || pid <= 0 {
-		return PIDFile{}, fmt.Errorf("invalid pid file %s", path)
-	}
-	return PIDFile{PID: pid, Legacy: true}, nil
+	return PIDFile{}, fmt.Errorf("invalid pid file %s", path)
 }
 
 // Inspect returns PID file state and verifies live process identity when possible.
@@ -202,7 +196,7 @@ func Inspect(path, expectedRoot, expectedExecutable string) (Status, error) {
 
 // Verify checks whether PID metadata matches the expected daemon identity.
 func Verify(meta PIDFile, expectedRoot, expectedExecutable string) bool {
-	if meta.Legacy || meta.PID <= 0 || meta.Executable == "" {
+	if meta.PID <= 0 || meta.Executable == "" {
 		return false
 	}
 	if expectedRoot != "" && meta.Root != "" && meta.Root != cleanPath(expectedRoot) {

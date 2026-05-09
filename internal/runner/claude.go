@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/shinpr/galley/internal/task"
+	"github.com/shinpr/galley/prompts"
+	"github.com/shinpr/galley/schemas"
 )
 
 // ClaudeOptions contains the task-derived settings needed to construct a Claude Code invocation.
@@ -16,25 +18,25 @@ type ClaudeOptions struct {
 	Effort            string
 	PromptMode        string
 	MaxBudgetUSD      float64
-	MaxTurns          int
 	PermissionMode    string
 	WorkDir           string
 	SystemPromptFile  string
+	SystemPrompt      string
 	JSONSchemaFile    string
+	JSONSchema        string
 	SettingsFile      string
 	Prompt            string
 	IncludeHookEvents bool
+	PluginDirs        []string
 }
 
 // Command is an execution plan suitable for exec.Command plus cmd.Dir.
 type Command struct {
 	WorkDir  string   `json:"work_dir"`
 	Argv     []string `json:"argv"`
+	Stdin    string   `json:"stdin,omitempty"`
 	Warnings []string `json:"warnings,omitempty"`
 }
-
-// ClaudeCommand is kept as a compatibility alias for Claude command plans.
-type ClaudeCommand = Command
 
 // FromTask maps a validated Galley task into Claude runner options.
 func FromTask(t task.Task) ClaudeOptions {
@@ -42,7 +44,7 @@ func FromTask(t task.Task) ClaudeOptions {
 	switch t.Scope.Permission {
 	case "read-only":
 		permissionMode = "plan"
-	case "yolo":
+	case "sandbox-full-access":
 		permissionMode = "bypassPermissions"
 	}
 
@@ -56,7 +58,6 @@ func FromTask(t task.Task) ClaudeOptions {
 		Effort:         t.Executor.Effort,
 		PromptMode:     promptMode,
 		MaxBudgetUSD:   t.Executor.MaxBudgetUSD,
-		MaxTurns:       t.Executor.MaxTurns,
 		PermissionMode: permissionMode,
 		WorkDir:        t.Scope.CWD,
 	}
@@ -76,8 +77,9 @@ func ClaudeArgv(opts ClaudeOptions) ([]string, error) {
 
 // ClaudeCommandPlan returns the work directory, argv, and warnings for a Claude Code run.
 //
-// Prompt and schema files are read from paths supplied by the caller. Callers
-// that cross a trust boundary should validate those paths before calling this.
+// When no prompt or schema path/content is supplied, the built-in Galley
+// executor prompt and result schema are embedded into argv. Caller-supplied
+// prompt and schema file paths are read before execution.
 func ClaudeCommandPlan(opts ClaudeOptions) (Command, error) {
 	if opts.Prompt == "" {
 		return Command{}, fmt.Errorf("prompt is required")
@@ -85,51 +87,15 @@ func ClaudeCommandPlan(opts ClaudeOptions) (Command, error) {
 	if opts.PromptMode == "" {
 		opts.PromptMode = "replace"
 	}
+	applyDefaultEmbeddedOptions(&opts)
 
 	warnings := claudeWarnings(opts)
-	argv := []string{"claude", "-p", "--output-format", "stream-json", "--verbose"}
-
-	if opts.Model != "" {
-		argv = append(argv, "--model", opts.Model)
+	argv, err := buildClaudeArgv(opts, func(label, path string) (string, error) {
+		return readOptionFile(label, path)
+	})
+	if err != nil {
+		return Command{}, err
 	}
-	if opts.Effort != "" {
-		argv = append(argv, "--effort", opts.Effort)
-	}
-	if opts.PermissionMode != "" {
-		argv = append(argv, "--permission-mode", opts.PermissionMode)
-	}
-	if opts.SystemPromptFile != "" {
-		systemPrompt, err := readOptionFile("system prompt", opts.SystemPromptFile)
-		if err != nil {
-			return Command{}, err
-		}
-		switch opts.PromptMode {
-		case "replace":
-			argv = append(argv, "--system-prompt", systemPrompt)
-		case "append":
-			argv = append(argv, "--append-system-prompt", systemPrompt)
-		default:
-			return Command{}, fmt.Errorf("unsupported prompt mode %q", opts.PromptMode)
-		}
-	}
-	if opts.JSONSchemaFile != "" {
-		schema, err := readOptionFile("JSON schema", opts.JSONSchemaFile)
-		if err != nil {
-			return Command{}, err
-		}
-		argv = append(argv, "--json-schema", schema)
-	}
-	if opts.SettingsFile != "" {
-		argv = append(argv, "--settings", opts.SettingsFile)
-	}
-	if opts.IncludeHookEvents {
-		argv = append(argv, "--include-hook-events")
-	}
-	if opts.MaxBudgetUSD > 0 {
-		argv = append(argv, "--max-budget-usd", strconv.FormatFloat(opts.MaxBudgetUSD, 'f', -1, 64))
-	}
-
-	argv = append(argv, opts.Prompt)
 	return Command{WorkDir: opts.WorkDir, Argv: argv, Warnings: warnings}, nil
 }
 
@@ -144,7 +110,26 @@ func ClaudeShellPreview(opts ClaudeOptions) (string, []string, error) {
 	if opts.PromptMode == "" {
 		opts.PromptMode = "replace"
 	}
+	applyDefaultEmbeddedOptions(&opts)
 
+	argv, err := buildClaudeArgv(opts, func(_ string, path string) (string, error) {
+		absolute, err := absPath(path)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("$(cat %s)", shellToken(absolute)), nil
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	preview := ShellQuote(argv)
+	if opts.WorkDir != "" {
+		preview = "cd " + shellToken(opts.WorkDir) + " && " + preview
+	}
+	return preview, claudeWarnings(opts), nil
+}
+
+func buildClaudeArgv(opts ClaudeOptions, fileValue func(label, path string) (string, error)) ([]string, error) {
 	argv := []string{"claude", "-p", "--output-format", "stream-json", "--verbose"}
 	if opts.Model != "" {
 		argv = append(argv, "--model", opts.Model)
@@ -155,29 +140,42 @@ func ClaudeShellPreview(opts ClaudeOptions) (string, []string, error) {
 	if opts.PermissionMode != "" {
 		argv = append(argv, "--permission-mode", opts.PermissionMode)
 	}
-	if opts.SystemPromptFile != "" {
-		systemPromptFile, err := absPath(opts.SystemPromptFile)
-		if err != nil {
-			return "", nil, err
+	if opts.SystemPromptFile != "" || opts.SystemPrompt != "" {
+		systemPrompt := opts.SystemPrompt
+		if opts.SystemPromptFile != "" {
+			var err error
+			systemPrompt, err = fileValue("system prompt", opts.SystemPromptFile)
+			if err != nil {
+				return nil, err
+			}
 		}
 		switch opts.PromptMode {
 		case "replace":
-			argv = append(argv, "--system-prompt", fmt.Sprintf("$(cat %s)", shellToken(systemPromptFile)))
+			argv = append(argv, "--system-prompt", systemPrompt)
 		case "append":
-			argv = append(argv, "--append-system-prompt", fmt.Sprintf("$(cat %s)", shellToken(systemPromptFile)))
+			argv = append(argv, "--append-system-prompt", systemPrompt)
 		default:
-			return "", nil, fmt.Errorf("unsupported prompt mode %q", opts.PromptMode)
+			return nil, fmt.Errorf("unsupported prompt mode %q", opts.PromptMode)
 		}
 	}
-	if opts.JSONSchemaFile != "" {
-		schemaFile, err := absPath(opts.JSONSchemaFile)
-		if err != nil {
-			return "", nil, err
+	if opts.JSONSchemaFile != "" || opts.JSONSchema != "" {
+		schema := opts.JSONSchema
+		if opts.JSONSchemaFile != "" {
+			var err error
+			schema, err = fileValue("JSON schema", opts.JSONSchemaFile)
+			if err != nil {
+				return nil, err
+			}
 		}
-		argv = append(argv, "--json-schema", fmt.Sprintf("$(cat %s)", shellToken(schemaFile)))
+		argv = append(argv, "--json-schema", schema)
 	}
 	if opts.SettingsFile != "" {
 		argv = append(argv, "--settings", opts.SettingsFile)
+	}
+	for _, dir := range opts.PluginDirs {
+		if dir != "" {
+			argv = append(argv, "--plugin-dir", dir)
+		}
 	}
 	if opts.IncludeHookEvents {
 		argv = append(argv, "--include-hook-events")
@@ -186,12 +184,16 @@ func ClaudeShellPreview(opts ClaudeOptions) (string, []string, error) {
 		argv = append(argv, "--max-budget-usd", strconv.FormatFloat(opts.MaxBudgetUSD, 'f', -1, 64))
 	}
 	argv = append(argv, opts.Prompt)
+	return argv, nil
+}
 
-	preview := ShellQuote(argv)
-	if opts.WorkDir != "" {
-		preview = "cd " + shellToken(opts.WorkDir) + " && " + preview
+func applyDefaultEmbeddedOptions(opts *ClaudeOptions) {
+	if opts.SystemPromptFile == "" && opts.SystemPrompt == "" {
+		opts.SystemPrompt = prompts.ClaudeExecutorFull()
 	}
-	return preview, claudeWarnings(opts), nil
+	if opts.JSONSchemaFile == "" && opts.JSONSchema == "" {
+		opts.JSONSchema = schemas.ClaudeResult
+	}
 }
 
 // ShellQuote formats argv as a POSIX shell command preview.
@@ -228,11 +230,8 @@ func absPath(path string) (string, error) {
 
 func claudeWarnings(opts ClaudeOptions) []string {
 	var warnings []string
-	if opts.MaxTurns > 0 {
-		warnings = append(warnings, "executor.max_turns is set but Claude Code 2.1.132 does not expose --max-turns; value is not applied")
-	}
 	if opts.PermissionMode == "bypassPermissions" {
-		warnings = append(warnings, "Claude permission mode is bypassPermissions")
+		warnings = append(warnings, "Claude permission mode is bypassPermissions; use only inside an isolated sandbox/worktree")
 	}
 	return warnings
 }

@@ -22,6 +22,7 @@ func TestClaudeArgvReplacePrompt(t *testing.T) {
 		SystemPromptFile: promptPath,
 		JSONSchemaFile:   schemaPath,
 		MaxBudgetUSD:     5,
+		PluginDirs:       []string{"/tmp/galley-guard"},
 		Prompt:           "do the work",
 	})
 	if err != nil {
@@ -35,6 +36,7 @@ func TestClaudeArgvReplacePrompt(t *testing.T) {
 		"--permission-mode", "acceptEdits",
 		"--system-prompt", "system prompt",
 		"--json-schema", `{"type":"object"}`,
+		"--plugin-dir", "/tmp/galley-guard",
 		"--max-budget-usd", "5",
 		"do the work",
 	}
@@ -50,6 +52,7 @@ func TestClaudeArgvAppendPrompt(t *testing.T) {
 	argv, err := ClaudeArgv(ClaudeOptions{
 		PromptMode:       "append",
 		SystemPromptFile: promptPath,
+		JSONSchema:       `{"type":"object"}`,
 		Prompt:           "do the work",
 	})
 	if err != nil {
@@ -59,6 +62,7 @@ func TestClaudeArgvAppendPrompt(t *testing.T) {
 	want := []string{
 		"claude", "-p", "--output-format", "stream-json", "--verbose",
 		"--append-system-prompt", "system prompt",
+		"--json-schema", `{"type":"object"}`,
 		"do the work",
 	}
 	if !reflect.DeepEqual(argv, want) {
@@ -71,7 +75,6 @@ func TestClaudeCommandPlanIncludesWorkDirAndWarnings(t *testing.T) {
 
 	command, err := ClaudeCommandPlan(ClaudeOptions{
 		WorkDir:        "/tmp/project",
-		MaxTurns:       3,
 		PermissionMode: "bypassPermissions",
 		Prompt:         "do the work",
 	})
@@ -82,8 +85,25 @@ func TestClaudeCommandPlanIncludesWorkDirAndWarnings(t *testing.T) {
 	if command.WorkDir != "/tmp/project" {
 		t.Fatalf("work dir mismatch: %q", command.WorkDir)
 	}
-	if len(command.Warnings) != 2 {
-		t.Fatalf("expected 2 warnings, got %#v", command.Warnings)
+	if len(command.Warnings) != 1 {
+		t.Fatalf("expected 1 warning, got %#v", command.Warnings)
+	}
+}
+
+func TestClaudeCommandPlanUsesEmbeddedPromptAndSchemaByDefault(t *testing.T) {
+	t.Parallel()
+
+	command, err := ClaudeCommandPlan(ClaudeOptions{
+		Prompt: "do the work",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(command.Argv, "\x00")
+	for _, want := range []string{"--system-prompt", "Galley Claude Executor", "--json-schema", "Galley Claude Executor Result"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("argv missing %q", want)
+		}
 	}
 }
 
@@ -121,7 +141,6 @@ func TestClaudeShellPreviewUsesCatAndCd(t *testing.T) {
 		SystemPromptFile: "prompts/claude-executor-full.md",
 		JSONSchemaFile:   "schemas/claude-result.schema.json",
 		Prompt:           "do the work",
-		MaxTurns:         1,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -131,8 +150,8 @@ func TestClaudeShellPreviewUsesCatAndCd(t *testing.T) {
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
-	if len(warnings) != 1 {
-		t.Fatalf("expected max-turns warning, got %#v", warnings)
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %#v", warnings)
 	}
 }
 
@@ -147,9 +166,9 @@ func TestFromTaskMapsPermissionAndDefaultsPromptMode(t *testing.T) {
 		wantPrompt string
 	}{
 		{name: "read only", permission: "read-only", wantPerm: "plan", wantPrompt: "replace"},
-		{name: "safe edit", permission: "safe-edit", wantPerm: "acceptEdits", wantPrompt: "replace"},
-		{name: "yolo", permission: "yolo", wantPerm: "bypassPermissions", wantPrompt: "replace"},
-		{name: "append", permission: "safe-edit", promptMode: "append", wantPerm: "acceptEdits", wantPrompt: "append"},
+		{name: "edit", permission: "edit", wantPerm: "acceptEdits", wantPrompt: "replace"},
+		{name: "sandbox full access", permission: "sandbox-full-access", wantPerm: "bypassPermissions", wantPrompt: "replace"},
+		{name: "append", permission: "edit", promptMode: "append", wantPerm: "acceptEdits", wantPrompt: "append"},
 	}
 
 	for _, tt := range tests {

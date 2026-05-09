@@ -10,17 +10,17 @@ import (
 func TestResolvePathsDefaultsUnderRoot(t *testing.T) {
 	t.Parallel()
 	paths := ResolvePaths("/tmp/galley", "", "")
-	if paths.PIDFile != "/tmp/galley/galleyd.pid" {
+	if paths.PIDFile != "/tmp/galley/galley-daemon.pid" {
 		t.Fatalf("pid file got %q", paths.PIDFile)
 	}
-	if paths.LogFile != "/tmp/galley/galleyd.log" {
+	if paths.LogFile != "/tmp/galley/galley-daemon.log" {
 		t.Fatalf("log file got %q", paths.LogFile)
 	}
 }
 
 func TestReservePIDIsExclusive(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "galleyd.pid")
+	path := filepath.Join(t.TempDir(), "galley-daemon.pid")
 	release, err := ReservePID(path)
 	if err != nil {
 		t.Fatal(err)
@@ -33,7 +33,7 @@ func TestReservePIDIsExclusive(t *testing.T) {
 
 func TestWriteReadPIDFileJSON(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "galleyd.pid")
+	path := filepath.Join(t.TempDir(), "galley-daemon.pid")
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -46,14 +46,14 @@ func TestWriteReadPIDFileJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if read.PID != os.Getpid() || read.Executable != meta.Executable || read.Root != meta.Root || read.Legacy {
+	if read.PID != os.Getpid() || read.Executable != meta.Executable || read.Root != meta.Root {
 		t.Fatalf("metadata got %#v, want %#v", read, meta)
 	}
 }
 
 func TestInspectVerifiesCurrentProcess(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "galleyd.pid")
+	path := filepath.Join(t.TempDir(), "galley-daemon.pid")
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +77,7 @@ func TestInspectVerifiesCurrentProcess(t *testing.T) {
 
 func TestHeartbeatRequiresMatchingToken(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "galleyd.pid")
+	path := filepath.Join(t.TempDir(), "galley-daemon.pid")
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -98,7 +98,7 @@ func TestHeartbeatRequiresMatchingToken(t *testing.T) {
 
 func TestInspectRejectsMismatchedRoot(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "galleyd.pid")
+	path := filepath.Join(t.TempDir(), "galley-daemon.pid")
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -115,24 +115,20 @@ func TestInspectRejectsMismatchedRoot(t *testing.T) {
 	}
 }
 
-func TestReadPIDFileSupportsLegacyBarePID(t *testing.T) {
+func TestReadPIDFileRejectsBarePID(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "galleyd.pid")
+	path := filepath.Join(t.TempDir(), "galley-daemon.pid")
 	if err := os.WriteFile(path, []byte("123\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	meta, err := ReadPIDFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if meta.PID != 123 || !meta.Legacy {
-		t.Fatalf("legacy metadata got %#v", meta)
+	if _, err := ReadPIDFile(path); err == nil {
+		t.Fatal("expected bare PID file to be rejected")
 	}
 }
 
 func TestRemovePIDOnlyRemovesMatchingPID(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "galleyd.pid")
+	path := filepath.Join(t.TempDir(), "galley-daemon.pid")
 	if err := WritePID(path, PIDFile{PID: 123}); err != nil {
 		t.Fatal(err)
 	}

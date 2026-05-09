@@ -1,0 +1,20 @@
+{
+  "name": "galley",
+  "description": "Create, validate, queue, set up, and troubleshoot Galley AFK task workflows.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Shinsuke Kagawa",
+    "url": "https://github.com/shinpr"
+  },
+  "homepage": "https://github.com/shinpr/galley",
+  "repository": "https://github.com/shinpr/galley.git",
+  "license": "MIT",
+  "keywords": [
+    "galley",
+    "agent-workflow",
+    "task-authoring",
+    "afk",
+    "supervisor",
+    "automation"
+  ]
+}

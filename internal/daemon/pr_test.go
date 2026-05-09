@@ -6,6 +6,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/shinpr/galley/internal/task"
+	"github.com/shinpr/galley/internal/workspace"
 )
 
 func TestPRTitleTruncatesRunes(t *testing.T) {
@@ -61,5 +62,21 @@ func TestRenderPRBodyIncludesDecisionRationale(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("PR body missing %q:\n%s", want, body)
 		}
+	}
+}
+
+func TestEnsureNonCommittedInputsAbsentUsesChangedFiles(t *testing.T) {
+	t.Parallel()
+	files := []task.InputFile{{Destination: "docs/plan.md", Commit: false}}
+	snapshot := workspace.Snapshot{
+		BranchDiff:  "code contains b/docs/plan.md as text",
+		BranchFiles: []string{"docs/plan.md.bak"},
+	}
+	if err := ensureNonCommittedInputsAbsentFromBranch(snapshot, files); err != nil {
+		t.Fatalf("substring-only diff text should not fail: %v", err)
+	}
+	snapshot.BranchFiles = []string{"docs/plan.md"}
+	if err := ensureNonCommittedInputsAbsentFromBranch(snapshot, files); err == nil {
+		t.Fatal("expected committed non-committed input file error")
 	}
 }

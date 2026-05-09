@@ -1,12 +1,11 @@
 package task
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestValidateAcceptsWellFormedHITLTask(t *testing.T) {
+func TestValidateAcceptsWellFormedAFKTask(t *testing.T) {
 	t.Parallel()
 	task := validTask(t)
 	result := Validate(task)
@@ -29,8 +28,7 @@ func TestValidateRejectsAbsoluteAllowedPath(t *testing.T) {
 func TestValidateRequiresAFKWorktree(t *testing.T) {
 	t.Parallel()
 	task := validTask(t)
-	task.Mode = "afk"
-	task.ExecutionPolicy.AFKDecisionPolicy = "choose-smallest-reversible"
+	task.Worktree = Worktree{}
 
 	result := Validate(task)
 	if result.Valid() {
@@ -51,20 +49,6 @@ func TestValidateStructuralDoesNotStatCWD(t *testing.T) {
 	envResult := ValidateEnvironment(task)
 	if envResult.Valid() {
 		t.Fatal("expected environment validation to reject missing cwd")
-	}
-}
-
-func TestValidateWarnsWhenMaxTurnsIsConfigured(t *testing.T) {
-	t.Parallel()
-	task := validTask(t)
-	task.Executor.MaxTurns = 3
-
-	result := ValidateStructural(task)
-	if !result.Valid() {
-		t.Fatalf("expected valid task, got errors: %#v", result.Errors)
-	}
-	if len(result.Warnings) == 0 {
-		t.Fatal("expected max_turns warning")
 	}
 }
 
@@ -134,20 +118,6 @@ func TestValidateStructuralRejectsInvalidCases(t *testing.T) {
 			want: "scope.permission must be one of",
 		},
 		{
-			name: "invalid supervisor provider",
-			mutate: func(task *Task) {
-				task.Supervisor.Provider = "robot"
-			},
-			want: "supervisor.provider must be one of",
-		},
-		{
-			name: "invalid supervisor mode",
-			mutate: func(task *Task) {
-				task.Supervisor.Mode = "judge"
-			},
-			want: "supervisor.mode must be one of",
-		},
-		{
 			name: "invalid prompt mode",
 			mutate: func(task *Task) {
 				task.Executor.PromptMode = "merge"
@@ -176,11 +146,35 @@ func TestValidateStructuralRejectsInvalidCases(t *testing.T) {
 			want: `scope.allowed_paths contains parent traversal path "../foo"`,
 		},
 		{
+			name: "parent input file destination",
+			mutate: func(task *Task) {
+				task.Files = []InputFile{{Source: "plan.md", Destination: "../plan.md"}}
+			},
+			want: `files[0].destination contains parent traversal path "../plan.md"`,
+		},
+		{
+			name: "input file outside allowed paths",
+			mutate: func(task *Task) {
+				task.Scope.AllowedPaths = []string{"src"}
+				task.Files = []InputFile{{Source: "plan.md", Destination: "docs/plan.md", Commit: false}}
+			},
+			want: "files[0].destination must be within scope.allowed_paths",
+		},
+		{
+			name: "input file inside forbidden paths",
+			mutate: func(task *Task) {
+				task.Scope.AllowedPaths = []string{"."}
+				task.Scope.ForbiddenPaths = []string{"secrets"}
+				task.Files = []InputFile{{Source: "plan.md", Destination: "secrets/plan.md", Commit: false}}
+			},
+			want: "files[0].destination must not be within scope.forbidden_paths",
+		},
+		{
 			name: "invalid afk policy",
 			mutate: func(task *Task) {
 				task.Mode = "afk"
 				task.ExecutionPolicy.AFKDecisionPolicy = "ask-human"
-				task.Worktree = Worktree{Enabled: true, Branch: "agent/test", Path: filepath.Join(t.TempDir(), "worktrees", "test")}
+				task.Worktree = Worktree{Enabled: true, Branch: "agent/test", Path: "../repo.worktrees/test"}
 			},
 			want: "execution_policy.afk_decision_policy must be one of",
 		},
@@ -189,9 +183,18 @@ func TestValidateStructuralRejectsInvalidCases(t *testing.T) {
 			mutate: func(task *Task) {
 				task.Mode = "afk"
 				task.ExecutionPolicy.AFKDecisionPolicy = "choose-smallest-reversible"
-				task.Worktree = Worktree{Enabled: true, Branch: "-bad", Path: filepath.Join(t.TempDir(), "worktrees", "test")}
+				task.Worktree = Worktree{Enabled: true, Branch: "-bad", Path: "../repo.worktrees/test"}
 			},
 			want: "worktree.branch must be a valid git branch name",
+		},
+		{
+			name: "source repo internal worktree path",
+			mutate: func(task *Task) {
+				task.Mode = "afk"
+				task.ExecutionPolicy.AFKDecisionPolicy = "choose-smallest-reversible"
+				task.Worktree = Worktree{Enabled: true, Branch: "agent/test", Path: "worktrees/test"}
+			},
+			want: "worktree.path must point to a sibling path outside scope.cwd",
 		},
 		{
 			name: "parent worktree path",
@@ -207,7 +210,7 @@ func TestValidateStructuralRejectsInvalidCases(t *testing.T) {
 			mutate: func(task *Task) {
 				task.Mode = "afk"
 				task.ExecutionPolicy.AFKDecisionPolicy = "choose-smallest-reversible"
-				task.Worktree = Worktree{Enabled: true, Branch: "agent/test", Path: filepath.Join(t.TempDir(), "worktrees", "test")}
+				task.Worktree = Worktree{Enabled: true, Branch: "agent/test", Path: "../repo.worktrees/test"}
 				task.Decisions = []Decision{{ID: "D1", NeedsHumanReview: true}}
 			},
 			want: `decision "D1" needs a chosen value for AFK mode`,
@@ -245,6 +248,19 @@ func TestValidateStructuralAcceptsInfiniteLoopBudget(t *testing.T) {
 	}
 }
 
+func TestValidateStructuralAcceptsSiblingWorktreePath(t *testing.T) {
+	t.Parallel()
+	task := validTask(t)
+	task.Mode = "afk"
+	task.ExecutionPolicy.AFKDecisionPolicy = "choose-smallest-reversible"
+	task.Worktree = Worktree{Enabled: true, Branch: "agent/test", Path: "../repo.worktrees/test"}
+
+	result := ValidateStructural(task)
+	if !result.Valid() {
+		t.Fatalf("expected valid sibling worktree path, got %#v", result.Errors)
+	}
+}
+
 func TestValidateStructuralWarnsOnWholeRepoAllowedPath(t *testing.T) {
 	t.Parallel()
 	task := validTask(t)
@@ -256,6 +272,33 @@ func TestValidateStructuralWarnsOnWholeRepoAllowedPath(t *testing.T) {
 	}
 	if !contains(result.Warnings, "scope.allowed_paths includes the whole repository") {
 		t.Fatalf("expected whole repo warning, got %#v", result.Warnings)
+	}
+}
+
+func TestValidGitBranchNameBoundaries(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		branch string
+		want   bool
+	}{
+		{branch: "feature/test", want: true},
+		{branch: "release.2026_05-rc1", want: true},
+		{branch: "-bad", want: false},
+		{branch: "bad..name", want: false},
+		{branch: "bad@{name", want: false},
+		{branch: "bad.lock", want: false},
+		{branch: ".hidden/name", want: false},
+		{branch: "bad name", want: false},
+		{branch: "bad/", want: false},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.branch, func(t *testing.T) {
+			t.Parallel()
+			if got := validGitBranchName(tt.branch); got != tt.want {
+				t.Fatalf("validGitBranchName(%q)=%v, want %v", tt.branch, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -290,7 +333,7 @@ func validTask(t *testing.T) Task {
 	t.Helper()
 	return Task{
 		ID:     "task-test",
-		Mode:   "hitl",
+		Mode:   "afk",
 		Status: "queued",
 		Goal:   "Test the validator.",
 		AcceptanceCriteria: []AcceptanceCriterion{
@@ -304,19 +347,19 @@ func validTask(t *testing.T) Task {
 		Scope: Scope{
 			CWD:          t.TempDir(),
 			AllowedPaths: []string{"internal/task"},
-			Permission:   "safe-edit",
+			Permission:   "edit",
 		},
 		ExecutionPolicy: ExecutionPolicy{
-			LoopBudget:                 LoopBudget{Count: 3, Set: true},
-			TimeoutMS:                  600000,
-			StopOnDestructiveOperation: true,
+			LoopBudget:        LoopBudget{Count: 3, Set: true},
+			TimeoutMS:         600000,
+			AFKDecisionPolicy: "choose-smallest-reversible",
 		},
-		Supervisor: Supervisor{
-			Provider:         "codex",
-			Mode:             "review_and_repair",
-			ApprovalRequired: true,
-			ApprovalStatus:   "pending",
+		Worktree: Worktree{
+			Enabled: true,
+			Branch:  "agent/task-test",
+			Path:    "../repo.worktrees/task-test",
 		},
+		Supervisor: Supervisor{},
 		Executor: Executor{
 			CLI:           "claude",
 			Model:         "opus",

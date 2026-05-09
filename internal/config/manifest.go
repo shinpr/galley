@@ -31,7 +31,7 @@ type Defaults struct {
 	ReplyPRComments        bool          `yaml:"reply_pr_comments" json:"reply_pr_comments"`
 	CleanupWorktrees       bool          `yaml:"cleanup_worktrees" json:"cleanup_worktrees"`
 	PRBase                 string        `yaml:"pr_base" json:"pr_base"`
-	SupervisorCommand      []string      `yaml:"supervisor_command" json:"supervisor_command"`
+	Supervisor             string        `yaml:"supervisor" json:"supervisor"`
 }
 
 type ValidationResult struct {
@@ -70,6 +70,11 @@ func ValidateManifest(manifest Manifest) ValidationResult {
 	}
 	if manifest.Defaults.MaxConcurrentPerRepo < 0 {
 		result.Errors = append(result.Errors, "defaults.max_concurrent_per_repo cannot be negative")
+	}
+	switch manifest.Defaults.Supervisor {
+	case "", "codex", "claude":
+	default:
+		result.Errors = append(result.Errors, "defaults.supervisor must be one of: codex, claude")
 	}
 	return result
 }

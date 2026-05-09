@@ -45,8 +45,8 @@ func TestRequeueMovesFailedTaskToQueued(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if requeued.Status != "queued" || requeued.Supervisor.ApprovalStatus != "pending" {
-		t.Fatalf("requeued task got status=%q approval=%q", requeued.Status, requeued.Supervisor.ApprovalStatus)
+	if requeued.Status != "queued" {
+		t.Fatalf("requeued task got status=%q", requeued.Status)
 	}
 	if requeued.Supervisor.ReviewIterations != 1 {
 		t.Fatalf("review iterations got %d", requeued.Supervisor.ReviewIterations)

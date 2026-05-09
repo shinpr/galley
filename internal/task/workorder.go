@@ -18,7 +18,7 @@ func RenderWorkOrderWithProfiles(t Task, profiles profile.Bundle) string {
 	fmt.Fprintf(&b, "# Galley Work Order\n\n")
 	fmt.Fprintf(&b, "Task ID: `%s`\n", t.ID)
 	fmt.Fprintf(&b, "Mode: `%s`\n", t.Mode)
-	fmt.Fprintf(&b, "Supervisor: `%s` / `%s`\n\n", t.Supervisor.Provider, t.Supervisor.Mode)
+	fmt.Fprintf(&b, "Review iteration: `%d`\n\n", t.Supervisor.ReviewIterations)
 	fmt.Fprintf(&b, "## Goal\n\n%s\n\n", t.Goal)
 	renderReviewContext(&b, t)
 
@@ -26,6 +26,7 @@ func RenderWorkOrderWithProfiles(t Task, profiles profile.Bundle) string {
 	for _, ac := range t.AcceptanceCriteria {
 		fmt.Fprintf(&b, "- `%s`: %s\n  Verification: %s\n", ac.ID, ac.Text, ac.Verification)
 	}
+	renderInputFiles(&b, t)
 
 	fmt.Fprintf(&b, "\n## Scope\n\n")
 	fmt.Fprintf(&b, "- cwd: `%s`\n", t.Scope.CWD)
@@ -51,6 +52,25 @@ func RenderWorkOrderWithProfiles(t Task, profiles profile.Bundle) string {
 	fmt.Fprintf(&b, "- Return exactly one JSON object matching the configured schema.\n")
 
 	return b.String()
+}
+
+func renderInputFiles(b *strings.Builder, t Task) {
+	if len(t.Files) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "\n## Input Files\n\n")
+	fmt.Fprintf(b, "Galley has placed these files in the execution workspace before this attempt. Use them as task context and preserve or modify them according to the commit policy.\n\n")
+	for _, file := range t.Files {
+		fmt.Fprintf(b, "- `%s`", file.Destination)
+		if file.Description != "" {
+			fmt.Fprintf(b, ": %s", file.Description)
+		}
+		fmt.Fprintf(b, "\n  - source: `%s`\n", file.Source)
+		fmt.Fprintf(b, "  - commit with task changes: `%t`\n", file.Commit)
+		if !file.Commit {
+			fmt.Fprintf(b, "  - cleanup: Galley removes this file before commit/PR finalization.\n")
+		}
+	}
 }
 
 func renderReviewContext(b *strings.Builder, t Task) {

@@ -13,13 +13,16 @@ import (
 	"github.com/shinpr/galley/internal/workspace"
 )
 
-func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task, workDir, runDir, runID string) error {
+func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task, workDir, baseSHA, runDir, runID string) error {
 	prBodyPath := filepath.Join(runDir, "pr_body.md")
 	if err := os.WriteFile(prBodyPath, []byte(renderPRBody(*loaded, runID)), 0o600); err != nil {
 		return fmt.Errorf("write pr body: %w", err)
 	}
+	if err := cleanupNonCommittedInputFiles(workDir, loaded.Files); err != nil {
+		return err
+	}
 
-	snapshot, snapshotErr := workspace.CaptureSnapshot(ctx, workDir)
+	snapshot, snapshotErr := workspace.CaptureSnapshotFromBase(ctx, workDir, baseSHA)
 	if snapshotErr == nil && !snapshot.Dirty {
 		if loaded.PR.URL != "" {
 			loaded.PR.Status = "open"
@@ -34,13 +37,18 @@ func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task
 	if snapshotErr != nil {
 		return fmt.Errorf("capture final diff: %w", snapshotErr)
 	}
-
-	commitMessage := fmt.Sprintf("galley: %s", firstNonEmpty(loaded.ID, "accepted task"))
-	if err := vcs.AddAllowedPaths(ctx, workDir, runDir, loaded.Scope.AllowedPaths); err != nil {
+	if err := ensureNonCommittedInputsAbsentFromBranch(snapshot, loaded.Files); err != nil {
 		return err
 	}
-	if err := vcs.Commit(ctx, workDir, runDir, commitMessage); err != nil {
-		return err
+
+	if snapshot.StatusPorcelain != "" {
+		commitMessage := fmt.Sprintf("galley: %s", firstNonEmpty(loaded.ID, "accepted task"))
+		if err := vcs.AddAllowedPaths(ctx, workDir, runDir, loaded.Scope.AllowedPaths, loaded.Scope.ForbiddenPaths); err != nil {
+			return err
+		}
+		if err := vcs.Commit(ctx, workDir, runDir, commitMessage); err != nil {
+			return err
+		}
 	}
 	if !opts.OpenPR {
 		loaded.PR.Status = "not_requested"
@@ -59,6 +67,23 @@ func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task
 	}
 	loaded.PR.URL = prURL
 	loaded.PR.Status = "open"
+	return nil
+}
+
+func ensureNonCommittedInputsAbsentFromBranch(snapshot workspace.Snapshot, files []task.InputFile) error {
+	branchFiles := make(map[string]bool, len(snapshot.BranchFiles))
+	for _, file := range snapshot.BranchFiles {
+		branchFiles[filepath.ToSlash(filepath.Clean(file))] = true
+	}
+	for _, file := range files {
+		if file.Commit || file.Destination == "" {
+			continue
+		}
+		dst := filepath.ToSlash(filepath.Clean(file.Destination))
+		if branchFiles[dst] {
+			return fmt.Errorf("non-committed input file %s is present in committed branch diff", file.Destination)
+		}
+	}
 	return nil
 }
 

@@ -7,7 +7,6 @@
     "status",
     "summary",
     "acceptance_gaps",
-    "quality_findings",
     "reviewed_files",
     "acceptance_evidence",
     "findings",
@@ -25,10 +24,6 @@
       "minLength": 1
     },
     "acceptance_gaps": {
-      "type": "array",
-      "items": { "type": "string" }
-    },
-    "quality_findings": {
       "type": "array",
       "items": { "type": "string" }
     },

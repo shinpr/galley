@@ -16,7 +16,7 @@ func TestRunCommandCapturesOutputAndFiles(t *testing.T) {
 	stdoutPath := filepath.Join(dir, "stdout.log")
 	stderrPath := filepath.Join(dir, "stderr.log")
 
-	result, err := RunCommand(context.Background(), ClaudeCommand{
+	result, err := RunCommand(context.Background(), Command{
 		WorkDir: dir,
 		Argv:    []string{script},
 	}, RunOptions{
@@ -45,7 +45,7 @@ func TestRunCommandReturnsExitError(t *testing.T) {
 	dir := t.TempDir()
 	script := writeScript(t, dir, "fail", "#!/bin/sh\necho nope >&2\nexit 7\n")
 
-	result, err := RunCommand(context.Background(), ClaudeCommand{Argv: []string{script}}, RunOptions{Timeout: 5 * time.Second})
+	result, err := RunCommand(context.Background(), Command{Argv: []string{script}}, RunOptions{Timeout: 5 * time.Second})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -62,7 +62,7 @@ func TestRunCommandTimeout(t *testing.T) {
 	dir := t.TempDir()
 	script := writeScript(t, dir, "sleep", "#!/bin/sh\nsleep 2\n")
 
-	result, err := RunCommand(context.Background(), ClaudeCommand{Argv: []string{script}}, RunOptions{Timeout: 10 * time.Millisecond})
+	result, err := RunCommand(context.Background(), Command{Argv: []string{script}}, RunOptions{Timeout: 10 * time.Millisecond})
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
@@ -77,7 +77,7 @@ func TestRunCommandKillsProcessGroup(t *testing.T) {
 	marker := filepath.Join(dir, "child-finished")
 	script := writeScript(t, dir, "spawn", "#!/bin/sh\n(sleep 1; touch "+marker+") &\nsleep 5\n")
 
-	result, err := RunCommand(context.Background(), ClaudeCommand{Argv: []string{script}}, RunOptions{Timeout: 50 * time.Millisecond})
+	result, err := RunCommand(context.Background(), Command{Argv: []string{script}}, RunOptions{Timeout: 50 * time.Millisecond})
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
@@ -97,7 +97,7 @@ func TestRunCommandKeepsBoundedTail(t *testing.T) {
 	dir := t.TempDir()
 	script := writeScript(t, dir, "output", "#!/bin/sh\nprintf 1234567890\n")
 
-	result, err := RunCommand(context.Background(), ClaudeCommand{Argv: []string{script}}, RunOptions{
+	result, err := RunCommand(context.Background(), Command{Argv: []string{script}}, RunOptions{
 		Timeout:   5 * time.Second,
 		TailBytes: 4,
 	})

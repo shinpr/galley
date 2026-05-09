@@ -35,7 +35,7 @@ scope:
   allowed_paths:
     - "proof.txt"
   forbidden_paths: []
-  permission: "safe-edit"
+  permission: "edit"
 execution_policy:
   loop_budget: 1
   timeout_ms: 60000
@@ -46,12 +46,8 @@ execution_policy:
 worktree:
   enabled: true
   branch: "agent/test"
-  path: "`+filepath.Join(repo, "wt")+`"
+  path: "../repo.worktrees/test"
 supervisor:
-  provider: "codex"
-  mode: "review_and_repair"
-  approval_required: true
-  approval_status: "pending"
   review_iterations: 0
 executor:
   cli: "claude"
@@ -60,7 +56,6 @@ executor:
   prompt_profile: "test"
   prompt_mode: "replace"
   max_budget_usd: 0
-  max_turns: 0
 decisions: []
 risks: []
 attempts: []
@@ -182,7 +177,7 @@ scope:
   allowed_paths:
     - "."
   forbidden_paths: []
-  permission: "safe-edit"
+  permission: "edit"
 execution_policy:
   loop_budget: 1
   timeout_ms: 60000
@@ -193,12 +188,8 @@ execution_policy:
 worktree:
   enabled: true
   branch: "agent/test"
-  path: "`+filepath.Join(repo, "wt")+`"
+  path: "../repo.worktrees/test"
 supervisor:
-  provider: "codex"
-  mode: "review_and_repair"
-  approval_required: true
-  approval_status: "pending"
   review_iterations: 0
 executor:
   cli: "claude"
@@ -207,7 +198,6 @@ executor:
   prompt_profile: "test"
   prompt_mode: "replace"
   max_budget_usd: 0
-  max_turns: 0
 decisions: []
 risks: []
 attempts: []

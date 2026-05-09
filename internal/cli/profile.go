@@ -3,7 +3,10 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 
+	"github.com/shinpr/galley/internal/galleyhome"
 	"github.com/shinpr/galley/internal/profile"
 	"github.com/spf13/cobra"
 )
@@ -14,6 +17,77 @@ func newProfileCommand() *cobra.Command {
 		Short: "Validate Galley quality and environment profiles",
 	}
 	cmd.AddCommand(newProfileValidateCommand())
+	cmd.AddCommand(newProfileResolveCommand())
+	return cmd
+}
+
+func newProfileResolveCommand() *cobra.Command {
+	var root string
+	var cwd string
+	var output string
+	var mkdir bool
+	cmd := &cobra.Command{
+		Use:   "resolve",
+		Short: "Resolve conventional profile paths for a repository",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			repoCWD := cwd
+			if repoCWD == "" {
+				current, err := os.Getwd()
+				if err != nil {
+					return err
+				}
+				repoCWD = current
+			}
+			repoCWD, err := filepath.Abs(repoCWD)
+			if err != nil {
+				return err
+			}
+			key, qualityPath, environmentPath, err := galleyhome.RepoProfilePaths(root, repoCWD)
+			if err != nil {
+				return err
+			}
+			if mkdir {
+				if err := os.MkdirAll(filepath.Dir(qualityPath), 0o700); err != nil {
+					return fmt.Errorf("create profile directory: %w", err)
+				}
+			}
+			payload := struct {
+				Root                   string `json:"root"`
+				CWD                    string `json:"cwd"`
+				RepoKey                string `json:"repo_key"`
+				QualityProfileFile     string `json:"quality_profile_file"`
+				EnvironmentProfileFile string `json:"environment_profile_file"`
+				QualityExists          bool   `json:"quality_exists"`
+				EnvironmentExists      bool   `json:"environment_exists"`
+			}{
+				Root:                   root,
+				CWD:                    filepath.Clean(repoCWD),
+				RepoKey:                key,
+				QualityProfileFile:     qualityPath,
+				EnvironmentProfileFile: environmentPath,
+				QualityExists:          fileExists(qualityPath),
+				EnvironmentExists:      fileExists(environmentPath),
+			}
+			switch output {
+			case "json":
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetIndent("", "  ")
+				return enc.Encode(payload)
+			case "text":
+				fmt.Fprintf(cmd.OutOrStdout(), "root: %s\n", payload.Root)
+				fmt.Fprintf(cmd.OutOrStdout(), "repo_key: %s\n", payload.RepoKey)
+				fmt.Fprintf(cmd.OutOrStdout(), "quality_profile_file: %s\n", payload.QualityProfileFile)
+				fmt.Fprintf(cmd.OutOrStdout(), "environment_profile_file: %s\n", payload.EnvironmentProfileFile)
+				return nil
+			default:
+				return fmt.Errorf("unsupported output format %q", output)
+			}
+		},
+	}
+	cmd.Flags().StringVar(&root, "root", galleyhome.DefaultRoot(), "Galley daemon root directory")
+	cmd.Flags().StringVar(&cwd, "cwd", "", "Repository cwd; defaults to the current directory")
+	cmd.Flags().BoolVar(&mkdir, "mkdir", false, "Create the resolved profile parent directory")
+	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text or json")
 	return cmd
 }
 
@@ -92,4 +166,9 @@ func validateProfile(kind, path string) (profile.ValidationResult, error) {
 	default:
 		return profile.ValidationResult{}, fmt.Errorf("unsupported profile kind %q", kind)
 	}
+}
+
+func fileExists(path string) bool {
+	stat, err := os.Stat(path)
+	return err == nil && !stat.IsDir()
 }

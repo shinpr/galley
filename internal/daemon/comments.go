@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -55,6 +56,7 @@ func processTaskPRComments(ctx context.Context, opts Options, path string) error
 	if err != nil {
 		return err
 	}
+	var errs []error
 	for _, comment := range comments {
 		commentID := strconv.FormatInt(comment.ID, 10)
 		if slices.Contains(loaded.PR.ProcessedCommentIDs, commentID) {
@@ -64,17 +66,31 @@ func processTaskPRComments(ctx context.Context, opts Options, path string) error
 		if !ok {
 			continue
 		}
-		if loaded.Status == "queued" || loaded.Status == "running" {
+		if !trustedPRCommentAuthor(comment) {
 			loaded.PR.ProcessedCommentIDs = append(loaded.PR.ProcessedCommentIDs, command.CommentID)
 			if err := task.Save(path, loaded); err != nil {
 				return err
 			}
 			if opts.ReplyPRComments {
-				return vcs.PostPRComment(ctx, opts.Root, loaded.PR.URL, fmt.Sprintf("Galley noted comment %s; task is already %s.", command.CommentID, loaded.Status))
+				if err := vcs.PostPRComment(ctx, opts.Root, loaded.PR.URL, fmt.Sprintf("Galley ignored comment %s from @%s because author_association=%s is not allowed.", command.CommentID, comment.User.Login, comment.AuthorAssociation)); err != nil {
+					errs = append(errs, err)
+				}
 			}
-			return nil
+			continue
 		}
-		_, err := task.Requeue(path, task.RequeueOptions{
+		if loaded.Status == "queued" || loaded.Status == "running" {
+			applyPRCommandToLoadedTask(&loaded, command)
+			if err := task.Save(path, loaded); err != nil {
+				return err
+			}
+			if opts.ReplyPRComments {
+				if err := vcs.PostPRComment(ctx, opts.Root, loaded.PR.URL, fmt.Sprintf("Galley noted comment %s; task is already %s.", command.CommentID, loaded.Status)); err != nil {
+					errs = append(errs, err)
+				}
+			}
+			continue
+		}
+		result, err := task.Requeue(path, task.RequeueOptions{
 			Reason:              command.Reason,
 			ProcessedCommentIDs: []string{command.CommentID},
 			RevisionRequests: []task.RevisionRequest{{
@@ -86,14 +102,64 @@ func processTaskPRComments(ctx context.Context, opts Options, path string) error
 			}},
 		})
 		if err != nil {
-			return err
+			applyPRCommandToLoadedTask(&loaded, command)
+			loaded.Risks = append(loaded.Risks, task.Risk{
+				ID:                   "pr-requeue-" + command.CommentID,
+				Type:                 "external_dependency",
+				Detail:               fmt.Sprintf("PR comment %s requested a rerun, but Galley could not requeue the task: %v", command.CommentID, err),
+				Mitigation:           "Resolve the queued/running task conflict or filesystem error, then run galley task requeue manually.",
+				HumanReviewSuggested: true,
+			})
+			if saveErr := task.Save(path, loaded); saveErr != nil {
+				errs = append(errs, errors.Join(err, saveErr))
+				continue
+			}
+			errs = append(errs, err)
+			continue
 		}
+		path = result.To
+		loaded = result.Task
 		if opts.ReplyPRComments {
-			return vcs.PostPRComment(ctx, opts.Root, loaded.PR.URL, fmt.Sprintf("Galley requeued task `%s` from comment %s. Reason: %s", loaded.ID, command.CommentID, command.Reason))
+			if err := vcs.PostPRComment(ctx, opts.Root, loaded.PR.URL, fmt.Sprintf("Galley requeued task `%s` from comment %s. Reason: %s", loaded.ID, command.CommentID, command.Reason)); err != nil {
+				errs = append(errs, err)
+			}
 		}
-		return nil
 	}
-	return nil
+	return errors.Join(errs...)
+}
+
+func applyPRCommandToLoadedTask(loaded *task.Task, command prCommand) {
+	if command.CommentID != "" && !slices.Contains(loaded.PR.ProcessedCommentIDs, command.CommentID) {
+		loaded.PR.ProcessedCommentIDs = append(loaded.PR.ProcessedCommentIDs, command.CommentID)
+	}
+	request := task.RevisionRequest{
+		ID:        "pr-comment-" + command.CommentID,
+		Source:    "pr_comment",
+		CommentID: command.CommentID,
+		Text:      command.Reason,
+		Status:    "pending",
+	}
+	if !containsRevisionRequest(loaded.RevisionRequests, request.ID) {
+		loaded.RevisionRequests = append(loaded.RevisionRequests, request)
+	}
+}
+
+func containsRevisionRequest(values []task.RevisionRequest, wantID string) bool {
+	for _, value := range values {
+		if value.ID == wantID {
+			return true
+		}
+	}
+	return false
+}
+
+func trustedPRCommentAuthor(comment vcs.PRComment) bool {
+	switch comment.AuthorAssociation {
+	case "OWNER", "MEMBER", "COLLABORATOR":
+		return true
+	default:
+		return false
+	}
 }
 
 func parsePRCommand(comment vcs.PRComment) (prCommand, bool) {

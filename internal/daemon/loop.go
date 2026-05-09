@@ -11,6 +11,7 @@ import (
 	"github.com/shinpr/galley/internal/profile"
 	"github.com/shinpr/galley/internal/result"
 	"github.com/shinpr/galley/internal/runner"
+	claudeguard "github.com/shinpr/galley/internal/runner/claude_guard_plugin"
 	"github.com/shinpr/galley/internal/supervisor"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/internal/workspace"
@@ -18,12 +19,20 @@ import (
 
 func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPath string, loaded *task.Task, prepared workspace.Prepared, runDir, runID string) error {
 	fmt.Fprintf(os.Stderr, "galley: task %s running in %s (run_id=%s)\n", loaded.ID, prepared.CWD, runID)
-	profiles, err := profile.LoadBundle(opts.QualityProfileFile, opts.EnvironmentProfileFile)
+	resolvedProfiles, err := resolveProfileFiles(opts, loaded.Scope.CWD)
 	if err != nil {
 		loaded.Status = "failed"
 		return failTaskMove(opts.Root, runningPath, loaded, err)
 	}
-	if err := writeJSON(filepath.Join(runDir, "profiles.json"), profiles); err != nil {
+	profiles, err := profile.LoadBundle(resolvedProfiles.QualityProfileFile, resolvedProfiles.EnvironmentProfileFile)
+	if err != nil {
+		loaded.Status = "failed"
+		return failTaskMove(opts.Root, runningPath, loaded, err)
+	}
+	if err := writeJSON(filepath.Join(runDir, "profiles.json"), struct {
+		Resolved resolvedProfileFiles `json:"resolved"`
+		Bundle   profile.Bundle       `json:"bundle"`
+	}{Resolved: resolvedProfiles, Bundle: profiles}); err != nil {
 		loaded.Status = "failed"
 		return failTaskMove(opts.Root, runningPath, loaded, err)
 	}
@@ -43,7 +52,7 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 			loaded.Status = "failed"
 			return failTaskMove(opts.Root, runningPath, loaded, err)
 		}
-		outcome, err := runExecutorAttempt(ctx, opts, effectiveTask, profiles, prepared.CWD, attemptDir, prompt, effectiveTaskPath)
+		outcome, err := runExecutorAttempt(ctx, opts, effectiveTask, profiles, prepared.CWD, prepared.BaseSHA, attemptDir, prompt, effectiveTaskPath)
 		if err != nil {
 			loaded.Status = "failed"
 			return failTaskMove(opts.Root, runningPath, loaded, err)
@@ -112,7 +121,7 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 			markRevisionRequestsAddressed(loaded, verdict.Summary)
 			if opts.CommitOnAccept {
 				fmt.Fprintf(os.Stderr, "galley: task %s accepted; finalizing commit/pr\n", loaded.ID)
-				if err := finalizeAcceptedChange(ctx, opts, loaded, prepared.CWD, runDir, runID); err != nil {
+				if err := finalizeAcceptedChange(ctx, opts, loaded, prepared.CWD, prepared.BaseSHA, runDir, runID); err != nil {
 					loaded.Status = "needs_supervisor_review"
 					loaded.Risks = append(loaded.Risks, task.Risk{
 						ID:                   fmt.Sprintf("finalize-%d", len(loaded.Risks)+1),
@@ -123,6 +132,16 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 					})
 					return failTaskMove(opts.Root, runningPath, loaded, err)
 				}
+			} else if err := cleanupNonCommittedInputFiles(prepared.CWD, loaded.Files); err != nil {
+				loaded.Status = "needs_supervisor_review"
+				loaded.Risks = append(loaded.Risks, task.Risk{
+					ID:                   fmt.Sprintf("input-file-cleanup-%d", len(loaded.Risks)+1),
+					Type:                 "partial_verification",
+					Detail:               err.Error(),
+					Mitigation:           "Remove non-committed task input files from the execution workspace before archiving or reusing it.",
+					HumanReviewSuggested: true,
+				})
+				return failTaskMove(opts.Root, runningPath, loaded, err)
 			}
 			loaded.Status = "accepted"
 			if opts.OpenPR {
@@ -136,8 +155,19 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 		case "hard_stop":
 			loaded.Status = "failed"
 			return moveTask(opts.Root, runningPath, "failed", loaded)
+		case "needs_supervisor_review":
+			loaded.Status = "needs_supervisor_review"
+			return moveTask(opts.Root, runningPath, "failed", loaded)
 		default:
 			loaded.Status = "needs_supervisor_review"
+			loaded.Risks = append(loaded.Risks, task.Risk{
+				ID:                   fmt.Sprintf("supervisor-verdict-%d", len(loaded.Risks)+1),
+				Type:                 "partial_verification",
+				Detail:               fmt.Sprintf("Supervisor returned unknown verdict status %q.", verdict.Status),
+				Mitigation:           "Inspect supervisor_verdict.json and rerun after correcting the supervisor output.",
+				HumanReviewSuggested: true,
+			})
+			fmt.Fprintf(os.Stderr, "galley: task %s unknown supervisor verdict=%q\n", loaded.ID, verdict.Status)
 			return moveTask(opts.Root, runningPath, "failed", loaded)
 		}
 	}
@@ -152,11 +182,8 @@ func executionTask(loaded task.Task, workDir string) task.Task {
 }
 
 func evaluateSupervisor(ctx context.Context, opts Options, evidence supervisor.Evidence, attemptDir, workDir string) (supervisor.Verdict, error) {
-	if len(opts.SupervisorCommand) == 0 {
-		return supervisor.Evaluate(evidence), nil
-	}
-	verdict, err := supervisor.RunExternal(ctx, supervisor.ExternalOptions{
-		Argv:        opts.SupervisorCommand,
+	verdict, err := supervisor.RunAdapter(ctx, supervisor.AdapterOptions{
+		Provider:    opts.Supervisor,
 		WorkDir:     workDir,
 		Timeout:     time.Duration(evidence.Task.ExecutionPolicy.TimeoutMS) * time.Millisecond,
 		ArtifactDir: attemptDir,
@@ -164,7 +191,7 @@ func evaluateSupervisor(ctx context.Context, opts Options, evidence supervisor.E
 	if err != nil {
 		return supervisor.Verdict{}, err
 	}
-	if err := writeJSON(filepath.Join(attemptDir, "external_supervisor_verdict.json"), verdict); err != nil {
+	if err := writeJSON(filepath.Join(attemptDir, "model_supervisor_verdict.json"), verdict); err != nil {
 		return supervisor.Verdict{}, err
 	}
 	return verdict, nil
@@ -182,12 +209,27 @@ type attemptOutcome struct {
 	DiffErr      error
 }
 
-func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, profiles profile.Bundle, workDir, attemptDir, prompt, taskFile string) (attemptOutcome, error) {
+func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, profiles profile.Bundle, workDir, baseSHA, attemptDir, prompt, taskFile string) (attemptOutcome, error) {
 	claudeOpts := runner.FromTask(loaded)
 	claudeOpts.WorkDir = workDir
 	claudeOpts.SystemPromptFile = opts.SystemPromptFile
 	claudeOpts.JSONSchemaFile = opts.JSONSchemaFile
 	claudeOpts.Prompt = prompt
+	if !opts.DisableClaudeGuard {
+		guardDir := opts.ClaudeGuardPluginDir
+		if guardDir == "" {
+			guardDir = filepath.Join(opts.Root, "runtime", "claude-guard-plugin")
+		}
+		guardDir, err := claudeguard.Ensure(guardDir)
+		if err != nil {
+			return attemptOutcome{}, err
+		}
+		guardDir, err = filepath.Abs(guardDir)
+		if err != nil {
+			return attemptOutcome{}, fmt.Errorf("resolve Claude guard plugin dir: %w", err)
+		}
+		claudeOpts.PluginDirs = append(claudeOpts.PluginDirs, guardDir)
+	}
 
 	commandPlan, err := runner.ClaudeCommandPlan(claudeOpts)
 	if err != nil {
@@ -209,7 +251,15 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 		return attemptOutcome{}, err
 	}
 
-	diffSnapshot, diffErr := workspace.CaptureSnapshot(ctx, workDir)
+	resultPath := filepath.Join(attemptDir, "claude_result.json")
+	claudeResult, parseErr := resolveClaudeResult(ctx, stdoutPath, runResult.Stdout, taskFile, resultPath, workDir, profiles)
+	if parseErr == nil {
+		if err := writeJSON(resultPath, claudeResult); err != nil {
+			return attemptOutcome{}, err
+		}
+	}
+
+	diffSnapshot, diffErr := workspace.CaptureSnapshotFromBase(ctx, workDir, baseSHA)
 	diffDirty := false
 	diffText := ""
 	if diffErr == nil {
@@ -220,14 +270,6 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 		}
 		if err := os.WriteFile(filepath.Join(attemptDir, "diff.patch"), []byte(diffSnapshot.Diff), 0o600); err != nil {
 			return attemptOutcome{}, fmt.Errorf("write diff.patch: %w", err)
-		}
-	}
-
-	resultPath := filepath.Join(attemptDir, "claude_result.json")
-	claudeResult, parseErr := resolveClaudeResult(ctx, stdoutPath, runResult.Stdout, taskFile, resultPath, workDir, profiles)
-	if parseErr == nil {
-		if err := writeJSON(resultPath, claudeResult); err != nil {
-			return attemptOutcome{}, err
 		}
 	}
 
@@ -253,7 +295,7 @@ func resolveClaudeResult(ctx context.Context, stdoutPath, stdoutTail, taskFile, 
 		TaskFile: taskFile,
 		Output:   resultPath,
 		WorkDir:  workDir,
-		Summary:  "Task implementation completed and verification was recorded by deterministic Galley result generation.",
+		Summary:  "Task implementation completed and verification evidence was recorded by Galley.",
 		Profiles: profiles,
 	})
 	if generatedErr == nil {
@@ -269,7 +311,7 @@ func resolveClaudeResult(ctx context.Context, stdoutPath, stdoutTail, taskFile, 
 	if tailErr == nil {
 		return tailResult, nil
 	}
-	return runner.ClaudeResult{}, fmt.Errorf("resolve Claude result: deterministic generation failed: %w; stdout file parse failed: %v; stdout tail parse failed: %v", generatedErr, claudeErr, tailErr)
+	return runner.ClaudeResult{}, fmt.Errorf("resolve Claude result: verification evidence generation failed: %w; stdout file parse failed: %v; stdout tail parse failed: %v", generatedErr, claudeErr, tailErr)
 }
 
 func mergeExecutorJudgment(generated, reported runner.ClaudeResult) runner.ClaudeResult {

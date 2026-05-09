@@ -56,7 +56,7 @@ func TestPollPRCommentsRequeuesTaskOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFakeCommand(t, "gh", `if [ "$1" = "api" ]; then
-	echo '[[{"id":42,"body":"/galley rerun tighten tests","html_url":"https://github.com/example/galley/pull/123#issuecomment-42"}]]'
+	echo '[[{"id":42,"body":"/galley rerun tighten tests","html_url":"https://github.com/example/galley/pull/123#issuecomment-42","author_association":"MEMBER","user":{"login":"maintainer"}}]]'
 else
 echo unexpected-gh >&2
 exit 1
@@ -110,9 +110,10 @@ func TestPollPRCommentsPostsReply(t *testing.T) {
 	}
 	marker := filepath.Join(t.TempDir(), "posted")
 	writeFakeCommand(t, "gh", `if [ "$1" = "api" ] && [ "$3" = "--paginate" ]; then
-echo '[[{"id":99,"body":"/galley rerun reply please","html_url":"https://github.com/example/galley/pull/123#issuecomment-99"}]]'
+echo '[[{"id":99,"body":"/galley rerun reply please","html_url":"https://github.com/example/galley/pull/123#issuecomment-99","author_association":"OWNER","user":{"login":"owner"}}]]'
 elif [ "$1" = "api" ]; then
 echo "$*" > `+marker+`
+cat >> `+marker+`
 echo '{"id":100}'
 else
 echo unexpected-gh >&2
@@ -127,12 +128,61 @@ fi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "body=Galley requeued") {
+	if !strings.Contains(string(data), `"body":"Galley requeued`) {
 		t.Fatalf("reply command got %q", string(data))
 	}
 }
 
-func TestPollPRCommentsDoesNotMarkFailedRequeueProcessed(t *testing.T) {
+func TestPollPRCommentsContinuesAfterReplyFailure(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	if err := queue.EnsureLayout(root); err != nil {
+		t.Fatal(err)
+	}
+	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
+	writeDaemonTask(t, donePath, repo)
+	loaded, err := task.Load(donePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Status = "pr_opened"
+	loaded.PR.URL = "https://github.com/example/galley/pull/123"
+	loaded.PR.Status = "open"
+	if err := task.Save(donePath, loaded); err != nil {
+		t.Fatal(err)
+	}
+	writeFakeCommand(t, "gh", `if [ "$1" = "api" ] && [ "$3" = "--paginate" ]; then
+echo '[[{"id":42,"body":"/galley rerun first fix","html_url":"https://github.com/example/galley/pull/123#issuecomment-42","author_association":"MEMBER","user":{"login":"maintainer"}},{"id":43,"body":"/galley rerun second fix","html_url":"https://github.com/example/galley/pull/123#issuecomment-43","author_association":"MEMBER","user":{"login":"maintainer"}}]]'
+elif [ "$1" = "api" ]; then
+echo reply-failed >&2
+exit 1
+else
+echo unexpected-gh >&2
+exit 1
+fi
+`)
+
+	if err := pollPRComments(context.Background(), Options{Root: root, ReplyPRComments: true}.withDefaults()); err == nil {
+		t.Fatal("expected reply error")
+	}
+	queuedPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	requeued, err := task.Load(queuedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"42", "43"} {
+		if !slices.Contains(requeued.PR.ProcessedCommentIDs, id) {
+			t.Fatalf("processed comments missing %s: %#v", id, requeued.PR.ProcessedCommentIDs)
+		}
+	}
+	for _, id := range []string{"pr-comment-42", "pr-comment-43"} {
+		if !hasRevisionRequest(requeued.RevisionRequests, id) {
+			t.Fatalf("revision requests missing %s: %#v", id, requeued.RevisionRequests)
+		}
+	}
+}
+
+func TestPollPRCommentsRecordsFailedRequeueForManualRecovery(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	if err := queue.EnsureLayout(root); err != nil {
@@ -153,7 +203,7 @@ func TestPollPRCommentsDoesNotMarkFailedRequeueProcessed(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFakeCommand(t, "gh", `if [ "$1" = "api" ]; then
-echo '[[{"id":42,"body":"/galley rerun retry after queue clears","html_url":"https://github.com/example/galley/pull/123#issuecomment-42"}]]'
+echo '[[{"id":42,"body":"/galley rerun retry after queue clears","html_url":"https://github.com/example/galley/pull/123#issuecomment-42","author_association":"COLLABORATOR","user":{"login":"collab"}}]]'
 else
 echo unexpected-gh >&2
 exit 1
@@ -167,7 +217,64 @@ fi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if slices.Contains(stillDone.PR.ProcessedCommentIDs, "42") {
-		t.Fatalf("comment should not be marked processed after failed requeue: %#v", stillDone.PR.ProcessedCommentIDs)
+	if !slices.Contains(stillDone.PR.ProcessedCommentIDs, "42") {
+		t.Fatalf("comment should be marked processed after preserving recovery request: %#v", stillDone.PR.ProcessedCommentIDs)
 	}
+	if !hasRevisionRequest(stillDone.RevisionRequests, "pr-comment-42") {
+		t.Fatalf("revision request missing after failed requeue: %#v", stillDone.RevisionRequests)
+	}
+	if len(stillDone.Risks) == 0 || !strings.Contains(stillDone.Risks[len(stillDone.Risks)-1].Detail, "could not requeue") {
+		t.Fatalf("requeue failure risk missing: %#v", stillDone.Risks)
+	}
+}
+
+func hasRevisionRequest(values []task.RevisionRequest, id string) bool {
+	for _, value := range values {
+		if value.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func TestPollPRCommentsIgnoresUntrustedAuthor(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	if err := queue.EnsureLayout(root); err != nil {
+		t.Fatal(err)
+	}
+	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
+	writeDaemonTask(t, donePath, repo)
+	loaded, err := task.Load(donePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Status = "pr_opened"
+	loaded.PR.URL = "https://github.com/example/galley/pull/123"
+	loaded.PR.Status = "open"
+	if err := task.Save(donePath, loaded); err != nil {
+		t.Fatal(err)
+	}
+	writeFakeCommand(t, "gh", `if [ "$1" = "api" ]; then
+echo '[[{"id":77,"body":"/galley rerun please run my code","html_url":"https://github.com/example/galley/pull/123#issuecomment-77","author_association":"NONE","user":{"login":"stranger"}}]]'
+else
+echo unexpected-gh >&2
+exit 1
+fi
+`)
+
+	if err := pollPRComments(context.Background(), Options{Root: root}.withDefaults()); err != nil {
+		t.Fatal(err)
+	}
+	stillDone, err := task.Load(donePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stillDone.Status != "pr_opened" {
+		t.Fatalf("status got %q", stillDone.Status)
+	}
+	if !slices.Contains(stillDone.PR.ProcessedCommentIDs, "77") {
+		t.Fatalf("untrusted comment should be marked processed after ignore: %#v", stillDone.PR.ProcessedCommentIDs)
+	}
+	assertGlobCount(t, filepath.Join(root, "tasks", "queued", "*.yaml"), 0)
 }

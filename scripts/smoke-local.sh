@@ -10,10 +10,20 @@ WORKFLOW_DIR="$TMP_DIR/workflow"
 mkdir -p "$BIN_DIR" "$WORKFLOW_DIR/tasks/draft"
 
 go build -o "$TMP_DIR/galley" "$ROOT_DIR/cmd/galley"
-go build -o "$TMP_DIR/galleyd" "$ROOT_DIR/cmd/galleyd"
 
 cat > "$BIN_DIR/claude" <<'SH'
 #!/bin/sh
+supervisor=0
+for arg in "$@"; do
+  if [ "$arg" = "plan" ]; then
+    supervisor=1
+  fi
+done
+if [ "$supervisor" = "1" ]; then
+  cat > /dev/null
+  echo '{"status":"accepted","summary":"smoke supervisor accepted","acceptance_gaps":[],"reviewed_files":["smoke-output.txt"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["smoke-output.txt exists"]}],"findings":[],"residual_risks":[],"confidence":"high","next_work_order":""}'
+  exit 0
+fi
 cat > /dev/null
 echo "smoke" > smoke-output.txt
 echo '{"status":"completed","summary":"smoke done","files_modified":["smoke-output.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["smoke-output.txt"],"notes":"created smoke output"}],"verification":[{"command":"test -f smoke-output.txt","status":"passed","reason":"file exists","output_excerpt":"ok"}],"decisions":[],"risks":[]}'
@@ -44,7 +54,7 @@ scope:
   allowed_paths:
     - "."
   forbidden_paths: []
-  permission: "safe-edit"
+  permission: "sandbox-full-access"
 execution_policy:
   loop_budget: 1
   timeout_ms: 120000
@@ -55,12 +65,8 @@ execution_policy:
 worktree:
   enabled: true
   branch: "agent/smoke"
-  path: "$TMP_DIR/worktrees/smoke"
+  path: "../worktrees/smoke"
 supervisor:
-  provider: "codex"
-  mode: "review_and_repair"
-  approval_required: true
-  approval_status: "pending"
   review_iterations: 0
 executor:
   cli: "claude"
@@ -69,7 +75,6 @@ executor:
   prompt_profile: "codexized-claude-executor-v1"
   prompt_mode: "replace"
   max_budget_usd: 0
-  max_turns: 0
 decisions: []
 risks: []
 attempts: []
@@ -82,7 +87,7 @@ YAML
 
 "$TMP_DIR/galley" task validate "$WORKFLOW_DIR/tasks/draft/smoke.yaml" >/dev/null
 "$TMP_DIR/galley" task queue "$WORKFLOW_DIR/tasks/draft/smoke.yaml" --reason "local smoke" >/dev/null
-"$TMP_DIR/galleyd" --once --root "$WORKFLOW_DIR" --system-prompt-file "$ROOT_DIR/prompts/claude-executor-full.md" --json-schema-file "$ROOT_DIR/schemas/claude-result.schema.json" >/dev/null
+"$TMP_DIR/galley" daemon run --once --root "$WORKFLOW_DIR" >/dev/null
 
 DONE_TASK="$WORKFLOW_DIR/tasks/done/smoke.yaml"
 test -f "$DONE_TASK"

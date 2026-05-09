@@ -14,7 +14,7 @@ scope:
   forbidden_paths:
     - ".env"
     - ".env.local"
-  permission: "safe-edit"
+  permission: "edit"
 execution_policy:
   loop_budget: 10
   timeout_ms: 1200000
@@ -25,12 +25,8 @@ execution_policy:
 worktree:
   enabled: true
   branch: "agent/task-20260508-afk-001"
-  path: "/tmp/galley-worktrees/task-20260508-afk-001"
+  path: "../galley.worktrees/task-20260508-afk-001"
 supervisor:
-  provider: "codex"
-  mode: "review_and_repair"
-  approval_required: true
-  approval_status: "pending"
   review_iterations: 0
 executor:
   cli: "claude"
@@ -39,7 +35,6 @@ executor:
   prompt_profile: "codexized-claude-executor-v1"
   prompt_mode: "replace"
   max_budget_usd: 10
-  max_turns: 0
 decisions: []
 risks: []
 attempts: []

@@ -13,6 +13,7 @@ type Task struct {
 	Status             string                `yaml:"status" json:"status"`
 	Goal               string                `yaml:"goal" json:"goal"`
 	AcceptanceCriteria []AcceptanceCriterion `yaml:"acceptance_criteria" json:"acceptance_criteria"`
+	Files              []InputFile           `yaml:"files,omitempty" json:"files,omitempty"`
 	Scope              Scope                 `yaml:"scope" json:"scope"`
 	ExecutionPolicy    ExecutionPolicy       `yaml:"execution_policy" json:"execution_policy"`
 	Worktree           Worktree              `yaml:"worktree" json:"worktree"`
@@ -24,6 +25,14 @@ type Task struct {
 	Attempts           []Attempt             `yaml:"attempts" json:"attempts"`
 	Verification       Verification          `yaml:"verification" json:"verification"`
 	PR                 PR                    `yaml:"pr" json:"pr"`
+}
+
+// InputFile describes a source file Galley should place in the execution workspace.
+type InputFile struct {
+	Source      string `yaml:"source" json:"source"`
+	Destination string `yaml:"destination" json:"destination"`
+	Description string `yaml:"description,omitempty" json:"description,omitempty"`
+	Commit      bool   `yaml:"commit" json:"commit"`
 }
 
 // AcceptanceCriterion describes one observable completion requirement.
@@ -120,11 +129,7 @@ type Worktree struct {
 
 // Supervisor configures the review authority for a task.
 type Supervisor struct {
-	Provider         string `yaml:"provider" json:"provider"`
-	Mode             string `yaml:"mode" json:"mode"`
-	ApprovalRequired bool   `yaml:"approval_required" json:"approval_required"`
-	ApprovalStatus   string `yaml:"approval_status" json:"approval_status"`
-	ReviewIterations int    `yaml:"review_iterations" json:"review_iterations"`
+	ReviewIterations int `yaml:"review_iterations" json:"review_iterations"`
 }
 
 // Executor configures the implementation worker for a task.
@@ -135,7 +140,6 @@ type Executor struct {
 	PromptProfile string  `yaml:"prompt_profile" json:"prompt_profile"`
 	PromptMode    string  `yaml:"prompt_mode" json:"prompt_mode"`
 	MaxBudgetUSD  float64 `yaml:"max_budget_usd" json:"max_budget_usd"`
-	MaxTurns      int     `yaml:"max_turns" json:"max_turns"`
 }
 
 // Decision records an ambiguity resolved during execution.
@@ -197,11 +201,11 @@ func (c VerificationCommand) MarshalYAML() (any, error) {
 		Kind: yaml.MappingNode,
 		Tag:  "!!map",
 		Content: []*yaml.Node{
-			yamlStringNode("cmd", yaml.LiteralStyle),
+			yamlStringNode("cmd", 0),
 			yamlStringNode(c.Cmd, 0),
-			yamlStringNode("status", yaml.LiteralStyle),
+			yamlStringNode("status", 0),
 			yamlStringNode(c.Status, 0),
-			yamlStringNode("output_excerpt", yaml.LiteralStyle),
+			yamlStringNode("output_excerpt", 0),
 			yamlStringNode(c.OutputExcerpt, yaml.DoubleQuotedStyle),
 		},
 	}, nil

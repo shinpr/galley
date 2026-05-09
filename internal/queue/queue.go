@@ -3,7 +3,6 @@ package queue
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -61,27 +60,13 @@ func RunningRepoCounts(root string) map[string]int {
 	return counts
 }
 
-// ClaimTask atomically moves a queued task into running without overwriting.
+// ClaimTask claims a queued task into running without overwriting an existing running task.
 func ClaimTask(root, queuedPath string) (string, error) {
 	runningPath := filepath.Join(root, "tasks", "running", filepath.Base(queuedPath))
-	lockPath := runningPath + ".lock"
-	lockFile, err := os.OpenFile(lockPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
+	if err := noOverwriteRename(queuedPath, runningPath); err != nil {
 		if errors.Is(err, os.ErrExist) {
-			return "", fmt.Errorf("%w: claim %s lock already exists at %s", ErrClaimConflict, queuedPath, lockPath)
+			return "", fmt.Errorf("%w: running task already exists at %s", ErrClaimConflict, runningPath)
 		}
-		return "", fmt.Errorf("reserve claim %s: %w", queuedPath, err)
-	}
-	defer os.Remove(lockPath)
-	if err := lockFile.Close(); err != nil {
-		return "", fmt.Errorf("reserve claim %s: %w", queuedPath, err)
-	}
-	if _, err := os.Stat(runningPath); err == nil {
-		return "", fmt.Errorf("%w: running task already exists at %s", ErrClaimConflict, runningPath)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("inspect running task %s: %w", runningPath, err)
-	}
-	if err := os.Rename(queuedPath, runningPath); err != nil {
 		return "", fmt.Errorf("claim %s: %w", queuedPath, err)
 	}
 	return runningPath, nil
@@ -135,20 +120,25 @@ func requeueRunningTask(root, runningPath string) error {
 }
 
 func noOverwriteRename(src, dst string) error {
-	file, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	lockPath := dst + ".lock"
+	lock, err := os.OpenFile(lockPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
-			return fmt.Errorf("%w: destination exists at %s", fs.ErrExist, dst)
+			return fmt.Errorf("%w: destination is locked at %s", os.ErrExist, lockPath)
 		}
 		return err
 	}
-	if err := file.Close(); err != nil {
-		_ = os.Remove(dst)
+	if err := lock.Close(); err != nil {
+		_ = os.Remove(lockPath)
 		return err
 	}
-	if err := os.Rename(src, dst); err != nil {
-		_ = os.Remove(dst)
+	defer func() {
+		_ = os.Remove(lockPath)
+	}()
+	if _, err := os.Stat(dst); err == nil {
+		return fmt.Errorf("%w: destination exists at %s", os.ErrExist, dst)
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	return nil
+	return os.Rename(src, dst)
 }

@@ -1,6 +1,11 @@
 package vcs
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestDecodePRCommentsSlurpPages(t *testing.T) {
 	t.Parallel()
@@ -10,6 +15,26 @@ func TestDecodePRCommentsSlurpPages(t *testing.T) {
 	}
 	if len(comments) != 2 || comments[0].ID != 1 || comments[1].ID != 2 {
 		t.Fatalf("comments got %#v", comments)
+	}
+}
+
+func TestFetchPRCommentsReadsFullPaginatedResponse(t *testing.T) {
+	binDir := t.TempDir()
+	fakeGH := filepath.Join(binDir, "gh")
+	longBody := strings.Repeat("x", 70*1024)
+	if err := os.WriteFile(fakeGH, []byte(`#!/bin/sh
+printf '%s' '[[{"id":1,"body":"`+longBody+`","html_url":"https://github.com/example/galley/pull/1#issuecomment-1","author_association":"OWNER","user":{"login":"owner"}}]]'
+`), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	comments, err := FetchPRComments(t.Context(), t.TempDir(), "https://github.com/example/galley/pull/1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(comments) != 1 || comments[0].Body != longBody {
+		t.Fatal("large PR comment response was not decoded intact")
 	}
 }
 

@@ -159,7 +159,7 @@ func writeTaskYAML(t *testing.T, loopBudgetLine string) string {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "task.yaml")
 	body := `id: "task-load-test"
-mode: "hitl"
+mode: "afk"
 status: "queued"
 goal: "Test loading."
 acceptance_criteria:
@@ -172,23 +172,19 @@ scope:
   allowed_paths:
     - "internal/task"
   forbidden_paths: []
-  permission: "safe-edit"
+  permission: "edit"
 execution_policy:
   ` + loopBudgetLine + `
   timeout_ms: 600000
-  afk_decision_policy: ""
+  afk_decision_policy: "choose-smallest-reversible"
   stop_on_destructive_operation: true
   stop_on_missing_secret: false
   stop_on_external_service_unavailable: false
 worktree:
-  enabled: false
-  branch: ""
-  path: ""
+  enabled: true
+  branch: "agent/task-load-test"
+  path: "../repo.worktrees/task-load-test"
 supervisor:
-  provider: "codex"
-  mode: "review_and_repair"
-  approval_required: true
-  approval_status: "pending"
   review_iterations: 0
 executor:
   cli: "claude"
@@ -197,7 +193,6 @@ executor:
   prompt_profile: "codexized-claude-executor-v1"
   prompt_mode: "replace"
   max_budget_usd: 0
-  max_turns: 0
 decisions: []
 risks: []
 attempts: []

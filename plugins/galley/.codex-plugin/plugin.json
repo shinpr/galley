@@ -1,0 +1,37 @@
+{
+  "name": "galley",
+  "version": "0.1.0",
+  "description": "Create, validate, queue, set up, and troubleshoot Galley AFK task workflows.",
+  "author": {
+    "name": "Shinsuke Kagawa",
+    "url": "https://github.com/shinpr"
+  },
+  "homepage": "https://github.com/shinpr/galley",
+  "repository": "https://github.com/shinpr/galley.git",
+  "license": "MIT",
+  "keywords": [
+    "galley",
+    "agent-workflow",
+    "task-authoring",
+    "afk",
+    "supervisor",
+    "automation"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Galley",
+    "shortDescription": "Author, validate, queue, and diagnose Galley tasks.",
+    "longDescription": "Galley packages workflows for creating task YAML, validating acceptance criteria, queueing AFK work, setting up daemon runs, and diagnosing failed or stuck runs.",
+    "developerName": "Shinsuke Kagawa",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Create a Galley task for this feature request.",
+      "Validate and queue this Galley task.",
+      "Diagnose this failed Galley run."
+    ]
+  }
+}

@@ -1,0 +1,7 @@
+interface:
+  display_name: "Galley"
+  short_description: "Author Galley tasks, profiles, and run diagnostics"
+  default_prompt: "Use $galley to inspect the repository, read any specs or work plans, draft a validated Galley task or profile, and queue only after approval."
+
+policy:
+  allow_implicit_invocation: true

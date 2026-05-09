@@ -1,9 +1,10 @@
-package main
+package daemoncmd
 
 import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -15,23 +16,14 @@ import (
 
 	"github.com/shinpr/galley/internal/daemon"
 	"github.com/shinpr/galley/internal/daemonctl"
+	"github.com/shinpr/galley/internal/galleyhome"
 	"github.com/spf13/cobra"
 )
 
-func main() {
-	if err := newCommand().Execute(); err != nil {
-		if err == context.Canceled {
-			return
-		}
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-}
-
-func newCommand() *cobra.Command {
+func NewCommand(use string) *cobra.Command {
 	var opts daemon.Options
 	var pollInterval time.Duration
-	var supervisorCommand []string
+	var supervisorProvider string
 	var pidFile string
 	var logFile string
 	var stopTimeout time.Duration
@@ -39,7 +31,7 @@ func newCommand() *cobra.Command {
 	var daemonToken string
 
 	cmd := &cobra.Command{
-		Use:           "galleyd",
+		Use:           use,
 		Short:         "Run the Galley file-backed task daemon",
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -58,7 +50,14 @@ func newCommand() *cobra.Command {
 				case <-done:
 				}
 			}()
-			opts.SupervisorCommand = supervisorCommand
+			if supervisorProvider != "" {
+				switch supervisorProvider {
+				case "codex", "claude":
+					opts.Supervisor = supervisorProvider
+				default:
+					return fmt.Errorf("--supervisor must be one of: codex, claude")
+				}
+			}
 			opts.Explicit = daemon.ExplicitOptions{
 				Root:                   cmd.Flags().Changed("root"),
 				SystemPromptFile:       cmd.Flags().Changed("system-prompt-file"),
@@ -76,7 +75,7 @@ func newCommand() *cobra.Command {
 				ReplyPRComments:        cmd.Flags().Changed("reply-pr-comments"),
 				CleanupWorktrees:       cmd.Flags().Changed("cleanup-worktrees"),
 				PRBase:                 cmd.Flags().Changed("pr-base"),
-				SupervisorCommand:      cmd.Flags().Changed("supervisor-command"),
+				Supervisor:             cmd.Flags().Changed("supervisor"),
 			}
 			if pollInterval > 0 {
 				opts.PollInterval = pollInterval
@@ -110,10 +109,10 @@ func newCommand() *cobra.Command {
 	}
 
 	flags := cmd.PersistentFlags()
-	flags.StringVar(&opts.Root, "root", ".agent-workflow", "Agent workflow root directory")
+	flags.StringVar(&opts.Root, "root", galleyhome.DefaultRoot(), "Galley daemon root directory")
 	flags.StringVar(&opts.ManifestFile, "manifest-file", "", "Optional Galley repo manifest YAML file")
-	flags.StringVar(&opts.SystemPromptFile, "system-prompt-file", "prompts/claude-executor-full.md", "Claude replacement system prompt file")
-	flags.StringVar(&opts.JSONSchemaFile, "json-schema-file", "schemas/claude-result.schema.json", "Claude JSON schema file")
+	flags.StringVar(&opts.SystemPromptFile, "system-prompt-file", "", "Claude replacement system prompt file; defaults to the embedded Galley executor prompt")
+	flags.StringVar(&opts.JSONSchemaFile, "json-schema-file", "", "Claude JSON schema file; defaults to the embedded Galley result schema")
 	flags.StringVar(&opts.QualityProfileFile, "quality-profile-file", "", "Optional Galley quality profile YAML file")
 	flags.StringVar(&opts.EnvironmentProfileFile, "environment-profile-file", "", "Optional Galley environment profile YAML file")
 	flags.BoolVar(&opts.Once, "once", false, "Process available queued tasks once and exit")
@@ -129,15 +128,18 @@ func newCommand() *cobra.Command {
 	flags.BoolVar(&opts.ReplyPRComments, "reply-pr-comments", false, "Post PR comments after handling /galley commands")
 	flags.BoolVar(&opts.CleanupWorktrees, "cleanup-worktrees", false, "Remove clean worktrees for closed or merged PR tasks")
 	flags.StringVar(&opts.PRBase, "pr-base", "", "Base branch for pull requests")
-	flags.StringArrayVar(&supervisorCommand, "supervisor-command", nil, "External supervisor command argv item; repeat for each argv token")
-	flags.StringVar(&pidFile, "pid-file", "", "PID file path for start, stop, and status; defaults to ROOT/galleyd.pid")
-	flags.StringVar(&logFile, "log-file", "", "Log file path for start; defaults to ROOT/galleyd.log")
+	flags.StringVar(&supervisorProvider, "supervisor", "", "Built-in supervisor adapter: claude or codex; defaults to claude")
+	flags.BoolVar(&opts.DisableClaudeGuard, "disable-claude-guard", false, "Disable Galley's session-only Claude guard plugin")
+	flags.StringVar(&opts.ClaudeGuardPluginDir, "claude-guard-plugin-dir", "", "Override Galley's generated Claude guard plugin directory")
+	flags.StringVar(&pidFile, "pid-file", "", "PID file path for start, stop, and status; defaults to ROOT/galley-daemon.pid")
+	flags.StringVar(&logFile, "log-file", "", "Log file path for start; defaults to ROOT/galley-daemon.log")
 	flags.DurationVar(&stopTimeout, "stop-timeout", 30*time.Second, "How long stop waits after sending SIGTERM")
 	flags.DurationVar(&readinessTimeout, "readiness-timeout", 750*time.Millisecond, "How long start waits to detect immediate daemon startup failure")
 	flags.StringVar(&daemonToken, "daemon-token", "", "Internal daemon control token")
 	_ = flags.MarkHidden("daemon-token")
 
 	cmd.AddCommand(
+		newRunCommand(cmd),
 		newStartCommand(&opts, &pidFile, &logFile, &readinessTimeout),
 		newStopCommand(&opts, &pidFile, &stopTimeout),
 		newStatusCommand(&opts, &pidFile),
@@ -146,10 +148,20 @@ func newCommand() *cobra.Command {
 	return cmd
 }
 
+func newRunCommand(parent *cobra.Command) *cobra.Command {
+	return &cobra.Command{
+		Use:           "run",
+		Short:         "Run the Galley daemon in the foreground",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE:          parent.RunE,
+	}
+}
+
 func newStartCommand(opts *daemon.Options, pidFile, logFile *string, readinessTimeout *time.Duration) *cobra.Command {
 	return &cobra.Command{
 		Use:           "start",
-		Short:         "Start galleyd in the background",
+		Short:         "Start Galley daemon in the background",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -168,7 +180,7 @@ func newStartCommand(opts *daemon.Options, pidFile, logFile *string, readinessTi
 			defer release()
 			if status, err := daemonctl.Inspect(paths.PIDFile, opts.Root, exe); err == nil {
 				if status.Alive && status.Verified {
-					return fmt.Errorf("galleyd already running with pid %d", status.Meta.PID)
+					return fmt.Errorf("galley daemon already running with pid %d", status.Meta.PID)
 				}
 				if status.Alive && !status.Verified {
 					return fmt.Errorf("refusing to replace pid file for unverified live pid %d", status.Meta.PID)
@@ -217,7 +229,7 @@ func newStartCommand(opts *daemon.Options, pidFile, logFile *string, readinessTi
 				_ = daemonctl.RemovePID(paths.PIDFile, child.Process.Pid)
 				return fmt.Errorf("%w; see log file %s", err, paths.LogFile)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "galleyd started pid=%d\npid_file=%s\nlog_file=%s\n", child.Process.Pid, paths.PIDFile, paths.LogFile)
+			fmt.Fprintf(cmd.OutOrStdout(), "galley daemon started pid=%d\npid_file=%s\nlog_file=%s\n", child.Process.Pid, paths.PIDFile, paths.LogFile)
 			return child.Process.Release()
 		},
 	}
@@ -226,7 +238,7 @@ func newStartCommand(opts *daemon.Options, pidFile, logFile *string, readinessTi
 func newStopCommand(opts *daemon.Options, pidFile *string, stopTimeout *time.Duration) *cobra.Command {
 	return &cobra.Command{
 		Use:           "stop",
-		Short:         "Stop a background galleyd",
+		Short:         "Stop a background Galley daemon",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -257,16 +269,17 @@ func newStopCommand(opts *daemon.Options, pidFile *string, stopTimeout *time.Dur
 			if err := daemonctl.RemovePID(paths.PIDFile, status.Meta.PID); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "galleyd stopped pid=%d\n", status.Meta.PID)
+			fmt.Fprintf(cmd.OutOrStdout(), "galley daemon stopped pid=%d\n", status.Meta.PID)
 			return nil
 		},
 	}
 }
 
 func newStatusCommand(opts *daemon.Options, pidFile *string) *cobra.Command {
-	return &cobra.Command{
+	var output string
+	cmd := &cobra.Command{
 		Use:           "status",
-		Short:         "Report background galleyd status",
+		Short:         "Report background Galley daemon status",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -277,24 +290,71 @@ func newStatusCommand(opts *daemon.Options, pidFile *string) *cobra.Command {
 			}
 			status, err := daemonctl.Inspect(paths.PIDFile, opts.Root, exe)
 			if errors.Is(err, daemonctl.ErrNotRunning) {
-				fmt.Fprintln(cmd.OutOrStdout(), "galleyd not running")
+				if output == "json" {
+					return writeStatusJSON(cmd, opts, paths, nil, false, false)
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), "galley daemon not running")
 				return nil
 			}
 			if err != nil {
 				return err
 			}
 			if !status.Alive {
-				fmt.Fprintf(cmd.OutOrStdout(), "galleyd not running stale_pid=%d\n", status.Meta.PID)
+				if output == "json" {
+					return writeStatusJSON(cmd, opts, paths, &status, false, status.Verified)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "galley daemon not running stale_pid=%d\n", status.Meta.PID)
 				return nil
 			}
 			if !status.Verified {
-				fmt.Fprintf(cmd.OutOrStdout(), "galleyd unverified pid=%d\n", status.Meta.PID)
+				if output == "json" {
+					return writeStatusJSON(cmd, opts, paths, &status, true, false)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "galley daemon unverified pid=%d\n", status.Meta.PID)
 				return nil
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "galleyd running pid=%d\n", status.Meta.PID)
+			if output == "json" {
+				return writeStatusJSON(cmd, opts, paths, &status, true, true)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "galley daemon running pid=%d\n", status.Meta.PID)
 			return nil
 		},
 	}
+	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text or json")
+	return cmd
+}
+
+func writeStatusJSON(cmd *cobra.Command, opts *daemon.Options, paths daemonctl.Paths, status *daemonctl.Status, alive, verified bool) error {
+	payload := struct {
+		Running           bool   `json:"running"`
+		Verified          bool   `json:"verified"`
+		PID               int    `json:"pid,omitempty"`
+		Root              string `json:"root"`
+		PIDFile           string `json:"pid_file"`
+		LogFile           string `json:"log_file"`
+		ManifestFile      string `json:"manifest_file,omitempty"`
+		Supervisor        string `json:"supervisor,omitempty"`
+		PollPRComments    bool   `json:"poll_pr_comments"`
+		MaxConcurrent     int    `json:"max_concurrent_tasks,omitempty"`
+		MaxConcurrentRepo int    `json:"max_concurrent_per_repo,omitempty"`
+	}{
+		Running:           alive,
+		Verified:          verified,
+		Root:              opts.Root,
+		PIDFile:           paths.PIDFile,
+		LogFile:           paths.LogFile,
+		ManifestFile:      opts.ManifestFile,
+		Supervisor:        opts.Supervisor,
+		PollPRComments:    opts.PollPRComments,
+		MaxConcurrent:     opts.MaxConcurrentTasks,
+		MaxConcurrentRepo: opts.MaxConcurrentPerRepo,
+	}
+	if status != nil {
+		payload.PID = status.Meta.PID
+	}
+	enc := json.NewEncoder(cmd.OutOrStdout())
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
 }
 
 func waitReady(pidFile, root, executable string, timeout time.Duration) error {
@@ -305,13 +365,13 @@ func waitReady(pidFile, root, executable string, timeout time.Duration) error {
 			return err
 		}
 		if !status.Alive {
-			return fmt.Errorf("galleyd exited during startup")
+			return fmt.Errorf("galley daemon exited during startup")
 		}
 		if status.Verified {
 			return nil
 		}
 		if timeout <= 0 || time.Now().After(deadline) {
-			return fmt.Errorf("galleyd did not become ready within %s", timeout)
+			return fmt.Errorf("galley daemon did not become ready within %s", timeout)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}

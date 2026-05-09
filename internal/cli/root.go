@@ -1,6 +1,9 @@
 package cli
 
-import "github.com/spf13/cobra"
+import (
+	"github.com/shinpr/galley/internal/daemoncmd"
+	"github.com/spf13/cobra"
+)
 
 func Execute() error {
 	root := NewRootCommand()
@@ -21,7 +24,7 @@ func NewRootCommand() *cobra.Command {
 	cmd.AddCommand(newTaskCommand())
 	cmd.AddCommand(newClaudeCommand())
 	cmd.AddCommand(newProfileCommand())
-	cmd.AddCommand(newResultCommand())
+	cmd.AddCommand(daemoncmd.NewCommand("daemon"))
 
 	return cmd
 }

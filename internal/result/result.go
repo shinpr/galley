@@ -16,7 +16,7 @@ import (
 	"github.com/shinpr/galley/internal/task"
 )
 
-// CompleteOptions controls deterministic executor result generation.
+// CompleteOptions controls executor result generation from verification evidence.
 type CompleteOptions struct {
 	TaskFile string
 	Output   string
@@ -237,23 +237,25 @@ func (r verificationRun) outputExcerpt() string {
 }
 
 func gitChangedFiles(ctx context.Context, workDir string) ([]string, error) {
-	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
+	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain", "-z")
 	cmd.Dir = workDir
 	output, err := cmd.Output()
 	if err != nil {
-		return []string{}, fmt.Errorf("git status --porcelain: %w", err)
+		return []string{}, fmt.Errorf("git status --porcelain -z: %w", err)
 	}
 	var files []string
-	for _, line := range strings.Split(string(output), "\n") {
-		if strings.TrimSpace(line) == "" {
+	records := bytes.Split(bytes.TrimRight(output, "\x00"), []byte{0})
+	for i := 0; i < len(records); i++ {
+		record := string(records[i])
+		if strings.TrimSpace(record) == "" || len(record) < 4 {
 			continue
 		}
-		path := strings.TrimSpace(line[3:])
-		if strings.Contains(path, " -> ") {
-			parts := strings.Split(path, " -> ")
-			path = parts[len(parts)-1]
-		}
+		status := record[:2]
+		path := strings.TrimSpace(record[3:])
 		files = append(files, path)
+		if (status[0] == 'R' || status[0] == 'C' || status[1] == 'R' || status[1] == 'C') && i+1 < len(records) {
+			i++
+		}
 	}
 	return files, nil
 }

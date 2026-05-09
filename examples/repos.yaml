@@ -1,7 +1,5 @@
 version: 1
 defaults:
-  system_prompt_file: "prompts/claude-executor-full.md"
-  json_schema_file: "schemas/claude-result.schema.json"
   quality_profile_file: "examples/quality-default.yaml"
   environment_profile_file: "examples/environment-local.yaml"
   max_concurrent_tasks: 1
@@ -13,4 +11,4 @@ defaults:
   poll_pr_comments: true
   reply_pr_comments: false
   pr_base: "main"
-  supervisor_command: []
+  supervisor: claude

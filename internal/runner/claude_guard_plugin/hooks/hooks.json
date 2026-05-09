@@ -1,0 +1,28 @@
+{
+  "description": "Guard Galley executor runs and require a validated JSON result before stop.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/block-finalizer-commands.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/require-final-json.py",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

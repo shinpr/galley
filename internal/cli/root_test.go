@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	taskpkg "github.com/shinpr/galley/internal/task"
 )
 
 func TestTaskValidateText(t *testing.T) {
@@ -123,6 +125,140 @@ func TestTaskQueueText(t *testing.T) {
 	}
 }
 
+func TestTaskListText(t *testing.T) {
+	root := t.TempDir()
+	taskPath := writeCLITaskYAML(t)
+	failedPath := filepath.Join(root, "tasks", "failed", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(failedPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(taskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(failedPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := taskpkg.Load(failedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Status = "needs_supervisor_review"
+	loaded.Attempts = []taskpkg.Attempt{{
+		Number:            1,
+		ClaudeStatus:      "completed",
+		SupervisorVerdict: "needs_revision",
+		Summary:           "AC1 still missing",
+	}}
+	loaded.PR.URL = "https://github.com/shinpr/sandbox/pull/123"
+	if err := taskpkg.Save(failedPath, loaded); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, err := executeCommand("task", "list", "--root", root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr got %q", stderr)
+	}
+	for _, want := range []string{"failed\tneeds_supervisor_review\ttask-cli-test", "https://github.com/shinpr/sandbox/pull/123", "needs_revision", "AC1 still missing"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("stdout missing %q: %q", want, stdout)
+		}
+	}
+}
+
+func TestTaskShowByIDText(t *testing.T) {
+	root := t.TempDir()
+	taskPath := writeCLITaskYAML(t)
+	failedPath := filepath.Join(root, "tasks", "failed", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(failedPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(taskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(failedPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := taskpkg.Load(failedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Status = "failed"
+	loaded.Attempts = []taskpkg.Attempt{{
+		Number:            2,
+		ClaudeStatus:      "hard_stop",
+		SupervisorVerdict: "failed",
+		Summary:           "usage limit reached",
+	}}
+	loaded.Risks = []taskpkg.Risk{{
+		ID:         "risk-1",
+		Type:       "blocked",
+		Detail:     "Claude usage limit",
+		Mitigation: "Requeue after quota reset.",
+	}}
+	loaded.Verification.Commands = []taskpkg.VerificationCommand{{
+		Cmd:           "pnpm test",
+		Status:        "failed",
+		OutputExcerpt: "usage limit",
+	}}
+	if err := taskpkg.Save(failedPath, loaded); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, err := executeCommand("task", "show", "--root", root, "task-cli-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr got %q", stderr)
+	}
+	for _, want := range []string{"id: task-cli-test", "state: failed", "latest_attempt: 2", "latest_supervisor_verdict: failed", "latest_risk: risk-1 blocked: Claude usage limit", "failed_verification: pnpm test"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("stdout missing %q: %q", want, stdout)
+		}
+	}
+}
+
+func TestTaskShowByIDWithDots(t *testing.T) {
+	root := t.TempDir()
+	taskPath := writeCLITaskYAML(t)
+	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(donePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(taskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(donePath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := taskpkg.Load(donePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.ID = "task.release.1"
+	loaded.Status = "accepted"
+	if err := taskpkg.Save(donePath, loaded); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, err := executeCommand("task", "show", "--root", root, "task.release.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr got %q", stderr)
+	}
+	if !strings.Contains(stdout, "id: task.release.1") {
+		t.Fatalf("stdout got %q", stdout)
+	}
+}
+
 func TestTaskArchiveText(t *testing.T) {
 	taskPath := writeCLITaskYAML(t)
 	donePath := filepath.Join(t.TempDir(), "tasks", "done", "task.yaml")
@@ -201,6 +337,54 @@ func TestProfileValidateQuality(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "valid: quality default") {
 		t.Fatalf("stdout got %q", stdout)
+	}
+}
+
+func TestProfileResolveJSON(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	repo := t.TempDir()
+	stdout, stderr, err := executeCommand("profile", "resolve", "--root", root, "--cwd", repo, "--output", "json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr got %q", stderr)
+	}
+	var payload struct {
+		Root                   string `json:"root"`
+		CWD                    string `json:"cwd"`
+		RepoKey                string `json:"repo_key"`
+		QualityProfileFile     string `json:"quality_profile_file"`
+		EnvironmentProfileFile string `json:"environment_profile_file"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Root != root || payload.CWD != repo || payload.RepoKey == "" || payload.QualityProfileFile == "" || payload.EnvironmentProfileFile == "" {
+		t.Fatalf("payload got %#v", payload)
+	}
+}
+
+func TestProfileResolveMkdir(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	repo := t.TempDir()
+	stdout, stderr, err := executeCommand("profile", "resolve", "--root", root, "--cwd", repo, "--mkdir", "--output", "json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr got %q", stderr)
+	}
+	var payload struct {
+		QualityProfileFile string `json:"quality_profile_file"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Dir(payload.QualityProfileFile)); err != nil {
+		t.Fatalf("profile dir missing: %v", err)
 	}
 }
 
@@ -304,36 +488,6 @@ func TestClaudeArgsShell(t *testing.T) {
 	}
 }
 
-func TestClaudeRunUsesFakeClaude(t *testing.T) {
-	taskPath := writeCLITaskYAML(t)
-	promptPath, schemaPath := cliPromptFiles(t)
-	binDir := t.TempDir()
-	fakeClaude := filepath.Join(binDir, "claude")
-	if err := os.WriteFile(fakeClaude, []byte("#!/bin/sh\necho fake-claude\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", binDir)
-
-	stdout, stderr, err := executeCommand("claude", "run", "--system-prompt-file", promptPath, "--json-schema-file", schemaPath, "--timeout-ms", "5000", taskPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stderr != "" {
-		t.Fatalf("stderr got %q", stderr)
-	}
-
-	var payload struct {
-		ExitCode int    `json:"exit_code"`
-		Stdout   string `json:"stdout"`
-	}
-	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
-		t.Fatal(err)
-	}
-	if payload.ExitCode != 0 || !strings.Contains(payload.Stdout, "fake-claude") {
-		t.Fatalf("unexpected run payload: %#v", payload)
-	}
-}
-
 func executeCommand(args ...string) (string, string, error) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -350,7 +504,7 @@ func writeCLITaskYAML(t *testing.T) string {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "task.yaml")
 	body := `id: "task-cli-test"
-mode: "hitl"
+mode: "afk"
 status: "queued"
 goal: "Test CLI."
 acceptance_criteria:
@@ -363,23 +517,19 @@ scope:
   allowed_paths:
     - "internal/task"
   forbidden_paths: []
-  permission: "safe-edit"
+  permission: "edit"
 execution_policy:
   loop_budget: 3
   timeout_ms: 600000
-  afk_decision_policy: ""
+  afk_decision_policy: "choose-smallest-reversible"
   stop_on_destructive_operation: true
   stop_on_missing_secret: false
   stop_on_external_service_unavailable: false
 worktree:
-  enabled: false
-  branch: ""
-  path: ""
+  enabled: true
+  branch: "agent/task-cli-test"
+  path: "../repo.worktrees/task-cli-test"
 supervisor:
-  provider: "codex"
-  mode: "review_and_repair"
-  approval_required: true
-  approval_status: "pending"
   review_iterations: 0
 executor:
   cli: "claude"
@@ -388,7 +538,6 @@ executor:
   prompt_profile: "codexized-claude-executor-v1"
   prompt_mode: "replace"
   max_budget_usd: 0
-  max_turns: 0
 decisions: []
 risks: []
 attempts: []

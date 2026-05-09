@@ -72,15 +72,12 @@ func TestRunOnceMovesTaskToDoneAndWritesRunEvidence(t *testing.T) {
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", "claude.stdout.jsonl"), 1)
 }
 
-func TestRunOnceUsesExternalSupervisorCommand(t *testing.T) {
+func TestRunOnceUsesModelSupervisorProvider(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
 	writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
-	supervisorPath := filepath.Join(t.TempDir(), "supervisor")
-	if err := os.WriteFile(supervisorPath, []byte("#!/bin/sh\ncat >/dev/null\necho '{\"status\":\"accepted\",\"summary\":\"external accepted\",\"acceptance_gaps\":[],\"quality_findings\":[],\"reviewed_files\":[\"daemon-output.txt\"],\"acceptance_evidence\":[{\"ac_id\":\"AC1\",\"evidence\":[\"diff\"]}],\"findings\":[],\"residual_risks\":[],\"confidence\":\"high\",\"next_work_order\":\"\"}'\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	writeFakeCodexSupervisor(t, `{"status":"accepted","summary":"codex accepted","acceptance_gaps":[],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["diff"]}],"findings":[],"residual_risks":[],"confidence":"high","next_work_order":""}`)
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -93,7 +90,7 @@ func TestRunOnceUsesExternalSupervisorCommand(t *testing.T) {
 		JSONSchemaFile:     schemaPath,
 		Once:               true,
 		MaxConcurrentTasks: 1,
-		SupervisorCommand:  []string{supervisorPath},
+		Supervisor:         "codex",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -102,13 +99,13 @@ func TestRunOnceUsesExternalSupervisorCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if doneTask.Attempts[0].SupervisorVerdict != "accepted" || !strings.Contains(doneTask.Attempts[0].Summary, "external accepted") {
+	if doneTask.Attempts[0].SupervisorVerdict != "accepted" || !strings.Contains(doneTask.Attempts[0].Summary, "codex accepted") {
 		t.Fatalf("attempts got %#v", doneTask.Attempts)
 	}
-	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", "external_supervisor_verdict.json"), 1)
+	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", "model_supervisor_verdict.json"), 1)
 }
 
-func TestRunOnceRetriesCorrectiveWorkOrderUntilAccepted(t *testing.T) {
+func TestRunOnceRetriesModelSupervisorWorkOrderUntilAccepted(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
@@ -154,7 +151,7 @@ fi
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-2", "supervisor_verdict.json"), 1)
 }
 
-func TestRunOncePreservesExecutorDecisionsWithDeterministicVerification(t *testing.T) {
+func TestRunOncePreservesExecutorDecisionsWithVerificationEvidence(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
@@ -229,6 +226,117 @@ func TestRunOnceOpenPRCommitsPushesAndUpdatesTask(t *testing.T) {
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "git_commit_result.json"), 1)
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "git_push_result.json"), 1)
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "gh_pr_create_result.json"), 1)
+}
+
+func TestRunOnceOpenPRUsesExecutorCommit(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	runDaemonGit(t, t.TempDir(), "init", "--bare", remote)
+	runDaemonGit(t, repo, "remote", "add", "origin", remote)
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+	writeFakeClaude(t, "echo committed > daemon-output.txt\ngit add daemon-output.txt\ngit commit -m executor-commit\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"committed diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	writeFakeCommand(t, "gh", "echo https://github.com/example/galley/pull/789\n")
+	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonTask(t, taskPath, repo)
+
+	err := Run(context.Background(), Options{
+		Root:               root,
+		SystemPromptFile:   promptPath,
+		JSONSchemaFile:     schemaPath,
+		Once:               true,
+		MaxConcurrentTasks: 1,
+		OpenPR:             true,
+		PRBase:             "main",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	doneTask, err := task.Load(filepath.Join(root, "tasks", "done", "task.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doneTask.PR.URL != "https://github.com/example/galley/pull/789" {
+		t.Fatalf("pr url got %q", doneTask.PR.URL)
+	}
+	assertGlobCount(t, filepath.Join(root, "runs", "*", "git_push_result.json"), 1)
+	assertGlobCount(t, filepath.Join(root, "runs", "*", "gh_pr_create_result.json"), 1)
+	assertGlobCount(t, filepath.Join(root, "runs", "*", "git_commit_result.json"), 0)
+	worktreePath := taskWorktreePath(repo, doneTask.Worktree.Path)
+	if got := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", worktreePath, "log", "--oneline", "-1"))); !strings.Contains(got, "executor-commit") {
+		t.Fatalf("last commit got %q", got)
+	}
+}
+
+func TestRunOnceCopiesInputFileAndRemovesBeforeCommit(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	runDaemonGit(t, t.TempDir(), "init", "--bare", remote)
+	runDaemonGit(t, repo, "remote", "add", "origin", remote)
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+	inputPath := filepath.Join(t.TempDir(), "plan.md")
+	if err := os.WriteFile(inputPath, []byte("design note from plan\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeFakeClaude(t, "grep 'design note' docs/plan.md >/dev/null\necho change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"used plan\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\",\"plan read\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	writeFakeCommand(t, "gh", "echo https://github.com/example/galley/pull/456\n")
+	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonTask(t, taskPath, repo)
+	loaded, err := task.Load(taskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Files = []task.InputFile{{
+		Source:      inputPath,
+		Destination: "docs/plan.md",
+		Description: "design plan",
+		Commit:      false,
+	}}
+	if err := task.Save(taskPath, loaded); err != nil {
+		t.Fatal(err)
+	}
+
+	err = Run(context.Background(), Options{
+		Root:               root,
+		SystemPromptFile:   promptPath,
+		JSONSchemaFile:     schemaPath,
+		Once:               true,
+		MaxConcurrentTasks: 1,
+		OpenPR:             true,
+		PRBase:             "main",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	doneTask, err := task.Load(filepath.Join(root, "tasks", "done", "task.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doneTask.PR.URL != "https://github.com/example/galley/pull/456" {
+		t.Fatalf("pr url got %q", doneTask.PR.URL)
+	}
+	worktreePath := taskWorktreePath(repo, doneTask.Worktree.Path)
+	if _, err := os.Stat(filepath.Join(worktreePath, "docs", "plan.md")); !os.IsNotExist(err) {
+		t.Fatalf("expected non-committed input file removed before commit, stat err=%v", err)
+	}
+	commitOutput, err := exec.Command("git", "-C", worktreePath, "show", "--name-only", "--format=", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	committedFiles := string(commitOutput)
+	if strings.Contains(committedFiles, "docs/plan.md") {
+		t.Fatalf("non-committed input file was committed:\n%s", committedFiles)
+	}
+	assertGlobCount(t, filepath.Join(root, "runs", "*", "input_files.json"), 1)
 }
 
 func TestRunOnceMovesInvalidTaskToFailed(t *testing.T) {
@@ -690,10 +798,7 @@ func TestShutdownStopsBeforeRetryAttempt(t *testing.T) {
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
 	attemptLog := filepath.Join(t.TempDir(), "attempts.log")
 	writeFakeClaude(t, "echo attempt >> "+attemptLog+"\nsleep 0.05\necho change >> daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
-	supervisorPath := filepath.Join(t.TempDir(), "supervisor")
-	if err := os.WriteFile(supervisorPath, []byte("#!/bin/sh\ncat >/dev/null\necho '{\"status\":\"needs_revision\",\"summary\":\"external wants retry\",\"acceptance_gaps\":[\"retry\"],\"quality_findings\":[],\"reviewed_files\":[\"daemon-output.txt\"],\"acceptance_evidence\":[],\"findings\":[{\"severity\":\"medium\",\"category\":\"acceptance\",\"file\":\"daemon-output.txt\",\"summary\":\"retry\",\"blocks_acceptance\":true}],\"residual_risks\":[],\"confidence\":\"high\",\"next_work_order\":\"try again\"}'\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	writeFakeCodexSupervisor(t, `{"status":"needs_revision","summary":"codex wants retry","acceptance_gaps":["retry"],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[],"findings":[{"severity":"medium","category":"acceptance","file":"daemon-output.txt","summary":"retry","blocks_acceptance":true}],"residual_risks":[],"confidence":"high","next_work_order":"try again"}`)
 	queueDir := filepath.Join(root, "tasks", "queued")
 	if err := os.MkdirAll(queueDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -709,8 +814,8 @@ func TestShutdownStopsBeforeRetryAttempt(t *testing.T) {
 			JSONSchemaFile:     schemaPath,
 			MaxConcurrentTasks: 1,
 			ClaimTTL:           time.Hour,
-			ShutdownTimeout:    time.Second,
-			SupervisorCommand:  []string{supervisorPath},
+			ShutdownTimeout:    5 * time.Second,
+			Supervisor:         "codex",
 		}.withDefaults())
 		done <- err
 	}()
@@ -891,7 +996,28 @@ func TestCleanupWorktreesSkipsDirtyClosedPRWorktree(t *testing.T) {
 
 func writeFakeClaude(t *testing.T, body string) {
 	t.Helper()
-	writeFakeCommand(t, "claude", body)
+	writeFakeCommand(t, "claude", `supervisor=0
+for arg in "$@"; do
+  if [ "$arg" = "plan" ]; then
+    supervisor=1
+  fi
+done
+if [ "$supervisor" = "1" ]; then
+  request="$(cat)"
+  if printf '%s' "$request" | grep -q '"status":"hard_stop"'; then
+    printf '%s\n' '{"status":"hard_stop","summary":"executor reported hard_stop","acceptance_gaps":[],"reviewed_files":[],"acceptance_evidence":[],"findings":[{"severity":"high","category":"execution","file":"","summary":"executor reported hard_stop","blocks_acceptance":true}],"residual_risks":[],"confidence":"high","next_work_order":""}'
+  elif printf '%s' "$request" | grep -q '"parse_error":"'; then
+    printf '%s\n' '{"status":"needs_revision","summary":"executor result was invalid","acceptance_gaps":["executor result JSON is invalid"],"reviewed_files":[],"acceptance_evidence":[],"findings":[{"severity":"medium","category":"verification","file":"","summary":"executor result JSON is invalid","blocks_acceptance":true}],"residual_risks":[],"confidence":"high","next_work_order":"Return valid structured JSON and preserve any useful workspace changes."}'
+  elif printf '%s' "$request" | grep -q '"status":"completed_with_risks"'; then
+    printf '%s\n' '{"status":"needs_revision","summary":"executor reported risks","acceptance_gaps":["executor reported risks"],"reviewed_files":[],"acceptance_evidence":[],"findings":[{"severity":"medium","category":"verification","file":"","summary":"executor reported risks","blocks_acceptance":true}],"residual_risks":[],"confidence":"high","next_work_order":"Resolve the reported risks and rerun verification."}'
+  elif printf '%s' "$request" | grep -q '"diff_dirty":false'; then
+    printf '%s\n' '{"status":"needs_revision","summary":"no repository diff was produced","acceptance_gaps":["no repository diff was produced"],"reviewed_files":[],"acceptance_evidence":[],"findings":[{"severity":"medium","category":"acceptance","file":"","summary":"no repository diff was produced","blocks_acceptance":true}],"residual_risks":[],"confidence":"high","next_work_order":"Make the required repository change and return valid structured JSON."}'
+  else
+    printf '%s\n' '{"status":"accepted","summary":"fake claude supervisor accepted","acceptance_gaps":[],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["diff"]}],"findings":[],"residual_risks":[],"confidence":"high","next_work_order":""}'
+  fi
+  exit 0
+fi
+`+body)
 }
 
 func prepareDonePRTask(t *testing.T, taskPath, repo, prStatus string) (task.Task, string) {
@@ -923,6 +1049,26 @@ func writeFakeCommand(t *testing.T, name, body string) {
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
+func writeFakeCodexSupervisor(t *testing.T, verdict string) {
+	t.Helper()
+	writeFakeCommand(t, "codex", `out=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output-last-message)
+      out="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+cat >/dev/null
+printf '%s\n' '`+verdict+`' > "$out"
+printf '%s\n' '{"event":"done"}'
+`)
+}
+
 func initDaemonGitRepo(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()
@@ -947,6 +1093,15 @@ func runDaemonGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
+func mustCommandOutput(t *testing.T, name string, args ...string) []byte {
+	t.Helper()
+	output, err := exec.Command(name, args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("%s %v failed: %v\n%s", name, args, err, output)
+	}
+	return output
+}
+
 func writeDaemonPromptFiles(t *testing.T) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -965,7 +1120,7 @@ func writeDaemonTask(t *testing.T, path, repo string) {
 	t.Helper()
 	name := filepath.Base(path)
 	name = name[:len(name)-len(filepath.Ext(name))]
-	worktreePath := filepath.Join(filepath.Dir(repo), "worktrees", name)
+	worktreePath := filepath.Join("..", "worktrees", name)
 	body := `id: "task-daemon-test"
 mode: "afk"
 status: "queued"
@@ -980,7 +1135,7 @@ scope:
   allowed_paths:
     - "."
   forbidden_paths: []
-  permission: "safe-edit"
+  permission: "edit"
 execution_policy:
   loop_budget: 1
   timeout_ms: 5000
@@ -993,10 +1148,6 @@ worktree:
   branch: "agent/` + name + `"
   path: "` + worktreePath + `"
 supervisor:
-  provider: "codex"
-  mode: "review_and_repair"
-  approval_required: true
-  approval_status: "pending"
   review_iterations: 0
 executor:
   cli: "claude"
@@ -1005,7 +1156,6 @@ executor:
   prompt_profile: "codexized-claude-executor-v1"
   prompt_mode: "replace"
   max_budget_usd: 0
-  max_turns: 0
 decisions: []
 risks: []
 attempts: []
@@ -1018,6 +1168,13 @@ pr:
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func taskWorktreePath(repo, path string) string {
+	if filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(repo, path)
 }
 
 func setLoopBudget(t *testing.T, path string, count int) {

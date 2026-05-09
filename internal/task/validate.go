@@ -10,11 +10,9 @@ import (
 )
 
 var (
-	validModes               = []string{"hitl", "afk"}
+	validModes               = []string{"afk"}
 	validStatuses            = []string{"draft", "queued", "running", "needs_supervisor_review", "accepted", "pr_opened", "failed", "closed", "merged", "archived"}
-	validPermissions         = []string{"read-only", "safe-edit", "yolo"}
-	validSupervisorProviders = []string{"codex", "claude", "manual"}
-	validSupervisorModes     = []string{"review_only", "review_and_repair", "approve_only"}
+	validPermissions         = []string{"read-only", "edit", "sandbox-full-access"}
 	validPromptModes         = []string{"replace", "append"}
 	validAFKDecisionPolicies = []string{"choose-smallest-reversible"}
 	validTaskIDPattern       = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
@@ -42,6 +40,7 @@ func ValidateStructural(t Task) ValidationResult {
 	require(&result, t.Goal != "", "goal is required")
 
 	validateAcceptance(&result, t)
+	validateInputFiles(&result, t)
 	validateScope(&result, t)
 	validateExecutionPolicy(&result, t)
 	validateWorktree(&result, t)
@@ -69,6 +68,15 @@ func ValidateEnvironment(t Task) ValidationResult {
 	if err != nil || !stat.IsDir() {
 		result.Errors = append(result.Errors, fmt.Sprintf("scope.cwd must exist and be a directory: %s", t.Scope.CWD))
 	}
+	for i, file := range t.Files {
+		if file.Source == "" || !filepath.IsAbs(file.Source) {
+			continue
+		}
+		stat, err := os.Stat(file.Source)
+		if err != nil || stat.IsDir() {
+			result.Errors = append(result.Errors, fmt.Sprintf("files[%d].source must exist and be a file: %s", i, file.Source))
+		}
+	}
 	return result
 }
 
@@ -89,6 +97,19 @@ func validateAcceptance(result *ValidationResult, t Task) {
 		if ac.Status == "" {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("%s.status is empty; treating as pending", prefix))
 		}
+	}
+}
+
+func validateInputFiles(result *ValidationResult, t Task) {
+	for i, file := range t.Files {
+		prefix := fmt.Sprintf("files[%d]", i)
+		require(result, file.Source != "", "%s.source is required", prefix)
+		require(result, file.Destination != "", "%s.destination is required", prefix)
+		if file.Destination != "" {
+			validateRelativePath(result, prefix+".destination", file.Destination)
+		}
+		require(result, pathAllowedByScope(file.Destination, t.Scope.AllowedPaths), "%s.destination must be within scope.allowed_paths", prefix)
+		require(result, !pathForbiddenByScope(file.Destination, t.Scope.ForbiddenPaths), "%s.destination must not be within scope.forbidden_paths", prefix)
 	}
 }
 
@@ -133,9 +154,6 @@ func validateExecutionPolicy(result *ValidationResult, t Task) {
 }
 
 func validateWorktree(result *ValidationResult, t Task) {
-	if t.Mode != "afk" {
-		return
-	}
 	require(result, t.Worktree.Enabled, "worktree.enabled must be true for AFK tasks")
 	require(result, t.Worktree.Branch != "", "worktree.branch is required for AFK tasks")
 	if t.Worktree.Branch != "" {
@@ -143,12 +161,20 @@ func validateWorktree(result *ValidationResult, t Task) {
 	}
 	require(result, t.Worktree.Path != "", "worktree.path is required for AFK tasks")
 	if t.Worktree.Path != "" && filepath.IsAbs(t.Worktree.Path) {
-		result.Warnings = append(result.Warnings, "worktree.path is absolute; relative paths are easier to relocate")
+		result.Errors = append(result.Errors, "worktree.path must be relative")
 	} else if t.Worktree.Path != "" {
-		clean := filepath.Clean(t.Worktree.Path)
-		if clean == ".." || strings.HasPrefix(clean, "../") {
-			result.Errors = append(result.Errors, fmt.Sprintf("worktree.path contains parent traversal path %q", t.Worktree.Path))
-		}
+		validateWorktreePath(result, t.Worktree.Path)
+	}
+}
+
+func validateWorktreePath(result *ValidationResult, path string) {
+	clean := filepath.Clean(path)
+	if clean == ".." || strings.HasPrefix(clean, "../../") {
+		result.Errors = append(result.Errors, fmt.Sprintf("worktree.path contains parent traversal path %q", path))
+		return
+	}
+	if !strings.HasPrefix(clean, "../") {
+		result.Errors = append(result.Errors, `worktree.path must point to a sibling path outside scope.cwd, for example "../repo.worktrees/task"`)
 	}
 }
 
@@ -173,11 +199,6 @@ func validGitBranchName(branch string) bool {
 }
 
 func validateSupervisor(result *ValidationResult, t Task) {
-	require(result, slices.Contains(validSupervisorProviders, t.Supervisor.Provider), "supervisor.provider must be one of: %s", strings.Join(validSupervisorProviders, ", "))
-	require(result, slices.Contains(validSupervisorModes, t.Supervisor.Mode), "supervisor.mode must be one of: %s", strings.Join(validSupervisorModes, ", "))
-	if t.Supervisor.ApprovalStatus == "" {
-		result.Warnings = append(result.Warnings, "supervisor.approval_status is empty; treating as pending")
-	}
 	require(result, t.Supervisor.ReviewIterations >= 0, "supervisor.review_iterations cannot be negative")
 }
 
@@ -192,10 +213,40 @@ func validateExecutor(result *ValidationResult, t Task) {
 		require(result, slices.Contains(validPromptModes, t.Executor.PromptMode), "executor.prompt_mode must be one of: %s", strings.Join(validPromptModes, ", "))
 	}
 	require(result, t.Executor.MaxBudgetUSD >= 0, "executor.max_budget_usd cannot be negative")
-	require(result, t.Executor.MaxTurns >= 0, "executor.max_turns cannot be negative")
-	if t.Executor.MaxTurns > 0 {
-		result.Warnings = append(result.Warnings, "executor.max_turns is not applied because Claude Code 2.1.132 does not expose --max-turns")
+}
+
+func pathAllowedByScope(path string, allowed []string) bool {
+	if path == "" {
+		return false
 	}
+	cleanPath := filepath.Clean(path)
+	for _, allowedPath := range allowed {
+		cleanAllowed := filepath.Clean(allowedPath)
+		if cleanAllowed == "." {
+			return true
+		}
+		if cleanPath == cleanAllowed || strings.HasPrefix(cleanPath, cleanAllowed+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+func pathForbiddenByScope(path string, forbidden []string) bool {
+	if path == "" {
+		return false
+	}
+	cleanPath := filepath.Clean(path)
+	for _, forbiddenPath := range forbidden {
+		cleanForbidden := filepath.Clean(forbiddenPath)
+		if cleanForbidden == "." {
+			return true
+		}
+		if cleanPath == cleanForbidden || strings.HasPrefix(cleanPath, cleanForbidden+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 func validateRelativePath(result *ValidationResult, field, p string) {

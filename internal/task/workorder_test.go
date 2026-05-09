@@ -68,3 +68,30 @@ func TestRenderWorkOrderIncludesPRReviewInstructions(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderWorkOrderIncludesInputFiles(t *testing.T) {
+	t.Parallel()
+	loaded, err := Load(writeTaskYAML(t, "loop_budget: 3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Files = []InputFile{{
+		Source:      "/tmp/plan.md",
+		Destination: ".galley/inputs/plan.md",
+		Description: "Implementation plan",
+		Commit:      false,
+	}}
+
+	workOrder := RenderWorkOrder(loaded)
+	for _, want := range []string{
+		"## Input Files",
+		".galley/inputs/plan.md",
+		"Implementation plan",
+		"commit with task changes: `false`",
+		"Galley removes this file before commit/PR finalization",
+	} {
+		if !strings.Contains(workOrder, want) {
+			t.Fatalf("work order missing %q:\n%s", want, workOrder)
+		}
+	}
+}

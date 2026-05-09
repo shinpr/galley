@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/shinpr/galley/internal/task"
@@ -166,6 +167,30 @@ func TestCaptureSnapshot(t *testing.T) {
 	}
 }
 
+func TestCaptureSnapshotFromBaseDetectsExecutorCommit(t *testing.T) {
+	repo := initGitRepo(t)
+	base := strings.TrimSpace(string(mustGitOutput(t, repo, "rev-parse", "HEAD")))
+	if err := os.WriteFile(filepath.Join(repo, "committed.txt"), []byte("committed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "committed.txt")
+	runGit(t, repo, "commit", "-m", "executor commit")
+
+	snapshot, err := CaptureSnapshotFromBase(context.Background(), repo, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snapshot.Dirty {
+		t.Fatalf("expected branch delta dirty snapshot: %#v", snapshot)
+	}
+	if snapshot.StatusPorcelain != "" {
+		t.Fatalf("expected clean worktree status, got %q", snapshot.StatusPorcelain)
+	}
+	if !strings.Contains(snapshot.BranchDiff, "committed.txt") || !strings.Contains(snapshot.Diff, "committed.txt") {
+		t.Fatalf("branch diff missing committed file: %#v", snapshot)
+	}
+}
+
 func initGitRepo(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()
@@ -188,4 +213,15 @@ func runGit(t *testing.T, dir string, args ...string) {
 	if err != nil {
 		t.Fatalf("git %v failed: %v\n%s", args, err, output)
 	}
+}
+
+func mustGitOutput(t *testing.T, dir string, args ...string) []byte {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, output)
+	}
+	return output
 }

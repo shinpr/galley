@@ -1,0 +1,20 @@
+{
+  "name": "galley-tools",
+  "interface": {
+    "displayName": "Galley Tools"
+  },
+  "plugins": [
+    {
+      "name": "galley",
+      "source": {
+        "source": "local",
+        "path": "./plugins/galley"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

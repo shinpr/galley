@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"go.yaml.in/yaml/v3"
@@ -32,9 +33,9 @@ func Requeue(path string, opts RequeueOptions) (RequeueResult, error) {
 	if loaded.Status == "queued" {
 		return RequeueResult{}, fmt.Errorf("task %s is already queued", loaded.ID)
 	}
+	ResolveFileSources(path, &loaded)
 	ApplyDefaults(&loaded)
 	loaded.Status = "queued"
-	loaded.Supervisor.ApprovalStatus = "pending"
 	loaded.Supervisor.ReviewIterations++
 	for _, commentID := range opts.ProcessedCommentIDs {
 		if commentID != "" && !containsString(loaded.PR.ProcessedCommentIDs, commentID) {
@@ -123,8 +124,8 @@ func writeMovedTask(src, dst string, loaded Task) error {
 
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
-		if value != "" {
-			return value
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
 		}
 	}
 	return ""

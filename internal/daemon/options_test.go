@@ -20,6 +20,7 @@ defaults:
   poll_pr_comments: true
   cleanup_worktrees: true
   pr_base: develop
+  supervisor: codex
 `)
 	opts, err := (Options{ManifestFile: manifestPath}).withManifest()
 	if err != nil {
@@ -40,7 +41,7 @@ defaults:
 	if opts.PollInterval != 2*time.Second {
 		t.Fatalf("poll interval got %s", opts.PollInterval)
 	}
-	if !opts.OpenPR || !opts.PollPRComments || !opts.CleanupWorktrees || opts.PRBase != "develop" {
+	if !opts.OpenPR || !opts.PollPRComments || !opts.CleanupWorktrees || opts.PRBase != "develop" || opts.Supervisor != "codex" {
 		t.Fatalf("manifest bool/string defaults not applied: %#v", opts)
 	}
 }
@@ -58,6 +59,7 @@ defaults:
   poll_pr_comments: true
   cleanup_worktrees: true
   pr_base: develop
+  supervisor: codex
 `)
 	opts, err := (Options{
 		ManifestFile:         manifestPath,
@@ -69,6 +71,7 @@ defaults:
 		PollPRComments:       false,
 		CleanupWorktrees:     false,
 		PRBase:               "main",
+		Supervisor:           "claude",
 		Explicit: ExplicitOptions{
 			SystemPromptFile:     true,
 			MaxConcurrentTasks:   true,
@@ -78,6 +81,7 @@ defaults:
 			PollPRComments:       true,
 			CleanupWorktrees:     true,
 			PRBase:               true,
+			Supervisor:           true,
 		},
 	}).withManifest()
 	if err != nil {
@@ -94,6 +98,9 @@ defaults:
 	}
 	if opts.PRBase != "main" {
 		t.Fatalf("pr base got %q", opts.PRBase)
+	}
+	if opts.Supervisor != "claude" {
+		t.Fatalf("supervisor got %q", opts.Supervisor)
 	}
 	if opts.JSONSchemaFile != "manifest-schema.json" {
 		t.Fatalf("non-explicit schema should come from manifest, got %q", opts.JSONSchemaFile)

@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +10,8 @@ import (
 	"time"
 
 	"github.com/shinpr/galley/internal/config"
+	"github.com/shinpr/galley/internal/galleyhome"
+	"github.com/shinpr/galley/internal/jsonio"
 	"github.com/shinpr/galley/internal/queue"
 	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/task"
@@ -37,8 +38,10 @@ type Options struct {
 	ReplyPRComments        bool
 	CleanupWorktrees       bool
 	PRBase                 string
-	SupervisorCommand      []string
+	Supervisor             string
 	ShutdownTimeout        time.Duration
+	DisableClaudeGuard     bool
+	ClaudeGuardPluginDir   string
 	Explicit               ExplicitOptions
 }
 
@@ -59,7 +62,7 @@ type ExplicitOptions struct {
 	ReplyPRComments        bool
 	CleanupWorktrees       bool
 	PRBase                 bool
-	SupervisorCommand      bool
+	Supervisor             bool
 }
 
 // Run starts the daemon loop.
@@ -99,16 +102,16 @@ func Run(ctx context.Context, opts Options) error {
 	for {
 		if opts.PollPRComments {
 			if err := pollPRComments(ctx, opts); err != nil {
-				return err
+				fmt.Fprintf(os.Stderr, "galley: poll PR comments failed: %v\n", err)
 			}
 		}
 		if opts.CleanupWorktrees {
 			if err := cleanupWorktrees(ctx, opts); err != nil {
-				return err
+				fmt.Fprintf(os.Stderr, "galley: cleanup worktrees failed: %v\n", err)
 			}
 		}
 		if _, err := processAvailable(ctx, opts); err != nil {
-			return err
+			fmt.Fprintf(os.Stderr, "galley: process available tasks failed: %v\n", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -126,6 +129,9 @@ func Preflight(opts Options) (Options, error) {
 		return Options{}, err
 	}
 	opts = opts.withDefaults()
+	if opts.Supervisor != "" && opts.Supervisor != "codex" && opts.Supervisor != "claude" {
+		return Options{}, fmt.Errorf("supervisor must be one of: codex, claude")
+	}
 	if err := queue.EnsureLayout(opts.Root); err != nil {
 		return Options{}, err
 	}
@@ -186,21 +192,18 @@ func (opts Options) withManifest() (Options, error) {
 	if !opts.Explicit.PRBase {
 		opts.PRBase = defaults.PRBase
 	}
-	if !opts.Explicit.SupervisorCommand {
-		opts.SupervisorCommand = defaults.SupervisorCommand
+	if !opts.Explicit.Supervisor {
+		opts.Supervisor = defaults.Supervisor
 	}
 	return opts, nil
 }
 
 func (opts Options) withDefaults() Options {
 	if opts.Root == "" {
-		opts.Root = ".agent-workflow"
+		opts.Root = galleyhome.DefaultRoot()
 	}
-	if opts.SystemPromptFile == "" {
-		opts.SystemPromptFile = "prompts/claude-executor-full.md"
-	}
-	if opts.JSONSchemaFile == "" {
-		opts.JSONSchemaFile = "schemas/claude-result.schema.json"
+	if opts.Supervisor == "" {
+		opts.Supervisor = "claude"
 	}
 	if opts.MaxConcurrentTasks <= 0 {
 		opts.MaxConcurrentTasks = 1
@@ -282,9 +285,19 @@ func processAvailable(ctx context.Context, opts Options) (int, error) {
 		default:
 		}
 		repoKey := ""
+		var repoLoadErr error
+		if queuedHasClaimConflict(opts.Root, queuedPath) {
+			continue
+		}
 		if opts.MaxConcurrentPerRepo > 0 {
 			loaded, loadErr := task.Load(queuedPath)
-			if loadErr == nil {
+			if loadErr != nil {
+				repoLoadErr = loadErr
+				if firstClaimErr == nil {
+					firstClaimErr = fmt.Errorf("load queued task for repo limit %s: %w", queuedPath, repoLoadErr)
+				}
+				continue
+			} else {
 				repoKey = loaded.Scope.CWD
 				if repoKey != "" && repoCounts[repoKey] >= opts.MaxConcurrentPerRepo {
 					continue
@@ -325,8 +338,21 @@ func processAvailable(ctx context.Context, opts Options) (int, error) {
 	return claimedCount, firstErr
 }
 
+func queuedHasClaimConflict(root, queuedPath string) bool {
+	runningPath := filepath.Join(root, "tasks", "running", filepath.Base(queuedPath))
+	if _, err := os.Stat(runningPath); err == nil {
+		return true
+	}
+	if _, err := os.Stat(runningPath + ".lock"); err == nil {
+		return true
+	}
+	return false
+}
+
 func gracefulTaskContext(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
+	done := make(chan struct{})
+	var once sync.Once
 	stop := context.AfterFunc(parent, func() {
 		if timeout <= 0 {
 			cancel()
@@ -334,10 +360,14 @@ func gracefulTaskContext(parent context.Context, timeout time.Duration) (context
 		}
 		timer := time.NewTimer(timeout)
 		defer timer.Stop()
-		<-timer.C
-		cancel()
+		select {
+		case <-timer.C:
+			cancel()
+		case <-done:
+		}
 	})
 	return ctx, func() {
+		once.Do(func() { close(done) })
 		stop()
 		cancel()
 	}
@@ -348,6 +378,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	if err != nil {
 		return failTaskMove(opts.Root, runningPath, nil, err)
 	}
+	task.ResolveFileSources(runningPath, &loaded)
 	task.ApplyDefaults(&loaded)
 	loaded.Status = "running"
 	if err := task.Save(runningPath, loaded); err != nil {
@@ -397,6 +428,15 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 		return failTaskMove(opts.Root, runningPath, &loaded, err)
 	}
 	if err := writeJSON(filepath.Join(runDir, "workspace.json"), prepared); err != nil {
+		loaded.Status = "failed"
+		return failTaskMove(opts.Root, runningPath, &loaded, err)
+	}
+	preparedFiles, err := prepareInputFiles(prepared.CWD, loaded.Files)
+	if err != nil {
+		loaded.Status = "failed"
+		return failTaskMove(opts.Root, runningPath, &loaded, err)
+	}
+	if err := writeJSON(filepath.Join(runDir, "input_files.json"), preparedFiles); err != nil {
 		loaded.Status = "failed"
 		return failTaskMove(opts.Root, runningPath, &loaded, err)
 	}
@@ -462,6 +502,9 @@ func moveTask(root, currentPath, state string, updated *task.Task) error {
 }
 
 func failTaskMove(root, runningPath string, updated *task.Task, primary error) error {
+	if updated != nil && (updated.Status == "" || updated.Status == "queued" || updated.Status == "running") {
+		updated.Status = "failed"
+	}
 	if moveErr := moveTask(root, runningPath, "failed", updated); moveErr != nil {
 		fmt.Fprintf(os.Stderr, "galley: failed to move task %s to failed: %v (primary: %v)\n", runningPath, moveErr, primary)
 		return errors.Join(primary, moveErr)
@@ -487,17 +530,7 @@ func verificationStatus(err error) string {
 }
 
 func writeJSON(path string, value any) error {
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
-		return fmt.Errorf("create %s: %w", path, err)
-	}
-	defer file.Close()
-	enc := json.NewEncoder(file)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(value); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	return nil
+	return jsonio.Write(path, value)
 }
 
 func copyFile(src, dst string) error {

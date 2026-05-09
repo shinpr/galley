@@ -3,6 +3,7 @@
 /galleyd
 /galleyd.exe
 /bin/
+/tmp/
 
 # Local agent/tool state
 /.claude/
@@ -12,6 +13,8 @@
 # Test and coverage output
 /coverage.out
 /*.test
+__pycache__/
+*.pyc
 
 # OS/editor noise
 .DS_Store

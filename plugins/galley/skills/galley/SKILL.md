@@ -17,6 +17,7 @@ Galley executes task YAML files through a file-backed queue. Task authoring is c
 - **Quality or environment profile authoring**: read `references/profile-authoring.md` and `references/authoring-quality.md`.
 - **Validation, queueing, or handoff**: read `references/handoff-and-queueing.md`.
 - **Setup, daemon, supervisor, or PR automation**: read `references/setup.md`.
+- **Codex CLI eval or daemon execution**: read `references/codex.md`.
 - **Failed, stale, rejected, or confusing runs**: read `references/troubleshooting.md`.
 
 ## Core Flow
@@ -74,4 +75,5 @@ When troubleshooting, report:
 - `references/profile-authoring.md`
 - `references/handoff-and-queueing.md`
 - `references/setup.md`
+- `references/codex.md`
 - `references/troubleshooting.md`

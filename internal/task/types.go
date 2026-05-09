@@ -184,12 +184,21 @@ type RevisionRequest struct {
 
 // Attempt records one executor and supervisor loop iteration.
 type Attempt struct {
-	Number            int    `yaml:"number" json:"number"`
-	StartedAt         string `yaml:"started_at" json:"started_at"`
-	CompletedAt       string `yaml:"completed_at" json:"completed_at"`
-	ClaudeStatus      string `yaml:"claude_status" json:"claude_status"`
-	SupervisorVerdict string `yaml:"supervisor_verdict" json:"supervisor_verdict"`
-	Summary           string `yaml:"summary" json:"summary"`
+	Number            int           `yaml:"number" json:"number"`
+	StartedAt         string        `yaml:"started_at" json:"started_at"`
+	CompletedAt       string        `yaml:"completed_at" json:"completed_at"`
+	ClaudeStatus      string        `yaml:"claude_status" json:"claude_status"`
+	SupervisorVerdict string        `yaml:"supervisor_verdict" json:"supervisor_verdict"`
+	Summary           string        `yaml:"summary" json:"summary"`
+	Error             *AttemptError `yaml:"error,omitempty" json:"error,omitempty"`
+}
+
+// AttemptError records the operator-facing failure that ended an attempt.
+type AttemptError struct {
+	Phase       string `yaml:"phase" json:"phase"`
+	Kind        string `yaml:"kind" json:"kind"`
+	Message     string `yaml:"message" json:"message"`
+	ArtifactDir string `yaml:"artifact_dir,omitempty" json:"artifact_dir,omitempty"`
 }
 
 // Verification contains command evidence collected for a task.

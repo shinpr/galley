@@ -195,6 +195,11 @@ func TestTaskShowByIDText(t *testing.T) {
 		ClaudeStatus:      "hard_stop",
 		SupervisorVerdict: "failed",
 		Summary:           "usage limit reached",
+		Error: &taskpkg.AttemptError{
+			Phase:   "executor",
+			Kind:    "timed_out",
+			Message: "claude -p timed out",
+		},
 	}}
 	loaded.Risks = []taskpkg.Risk{{
 		ID:         "risk-1",
@@ -218,7 +223,7 @@ func TestTaskShowByIDText(t *testing.T) {
 	if stderr != "" {
 		t.Fatalf("stderr got %q", stderr)
 	}
-	for _, want := range []string{"id: task-cli-test", "state: failed", "latest_attempt: 2", "latest_supervisor_verdict: failed", "latest_risk: risk-1 blocked: Claude usage limit", "failed_verification: pnpm test"} {
+	for _, want := range []string{"id: task-cli-test", "state: failed", "latest_attempt: 2", "latest_supervisor_verdict: failed", "latest_error_phase: executor", "latest_error_kind: timed_out", "latest_error_message: claude -p timed out", "latest_risk: risk-1 blocked: Claude usage limit", "failed_verification: pnpm test"} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("stdout missing %q: %q", want, stdout)
 		}

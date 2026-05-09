@@ -148,6 +148,14 @@ func newTaskShowCommand() *cobra.Command {
 					fmt.Fprintf(cmd.OutOrStdout(), "latest_claude_status: %s\n", last.ClaudeStatus)
 					fmt.Fprintf(cmd.OutOrStdout(), "latest_supervisor_verdict: %s\n", last.SupervisorVerdict)
 					fmt.Fprintf(cmd.OutOrStdout(), "latest_summary: %s\n", last.Summary)
+					if last.Error != nil {
+						fmt.Fprintf(cmd.OutOrStdout(), "latest_error_phase: %s\n", last.Error.Phase)
+						fmt.Fprintf(cmd.OutOrStdout(), "latest_error_kind: %s\n", last.Error.Kind)
+						fmt.Fprintf(cmd.OutOrStdout(), "latest_error_message: %s\n", last.Error.Message)
+						if last.Error.ArtifactDir != "" {
+							fmt.Fprintf(cmd.OutOrStdout(), "latest_error_artifact_dir: %s\n", last.Error.ArtifactDir)
+						}
+					}
 				}
 				if len(loaded.Risks) > 0 {
 					last := loaded.Risks[len(loaded.Risks)-1]

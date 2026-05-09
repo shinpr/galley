@@ -68,17 +68,17 @@ If the user approves, queue the task and report the exact command output.
 
 ## Daemon Next Step
 
-For a single drain:
-
-```bash
-galley daemon run --once
-```
-
 For continuous background execution:
 
 ```bash
 galley daemon start
 galley daemon status --output json
+```
+
+For a single drain:
+
+```bash
+galley daemon run --once
 ```
 
 Add flags such as `--open-pr`, `--poll-pr-comments`, and `--supervisor codex` or `--supervisor claude` according to the setup profile.

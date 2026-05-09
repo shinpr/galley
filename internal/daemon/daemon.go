@@ -407,6 +407,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	}
 	runID, runDir, err := initializeRunEvidence(opts.Root, runningPath, loaded, validation)
 	if err != nil {
+		appendFailureAttempt(&loaded, "run_evidence", "run_evidence_failed", err, "")
 		return taskstate.FailMove(opts.Root, runningPath, &loaded, err)
 	}
 
@@ -436,15 +437,9 @@ func validateClaimedTask(loaded *task.Task) (task.ValidationResult, error) {
 	if validation.Valid() {
 		return validation, nil
 	}
-	loaded.Attempts = append(loaded.Attempts, task.Attempt{
-		Number:            len(loaded.Attempts) + 1,
-		StartedAt:         time.Now().UTC().Format(time.RFC3339Nano),
-		CompletedAt:       time.Now().UTC().Format(time.RFC3339Nano),
-		ClaudeStatus:      "not_run",
-		SupervisorVerdict: "validation_failed",
-		Summary:           "Task validation failed before executor run.",
-	})
-	return validation, fmt.Errorf("task validation failed: %v", validation.Errors)
+	err := fmt.Errorf("task validation failed: %v", validation.Errors)
+	appendFailureAttempt(loaded, "validation", "validation_failed", err, "")
+	return validation, err
 }
 
 func initializeRunEvidence(root, runningPath string, loaded task.Task, validation task.ValidationResult) (string, string, error) {
@@ -465,21 +460,16 @@ func initializeRunEvidence(root, runningPath string, loaded task.Task, validatio
 func prepareClaimedWorkspace(ctx context.Context, opts Options, runningPath, runDir string, loaded *task.Task) (workspace.Prepared, error) {
 	prepared, err := workspace.Prepare(ctx, loaded.Scope.CWD, loaded.Worktree, workspaceOptions(opts))
 	if err != nil {
-		loaded.Attempts = append(loaded.Attempts, task.Attempt{
-			Number:            len(loaded.Attempts) + 1,
-			StartedAt:         time.Now().UTC().Format(time.RFC3339Nano),
-			CompletedAt:       time.Now().UTC().Format(time.RFC3339Nano),
-			ClaudeStatus:      "not_run",
-			SupervisorVerdict: "workspace_failed",
-			Summary:           err.Error(),
-		})
+		appendFailureAttempt(loaded, "workspace", "workspace_failed", err, runDir)
 		return workspace.Prepared{}, err
 	}
 	if err := writeJSON(filepath.Join(runDir, "workspace.json"), prepared); err != nil {
+		appendFailureAttempt(loaded, "run_evidence", "run_evidence_failed", err, runDir)
 		return workspace.Prepared{}, err
 	}
 	preparedFiles, err := inputfiles.Prepare(prepared.CWD, loaded.Files)
 	if err != nil {
+		appendFailureAttempt(loaded, "input_files", "input_files_failed", err, runDir)
 		return workspace.Prepared{}, err
 	}
 	cleanupPrepared := true
@@ -489,6 +479,7 @@ func prepareClaimedWorkspace(ctx context.Context, opts Options, runningPath, run
 		}
 	}()
 	if err := writeJSON(filepath.Join(runDir, "input_files.json"), preparedFiles); err != nil {
+		appendFailureAttempt(loaded, "run_evidence", "run_evidence_failed", err, runDir)
 		return workspace.Prepared{}, err
 	}
 	if prepared.WorktreeReused && prepared.Dirty {

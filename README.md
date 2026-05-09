@@ -8,25 +8,33 @@ It runs locally, keeps work in git-visible changes, and records evidence for rev
 
 Galley is Claude-first today. The executor path targets Claude Code, and supervisor review defaults to Claude. Codex can be selected as an alternate model supervisor.
 
+Status: early preview.
+
 ## Install
 
 Galley is intended to run from any repository you are working in, so install the `galley` binary on your `PATH`.
 
 For guided setup, install the plugin and ask the Galley skill to create profiles, task YAML, and queueing commands for your repository. See [Plugin And Skill](#plugin-and-skill).
 
+Install the latest GitHub Release binary:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/shinpr/galley/main/scripts/install.sh | sh
+```
+
+Install a specific release:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/shinpr/galley/main/scripts/install.sh | sh -s -- --version v0.1.0
+```
+
 From a cloned checkout:
 
 ```sh
-./scripts/install.sh
+./scripts/install.sh --local
 ```
 
-From a published module version:
-
-```sh
-GALLEY_VERSION=latest sh -c "$(curl -fsSL https://raw.githubusercontent.com/shinpr/galley/main/scripts/install.sh)"
-```
-
-The cloned checkout path lets you inspect the installer before running it. The `curl` form executes the script fetched from GitHub.
+The cloned checkout path lets you inspect the installer before running it. The `curl` form executes the script fetched from GitHub and downloads the matching release asset for your OS and architecture.
 
 Or use Go directly:
 
@@ -128,9 +136,9 @@ The standalone skill still expects the `galley` CLI on `PATH`. Some workflows al
 
 ## Core Concepts
 
-- **Task YAML**: the trusted local input that defines the goal, acceptance criteria, scope, verification, execution policy, and PR behavior.
-- **Quality profile**: optional repo-specific review gates, required checks, pass policy, and evidence requirements.
-- **Environment profile**: optional repo-specific command map and execution constraints for network, secrets, and destructive operations.
+- **Task YAML**: the trusted local input that defines the goal, acceptance criteria, scope, verification, execution policy, and PR behavior. See [docs/task-yaml.md](docs/task-yaml.md).
+- **Quality profile**: optional repo-specific review gates, required checks, pass policy, and evidence requirements. See [docs/profiles.md](docs/profiles.md).
+- **Environment profile**: optional repo-specific command map and execution constraints for network, secrets, and destructive operations. See [docs/profiles.md](docs/profiles.md).
 - **AFK task**: an unattended task that can run asynchronously inside a managed worktree.
 - **Acceptance criterion ID**: the `acceptance_criteria[].id` value Claude must report back with evidence, for example `AC1`.
 - **Loop budget**: `execution_policy.loop_budget` is the maximum number of executor attempts before Galley escalates to supervisor review.
@@ -204,6 +212,8 @@ Reviewed task files keep their terminal status in YAML. `tasks/done/` and `tasks
 ```
 
 `profiles/` holds repository quality and environment YAML files. Galley resolves `<repo-key>` from `scope.cwd`; use `galley profile resolve --cwd <repo> --mkdir --output json` to find the exact paths and create their parent directory. `--quality-profile-file` and `--environment-profile-file` remain explicit overrides.
+
+See [docs/profiles.md](docs/profiles.md) for supported profile fields and examples.
 
 Each executor attempt writes evidence under `runs/<run-id>/attempt-N/`, where `<run-id>` is generated as `<task-id>-<unix-nano>`.
 
@@ -381,6 +391,10 @@ galley daemon run --once --manifest-file examples/repos.yaml
 galley claude args examples/afk-task.yaml --output json
 ```
 
+For local development and release notes, see [CONTRIBUTING.md](CONTRIBUTING.md) and [CHANGELOG.md](CHANGELOG.md).
+
+Release assets are built by GitHub Actions when a GitHub Release is published. See [.github/workflows/release.yml](.github/workflows/release.yml) and [.goreleaser.yaml](.goreleaser.yaml).
+
 ## Worktree Cleanup
 
 When `--cleanup-worktrees` is enabled, the daemon scans `tasks/done` PR tasks and checks PR state through `gh api`.
@@ -419,3 +433,9 @@ PR comments can request requeueing and add instructions, but they do not rewrite
 Run Galley only for repositories and task authors you trust. Keep secrets out of task-accessible files, and use worktrees plus allowed paths to keep executor changes bounded.
 
 Automatic commit/PR creation currently stages the accepted worktree state with `git add -A`, so repository `.gitignore` should cover local editor, OS, cache, and secret files.
+
+See [SECURITY.md](SECURITY.md) for reporting and operational trust boundaries.
+
+## License
+
+Galley is released under the MIT License. See [LICENSE](LICENSE).

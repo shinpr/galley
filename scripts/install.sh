@@ -1,10 +1,12 @@
 #!/bin/sh
 set -eu
 
+OWNER="shinpr"
+REPO="galley"
 MODULE="github.com/shinpr/galley/cmd/galley"
 VERSION="${GALLEY_VERSION:-latest}"
-BIN_DIR="${GOBIN:-}"
-MODE="auto"
+BIN_DIR="${GALLEY_BIN_DIR:-${GOBIN:-}}"
+MODE="release"
 
 usage() {
   cat <<'USAGE'
@@ -14,15 +16,18 @@ Usage:
   scripts/install.sh [options]
 
 Options:
-  --version <version>   Install a module version such as latest, v0.1.0, or a commit.
-  --bin-dir <dir>       Install into a specific directory by setting GOBIN for go install.
-  --local               Install from the current checkout's ./cmd/galley.
-  --remote              Install github.com/shinpr/galley/cmd/galley@<version>.
+  --version <version>   Install a release version such as latest or v0.1.0.
+  --bin-dir <dir>       Install into a specific directory. Defaults to $GALLEY_BIN_DIR, $GOBIN, or ~/.local/bin.
+  --release             Install a prebuilt GitHub Release asset. This is the default.
+  --local               Build and install from the current checkout's ./cmd/galley.
+  --go-install          Install with go install github.com/shinpr/galley/cmd/galley@<version>.
+  --remote              Alias for --go-install.
   -h, --help            Show this help.
 
 Environment:
-  GALLEY_VERSION        Default version for remote install. Defaults to latest.
-  GOBIN                 Default install directory when --bin-dir is not provided.
+  GALLEY_VERSION        Release or module version. Defaults to latest.
+  GALLEY_BIN_DIR        Default install directory when --bin-dir is not provided.
+  GOBIN                 Fallback install directory when GALLEY_BIN_DIR is not set.
 
 The installer installs the Galley CLI. Daemon operations are available under
 `galley daemon ...`.
@@ -47,12 +52,16 @@ while [ "$#" -gt 0 ]; do
       BIN_DIR="$2"
       shift 2
       ;;
+    --release)
+      MODE="release"
+      shift
+      ;;
     --local)
       MODE="local"
       shift
       ;;
-    --remote)
-      MODE="remote"
+    --go-install|--remote)
+      MODE="go-install"
       shift
       ;;
     -h|--help)
@@ -67,38 +76,119 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-if ! command -v go >/dev/null 2>&1; then
-  echo "go is required to install Galley" >&2
-  exit 127
+if [ -z "$BIN_DIR" ]; then
+  BIN_DIR="$HOME/.local/bin"
 fi
 
-if [ -n "$BIN_DIR" ]; then
-  mkdir -p "$BIN_DIR"
-  export GOBIN="$BIN_DIR"
-else
-  GOBIN="$(go env GOBIN)"
-  if [ -z "$GOBIN" ]; then
-    GOPATH="$(go env GOPATH)"
-    GOBIN="$GOPATH/bin"
-  fi
-fi
+mkdir -p "$BIN_DIR"
 
-if [ "$MODE" = "auto" ]; then
-  if [ -f "go.mod" ] && grep -q '^module github.com/shinpr/galley$' go.mod && [ -d "cmd/galley" ]; then
-    MODE="local"
-  else
-    MODE="remote"
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "$1 is required" >&2
+    exit 127
   fi
-fi
+}
+
+detect_os() {
+  case "$(uname -s)" in
+    Darwin) echo "darwin" ;;
+    Linux) echo "linux" ;;
+    MINGW*|MSYS*|CYGWIN*) echo "windows" ;;
+    *)
+      echo "unsupported OS: $(uname -s)" >&2
+      exit 1
+      ;;
+  esac
+}
+
+detect_arch() {
+  case "$(uname -m)" in
+    x86_64|amd64) echo "amd64" ;;
+    arm64|aarch64) echo "arm64" ;;
+    *)
+      echo "unsupported architecture: $(uname -m)" >&2
+      exit 1
+      ;;
+  esac
+}
+
+resolve_latest_version() {
+  require_cmd curl
+  curl -fsSL "https://api.github.com/repos/$OWNER/$REPO/releases/latest" |
+    sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
+    head -n 1
+}
+
+install_release() {
+  require_cmd curl
+  require_cmd tar
+
+  os="$(detect_os)"
+  arch="$(detect_arch)"
+  version="$VERSION"
+  if [ "$version" = "latest" ]; then
+    version="$(resolve_latest_version)"
+    if [ -z "$version" ]; then
+      echo "could not resolve latest Galley release" >&2
+      exit 1
+    fi
+  fi
+
+  asset="galley_${version}_${os}_${arch}.tar.gz"
+  url="https://github.com/$OWNER/$REPO/releases/download/$version/$asset"
+  tmp_dir="$(mktemp -d)"
+  archive="$tmp_dir/$asset"
+  cleanup() {
+    rm -rf "$tmp_dir"
+  }
+  trap cleanup EXIT HUP INT TERM
+
+  echo "Downloading $url"
+  curl -fL "$url" -o "$archive"
+  tar -xzf "$archive" -C "$tmp_dir"
+
+  bin_name="galley"
+  if [ "$os" = "windows" ]; then
+    bin_name="galley.exe"
+  fi
+  src="$tmp_dir/$bin_name"
+  if [ ! -f "$src" ]; then
+    src="$(find "$tmp_dir" -type f -name "$bin_name" | head -n 1)"
+  fi
+  if [ -z "$src" ] || [ ! -f "$src" ]; then
+    echo "release asset did not contain $bin_name" >&2
+    exit 1
+  fi
+
+  dest="$BIN_DIR/$bin_name"
+  cp "$src" "$dest"
+  chmod 755 "$dest"
+  GALLEY_BIN="$dest"
+}
+
+install_local() {
+  require_cmd go
+  echo "Installing galley from local checkout into $BIN_DIR"
+  GOBIN="$BIN_DIR" go install ./cmd/galley
+  GALLEY_BIN="$BIN_DIR/galley"
+}
+
+install_go() {
+  require_cmd go
+  echo "Installing galley@$VERSION into $BIN_DIR"
+  GOBIN="$BIN_DIR" go install "$MODULE@$VERSION"
+  GALLEY_BIN="$BIN_DIR/galley"
+}
 
 case "$MODE" in
-  local)
-    echo "Installing galley from local checkout into $GOBIN"
-    GOBIN="$GOBIN" go install ./cmd/galley
+  release)
+    install_release
     ;;
-  remote)
-    echo "Installing galley@$VERSION into $GOBIN"
-    GOBIN="$GOBIN" go install "$MODULE@$VERSION"
+  local)
+    install_local
+    ;;
+  go-install)
+    install_go
     ;;
   *)
     echo "invalid install mode: $MODE" >&2
@@ -106,19 +196,18 @@ case "$MODE" in
     ;;
 esac
 
-GALLEY_BIN="$GOBIN/galley"
 if [ ! -x "$GALLEY_BIN" ]; then
   echo "install did not produce executable: $GALLEY_BIN" >&2
   exit 1
 fi
 
 case ":$PATH:" in
-  *":$GOBIN:"*) ;;
+  *":$BIN_DIR:"*) ;;
   *)
     echo
-    echo "Installed $GALLEY_BIN, but $GOBIN is not on PATH."
+    echo "Installed $GALLEY_BIN, but $BIN_DIR is not on PATH."
     echo "Add it to your shell profile, for example:"
-    echo "  export PATH=\"$GOBIN:\$PATH\""
+    echo "  export PATH=\"$BIN_DIR:\$PATH\""
     ;;
 esac
 

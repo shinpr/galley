@@ -15,16 +15,22 @@ git status --short
 If `galley` is missing, install it from a Galley checkout:
 
 ```bash
-scripts/install.sh
+scripts/install.sh --local
 ```
 
-or from a published module version:
+or from the latest GitHub Release:
 
 ```bash
-GALLEY_VERSION=latest sh -c "$(curl -fsSL https://raw.githubusercontent.com/shinpr/galley/main/scripts/install.sh)"
+curl -fsSL https://raw.githubusercontent.com/shinpr/galley/main/scripts/install.sh | sh
 ```
 
-The installer installs the `galley` binary. Daemon operations are available under `galley daemon ...`.
+For a specific release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/shinpr/galley/main/scripts/install.sh | sh -s -- --version v0.1.0
+```
+
+The installer installs the `galley` binary. By default it downloads a prebuilt GitHub Release asset; `--local` builds from the current checkout. Daemon operations are available under `galley daemon ...`.
 
 When PR automation is enabled, also check:
 
@@ -73,22 +79,22 @@ Advanced roots: use `--root <path>` only when the user intentionally runs a non-
 Claude supervisor is the default:
 
 ```bash
-galley daemon run --once
+galley daemon start
 ```
 
 Codex supervisor:
 
 ```bash
-galley daemon run --once --supervisor codex
+galley daemon start --supervisor codex
 ```
 
 Explicit Claude supervisor:
 
 ```bash
-galley daemon run --once --supervisor claude
+galley daemon start --supervisor claude
 ```
 
-Use the same command shape for background mode by replacing `--once` with `start`.
+For a single queue drain, use the same command shape with `run --once` instead of `start`.
 
 Repository profiles under the Galley root are loaded automatically from `scope.cwd`. Use explicit profile flags only when the user intentionally wants to override the conventional paths.
 

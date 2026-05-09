@@ -121,15 +121,18 @@ func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) 
 	fmt.Fprintf(os.Stderr, "galley: task %s attempt %d/%s starting\n", req.Loaded.ID, req.Attempt, req.Loaded.ExecutionPolicy.LoopBudget.String())
 	attemptDir := filepath.Join(req.RunDir, fmt.Sprintf("attempt-%d", req.Attempt))
 	if err := os.MkdirAll(attemptDir, 0o700); err != nil {
+		appendFailureAttempt(req.Loaded, "attempt_setup", "attempt_setup_failed", err, req.RunDir)
 		return attemptReview{}, fmt.Errorf("create attempt dir %s: %w", attemptDir, err)
 	}
 	effectiveTask := executionTask(*req.Loaded, req.Prepared.CWD)
 	effectiveTaskPath := filepath.Join(attemptDir, "task.effective.yaml")
 	if err := task.Save(effectiveTaskPath, effectiveTask); err != nil {
+		appendFailureAttempt(req.Loaded, "attempt_setup", "attempt_setup_failed", err, attemptDir)
 		return attemptReview{}, err
 	}
 	outcome, err := runExecutorAttempt(ctx, req.Opts, effectiveTask, req.Profiles, req.Prepared.CWD, req.Prepared.BaseSHA, attemptDir, req.Prompt, effectiveTaskPath)
 	if err != nil {
+		appendFailureAttempt(req.Loaded, "executor", classifyFailureKind("executor_failed", err), err, attemptDir)
 		return attemptReview{}, err
 	}
 	evidence := supervisor.Evidence{
@@ -146,9 +149,11 @@ func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) 
 	}
 	verdict, err := evaluateSupervisor(ctx, req.Opts, evidence, attemptDir, req.Prepared.CWD)
 	if err != nil {
+		appendSupervisorFailureAttempt(req.Loaded, outcome, err, attemptDir)
 		return attemptReview{}, err
 	}
 	if err := writeJSON(filepath.Join(attemptDir, "supervisor_verdict.json"), verdict); err != nil {
+		appendFailureAttempt(req.Loaded, "run_evidence", "run_evidence_failed", err, attemptDir)
 		return attemptReview{}, err
 	}
 	return attemptReview{AttemptDir: attemptDir, Outcome: outcome, Verdict: verdict}, nil
@@ -443,6 +448,7 @@ func mergeAttemptEvidence(loaded *task.Task, outcome attemptOutcome, runID, work
 		ClaudeStatus:      claudeStatus(outcome.RunResult, outcome.RunErr),
 		SupervisorVerdict: "not_reviewed",
 		Summary:           fmt.Sprintf("Executor run %s; run_id=%s; workspace=%s", claudeStatus(outcome.RunResult, outcome.RunErr), runID, workDir),
+		Error:             executorAttemptError(outcome, attemptDir),
 	})
 	loaded.Verification.Commands = append(loaded.Verification.Commands, task.VerificationCommand{
 		Cmd:           "claude -p",
@@ -519,6 +525,25 @@ func mergeAttemptEvidence(loaded *task.Task, outcome attemptOutcome, runID, work
 			HumanReviewSuggested: true,
 		})
 	}
+}
+
+func executorAttemptError(outcome attemptOutcome, attemptDir string) *task.AttemptError {
+	if outcome.RunErr == nil {
+		return nil
+	}
+	return attemptError("executor", classifyFailureKind("executor_failed", outcome.RunErr), outcome.RunErr, attemptDir)
+}
+
+func appendSupervisorFailureAttempt(loaded *task.Task, outcome attemptOutcome, err error, attemptDir string) {
+	loaded.Attempts = append(loaded.Attempts, task.Attempt{
+		Number:            len(loaded.Attempts) + 1,
+		StartedAt:         outcome.Started.Format(time.RFC3339Nano),
+		CompletedAt:       time.Now().UTC().Format(time.RFC3339Nano),
+		ClaudeStatus:      claudeStatus(outcome.RunResult, outcome.RunErr),
+		SupervisorVerdict: classifyFailureKind("supervisor_failed", err),
+		Summary:           err.Error(),
+		Error:             attemptError("supervisor", classifyFailureKind("supervisor_failed", err), err, attemptDir),
+	})
 }
 
 func mergeDiscussionItems(loaded *task.Task, verdict supervisor.Verdict) {

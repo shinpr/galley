@@ -108,6 +108,57 @@ func TestRunOnceUsesModelSupervisorProvider(t *testing.T) {
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", "model_supervisor_verdict.json"), 1)
 }
 
+func TestRunOnceRecordsSupervisorTimeoutInTaskAttempt(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	codexBin := writeFakeCommand(t, "codex", "cat >/dev/null\nsleep 2\n")
+	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonTask(t, taskPath, repo)
+	setTimeoutMS(t, taskPath, 50)
+
+	err := Run(context.Background(), Options{
+		Root:               root,
+		SystemPromptFile:   promptPath,
+		JSONSchemaFile:     schemaPath,
+		Once:               true,
+		MaxConcurrentTasks: 1,
+		Supervisor:         "codex",
+		ClaudeBin:          claudeBin,
+		CodexBin:           codexBin,
+	})
+	if err == nil {
+		t.Fatal("expected supervisor timeout")
+	}
+	failedTask, err := task.Load(filepath.Join(root, "tasks", "failed", "task.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failedTask.Attempts) == 0 {
+		t.Fatal("expected failed attempt")
+	}
+	last := failedTask.Attempts[len(failedTask.Attempts)-1]
+	if last.SupervisorVerdict != "timed_out" {
+		t.Fatalf("supervisor verdict got %q", last.SupervisorVerdict)
+	}
+	if last.Error == nil {
+		t.Fatalf("attempt error missing: %#v", last)
+	}
+	if last.Error.Phase != "supervisor" || last.Error.Kind != "timed_out" {
+		t.Fatalf("attempt error got %#v", last.Error)
+	}
+	if !strings.Contains(last.Error.Message, "codex supervisor failed") || !strings.Contains(last.Error.Message, "timed out") {
+		t.Fatalf("attempt error message got %q", last.Error.Message)
+	}
+	if last.Error.ArtifactDir == "" {
+		t.Fatalf("attempt error artifact dir missing: %#v", last.Error)
+	}
+}
+
 func TestRunOnceRetriesModelSupervisorWorkOrderUntilAccepted(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
@@ -596,6 +647,58 @@ func TestRunOnceContinuesAfterTaskFailure(t *testing.T) {
 	assertGlobCount(t, filepath.Join(root, "tasks", "queued", "*.yaml"), 0)
 	assertGlobCount(t, filepath.Join(root, "tasks", "failed", "*.yaml"), 1)
 	assertGlobCount(t, filepath.Join(root, "tasks", "done", "*.yaml"), 1)
+}
+
+func TestRunOnceRecordsValidationErrorsInTaskAttempt(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+	claudeBin := writeFakeClaude(t, "echo should-not-run\n")
+	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonTask(t, taskPath, repo)
+	loaded, err := task.Load(taskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Scope.CWD = ""
+	if err := task.Save(taskPath, loaded); err != nil {
+		t.Fatal(err)
+	}
+
+	err = Run(context.Background(), Options{
+		Root:               root,
+		SystemPromptFile:   promptPath,
+		JSONSchemaFile:     schemaPath,
+		ClaudeBin:          claudeBin,
+		Once:               true,
+		MaxConcurrentTasks: 1,
+	})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	failedTask, err := task.Load(filepath.Join(root, "tasks", "failed", "task.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failedTask.Attempts) == 0 {
+		t.Fatal("expected validation attempt")
+	}
+	last := failedTask.Attempts[len(failedTask.Attempts)-1]
+	if last.SupervisorVerdict != "validation_failed" {
+		t.Fatalf("supervisor verdict got %q", last.SupervisorVerdict)
+	}
+	if last.Error == nil {
+		t.Fatalf("attempt error missing: %#v", last)
+	}
+	if last.Error.Phase != "validation" || last.Error.Kind != "validation_failed" {
+		t.Fatalf("attempt error got %#v", last.Error)
+	}
+	if !strings.Contains(last.Error.Message, "task validation failed") || !strings.Contains(last.Error.Message, "scope.cwd") {
+		t.Fatalf("attempt error message got %q", last.Error.Message)
+	}
 }
 
 func TestProcessAvailableSkipsClaimConflict(t *testing.T) {
@@ -1226,6 +1329,18 @@ func setLoopBudget(t *testing.T, path string, count int) {
 	loaded.ExecutionPolicy.LoopBudget.Count = count
 	loaded.ExecutionPolicy.LoopBudget.Infinite = false
 	loaded.ExecutionPolicy.LoopBudget.Set = true
+	if err := task.Save(path, loaded); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func setTimeoutMS(t *testing.T, path string, timeoutMS int) {
+	t.Helper()
+	loaded, err := task.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.ExecutionPolicy.TimeoutMS = timeoutMS
 	if err := task.Save(path, loaded); err != nil {
 		t.Fatal(err)
 	}

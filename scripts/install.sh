@@ -134,7 +134,8 @@ install_release() {
     fi
   fi
 
-  asset="galley_${version}_${os}_${arch}.tar.gz"
+  asset_version="${version#v}"
+  asset="galley_${asset_version}_${os}_${arch}.tar.gz"
   url="https://github.com/$OWNER/$REPO/releases/download/$version/$asset"
   tmp_dir="$(mktemp -d)"
   archive="$tmp_dir/$asset"

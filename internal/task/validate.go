@@ -9,15 +9,6 @@ import (
 	"strings"
 )
 
-var (
-	validModes               = []string{"afk"}
-	validStatuses            = []string{"draft", "queued", "running", "needs_supervisor_review", "accepted", "pr_opened", "failed", "closed", "merged", "archived"}
-	validPermissions         = []string{"read-only", "edit", "sandbox-full-access"}
-	validPromptModes         = []string{"replace", "append"}
-	validAFKDecisionPolicies = []string{"choose-smallest-reversible"}
-	validTaskIDPattern       = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
-)
-
 // Validate runs structural and environment validation for a task.
 func Validate(t Task) ValidationResult {
 	result := ValidateStructural(t)
@@ -142,11 +133,7 @@ func validateExecutionPolicy(result *ValidationResult, t Task) {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("execution_policy.loop_budget is empty; defaulting to %d", DefaultLoopBudget))
 		budget = LoopBudget{Count: DefaultLoopBudget, Set: true}
 	}
-	if budget.Infinite && budget.Count != 0 {
-		result.Errors = append(result.Errors, "execution_policy.loop_budget cannot be both infinite and counted")
-	} else if !budget.Infinite {
-		require(result, budget.Count > 0, "execution_policy.loop_budget must be positive")
-	}
+	require(result, budget.Count >= 0, "execution_policy.loop_budget must be >= 0; use 0 for unlimited")
 	require(result, t.ExecutionPolicy.TimeoutMS > 0, "execution_policy.timeout_ms must be positive")
 	if t.Mode == "afk" {
 		require(result, t.ExecutionPolicy.AFKDecisionPolicy != "", "execution_policy.afk_decision_policy is required for AFK tasks")

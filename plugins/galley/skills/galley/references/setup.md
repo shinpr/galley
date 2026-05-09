@@ -1,10 +1,10 @@
 # Setup
 
-Use this reference when configuring Galley for a repository, daemon run, supervisor selection, or PR automation.
+Use this reference when installing Galley, configuring a repository, starting the daemon, selecting a supervisor, or enabling PR automation.
 
 ## Preflight
 
-Check required commands:
+Check required commands and repository context:
 
 ```bash
 galley --help
@@ -12,37 +12,33 @@ claude --version
 git status --short
 ```
 
-If `galley` is missing, install it from a Galley checkout:
+Use the current git repository as the target repository when setup is requested from inside a repo. When the current directory is not a repository and the user did not provide a path, ask for the target repository before profile setup. Install-only requests can proceed without a target repository.
 
-```bash
-scripts/install.sh --local
-```
-
-or from the latest GitHub Release:
+When `galley --help` fails, install the CLI as part of setup. For normal repository work, use the GitHub Release installer:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/shinpr/galley/main/scripts/install.sh | sh
 ```
 
-For a specific release:
+Then verify the installed binary. Start with `galley --help`; when it is still not on `PATH`, use the path reported by the installer.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/shinpr/galley/main/scripts/install.sh | sh -s -- --version v0.1.0
+galley --help
 ```
 
-The installer installs the `galley` binary. By default it downloads a prebuilt GitHub Release asset; `--local` builds from the current checkout. Daemon operations are available under `galley daemon ...`.
-
-When PR automation is enabled, also check:
+Use a local checkout install only when working inside the Galley repository, when the user explicitly asks for a local build, or when the release installer is unavailable:
 
 ```bash
-gh auth status
+scripts/install.sh --local
 ```
 
-When Codex supervisor is enabled, check:
+Proceed with the standard installer when the user asks to install Galley, set it up, or make it available. Ask for a decision only when a required install choice is blocked, such as unavailable network access, an unwritable install destination, a requested non-default version or path, or a request to review commands before execution.
 
-```bash
-codex --version
-```
+Use `galley` for later commands when it works on `PATH`; otherwise use the verified installed binary path. Continue with that verified binary path for the rest of setup. Inspect or edit shell startup files only when the user asks to make PATH persistent.
+
+The installer installs the `galley` binary. By default it downloads a prebuilt GitHub Release asset; `--local` builds from the current checkout. Daemon operations are available under `<galley-bin> daemon ...`.
+
+Check `gh auth status` when the accepted profile proposal enables PR automation. Check `codex --version` when the user selects Codex as the daemon supervisor.
 
 ## Repository Layout
 
@@ -69,44 +65,60 @@ Create directories through Galley commands when available. If creating them manu
 Resolve the repository-specific profile paths with the same target repository path that task YAML will use as `scope.cwd`:
 
 ```bash
-galley profile resolve --cwd <absolute-target-repo> --mkdir --output json
+<galley-bin> profile resolve --cwd <absolute-target-repo> --mkdir --output json
 ```
+
+Use the returned JSON paths as the source of truth. Avoid broad `~/.galley` exploration during setup; inspect only the returned profile files or parent directory when confirmation is needed.
 
 Advanced roots: use `--root <path>` only when the user intentionally runs a non-default daemon root. Task queueing normally discovers the running daemon queue automatically.
 
-## Supervisor Commands
+## Repository Profiles
+
+Setup includes repository profiles. After resolving the profile paths:
+
+- If `quality.yaml` or `environment.yaml` is missing, explain profiles and create them from this flow. Use `references/profile-authoring.md` and `references/authoring-quality.md` for deeper guidance when available.
+- Profile creation starts by reading `references/quality.schema.json` and `references/environment.schema.json`; use schema defaults as the proposed values unless repo evidence or user choices point elsewhere.
+- `quality.yaml` proposal includes required checks, review dimensions, evidence requirements, and blocking severities.
+- `environment.yaml` proposal includes cwd, commands, network/secrets/destructive-command constraints, PR creation, PR comment handling, base branch, and worktree cleanup.
+- The first profile question is only repository inspection approval. Supervisor selection and PR automation are profile proposal or daemon-start decisions.
+- Profile creation requires repository inspection approval and profile approval before writing files.
+- Inspect the repository after approval, then draft candidate profiles from discovered commands, CI, README, config, and existing local guidance.
+- Present one combined profile proposal after inspection. Include the evidence behind each required check and each environment setting.
+- Ask for approval and additional repository-specific standards before writing profiles.
+- Validate both profiles before reporting setup complete.
+
+```bash
+<galley-bin> profile validate --kind quality <quality-profile-file>
+<galley-bin> profile validate --kind environment <environment-profile-file>
+```
+
+## Daemon Commands
+
+Choose daemon settings before startup. Explain the defaults and ask for changes when the user has not already chosen:
+
+- supervisor: Claude is the default; Codex can be selected for Codex review.
+- PR automation, PR comment handling, base branch, and worktree cleanup: use the resolved `environment.yaml`.
+- run mode: `daemon start` keeps working in the background; `daemon run --once` drains the current queue once.
+- concurrency: keep defaults unless the user asks for parallel task execution.
 
 Claude supervisor is the default:
 
 ```bash
-galley daemon start
+<galley-bin> daemon start
 ```
 
 Codex supervisor:
 
 ```bash
-galley daemon start --supervisor codex
+<galley-bin> daemon start --supervisor codex
 ```
 
 Explicit Claude supervisor:
 
 ```bash
-galley daemon start --supervisor claude
+<galley-bin> daemon start --supervisor claude
 ```
 
 For a single queue drain, use the same command shape with `run --once` instead of `start`.
 
-Repository profiles under the Galley root are loaded automatically from `scope.cwd`. Use explicit profile flags only when the user intentionally wants to override the conventional paths.
-
-## PR Automation
-
-Use PR automation when the task should finish with a reviewable branch:
-
-```bash
-galley daemon start \
-  --open-pr \
-  --poll-pr-comments \
-  --reply-pr-comments
-```
-
-`--poll-pr-comments` enables `/galley rerun` or `/galley requeue` review feedback handling.
+Repository profiles under the Galley root are loaded automatically from `scope.cwd`.

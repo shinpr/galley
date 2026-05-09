@@ -3,6 +3,7 @@ package task
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -121,6 +122,78 @@ func TestQueueMovesRootDraftIntoRoot(t *testing.T) {
 	}
 	if _, err := os.Stat(draftPath); !os.IsNotExist(err) {
 		t.Fatalf("root draft should be moved, err=%v", err)
+	}
+}
+
+func TestQueueRejectsDuplicateTaskIDInRoot(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	donePath := filepath.Join(root, "tasks", "done", "old.yaml")
+	draftPath := filepath.Join(root, "tasks", "draft", "new.yaml")
+	if err := os.MkdirAll(filepath.Dir(donePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(draftPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	path := writeTaskYAML(t, "loop_budget: 3")
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Status = "pr_opened"
+	if err := Save(donePath, loaded); err != nil {
+		t.Fatal(err)
+	}
+	loaded.Status = "draft"
+	if err := Save(draftPath, loaded); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = Queue(draftPath, QueueOptions{Root: root})
+	if err == nil {
+		t.Fatal("expected duplicate task id error")
+	}
+	if !strings.Contains(err.Error(), `task id "task-load-test" already exists`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, statErr := os.Stat(draftPath); statErr != nil {
+		t.Fatalf("draft should remain after rejected queue: %v", statErr)
+	}
+}
+
+func TestQueueDuplicateTaskIDSkipsMalformedExistingTask(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	donePath := filepath.Join(root, "tasks", "done", "broken.yaml")
+	draftPath := filepath.Join(root, "tasks", "draft", "new.yaml")
+	if err := os.MkdirAll(filepath.Dir(donePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(draftPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(donePath, []byte("id: [broken\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := writeTaskYAML(t, "loop_budget: 3")
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.ID = "new-task"
+	loaded.Status = "draft"
+	if err := Save(draftPath, loaded); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Queue(draftPath, QueueOptions{Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Task.ID != "new-task" || result.Task.Status != "queued" {
+		t.Fatalf("queued task got %#v", result.Task)
 	}
 }
 

@@ -8,7 +8,7 @@ Build from concrete sources before asking questions. Use sources that the user s
 
 1. User-provided files or paths: specs, work plans, PRDs, issue exports, design notes, review comments, logs, screenshots, API docs, schema docs, or investigation notes.
 2. Repository-local instructions: `SKILL.md`, `AGENTS.md`, `CLAUDE.md`, `README.md`, `CONTRIBUTING.md`, `docs/`, CI config, package scripts, Makefiles, justfiles, and existing tests.
-3. Existing Galley files: `~/.galley/profiles/<repo-key>/*.yaml`, manifests, previous task YAML, run evidence, and supervisor verdicts.
+3. Existing Galley files: `~/.galley/profiles/<repo-key>/*.yaml`, previous task YAML, run evidence, and supervisor verdicts.
 4. Targeted user answers for remaining gaps.
 
 When an available file contains the goal, ACs, constraints, or test plan, extract from the file and ask the user to confirm only ambiguous or risky points.
@@ -25,7 +25,7 @@ Before writing YAML, identify the task's fundamental purpose. This keeps the tas
 | Update docs | audience, changed behavior, examples that must stay true |
 | Investigate this | evidence to collect, decision to enable, stopping point |
 
-Use the essence to shape `goal`, ACs, risks, and verification. Record the surface request only when it is already precise enough to execute.
+Use the essence to shape `goal`, ACs, risks, and verification. Record the surface request directly when it satisfies all Goal checks below; otherwise convert it into a concrete goal before drafting.
 
 ## Reference Files
 
@@ -47,7 +47,9 @@ For each reference file, decide:
 | Where should it be copied? | Use a relative `destination` under `scope.allowed_paths`, such as `docs/galley-inputs/<name>`. |
 | Should it be committed? | Use `commit: false` for context-only specs, logs, screenshots, and temporary plans. Use `commit: true` only when the file is intended to become part of the repository output. |
 
-If the user gives a file path, read the file before drafting when it is accessible, readable as useful text, and inside the permitted read scope. When it cannot be read, record the risk and ask for the missing content or a usable path.
+When the user supplies reference files and has not stated commit policy, ask explicitly. Recommend context-only for specs, work plans, logs, screenshots, issue exports, and review notes. Use `commit: true` only after the user confirms the supplied file should become part of the branch output.
+
+If the user gives a file path, read the file before drafting when the path resolves to an existing file, the content is text-like enough to summarize or quote safely, and the read succeeds within the permitted scope. When reading fails, record the risk and ask for the missing content or a usable path.
 
 ## Goal Quality
 
@@ -159,7 +161,7 @@ Look for:
 - design system, accessibility, security, or API contract docs
 - team skills under `.claude/skills` or `.agents/skills`
 
-When repo-specific standards are absent, choose only checks that match the task domain and can realistically run locally. Explain which generic gates are intentionally left out because they add cost without useful evidence.
+When repo-specific standards are absent, choose checks that match the task domain and can run through commands found in the resolved environment profile, CI, package scripts, Makefile/justfile, or repository docs. Explain which generic gates are left out because they add cost without acceptance evidence.
 
 | Domain | Usually useful | Include only when relevant |
 | --- | --- | --- |
@@ -177,7 +179,7 @@ Verification levels help choose the strongest practical evidence:
 | L2 | Tests prove the changed behavior | unit/integration/component tests are the realistic proof |
 | L3 | Build/type/static checks prove consistency | behavior is docs/config/types only, or runtime proof is unavailable |
 
-Prefer L1 over L2 over L3 when the cost is reasonable. Use lower levels with a stated reason when higher-level proof is unavailable or not useful.
+Prefer L1 when the operation can run locally with available commands and services. Use L2 when L1 needs unavailable services, unsafe operations, or setup outside the environment profile. Use L3 when the change is docs/config/types-only or runtime proof is unavailable.
 
 ## Investigation Targets
 

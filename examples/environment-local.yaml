@@ -7,3 +7,11 @@ constraints:
   network: "approval_required"
   secrets_policy: "never_read_env_files"
   destructive_commands: "deny"
+pr:
+  enabled: true
+  base: "main"
+  comments:
+    enabled: true
+    reply: true
+worktree:
+  cleanup: true

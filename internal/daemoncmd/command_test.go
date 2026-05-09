@@ -58,6 +58,33 @@ func TestStatusJSONReportsRoot(t *testing.T) {
 	}
 }
 
+func TestStatusRuntimeRestoresDaemonArgs(t *testing.T) {
+	t.Parallel()
+	runtime := statusRuntime{}.withArgv([]string{
+		"/bin/galley",
+		"daemon",
+		"--supervisor",
+		"codex",
+		"--max-concurrent-tasks",
+		"3",
+		"--max-concurrent-per-repo=2",
+	})
+	if runtime.Supervisor != "codex" {
+		t.Fatalf("supervisor got %q", runtime.Supervisor)
+	}
+	if runtime.MaxConcurrentTasks != 3 || runtime.MaxConcurrentPerRepo != 2 {
+		t.Fatalf("parsed values got %#v", runtime)
+	}
+}
+
+func TestStatusRuntimeDefaultsSupervisorForDaemonWithoutFlag(t *testing.T) {
+	t.Parallel()
+	runtime := statusRuntime{}.withArgv([]string{"/bin/galley", "daemon"})
+	if runtime.Supervisor != "claude" {
+		t.Fatalf("supervisor got %q", runtime.Supervisor)
+	}
+}
+
 func TestStopMissingPIDReturnsNotRunning(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

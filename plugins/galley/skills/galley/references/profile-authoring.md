@@ -2,18 +2,25 @@
 
 Use this reference when creating or repairing Galley quality and environment profiles.
 
-Profiles are repository-specific. Create them interactively because the right quality gates depend on the codebase, available tooling, runtime services, and user risk tolerance.
+Profiles are repository-specific. Create them interactively because the right quality gates depend on the codebase, available tooling, runtime services, and user risk tolerance. Treat profile creation as quality-policy authoring, not a background setup detail.
 
 Use `references/authoring-quality.md` to decide when to use existing repo standards, when to ask questions, and how to choose domain-specific gates.
 
 ## Profile Types
 
-| Profile | Purpose | Override Flag |
-| --- | --- | --- |
-| quality | Defines required checks, review dimensions, evidence requirements, and pass policy. | `--quality-profile-file` |
-| environment | Defines cwd, available commands, network/secrets/destructive-command constraints. | `--environment-profile-file` |
+| Profile | Purpose |
+| --- | --- |
+| quality | Defines required checks, review dimensions, evidence requirements, and pass policy. |
+| environment | Defines cwd, available commands, network/secrets/destructive-command constraints, PR behavior, PR comment handling, base branch, and worktree cleanup. |
 
-The daemon normally resolves repository profiles from `scope.cwd` and the Galley root. Use the flags above only when the user intentionally wants to override the conventional profile paths for a daemon run.
+The daemon resolves repository profiles from `scope.cwd` and the Galley root.
+
+Use the bundled schemas as the profile field contract:
+
+- `references/quality.schema.json`
+- `references/environment.schema.json`
+
+Read both schema files before profile intake. Treat schema `default` values as the recommended defaults when presenting setup choices. User choices override schema defaults.
 
 Validate profiles with:
 
@@ -24,30 +31,36 @@ galley profile validate --kind environment <profile.yaml>
 
 ## Authoring Flow
 
-1. Inspect the repository for existing quality and environment signals.
-2. Read existing profiles, manifests, CI, package scripts, Makefiles, justfiles, README, CONTRIBUTING, test docs, and local skills when present.
-3. Draft profile values from discovered evidence before asking the user.
-4. Ask only for missing policy choices, unavailable service details, risk tolerance, or commands that cannot be inferred.
-5. Validate the profile YAML and report the evidence used to choose each required check.
+1. Explain the two profiles before reading or writing them:
+   - `quality.yaml` defines the checks, review dimensions, evidence, and severities that Galley uses to decide whether work is acceptable.
+   - `environment.yaml` defines the repository cwd, runnable commands, network/secrets policy, services, destructive-operation constraints, PR behavior, and worktree cleanup.
+2. Read `references/quality.schema.json` and `references/environment.schema.json` to establish fields, defaults, and valid shapes.
+3. Ask to inspect the repository for profile candidates. Mention the concrete sources you plan to read, such as README, CI, package scripts, Makefiles, justfiles, test docs, and existing local guidance.
+4. Inspect the approved sources and draft candidate values from discovered evidence plus schema defaults.
+5. Present the proposed profile before writing files: required checks, optional checks, review dimensions, blocking severities, environment constraints, PR/base/comment/cleanup settings, and the evidence behind each choice.
+6. Ask for approval and ask whether the user has additional repository-specific standards to enforce.
+7. Write the profile YAML only after approval.
+8. Validate the profile YAML and report the evidence used to choose each required check.
 
 ## Repository Discovery
 
-Run targeted discovery before questions:
+After the user approves repository inspection, explore only enough to identify candidate profile content:
 
-```bash
-cd <target-repo>
-find . -maxdepth 3 \( -name package.json -o -name go.mod -o -name Cargo.toml -o -name pyproject.toml -o -name Makefile -o -name justfile -o -name README.md -o -name CONTRIBUTING.md \)
-find . -maxdepth 4 \( -path "*/.github/workflows/*" -o -name "docker-compose*.yml" -o -name "playwright.config.*" -o -name "vite.config.*" -o -name "next.config.*" -o -name "terraform.tf" \) 2>/dev/null
-find ~/.galley/profiles -maxdepth 3 -type f 2>/dev/null
-```
+- repository type, package/build system, and runtime
+- documented setup, test, lint, typecheck, build, e2e, or release commands
+- CI jobs and pre-commit/pre-push hooks that already define quality gates
+- local services or tools required for realistic verification
+- repo-local agent instructions, project skills, or contribution guidance
+- existing Galley profile paths returned by `galley profile resolve --cwd <absolute-target-repo> --mkdir --output json`
 
-Read only files relevant to the repository type and requested workflow. If the current shell is not already in the target repository, use the target repository's absolute path in commands instead of `$PWD`.
+Stop discovery when you can explain where each proposed required check or environment constraint came from. If current shell context is not the target repository, use the target repository's absolute path in commands.
 
 ## Profile Quality Rules
 
 - Prefer repository-owned checks over generic best practices.
-- Include a required check only when it produces useful evidence for Galley acceptance.
+- Include a required check when it is referenced by CI, package scripts, contributor docs, or a user policy, or when it verifies a documented quality dimension for the task domain.
 - Record why a check is required: CI usage, package script, existing docs, affected file type, or user policy.
+- Present CI-derived checks as candidates before writing; CI evidence is strong, but required/blocking status is a policy choice.
 - Separate "available command" from "blocking quality gate"; not every runnable command should block acceptance.
 - Mark external resources as required only when the task domain needs them, such as Figma for UI work, DB services for persistence, or cloud/IaC tooling for infrastructure.
 - Use `N/A` or omit fields for irrelevant domains; ask only about tools that match the task domain.
@@ -55,6 +68,14 @@ Read only files relevant to the repository type and requested workflow. If the c
 ## Interactive Intake
 
 Ask only the questions needed for the profile being authored.
+
+Use this sequence:
+
+1. Read the profile schemas.
+2. Ask one question for repository inspection approval. Keep supervisor selection, PR automation, base branch, and cleanup out of this first question.
+3. After inspection, present a single profile proposal using schema defaults plus discovered repo evidence.
+4. Ask for profile approval and additional standards.
+5. Ask follow-up questions only for choices that affect acceptance, execution safety, unavailable services, or repository-specific policy.
 
 Quality profile questions:
 
@@ -73,6 +94,9 @@ Environment profile questions:
 4. Is network access allowed, approval-gated, or unavailable?
 5. What is the secret policy: never read `.env`, allow named test env vars, use local dummy credentials, or require human setup?
 6. Which destructive operations are denied or approval-gated: DB reset, migrations, docker prune, file deletion, terraform apply?
+7. Should accepted AFK implementation tasks open PRs by default, and what base branch should they target?
+8. Should `/galley rerun` and `/galley requeue` PR comments be polled and acknowledged?
+9. Should Galley clean up its managed clean worktrees after PRs are closed or merged?
 
 ## Quality Profile Template
 
@@ -118,6 +142,14 @@ constraints:
   network: "approval_required"
   secrets_policy: "never_read_env_files"
   destructive_commands: "deny"
+pr:
+  enabled: true
+  base: "main"
+  comments:
+    enabled: true
+    reply: true
+worktree:
+  cleanup: true
 ```
 
 ## Recommended Review Dimensions
@@ -171,7 +203,7 @@ Resolve the daemon root and repo-specific profile paths before writing profiles.
 galley profile resolve --cwd <absolute-target-repo> --mkdir --output json
 ```
 
-Write profiles to the returned `quality_profile_file` and `environment_profile_file` paths. `--mkdir` creates the parent directory; if it was omitted, create the returned parent directory before writing. The daemon loads those paths automatically for tasks whose `scope.cwd` resolves to the same repo key. CLI `--quality-profile-file` and `--environment-profile-file` are only overrides.
+Write profiles to the returned `quality_profile_file` and `environment_profile_file` paths. `--mkdir` creates the parent directory; if it was omitted, create the returned parent directory before writing. The daemon loads those paths automatically for tasks whose `scope.cwd` resolves to the same repo key.
 
 ## Output
 

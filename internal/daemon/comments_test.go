@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shinpr/galley/internal/galleyhome"
 	"github.com/shinpr/galley/internal/queue"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/internal/vcs"
@@ -43,6 +44,7 @@ func TestPollPRCommentsRequeuesTaskOnce(t *testing.T) {
 	if err := queue.EnsureLayout(root); err != nil {
 		t.Fatal(err)
 	}
+	writeDaemonEnvironmentProfile(t, root, repo, true, true)
 	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
 	writeDaemonTask(t, donePath, repo)
 	loaded, err := task.Load(donePath)
@@ -96,6 +98,7 @@ func TestPollPRCommentsPostsReply(t *testing.T) {
 	if err := queue.EnsureLayout(root); err != nil {
 		t.Fatal(err)
 	}
+	writeDaemonEnvironmentProfile(t, root, repo, true, true)
 	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
 	writeDaemonTask(t, donePath, repo)
 	loaded, err := task.Load(donePath)
@@ -139,6 +142,7 @@ func TestPollPRCommentsContinuesAfterReplyFailure(t *testing.T) {
 	if err := queue.EnsureLayout(root); err != nil {
 		t.Fatal(err)
 	}
+	writeDaemonEnvironmentProfile(t, root, repo, true, true)
 	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
 	writeDaemonTask(t, donePath, repo)
 	loaded, err := task.Load(donePath)
@@ -190,6 +194,7 @@ func TestPollPRCommentsRecordsFailedRequeueForManualRecovery(t *testing.T) {
 	if err := queue.EnsureLayout(root); err != nil {
 		t.Fatal(err)
 	}
+	writeDaemonEnvironmentProfile(t, root, repo, true, false)
 	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
 	queuedPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	writeDaemonTask(t, donePath, repo)
@@ -245,6 +250,7 @@ func TestPollPRCommentsIgnoresUntrustedAuthor(t *testing.T) {
 	if err := queue.EnsureLayout(root); err != nil {
 		t.Fatal(err)
 	}
+	writeDaemonEnvironmentProfile(t, root, repo, true, false)
 	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
 	writeDaemonTask(t, donePath, repo)
 	loaded, err := task.Load(donePath)
@@ -279,4 +285,42 @@ fi
 		t.Fatalf("untrusted comment should be marked processed after ignore: %#v", stillDone.PR.ProcessedCommentIDs)
 	}
 	assertGlobCount(t, filepath.Join(root, "tasks", "queued", "*.yaml"), 0)
+}
+
+func writeDaemonEnvironmentProfile(t *testing.T, root, repo string, pollComments, replyComments bool) {
+	t.Helper()
+	_, _, environmentPath, err := galleyhome.RepoProfilePaths(root, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(environmentPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `id: "test-env"
+cwd: "` + repo + `"
+commands:
+  test: "true"
+constraints:
+  network: "approval_required"
+  secrets_policy: "never_read_env_files"
+  destructive_commands: "deny"
+pr:
+  enabled: true
+  base: "main"
+  comments:
+    enabled: ` + boolYAML(pollComments) + `
+    reply: ` + boolYAML(replyComments) + `
+worktree:
+  cleanup: true
+`
+	if err := os.WriteFile(environmentPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func boolYAML(value bool) string {
+	if value {
+		return "true"
+	}
+	return "false"
 }

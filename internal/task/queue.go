@@ -2,11 +2,13 @@ package task
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/shinpr/galley/internal/strutil"
+	"go.yaml.in/yaml/v3"
 )
 
 type QueueOptions struct {
@@ -37,6 +39,9 @@ func Queue(path string, opts QueueOptions) (QueueResult, error) {
 	if !validation.Valid() {
 		return QueueResult{}, fmt.Errorf("task validation failed: %v", validation.Errors)
 	}
+	if err := rejectDuplicateTaskID(path, loaded.ID, opts.Root); err != nil {
+		return QueueResult{}, err
+	}
 	loaded.Attempts = append(loaded.Attempts, Attempt{
 		Number:            len(loaded.Attempts) + 1,
 		StartedAt:         time.Now().UTC().Format(time.RFC3339Nano),
@@ -57,6 +62,71 @@ func Queue(path string, opts QueueOptions) (QueueResult, error) {
 		}
 	}
 	return QueueResult{Task: loaded, From: path, To: nextPath}, nil
+}
+
+func rejectDuplicateTaskID(path, id, root string) error {
+	root = queueRoot(path, root)
+	if root == "" || id == "" {
+		return nil
+	}
+	current, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	matches, err := filepath.Glob(filepath.Join(root, "tasks", "*", "*.y*ml"))
+	if err != nil {
+		return err
+	}
+	for _, match := range matches {
+		absMatch, err := filepath.Abs(match)
+		if err != nil {
+			return err
+		}
+		if absMatch == current {
+			continue
+		}
+		existingID, err := taskIDFromFile(match)
+		if err != nil {
+			return fmt.Errorf("inspect existing task %s: %w", match, err)
+		}
+		if existingID == id {
+			return fmt.Errorf("task id %q already exists at %s", id, match)
+		}
+	}
+	return nil
+}
+
+func taskIDFromFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	var header struct {
+		ID string `yaml:"id"`
+	}
+	if err := yaml.Unmarshal(data, &header); err != nil {
+		return "", nil
+	}
+	return header.ID, nil
+}
+
+func queueRoot(path, root string) string {
+	if root != "" {
+		return filepath.Clean(root)
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return ""
+	}
+	stateDir := filepath.Dir(absPath)
+	tasksDir := filepath.Dir(stateDir)
+	if filepath.Base(tasksDir) != "tasks" {
+		return ""
+	}
+	if info, err := os.Stat(tasksDir); err == nil && info.IsDir() {
+		return filepath.Dir(tasksDir)
+	}
+	return ""
 }
 
 func queuedPathFor(path, root string) string {

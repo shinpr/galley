@@ -69,18 +69,11 @@ func TestValidateStructuralRejectsInvalidCases(t *testing.T) {
 			wantWarning: "execution_policy.loop_budget is empty; defaulting to 10",
 		},
 		{
-			name: "zero loop budget",
+			name: "negative loop budget",
 			mutate: func(task *Task) {
-				task.ExecutionPolicy.LoopBudget = LoopBudget{Count: 0, Set: true}
+				task.ExecutionPolicy.LoopBudget = LoopBudget{Count: -1, Set: true}
 			},
-			want: "execution_policy.loop_budget must be positive",
-		},
-		{
-			name: "mixed infinite loop budget",
-			mutate: func(task *Task) {
-				task.ExecutionPolicy.LoopBudget = LoopBudget{Count: 3, Infinite: true, Set: true}
-			},
-			want: "execution_policy.loop_budget cannot be both infinite and counted",
+			want: "execution_policy.loop_budget must be >= 0",
 		},
 		{
 			name: "invalid task id",
@@ -244,10 +237,10 @@ func TestValidateStructuralRejectsInvalidCases(t *testing.T) {
 	}
 }
 
-func TestValidateStructuralAcceptsInfiniteLoopBudget(t *testing.T) {
+func TestValidateStructuralAcceptsUnlimitedLoopBudget(t *testing.T) {
 	t.Parallel()
 	task := validTask(t)
-	task.ExecutionPolicy.LoopBudget = LoopBudget{Infinite: true, Set: true}
+	task.ExecutionPolicy.LoopBudget = LoopBudget{Count: 0, Set: true}
 
 	result := ValidateStructural(task)
 	if !result.Valid() {

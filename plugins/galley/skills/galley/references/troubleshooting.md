@@ -52,7 +52,7 @@ Read the files that exist. Focus on the newest attempt first.
 | task failed due to usage limit or transient provider failure | executor stopped for a temporary external limit | Wait until the limit resets, then requeue with a reason. |
 | `accepted` with quality concerns | pass policy treats concern as non-blocking | Add quality profile or PR comment requeue with specific blocker. |
 | no diff produced | task was investigation-only or executor stopped early | Check executor result and work order. |
-| PR comments ignored | polling disabled, auth missing, or comment ID already processed | Check `--poll-pr-comments`, `gh auth status`, and `pr.processed_comment_ids`. |
+| PR comments ignored | polling disabled in `environment.yaml`, auth missing, or comment ID already processed | Check `pr.comments.enabled`, `gh auth status`, and `pr.processed_comment_ids`. |
 
 ## Repair Actions
 

@@ -44,11 +44,15 @@ jobs:
           go run ./cmd/galley task validate "$tmp_task"
           go run ./cmd/galley profile validate --kind quality examples/quality-default.yaml
           go run ./cmd/galley profile validate --kind environment examples/environment-local.yaml
+          go run ./cmd/galley schema check
 
       - name: Validate JSON files
         run: |
           python3 -m json.tool schemas/claude-result.schema.json >/dev/null
           python3 -m json.tool schemas/supervisor-verdict.schema.json >/dev/null
+          python3 -m json.tool plugins/galley/skills/galley/references/task.schema.json >/dev/null
+          python3 -m json.tool plugins/galley/skills/galley/references/quality.schema.json >/dev/null
+          python3 -m json.tool plugins/galley/skills/galley/references/environment.schema.json >/dev/null
           python3 -m json.tool plugins/galley/.claude-plugin/plugin.json >/dev/null
           python3 -m json.tool plugins/galley/.codex-plugin/plugin.json >/dev/null
           python3 -m json.tool .claude-plugin/marketplace.json >/dev/null

@@ -16,7 +16,7 @@ Usage:
   scripts/install.sh [options]
 
 Options:
-  --version <version>   Install a release version such as latest or v0.1.0.
+  --version <version>   Install a release version such as latest or a tag.
   --bin-dir <dir>       Install into a specific directory. Defaults to $GALLEY_BIN_DIR, $GOBIN, or ~/.local/bin.
   --release             Install a prebuilt GitHub Release asset. This is the default.
   --local               Build and install from the current checkout's ./cmd/galley.

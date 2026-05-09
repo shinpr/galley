@@ -11,6 +11,34 @@ import (
 	taskpkg "github.com/shinpr/galley/internal/task"
 )
 
+func TestVersionCommand(t *testing.T) {
+	t.Parallel()
+	stdout, stderr, err := executeCommand("version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr got %q", stderr)
+	}
+	if !strings.HasPrefix(stdout, "galley dev") {
+		t.Fatalf("stdout got %q", stdout)
+	}
+}
+
+func TestVersionFlag(t *testing.T) {
+	t.Parallel()
+	stdout, stderr, err := executeCommand("--version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr got %q", stderr)
+	}
+	if !strings.HasPrefix(stdout, "galley dev") {
+		t.Fatalf("stdout got %q", stdout)
+	}
+}
+
 func TestTaskValidateText(t *testing.T) {
 	t.Parallel()
 	taskPath := writeCLITaskYAML(t)
@@ -62,6 +90,46 @@ func TestTaskValidateMissingFileReturnsErrorWithoutUsage(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "read ") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSchemaGenerateAndCheck(t *testing.T) {
+	t.Parallel()
+	output := t.TempDir()
+
+	stdout, stderr, err := executeCommand("schema", "generate", "--output", output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr got %q", stderr)
+	}
+	if !strings.Contains(stdout, "generated:") {
+		t.Fatalf("stdout got %q", stdout)
+	}
+	for _, name := range []string{"task.schema.json", "quality.schema.json", "environment.schema.json"} {
+		if _, err := os.Stat(filepath.Join(output, name)); err != nil {
+			t.Fatalf("generated schema %s missing: %v", name, err)
+		}
+		if !strings.Contains(stdout, name) {
+			t.Fatalf("stdout missing %s: %q", name, stdout)
+		}
+	}
+
+	stdout, stderr, err = executeCommand("schema", "check", "--path", output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr got %q", stderr)
+	}
+	if !strings.Contains(stdout, "schema up to date:") {
+		t.Fatalf("stdout got %q", stdout)
+	}
+	for _, name := range []string{"task.schema.json", "quality.schema.json", "environment.schema.json"} {
+		if !strings.Contains(stdout, name) {
+			t.Fatalf("stdout missing %s: %q", name, stdout)
+		}
 	}
 }
 

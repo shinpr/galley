@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "evidence_requirements": {
+      "additionalProperties": false,
+      "properties": {
+        "command_outputs": {
+          "default": true,
+          "type": "boolean"
+        },
+        "file_line_references": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "file_line_references",
+        "command_outputs"
+      ],
+      "type": "object"
+    },
+    "id": {
+      "description": "Repository quality profile identifier.",
+      "minLength": 1,
+      "type": "string"
+    },
+    "pass_policy": {
+      "additionalProperties": false,
+      "properties": {
+        "blocking_severities": {
+          "default": [
+            "critical",
+            "high",
+            "medium"
+          ],
+          "items": {
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "min_score": {
+          "default": 85,
+          "maximum": 100,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "required_dimensions_must_pass": {
+          "default": true,
+          "type": "boolean"
+        },
+        "unresolved_high_findings_allowed": {
+          "default": 0,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "required_dimensions_must_pass",
+        "min_score",
+        "unresolved_high_findings_allowed",
+        "blocking_severities"
+      ],
+      "type": "object"
+    },
+    "required_checks": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "preferred_commands": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "required": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "preferred_commands",
+          "required"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "review_dimensions": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "pass": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "required": {
+            "default": true,
+            "type": "boolean"
+          },
+          "weight": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "weight",
+          "required",
+          "pass"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "required_checks",
+    "review_dimensions",
+    "evidence_requirements",
+    "pass_policy"
+  ],
+  "title": "Galley Quality Profile YAML",
+  "type": "object"
+}

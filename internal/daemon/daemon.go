@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shinpr/galley/internal/config"
 	"github.com/shinpr/galley/internal/galleyhome"
 	"github.com/shinpr/galley/internal/inputfiles"
 	"github.com/shinpr/galley/internal/jsonio"
@@ -24,7 +23,6 @@ import (
 // Options configure the file-backed Galley daemon.
 type Options struct {
 	Root                   string
-	ManifestFile           string
 	SystemPromptFile       string
 	JSONSchemaFile         string
 	QualityProfileFile     string
@@ -82,7 +80,7 @@ func Run(ctx context.Context, opts Options) error {
 	if opts.Once {
 		var firstErr error
 		for {
-			processed, err := runIteration(ctx, opts)
+			processed, err := processQueuedTasks(ctx, opts)
 			if err != nil && firstErr == nil {
 				firstErr = err
 			}
@@ -95,7 +93,7 @@ func Run(ctx context.Context, opts Options) error {
 	ticker := time.NewTicker(opts.PollInterval)
 	defer ticker.Stop()
 	for {
-		if _, err := runIteration(ctx, opts); err != nil {
+		if _, err := runDaemonCycle(ctx, opts); err != nil {
 			fmt.Fprintf(os.Stderr, "galley: iteration failed: %v\n", err)
 		}
 		select {
@@ -106,36 +104,32 @@ func Run(ctx context.Context, opts Options) error {
 	}
 }
 
-func runIteration(ctx context.Context, opts Options) (int, error) {
+func runDaemonCycle(ctx context.Context, opts Options) (int, error) {
 	var errs []error
-	if opts.PollPRComments {
-		if err := pollPRComments(ctx, opts); err != nil {
-			errs = append(errs, fmt.Errorf("poll PR comments: %w", err))
-		}
+	if err := pollPRComments(ctx, opts); err != nil {
+		errs = append(errs, fmt.Errorf("poll PR comments: %w", err))
 	}
-	if opts.CleanupWorktrees {
-		if err := cleanupWorktrees(ctx, opts); err != nil {
-			errs = append(errs, fmt.Errorf("cleanup worktrees: %w", err))
-		}
+	if err := cleanupWorktrees(ctx, opts); err != nil {
+		errs = append(errs, fmt.Errorf("cleanup worktrees: %w", err))
 	}
-	processed, err := processAvailable(ctx, opts)
+	processed, err := processQueuedTasks(ctx, opts)
 	if err != nil {
-		errs = append(errs, fmt.Errorf("process available tasks: %w", err))
+		errs = append(errs, err)
 	}
 	return processed, errors.Join(errs...)
 }
 
+func processQueuedTasks(ctx context.Context, opts Options) (int, error) {
+	processed, err := processAvailable(ctx, opts)
+	if err != nil {
+		return processed, fmt.Errorf("process available tasks: %w", err)
+	}
+	return processed, nil
+}
+
 // Preflight resolves daemon options and verifies startup prerequisites.
 func Preflight(opts Options) (Options, error) {
-	var err error
-	opts, err = opts.withManifest()
-	if err != nil {
-		return Options{}, err
-	}
 	opts = opts.withDefaults()
-	if opts.OpenPR && !opts.CommitOnAccept {
-		return Options{}, fmt.Errorf("open PR requires commit-on-accept")
-	}
 	if opts.Supervisor != "" && opts.Supervisor != "codex" && opts.Supervisor != "claude" {
 		return Options{}, fmt.Errorf("supervisor must be one of: codex, claude")
 	}
@@ -143,41 +137,6 @@ func Preflight(opts Options) (Options, error) {
 		return Options{}, err
 	}
 	return opts, nil
-}
-
-func (opts Options) withManifest() (Options, error) {
-	if opts.ManifestFile == "" {
-		return opts, nil
-	}
-	manifest, err := config.LoadManifest(opts.ManifestFile)
-	if err != nil {
-		return Options{}, err
-	}
-	defaults := manifest.Defaults
-	applyDefault(&opts.SystemPromptFile, defaults.SystemPromptFile, opts.Explicit.SystemPromptFile)
-	applyDefault(&opts.JSONSchemaFile, defaults.JSONSchemaFile, opts.Explicit.JSONSchemaFile)
-	applyDefault(&opts.QualityProfileFile, defaults.QualityProfileFile, opts.Explicit.QualityProfileFile)
-	applyDefault(&opts.EnvironmentProfileFile, defaults.EnvironmentProfileFile, opts.Explicit.EnvironmentProfileFile)
-	applyDefault(&opts.MaxConcurrentTasks, defaults.MaxConcurrentTasks, opts.Explicit.MaxConcurrentTasks)
-	applyDefault(&opts.MaxConcurrentPerRepo, defaults.MaxConcurrentPerRepo, opts.Explicit.MaxConcurrentPerRepo)
-	applyDefault(&opts.PollInterval, defaults.PollInterval, opts.Explicit.PollInterval)
-	applyDefault(&opts.ClaimTTL, defaults.ClaimTTL, opts.Explicit.ClaimTTL)
-	applyDefault(&opts.HeartbeatInterval, defaults.HeartbeatInterval, opts.Explicit.HeartbeatInterval)
-	applyDefault(&opts.CommitOnAccept, defaults.CommitOnAccept, opts.Explicit.CommitOnAccept)
-	applyDefault(&opts.OpenPR, defaults.OpenPR, opts.Explicit.OpenPR)
-	applyDefault(&opts.PollPRComments, defaults.PollPRComments, opts.Explicit.PollPRComments)
-	applyDefault(&opts.ReplyPRComments, defaults.ReplyPRComments, opts.Explicit.ReplyPRComments)
-	applyDefault(&opts.CleanupWorktrees, defaults.CleanupWorktrees, opts.Explicit.CleanupWorktrees)
-	applyDefault(&opts.PRBase, defaults.PRBase, opts.Explicit.PRBase)
-	applyDefault(&opts.Supervisor, defaults.Supervisor, opts.Explicit.Supervisor)
-	return opts, nil
-}
-
-func applyDefault[T any](dst *T, value T, explicit bool) {
-	if explicit {
-		return
-	}
-	*dst = value
 }
 
 func (opts Options) withDefaults() Options {

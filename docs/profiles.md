@@ -18,7 +18,12 @@ By default, profiles live under the daemon root:
 
 `<repo-key>` is generated from the repository path. Use `galley profile resolve` instead of guessing it.
 
-Explicit daemon flags such as `--quality-profile-file` and `--environment-profile-file` override the default profile lookup.
+The packaged Galley skill includes generated schema references for profile authoring:
+
+- `plugins/galley/skills/galley/references/quality.schema.json`
+- `plugins/galley/skills/galley/references/environment.schema.json`
+
+These files are generated from the Go profile contracts with `galley schema generate`, and CI verifies them with `galley schema check`.
 
 ## quality.yaml
 
@@ -86,6 +91,14 @@ constraints:
   network: "approval_required"
   secrets_policy: "never_read_env_files"
   destructive_commands: "deny"
+pr:
+  enabled: true
+  base: "main"
+  comments:
+    enabled: true
+    reply: true
+worktree:
+  cleanup: true
 ```
 
 Supported fields:
@@ -96,6 +109,11 @@ Supported fields:
 - `constraints.network`: local network policy.
 - `constraints.secrets_policy`: secret handling policy.
 - `constraints.destructive_commands`: destructive command policy.
+- `pr.enabled`: commit accepted changes, push the task branch, and open a PR.
+- `pr.base`: base branch for opened PRs.
+- `pr.comments.enabled`: poll PR comments for `/galley rerun` and `/galley requeue`.
+- `pr.comments.reply`: post an acknowledgement after handling a Galley PR comment.
+- `worktree.cleanup`: remove clean worktrees for closed or merged PR tasks.
 
 Validate an environment profile:
 

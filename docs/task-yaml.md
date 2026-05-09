@@ -85,7 +85,7 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 
 ## Execution Policy And Executor
 
-- `execution_policy.loop_budget`: positive attempt count or `infinite`.
+- `execution_policy.loop_budget`: non-negative attempt count; `0` means unlimited.
 - `execution_policy.afk_decision_policy`: currently `choose-smallest-reversible`; the executor should choose the smallest reversible option when it can continue without human input.
 - `execution_policy.stop_on_destructive_operation`: stop when the task would require out-of-scope destructive work.
 - `execution_policy.stop_on_missing_secret`: stop when a required secret is unavailable and cannot be replaced by safe local evidence.
@@ -154,7 +154,9 @@ Example:
 
 ## Loop Budget
 
-`execution_policy.loop_budget` is the maximum number of executor attempts. It accepts a positive integer or the string `infinite`.
+`execution_policy.loop_budget` is the maximum number of executor attempts. It accepts an integer greater than or equal to `0`; `0` means unlimited.
+
+For AFK implementation tasks, `10` is the recommended default. Values below `5` are best reserved for intentionally short, low-cost runs because they can stop useful revision loops too early. Use `0` only when the user explicitly wants an unbounded run.
 
 `supervisor.review_iterations` controls supervisor-only follow-up iterations. `0` means Galley uses the supervisor as an acceptance gate after executor attempts, without additional supervisor-only review loops.
 

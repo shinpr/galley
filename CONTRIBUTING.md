@@ -28,6 +28,13 @@ galley profile validate --kind quality examples/quality-default.yaml
 galley profile validate --kind environment examples/environment-local.yaml
 ```
 
+Regenerate the skill-bundled task schema when changing the task YAML contract:
+
+```sh
+go run ./cmd/galley schema generate
+go run ./cmd/galley schema check
+```
+
 Validate plugin metadata when changing plugin or skill files:
 
 ```sh

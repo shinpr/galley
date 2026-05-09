@@ -144,7 +144,7 @@ The standalone skill still expects the `galley` CLI on `PATH`. Some workflows al
 ### Skill Use Cases
 
 - **Task authoring**: clarify the user goal, target repo, scope, input files, acceptance criteria, verification, loop budget, supervisor, and PR behavior; write a draft task YAML, validate it, and queue it only after explicit user approval.
-- **Profile authoring**: interactively create `quality.yaml` and `environment.yaml` for repo-specific quality gates, commands, tools, network policy, secrets policy, and destructive-command policy.
+- **Profile authoring**: interactively create `quality.yaml` and `environment.yaml` for repo-specific quality gates, commands, tools, network policy, secrets policy, PR behavior, and cleanup policy.
 - **Setup**: install `galley`, check `claude`, `codex`, `gh`, configure workflow roots, and prepare daemon/PR automation commands.
 - **Troubleshooting**: inspect failed runs, stale claims, PR automation state, executor output, and recorded evidence.
 
@@ -155,7 +155,7 @@ The standalone skill still expects the `galley` CLI on `PATH`. Some workflows al
 - **Environment profile**: optional repo-specific command map and execution constraints for network, secrets, and destructive operations. See [docs/profiles.md](docs/profiles.md).
 - **AFK task**: an unattended task that can run asynchronously inside a managed worktree.
 - **Acceptance criterion ID**: the `acceptance_criteria[].id` value Claude must report back with evidence, for example `AC1`.
-- **Loop budget**: `execution_policy.loop_budget` is the maximum number of executor attempts before Galley escalates to supervisor review.
+- **Loop budget**: `execution_policy.loop_budget` is the maximum number of executor attempts before Galley escalates to supervisor review; `0` means unlimited.
 - **Permission**: `scope.permission` sets the executor authority level for the task.
 - **Input files**: optional `files[]` entries copy user-supplied files into the execution worktree with an explicit destination and commit policy.
 - **File-backed queue**: queued task copies move through `tasks/queued`, `tasks/running`, `tasks/done`, `tasks/failed`, and `tasks/archived`.
@@ -192,7 +192,7 @@ supervisor review
         |
         +-- accepted -----------------> tasks/done/accepted
         |
-        +-- accepted + --open-pr -----> tasks/done/pr_opened
+        +-- accepted + PR enabled ----> tasks/done/pr_opened
         |
         +-- needs_revision -----------> retry while loop budget remains
         |
@@ -225,7 +225,7 @@ Reviewed task files keep their terminal status in YAML. `tasks/done/` and `tasks
   galley-daemon.log
 ```
 
-`profiles/` holds repository quality and environment YAML files. Galley resolves `<repo-key>` from `scope.cwd`; use `galley profile resolve --cwd <repo> --mkdir --output json` to find the exact paths and create their parent directory. `--quality-profile-file` and `--environment-profile-file` remain explicit overrides.
+`profiles/` holds repository quality and environment YAML files. Galley resolves `<repo-key>` from `scope.cwd`; use `galley profile resolve --cwd <repo> --mkdir --output json` to find the exact paths and create their parent directory.
 
 See [docs/profiles.md](docs/profiles.md) for supported profile fields and examples.
 
@@ -307,7 +307,16 @@ galley profile resolve --cwd /path/to/repo --mkdir --output json
 
 Quality and environment profiles are optional repository inputs. By default Galley resolves them from `~/.galley/profiles/<repo-key>/` using task `scope.cwd`. They add checks, constraints, preferred commands, and evidence requirements to the Claude work order.
 
-The Galley skill can create profiles interactively by inspecting the repository and asking which checks, tools, network policy, secrets policy, and blocking severities apply.
+The environment profile also owns repository operation defaults such as PR creation, PR comment handling, base branch, and worktree cleanup. The Galley skill can create profiles interactively by inspecting the repository and asking which checks, tools, network policy, secrets policy, PR behavior, and blocking severities apply.
+
+### Schema References
+
+```sh
+galley schema check
+galley schema generate
+```
+
+`galley schema generate` writes the task, quality profile, and environment profile schemas into the packaged skill references. `galley schema check` verifies those reference files still match the Go contracts and is run in CI.
 
 ### Claude Invocation
 
@@ -325,13 +334,13 @@ The default shell output is a human preview. Embedded defaults are shown as lite
 
 ```sh
 galley daemon run --once
-galley daemon run --once --open-pr --pr-base main
 galley daemon run --once --supervisor codex
-galley daemon run --once --poll-pr-comments --reply-pr-comments
 galley daemon start
 galley daemon status --output json
 galley daemon stop
 ```
+
+`galley daemon run --once` drains queued tasks once and exits. Background `galley daemon start` also performs daemon maintenance such as PR comment polling and closed/merged PR worktree cleanup according to `environment.yaml`.
 
 `--root` points at the daemon root and defaults to `~/.galley`. Use `--root .agent-workflow` only for repo-local or test workflows.
 
@@ -357,7 +366,7 @@ Accepted tasks must:
 - report required quality checks as passed verification evidence
 - return valid structured JSON matching the executor result schema
 
-Otherwise the task is retried until `execution_policy.loop_budget` is exhausted.
+Otherwise the task is retried until `execution_policy.loop_budget` is exhausted; `loop_budget: 0` has no attempt cap.
 
 | Condition | Result |
 | --- | --- |
@@ -380,19 +389,17 @@ Hard-stop conditions are defined in the Claude executor prompt at `prompts/claud
 
 PR automation requires GitHub CLI (`gh`) to be installed and authenticated.
 
-When `--commit-on-accept` is set, accepted worktree changes are committed with a Galley task commit message and `git_commit_result.json` is written to the run directory.
+When `pr.enabled: true` is set in the environment profile, accepted worktree changes are committed with a Galley task commit message and `git_commit_result.json` is written to the run directory.
 
-When `--open-pr` is set, Galley pushes the current worktree branch to `origin`, writes `pr_body.md`, runs `gh pr create`, updates `pr.url` and `pr.status`, and moves the task to `done/pr_opened`. For AFK tasks, the branch is the task YAML `worktree.branch`. PR creation is opt-in so local validation runs do not require GitHub credentials or network access.
+With `pr.enabled: true`, Galley pushes the current worktree branch to `origin`, writes `pr_body.md`, runs `gh pr create`, updates `pr.url` and `pr.status`, and moves the task to `done/pr_opened`. For AFK implementation tasks, PR creation plus comment polling is the recommended review loop. Local-only runs can leave PR automation disabled when GitHub credentials or network access are unavailable. The branch is the task YAML `worktree.branch`; the base branch comes from `pr.base`.
 
-When `--poll-pr-comments` is enabled, the daemon scans task files with `pr.url`, reads GitHub issue comments through `gh api`, and processes the oldest unprocessed `/galley rerun ...` or `/galley requeue ...` command for each task. Processed comment IDs are stored in `pr.processed_comment_ids` so rerun commands are not applied twice.
+With `pr.comments.enabled: true`, the daemon scans task files with `pr.url`, reads GitHub issue comments through `gh api`, and processes the oldest unprocessed `/galley rerun ...` or `/galley requeue ...` command for each task. Processed comment IDs are stored in `pr.processed_comment_ids` so rerun commands are not applied twice.
 
-When `--reply-pr-comments` is set with `--poll-pr-comments`, Galley posts an acknowledgement comment after handling a rerun or requeue command.
+With `pr.comments.reply: true`, Galley posts an acknowledgement comment after handling a rerun or requeue command.
 
-## Manifests And Supervisors
+## Supervisors
 
-`--manifest-file` loads repository defaults such as prompt/schema paths, profiles, PR policy, polling and cleanup settings.
-
-Supervisor review defaults to Claude. Use `--supervisor codex` to select Codex instead, or `--supervisor claude` to be explicit. The built-in adapters are implemented in the `galley` binary and include the bundled prompts and supervisor verdict schema, so they work after `go install` or the installer without a Galley repository checkout.
+Supervisor review defaults to Claude. Use `--supervisor codex` to select Codex instead, or `--supervisor claude` to be explicit. Repository-specific PR behavior, comment polling, and worktree cleanup live in the environment profile resolved from `scope.cwd`.
 
 ## Development Examples
 
@@ -401,7 +408,7 @@ The `examples/` directory is for Galley checkout development and CI validation. 
 ```sh
 galley task validate examples/afk-task.yaml
 galley task work-order examples/afk-task.yaml
-galley daemon run --once --manifest-file examples/repos.yaml
+galley daemon run --once
 galley claude args examples/afk-task.yaml --output json
 ```
 
@@ -411,7 +418,7 @@ Release assets are built by GitHub Actions when a GitHub Release is published. S
 
 ## Worktree Cleanup
 
-When `--cleanup-worktrees` is enabled, the daemon scans `tasks/done` PR tasks and checks PR state through `gh api`.
+With `worktree.cleanup: true`, the daemon scans `tasks/done` PR tasks and checks PR state through `gh api`.
 
 - Open PRs keep their worktree.
 - Closed or merged PRs remove only clean git worktrees.

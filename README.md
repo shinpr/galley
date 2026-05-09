@@ -4,7 +4,7 @@
 
 Galley is a local orchestration runtime for supervised Claude Code task execution.
 
-It runs locally, keeps work in git-visible changes, and records evidence for review before accepting unattended AI-assisted repository work.
+It runs locally, keeps work in git-visible changes, and records evidence for review before each acceptance decision.
 
 Galley is Claude-first today. The executor path targets Claude Code, and supervisor review defaults to Claude. Codex can be selected as an alternate model supervisor.
 
@@ -83,15 +83,7 @@ plugins/galley/
 
 ### Claude Code
 
-Install from the GitHub-hosted marketplace:
-
-```text
-/plugin marketplace add shinpr/galley
-/plugin install galley@galley-tools
-/reload-plugins
-```
-
-Then invoke the skill:
+After installing the plugin as shown above, invoke the skill:
 
 ```text
 /galley:galley Create a Galley task for this feature request.
@@ -116,11 +108,7 @@ You can also add the checkout as a local marketplace for testing:
 
 ### Codex
 
-Galley ships a Codex marketplace file at `.agents/plugins/marketplace.json`, which points to `./plugins/galley`. Install it from the GitHub repository:
-
-```sh
-codex plugin marketplace add shinpr/galley
-```
+Galley ships a Codex marketplace file at `.agents/plugins/marketplace.json`, which points to `./plugins/galley`.
 
 For local development:
 
@@ -267,24 +255,11 @@ For a task, describe the work to the skill:
 
 The skill asks for reference files when needed, confirms scope and execution settings, writes a draft task YAML, validates it, and asks before queueing. If the daemon is running, it will pick up queued tasks and move accepted work toward a PR according to `environment.yaml`.
 
+For hand-authored task YAML, use [docs/task-yaml.md](docs/task-yaml.md) as the reference.
+
 The daemon root defaults to `~/.galley`, and `galley task queue` targets the running daemon root when one is available. Use `--root <path>` only for repo-local, test, or advanced multi-root workflows.
 
 For one-shot local checks, use `galley daemon run --once` to drain the current queue and exit.
-
-Development build and tests:
-
-```sh
-go test ./...
-go build ./cmd/galley
-```
-
-Run the local smoke test:
-
-```sh
-./scripts/smoke-local.sh
-```
-
-The smoke test builds the binaries, creates a temporary git repository, installs a fake `claude` executable, queues a draft AFK task, runs the daemon once, and verifies that the task reaches `done/accepted` with run evidence.
 
 ## Commands
 
@@ -342,17 +317,13 @@ galley daemon run --once
 
 `--root` points at the daemon root and defaults to `~/.galley`. Use `--root .agent-workflow` only for repo-local or test workflows.
 
-`galley daemon run --once` processes the current queue in bounded concurrent batches. `--max-concurrent-per-repo` limits simultaneously running source repositories so local services, branch operations, and CI quotas are less likely to collide.
-
-Without `--once`, `galley daemon run` runs continuously and checks for work every `--poll-interval`, which defaults to `10s`.
-
 `galley daemon start` launches the daemon in the background. It writes a PID file and appends stdout/stderr to a log file. By default those files are under `~/.galley`; override them with `--pid-file` and `--log-file`.
 
 `galley daemon stop` reads the PID file, sends `SIGTERM`, waits up to `--stop-timeout`, and removes the PID file when it still points at the stopped process. `galley daemon status` reports whether the PID file points at a live process.
 
 Use the installed `galley` binary for `start`, `status`, and `stop`. PID verification records the executable path, so `go run ./cmd/galley ... daemon start` is not suitable for background daemon control because later `go run` invocations use different temporary binaries.
 
-Foreground and background daemons use the same shutdown path. On `SIGINT` or `SIGTERM`, Galley stops claiming new queued tasks, lets active attempts finish until `--shutdown-timeout`, which defaults to `5m`, records evidence, and avoids starting another retry attempt after shutdown is requested.
+Foreground and background daemons use the same shutdown path. On `SIGINT` or `SIGTERM`, Galley stops claiming new queued tasks, lets active attempts finish until the shutdown timeout, records evidence, and avoids starting another retry attempt after shutdown is requested.
 
 ## Supervisor Behavior
 
@@ -399,20 +370,6 @@ With `pr.comments.reply: true`, Galley posts an acknowledgement comment after ha
 
 Supervisor review defaults to Claude. Use `--supervisor codex` to select Codex instead, or `--supervisor claude` to be explicit. Repository-specific PR behavior, comment polling, and worktree cleanup live in the environment profile resolved from `scope.cwd`.
 
-## Development Examples
-
-The `examples/` directory is for Galley checkout development and CI validation. These files are useful for smoke tests and command previews, but normal users should prefer `~/.galley` tasks created by the plugin skill.
-
-```sh
-galley task validate examples/afk-task.yaml
-galley task work-order examples/afk-task.yaml
-galley daemon run --once
-```
-
-For local development and release notes, see [CONTRIBUTING.md](CONTRIBUTING.md) and [CHANGELOG.md](CHANGELOG.md).
-
-Release assets are built by GitHub Actions when a GitHub Release is published. See [.github/workflows/release.yml](.github/workflows/release.yml) and [.goreleaser.yaml](.goreleaser.yaml).
-
 ## Worktree Cleanup
 
 With `worktree.cleanup: true`, the daemon scans `tasks/done` PR tasks and checks PR state through `gh api`.
@@ -447,6 +404,35 @@ Run Galley only for repositories and task authors you trust. Keep secrets out of
 Automatic commit/PR creation currently stages the accepted worktree state with `git add -A`, so repository `.gitignore` should cover local editor, OS, cache, and secret files.
 
 See [SECURITY.md](SECURITY.md) for reporting and operational trust boundaries.
+
+## Development Examples
+
+The `examples/` directory is for Galley checkout development and CI validation. Normal users should prefer `~/.galley` tasks created by the plugin skill.
+
+Development build and tests:
+
+```sh
+go test ./...
+go build ./cmd/galley
+```
+
+Run the local smoke test:
+
+```sh
+./scripts/smoke-local.sh
+```
+
+The smoke test builds the binaries, creates a temporary git repository, installs a fake `claude` executable, queues a draft AFK task, runs the daemon once, and verifies that the task reaches `done/accepted` with run evidence.
+
+```sh
+galley task validate examples/afk-task.yaml
+galley task work-order examples/afk-task.yaml
+galley daemon run --once
+```
+
+For local development and release notes, see [CONTRIBUTING.md](CONTRIBUTING.md) and [CHANGELOG.md](CHANGELOG.md).
+
+Release assets are built by GitHub Actions when a GitHub Release is published. See [.github/workflows/release.yml](.github/workflows/release.yml) and [.goreleaser.yaml](.goreleaser.yaml).
 
 ## License
 

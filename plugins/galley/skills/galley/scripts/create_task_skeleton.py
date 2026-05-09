@@ -128,7 +128,7 @@ worktree:
   branch: agent/{short}
   path: ../{cwd.name}.worktrees/{short}
 supervisor:
-  review_iterations: 1
+  review_iterations: 0
 executor:
   cli: claude
   model: opus

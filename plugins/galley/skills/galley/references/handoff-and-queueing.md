@@ -26,7 +26,9 @@ galley task queue <task-file>
 
 After queueing, report the queued path and the daemon command the user can run.
 
-Advanced roots: `galley task queue` normally targets the running daemon queue, or the default queue when no daemon is running. Pass `--root <path>` only when the user explicitly chose a non-default root. Pass `--move` only when the source draft file should be removed after queueing.
+Main path: `galley task queue` targets the running daemon queue, or the default queue when no daemon is running. Drafts outside the daemon root are copied, so the source remains useful for review. Pass `--move` only when the source draft should be removed after queueing.
+
+Advanced roots: pass `--root <path>` only when the user explicitly chose a non-default root.
 
 ## Common Validation Fixes
 

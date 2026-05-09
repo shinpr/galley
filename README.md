@@ -121,7 +121,7 @@ The standalone skill still expects the `galley` CLI on `PATH`. Some workflows al
 
 ### Skill Use Cases
 
-- **Task authoring**: clarify the user goal, target repo, scope, input files, acceptance criteria, verification, loop budget, supervisor, and PR behavior; write task YAML under the daemon root's `tasks/draft/`; validate it; queue only after explicit user approval.
+- **Task authoring**: clarify the user goal, target repo, scope, input files, acceptance criteria, verification, loop budget, supervisor, and PR behavior; write a draft task YAML, validate it, and queue it only after explicit user approval.
 - **Profile authoring**: interactively create `quality.yaml` and `environment.yaml` for repo-specific quality gates, commands, tools, network policy, secrets policy, and destructive-command policy.
 - **Setup**: install `galley`, check `claude`, `codex`, `gh`, configure workflow roots, and prepare daemon/PR automation commands.
 - **Troubleshooting**: inspect failed runs, stale claims, PR automation state, executor output, and recorded evidence.
@@ -136,7 +136,7 @@ The standalone skill still expects the `galley` CLI on `PATH`. Some workflows al
 - **Loop budget**: `execution_policy.loop_budget` is the maximum number of executor attempts before Galley escalates to supervisor review.
 - **Permission**: `scope.permission` sets the executor authority level for the task.
 - **Input files**: optional `files[]` entries copy user-supplied files into the execution worktree with an explicit destination and commit policy.
-- **File-backed queue**: task files move through `tasks/queued`, `tasks/running`, `tasks/done`, `tasks/failed`, and `tasks/archived`.
+- **File-backed queue**: queued task copies move through `tasks/queued`, `tasks/running`, `tasks/done`, `tasks/failed`, and `tasks/archived`.
 - **Worktree execution**: AFK tasks execute in a git worktree while `scope.cwd` continues to point at the source repository.
 - **Structured evidence**: every attempt writes command plans, executor output, git status, diffs, and supervisor verdicts under `runs/`.
 - **Supervisor review**: Galley sends structured run evidence to a model supervisor before accepting, retrying, or escalating.
@@ -230,11 +230,11 @@ galley profile resolve --cwd /path/to/repo --mkdir --output json
 After the skill writes and validates a draft task, approve queueing and process the queue:
 
 ```sh
-galley task queue ~/.galley/tasks/draft/TASK.yaml --reason "queue for daemon"
+galley task queue ./TASK.yaml --reason "queue for daemon"
 galley daemon run --once
 ```
 
-The daemon root defaults to `~/.galley`, so these commands can be run from any repository. Use `--root <path>` only for repo-local, test, or advanced multi-root workflows.
+The daemon root defaults to `~/.galley`, and `galley task queue` targets the running daemon root when one is available. Use `--root <path>` only for repo-local, test, or advanced multi-root workflows. Use `--move` only when the source draft should be removed after queueing.
 
 Development build and tests:
 
@@ -258,20 +258,20 @@ The smoke test builds the binaries, creates a temporary git repository, installs
 ```sh
 galley task list
 galley task show TASK_ID
-galley task validate ~/.galley/tasks/draft/TASK.yaml
-galley task work-order ~/.galley/tasks/draft/TASK.yaml
-galley task queue ~/.galley/tasks/draft/TASK.yaml --reason "queue for daemon"
-galley task requeue ~/.galley/tasks/failed/TASK.yaml --reason "addressed review feedback"
+galley task validate ./TASK.yaml
+galley task work-order ./TASK.yaml
+galley task queue ./TASK.yaml --reason "queue for daemon"
+galley task requeue TASK_ID --reason "addressed review feedback"
 galley task archive ~/.galley/tasks/done/TASK.yaml
 ```
 
-`galley task queue` validates a `draft` task, sets `status: queued`, records a queue attempt, and moves it into `tasks/queued` without overwriting an existing queued file.
+`galley task queue` validates a `draft` task, sets `status: queued`, records a queue attempt, and writes it into `tasks/queued` without overwriting an existing queued file. Drafts outside the daemon root are copied by default; pass `--move` when the source file should be removed after queueing.
 
 `galley task list` shows task state, status, PR URL, latest verdict, and latest summary across the workflow root.
 
 `galley task show` accepts a task file or task ID and prints the latest attempt, supervisor verdict, risk, and failed verification context.
 
-`galley task requeue` moves a reviewed task from `tasks/failed`, `tasks/done`, or `tasks/running` back into `tasks/queued`, records an optional reason, and increments `supervisor.review_iterations`.
+`galley task requeue` accepts a task ID or task file, returns a reviewed task from `tasks/failed`, `tasks/done`, or `tasks/running` to `tasks/queued`, records an optional reason, and increments `supervisor.review_iterations`.
 
 ### Profiles
 
@@ -410,9 +410,11 @@ That version supports `--system-prompt` and `--append-system-prompt`, but does n
 
 ## Trust Model
 
-Galley treats task YAML as trusted local execution input. A user or process that can write task YAML can choose `acceptance_criteria[].verification`, which Galley runs through `/bin/sh -c` inside the selected workspace, and can influence the branch/worktree used for execution.
+Galley treats task YAML as trusted local execution input. A user or process that can write task YAML can choose the goal, scope, reference files, branch/worktree, and acceptance verification guidance used by the executor and supervisor.
 
-PR comments can request requeueing and add instructions, but they do not rewrite verification commands.
+Runnable quality checks come from profiles and are executed locally through `/bin/sh -c` inside the selected workspace.
+
+PR comments can request requeueing and add instructions, but they do not rewrite profile checks.
 
 Run Galley only for repositories and task authors you trust. Keep secrets out of task-accessible files, and use worktrees plus allowed paths to keep executor changes bounded.
 

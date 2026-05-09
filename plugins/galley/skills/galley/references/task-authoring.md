@@ -113,7 +113,7 @@ worktree:
   branch: agent/<short-name>
   path: ../<repo-name>.worktrees/<short-name>
 supervisor:
-  review_iterations: 1
+  review_iterations: 0
 executor:
   cli: claude
   model: opus
@@ -135,7 +135,7 @@ pr:
 ## Field Guidance
 
 - `mode`: use `afk` for daemon execution.
-- `status`: write new tasks as `draft`; `galley task queue` moves them to `queued`.
+- `status`: write new tasks as `draft`; `galley task queue` writes the queued copy with `status: queued`.
 - `scope.permission`: prefer `sandbox-full-access` for AFK implementation tasks that run in an isolated worktree or sandbox; use `read-only` for investigation and review only; use `edit` when edits are needed but broad sandbox authority is unnecessary or unavailable.
 - `allowed_paths`: choose the narrowest paths that still allow the task to succeed.
 - `files`: use it when the user attaches or names specs, work plans, logs, screenshots, issue exports, or other implementation references the executor should read in the worktree.

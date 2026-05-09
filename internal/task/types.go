@@ -64,51 +64,28 @@ type ExecutionPolicy struct {
 	StopOnExternalServiceUnavailable bool       `yaml:"stop_on_external_service_unavailable" json:"stop_on_external_service_unavailable"`
 }
 
-// LoopBudget is either a positive attempt count or the string "infinite".
+// LoopBudget is a non-negative attempt count. A count of zero means unlimited.
 type LoopBudget struct {
-	Count    int  `json:"count,omitempty"`
-	Infinite bool `json:"infinite,omitempty"`
-	Set      bool `yaml:"-" json:"-"`
+	Count int  `json:"count,omitempty"`
+	Set   bool `yaml:"-" json:"-"`
 }
 
-// UnmarshalYAML accepts a positive integer or the literal string "infinite".
+// UnmarshalYAML accepts an integer. Zero means unlimited.
 func (b *LoopBudget) UnmarshalYAML(value *yaml.Node) error {
 	b.Set = true
-	switch value.Kind {
-	case yaml.ScalarNode:
-		switch value.Tag {
-		case "!!int":
-			var count int
-			if err := value.Decode(&count); err != nil {
-				return err
-			}
-			b.Count = count
-			b.Infinite = false
-			return nil
-		case "!!str":
-			var text string
-			if err := value.Decode(&text); err != nil {
-				return err
-			}
-			if text != "infinite" {
-				return fmt.Errorf("loop_budget string value must be \"infinite\"")
-			}
-			b.Count = 0
-			b.Infinite = true
-			return nil
-		default:
-			return fmt.Errorf("loop_budget must be a positive integer or \"infinite\"")
-		}
-	default:
-		return fmt.Errorf("loop_budget must be a positive integer or \"infinite\"")
+	if value.Kind != yaml.ScalarNode || value.Tag != "!!int" {
+		return fmt.Errorf("loop_budget must be an integer >= 0; use 0 for unlimited")
 	}
+	var count int
+	if err := value.Decode(&count); err != nil {
+		return err
+	}
+	b.Count = count
+	return nil
 }
 
-// MarshalYAML encodes the budget as an integer or the literal string "infinite".
+// MarshalYAML encodes the budget as an integer.
 func (b LoopBudget) MarshalYAML() (any, error) {
-	if b.Infinite {
-		return "infinite", nil
-	}
 	if !b.Set {
 		return DefaultLoopBudget, nil
 	}
@@ -117,8 +94,11 @@ func (b LoopBudget) MarshalYAML() (any, error) {
 
 // String formats the budget for prompts and diagnostics.
 func (b LoopBudget) String() string {
-	if b.Infinite {
-		return "infinite"
+	if !b.Set {
+		return fmt.Sprintf("%d", DefaultLoopBudget)
+	}
+	if b.Count == 0 {
+		return "unlimited"
 	}
 	return fmt.Sprintf("%d", b.Count)
 }

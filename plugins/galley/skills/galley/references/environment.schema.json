@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "commands": {
+      "additionalProperties": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "constraints": {
+      "additionalProperties": false,
+      "properties": {
+        "destructive_commands": {
+          "default": "deny",
+          "minLength": 1,
+          "type": "string"
+        },
+        "network": {
+          "default": "approval_required",
+          "minLength": 1,
+          "type": "string"
+        },
+        "secrets_policy": {
+          "default": "never_read_env_files",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "network",
+        "secrets_policy",
+        "destructive_commands"
+      ],
+      "type": "object"
+    },
+    "cwd": {
+      "description": "Absolute path to the target repository.",
+      "minLength": 1,
+      "type": "string"
+    },
+    "id": {
+      "description": "Repository environment profile identifier.",
+      "minLength": 1,
+      "type": "string"
+    },
+    "pr": {
+      "additionalProperties": false,
+      "default": {
+        "base": "main",
+        "comments": {
+          "enabled": true,
+          "reply": true
+        },
+        "enabled": true
+      },
+      "properties": {
+        "base": {
+          "default": "main",
+          "type": "string"
+        },
+        "comments": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "default": true,
+              "type": "boolean"
+            },
+            "reply": {
+              "default": true,
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "worktree": {
+      "additionalProperties": false,
+      "default": {
+        "cleanup": true
+      },
+      "properties": {
+        "cleanup": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "required": [
+    "id",
+    "cwd",
+    "commands",
+    "constraints"
+  ],
+  "title": "Galley Environment Profile YAML",
+  "type": "object"
+}

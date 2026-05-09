@@ -23,15 +23,15 @@ func TestLoadDecodesKnownYAML(t *testing.T) {
 	}
 }
 
-func TestLoadDecodesInfiniteLoopBudget(t *testing.T) {
+func TestLoadDecodesUnlimitedLoopBudget(t *testing.T) {
 	t.Parallel()
-	path := writeTaskYAML(t, `loop_budget: "infinite"`)
+	path := writeTaskYAML(t, "loop_budget: 0")
 
 	loaded, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !loaded.ExecutionPolicy.LoopBudget.Infinite {
+	if loaded.ExecutionPolicy.LoopBudget.Count != 0 || !loaded.ExecutionPolicy.LoopBudget.Set {
 		t.Fatalf("loop budget got %#v", loaded.ExecutionPolicy.LoopBudget)
 	}
 }
@@ -44,7 +44,7 @@ func TestLoadRejectsStringNumberLoopBudget(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), `loop_budget string value must be "infinite"`) {
+	if !strings.Contains(err.Error(), "loop_budget must be an integer >= 0") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -57,7 +57,7 @@ func TestLoadRejectsNonScalarLoopBudget(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), `loop_budget must be a positive integer or "infinite"`) {
+	if !strings.Contains(err.Error(), "loop_budget must be an integer >= 0") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

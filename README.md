@@ -72,23 +72,10 @@ plugins/galley/
 
 ### Claude Code
 
-Load the local plugin while developing:
-
-```sh
-claude --plugin-dir ./plugins/galley
-```
-
-Validate the plugin and marketplace:
-
-```sh
-claude plugin validate plugins/galley
-claude plugin validate .
-```
-
-Install through the local marketplace:
+Install from the GitHub-hosted marketplace:
 
 ```text
-/plugin marketplace add .
+/plugin marketplace add shinpr/galley
 /plugin install galley@galley-tools
 /reload-plugins
 ```
@@ -101,15 +88,42 @@ Then invoke the skill:
 /galley:galley Diagnose this failed Galley run.
 ```
 
+For local development, validate the plugin and marketplace from a checkout:
+
+```sh
+claude plugin validate plugins/galley
+claude plugin validate .
+```
+
+You can also add the checkout as a local marketplace for testing:
+
+```text
+/plugin marketplace add .
+/plugin install galley@galley-tools
+/reload-plugins
+```
+
 ### Codex
 
-Galley ships a Codex marketplace file at `.agents/plugins/marketplace.json`, which points to `./plugins/galley`.
+Galley ships a Codex marketplace file at `.agents/plugins/marketplace.json`, which points to `./plugins/galley`. Install it from the GitHub repository:
+
+```sh
+codex plugin marketplace add shinpr/galley
+```
+
+To pin a release or branch:
+
+```sh
+codex plugin marketplace add shinpr/galley --ref v0.1.0
+```
+
+For local development:
 
 ```sh
 codex plugin marketplace add .
 ```
 
-The Codex CLI version used during development exposes marketplace management but no `plugin validate` command. Validate the bundled skill with the local skill validator when available.
+The Codex CLI version used during development exposes marketplace `add`, `upgrade`, and `remove`, but no `plugin validate` or separate `plugin install` command. Validate the bundled skill with the local skill validator when available.
 
 Invoke the skill from Codex with `$galley`, for example:
 

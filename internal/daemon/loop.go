@@ -28,12 +28,13 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 	if err != nil {
 		return taskstate.FailMove(opts.Root, runningPath, loaded, err)
 	}
+	effectiveOpts := effectiveOptionsForProfiles(opts, profiles)
 	prompt := task.RenderWorkOrderWithProfiles(executionTask(*loaded, prepared.CWD), profiles)
 	budget := attemptBudget(loaded.ExecutionPolicy.LoopBudget)
 	consecutiveNoDiff := 0
 	for attempt := 1; budget < 0 || attempt <= budget; attempt++ {
 		review, err := runOneSupervisorAttempt(ctx, supervisorAttemptRequest{
-			Opts:     opts,
+			Opts:     effectiveOpts,
 			Loaded:   loaded,
 			Prepared: prepared,
 			Profiles: profiles,
@@ -59,7 +60,7 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 			return taskstate.FailMove(opts.Root, runningPath, loaded, err)
 		}
 		nextPrompt, done, err := applySupervisorVerdict(ctx, shutdownCtx, verdictApplication{
-			Opts:              opts,
+			Opts:              effectiveOpts,
 			RunningPath:       runningPath,
 			Loaded:            loaded,
 			Prepared:          prepared,
@@ -100,11 +101,7 @@ type supervisorAttemptRequest struct {
 }
 
 func loadSupervisorProfiles(opts Options, loaded *task.Task, runDir string) (profile.Bundle, error) {
-	resolvedProfiles, err := resolveProfileFiles(opts, loaded.Scope.CWD)
-	if err != nil {
-		return profile.Bundle{}, err
-	}
-	profiles, err := profile.LoadBundle(resolvedProfiles.QualityProfileFile, resolvedProfiles.EnvironmentProfileFile)
+	resolvedProfiles, profiles, err := loadTaskProfiles(opts, loaded.Scope.CWD)
 	if err != nil {
 		return profile.Bundle{}, err
 	}
@@ -567,10 +564,10 @@ func mapAcceptanceStatus(status string) string {
 }
 
 func attemptBudget(b task.LoopBudget) int {
-	if b.Infinite {
+	if b.Set && b.Count == 0 {
 		return -1
 	}
-	if b.Count > 0 {
+	if b.Set {
 		return b.Count
 	}
 	return task.DefaultLoopBudget

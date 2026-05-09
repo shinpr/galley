@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -103,11 +104,6 @@ func NewCommand(use string) *cobra.Command {
 
 	flags := cmd.PersistentFlags()
 	flags.StringVar(&opts.Root, "root", galleyhome.DefaultRoot(), "Galley daemon root directory")
-	flags.StringVar(&opts.ManifestFile, "manifest-file", "", "Optional Galley repo manifest YAML file")
-	flags.StringVar(&opts.SystemPromptFile, "system-prompt-file", "", "Claude replacement system prompt file; defaults to the embedded Galley executor prompt")
-	flags.StringVar(&opts.JSONSchemaFile, "json-schema-file", "", "Claude JSON schema file; defaults to the embedded Galley result schema")
-	flags.StringVar(&opts.QualityProfileFile, "quality-profile-file", "", "Optional Galley quality profile YAML file")
-	flags.StringVar(&opts.EnvironmentProfileFile, "environment-profile-file", "", "Optional Galley environment profile YAML file")
 	flags.BoolVar(&opts.Once, "once", false, "Process available queued tasks once and exit")
 	flags.IntVar(&opts.MaxConcurrentTasks, "max-concurrent-tasks", 1, "Maximum concurrent tasks")
 	flags.IntVar(&opts.MaxConcurrentPerRepo, "max-concurrent-per-repo", 1, "Maximum concurrent tasks per source repository; 0 disables the per-repo limit")
@@ -115,15 +111,7 @@ func NewCommand(use string) *cobra.Command {
 	flags.DurationVar(&opts.ClaimTTL, "claim-ttl", 30*time.Minute, "Recover running task and claim locks older than this duration")
 	flags.DurationVar(&opts.HeartbeatInterval, "heartbeat-interval", 0, "Running task heartbeat interval; defaults to min(claim-ttl/4, 1m)")
 	flags.DurationVar(&opts.ShutdownTimeout, "shutdown-timeout", 5*time.Minute, "After SIGINT/SIGTERM, let active attempts finish for this duration before canceling them")
-	flags.BoolVar(&opts.CommitOnAccept, "commit-on-accept", false, "Commit accepted worktree changes after executor completion")
-	flags.BoolVar(&opts.OpenPR, "open-pr", false, "Commit, push, and create a pull request for accepted worktree changes")
-	flags.BoolVar(&opts.PollPRComments, "poll-pr-comments", false, "Poll PR comments for /galley rerun commands and requeue matching tasks")
-	flags.BoolVar(&opts.ReplyPRComments, "reply-pr-comments", false, "Post PR comments after handling /galley commands")
-	flags.BoolVar(&opts.CleanupWorktrees, "cleanup-worktrees", false, "Remove clean worktrees for closed or merged PR tasks")
-	flags.StringVar(&opts.PRBase, "pr-base", "", "Base branch for pull requests")
 	flags.StringVar(&supervisorProvider, "supervisor", "", "Built-in supervisor adapter: claude or codex; defaults to claude")
-	flags.BoolVar(&opts.DisableClaudeGuard, "disable-claude-guard", false, "Disable Galley's session-only Claude guard plugin")
-	flags.StringVar(&opts.ClaudeGuardPluginDir, "claude-guard-plugin-dir", "", "Override Galley's generated Claude guard plugin directory")
 	flags.StringVar(&pidFile, "pid-file", "", "PID file path for start, stop, and status; defaults to ROOT/galley-daemon.pid")
 	flags.StringVar(&logFile, "log-file", "", "Log file path for start; defaults to ROOT/galley-daemon.log")
 	flags.DurationVar(&stopTimeout, "stop-timeout", 30*time.Second, "How long stop waits after sending SIGTERM")
@@ -141,23 +129,13 @@ func NewCommand(use string) *cobra.Command {
 func explicitOptionsFromFlags(cmd *cobra.Command) daemon.ExplicitOptions {
 	changed := cmd.Flags().Changed
 	return daemon.ExplicitOptions{
-		Root:                   changed("root"),
-		SystemPromptFile:       changed("system-prompt-file"),
-		JSONSchemaFile:         changed("json-schema-file"),
-		QualityProfileFile:     changed("quality-profile-file"),
-		EnvironmentProfileFile: changed("environment-profile-file"),
-		MaxConcurrentTasks:     changed("max-concurrent-tasks"),
-		MaxConcurrentPerRepo:   changed("max-concurrent-per-repo"),
-		PollInterval:           changed("poll-interval"),
-		ClaimTTL:               changed("claim-ttl"),
-		HeartbeatInterval:      changed("heartbeat-interval"),
-		CommitOnAccept:         changed("commit-on-accept"),
-		OpenPR:                 changed("open-pr"),
-		PollPRComments:         changed("poll-pr-comments"),
-		ReplyPRComments:        changed("reply-pr-comments"),
-		CleanupWorktrees:       changed("cleanup-worktrees"),
-		PRBase:                 changed("pr-base"),
-		Supervisor:             changed("supervisor"),
+		Root:                 changed("root"),
+		MaxConcurrentTasks:   changed("max-concurrent-tasks"),
+		MaxConcurrentPerRepo: changed("max-concurrent-per-repo"),
+		PollInterval:         changed("poll-interval"),
+		ClaimTTL:             changed("claim-ttl"),
+		HeartbeatInterval:    changed("heartbeat-interval"),
+		Supervisor:           changed("supervisor"),
 	}
 }
 
@@ -338,6 +316,10 @@ func newStatusCommand(opts *daemon.Options, pidFile *string) *cobra.Command {
 }
 
 func writeStatusJSON(cmd *cobra.Command, opts *daemon.Options, paths daemonctl.Paths, status *daemonctl.Status, alive, verified bool) error {
+	runtime := statusRuntimeFromOptions(*opts)
+	if status != nil {
+		runtime = runtime.withArgv(status.Meta.Argv)
+	}
 	payload := struct {
 		Running           bool   `json:"running"`
 		Verified          bool   `json:"verified"`
@@ -345,9 +327,7 @@ func writeStatusJSON(cmd *cobra.Command, opts *daemon.Options, paths daemonctl.P
 		Root              string `json:"root"`
 		PIDFile           string `json:"pid_file"`
 		LogFile           string `json:"log_file"`
-		ManifestFile      string `json:"manifest_file,omitempty"`
 		Supervisor        string `json:"supervisor,omitempty"`
-		PollPRComments    bool   `json:"poll_pr_comments"`
 		MaxConcurrent     int    `json:"max_concurrent_tasks,omitempty"`
 		MaxConcurrentRepo int    `json:"max_concurrent_per_repo,omitempty"`
 	}{
@@ -356,11 +336,9 @@ func writeStatusJSON(cmd *cobra.Command, opts *daemon.Options, paths daemonctl.P
 		Root:              opts.Root,
 		PIDFile:           paths.PIDFile,
 		LogFile:           paths.LogFile,
-		ManifestFile:      opts.ManifestFile,
-		Supervisor:        opts.Supervisor,
-		PollPRComments:    opts.PollPRComments,
-		MaxConcurrent:     opts.MaxConcurrentTasks,
-		MaxConcurrentRepo: opts.MaxConcurrentPerRepo,
+		Supervisor:        runtime.Supervisor,
+		MaxConcurrent:     runtime.MaxConcurrentTasks,
+		MaxConcurrentRepo: runtime.MaxConcurrentPerRepo,
 	}
 	if status != nil {
 		payload.PID = status.Meta.PID
@@ -368,6 +346,66 @@ func writeStatusJSON(cmd *cobra.Command, opts *daemon.Options, paths daemonctl.P
 	enc := json.NewEncoder(cmd.OutOrStdout())
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)
+}
+
+type statusRuntime struct {
+	Supervisor           string
+	MaxConcurrentTasks   int
+	MaxConcurrentPerRepo int
+}
+
+func statusRuntimeFromOptions(opts daemon.Options) statusRuntime {
+	return statusRuntime{
+		Supervisor:           opts.Supervisor,
+		MaxConcurrentTasks:   opts.MaxConcurrentTasks,
+		MaxConcurrentPerRepo: opts.MaxConcurrentPerRepo,
+	}
+}
+
+func (runtime statusRuntime) withArgv(argv []string) statusRuntime {
+	if len(argv) == 0 {
+		return runtime
+	}
+	if value, ok := flagValue(argv, "--supervisor"); ok {
+		runtime.Supervisor = value
+	} else if runtime.Supervisor == "" {
+		runtime.Supervisor = "claude"
+	}
+	if value, ok := intFlagValue(argv, "--max-concurrent-tasks"); ok {
+		runtime.MaxConcurrentTasks = value
+	}
+	if value, ok := intFlagValue(argv, "--max-concurrent-per-repo"); ok {
+		runtime.MaxConcurrentPerRepo = value
+	}
+	return runtime
+}
+
+func flagValue(argv []string, name string) (string, bool) {
+	for i, arg := range argv {
+		if arg == name {
+			if i+1 < len(argv) {
+				return argv[i+1], true
+			}
+			return "", false
+		}
+		prefix := name + "="
+		if len(arg) > len(prefix) && arg[:len(prefix)] == prefix {
+			return arg[len(prefix):], true
+		}
+	}
+	return "", false
+}
+
+func intFlagValue(argv []string, name string) (int, bool) {
+	value, ok := flagValue(argv, name)
+	if !ok {
+		return 0, false
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, false
+	}
+	return parsed, true
 }
 
 func waitReady(pidFile, root, executable string, timeout time.Duration) error {

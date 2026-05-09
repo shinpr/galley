@@ -1327,7 +1327,6 @@ func setLoopBudget(t *testing.T, path string, count int) {
 		t.Fatal(err)
 	}
 	loaded.ExecutionPolicy.LoopBudget.Count = count
-	loaded.ExecutionPolicy.LoopBudget.Infinite = false
 	loaded.ExecutionPolicy.LoopBudget.Set = true
 	if err := task.Save(path, loaded); err != nil {
 		t.Fatal(err)

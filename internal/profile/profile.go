@@ -49,12 +49,29 @@ type Environment struct {
 	CWD         string            `yaml:"cwd" json:"cwd"`
 	Commands    map[string]string `yaml:"commands" json:"commands"`
 	Constraints Constraints       `yaml:"constraints" json:"constraints"`
+	PR          PRSettings        `yaml:"pr,omitempty" json:"pr,omitempty"`
+	Worktree    WorktreeSettings  `yaml:"worktree,omitempty" json:"worktree,omitempty"`
 }
 
 type Constraints struct {
 	Network             string `yaml:"network" json:"network"`
 	SecretsPolicy       string `yaml:"secrets_policy" json:"secrets_policy"`
 	DestructiveCommands string `yaml:"destructive_commands" json:"destructive_commands"`
+}
+
+type PRSettings struct {
+	Enabled  bool              `yaml:"enabled" json:"enabled"`
+	Base     string            `yaml:"base,omitempty" json:"base,omitempty"`
+	Comments PRCommentSettings `yaml:"comments,omitempty" json:"comments,omitempty"`
+}
+
+type PRCommentSettings struct {
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	Reply   bool `yaml:"reply" json:"reply"`
+}
+
+type WorktreeSettings struct {
+	Cleanup *bool `yaml:"cleanup,omitempty" json:"cleanup,omitempty"`
 }
 
 // Bundle is the optional profile context included in work orders.
@@ -158,6 +175,9 @@ func ValidateEnvironment(env Environment) ValidationResult {
 	require(&result, env.Constraints.Network != "", "constraints.network is required")
 	require(&result, env.Constraints.SecretsPolicy != "", "constraints.secrets_policy is required")
 	require(&result, env.Constraints.DestructiveCommands != "", "constraints.destructive_commands is required")
+	if env.PR.Comments.Reply && !env.PR.Comments.Enabled {
+		result.Warnings = append(result.Warnings, "pr.comments.reply is set while pr.comments.enabled is false")
+	}
 	return result
 }
 

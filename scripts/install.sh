@@ -119,6 +119,35 @@ resolve_latest_version() {
     head -n 1
 }
 
+stop_existing_daemon() {
+  bin="$1"
+  if [ ! -x "$bin" ]; then
+    return
+  fi
+  status="$("$bin" daemon status --output json 2>/dev/null || true)"
+  if printf '%s\n' "$status" | grep -q '"running"[[:space:]]*:[[:space:]]*true' &&
+    printf '%s\n' "$status" | grep -q '"verified"[[:space:]]*:[[:space:]]*true'; then
+    echo "Existing Galley daemon is running; stopping it before install..."
+    if ! "$bin" daemon stop; then
+      echo "could not stop existing Galley daemon; run \`$bin daemon stop\` and retry" >&2
+      exit 1
+    fi
+  fi
+}
+
+sign_darwin_binary() {
+  bin="$1"
+  if [ "$(uname -s)" != "Darwin" ]; then
+    return
+  fi
+  if ! command -v codesign >/dev/null 2>&1; then
+    return
+  fi
+  if ! codesign --force --sign - "$bin" >/dev/null 2>&1; then
+    echo "warning: failed to ad-hoc sign $bin" >&2
+  fi
+}
+
 install_release() {
   require_cmd curl
   require_cmd tar
@@ -162,6 +191,7 @@ install_release() {
   fi
 
   dest="$BIN_DIR/$bin_name"
+  stop_existing_daemon "$dest"
   cp "$src" "$dest"
   chmod 755 "$dest"
   GALLEY_BIN="$dest"
@@ -169,16 +199,18 @@ install_release() {
 
 install_local() {
   require_cmd go
+  GALLEY_BIN="$BIN_DIR/galley"
+  stop_existing_daemon "$GALLEY_BIN"
   echo "Installing galley from local checkout into $BIN_DIR"
   GOBIN="$BIN_DIR" go install ./cmd/galley
-  GALLEY_BIN="$BIN_DIR/galley"
 }
 
 install_go() {
   require_cmd go
+  GALLEY_BIN="$BIN_DIR/galley"
+  stop_existing_daemon "$GALLEY_BIN"
   echo "Installing galley@$VERSION into $BIN_DIR"
   GOBIN="$BIN_DIR" go install "$MODULE@$VERSION"
-  GALLEY_BIN="$BIN_DIR/galley"
 }
 
 case "$MODE" in
@@ -201,6 +233,8 @@ if [ ! -x "$GALLEY_BIN" ]; then
   echo "install did not produce executable: $GALLEY_BIN" >&2
   exit 1
 fi
+
+sign_darwin_binary "$GALLEY_BIN"
 
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;

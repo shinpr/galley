@@ -40,10 +40,10 @@ The installer installs the `galley` CLI. Queue processing and background daemon 
 
 ```sh
 galley --help
-galley daemon run --once
 galley daemon start
 galley daemon status --output json
 galley daemon stop
+galley daemon run --once
 ```
 
 ## Plugin And Skill
@@ -243,10 +243,12 @@ After the skill writes and validates a draft task, approve queueing and process 
 
 ```sh
 galley task queue ./TASK.yaml --reason "queue for daemon"
-galley daemon run --once
+galley daemon start
 ```
 
 The daemon root defaults to `~/.galley`, and `galley task queue` targets the running daemon root when one is available. Use `--root <path>` only for repo-local, test, or advanced multi-root workflows. Use `--move` only when the source draft should be removed after queueing.
+
+For one-shot local checks, use `galley daemon run --once` to drain the current queue and exit.
 
 Development build and tests:
 
@@ -306,26 +308,13 @@ galley schema generate
 
 `galley schema generate` writes the task, quality profile, and environment profile schemas into the packaged skill references. `galley schema check` verifies those reference files still match the Go contracts and is run in CI.
 
-### Claude Invocation
-
-```sh
-galley claude args ~/.galley/tasks/draft/TASK.yaml
-galley claude args ~/.galley/tasks/draft/TASK.yaml --output json
-galley claude args ~/.galley/tasks/draft/TASK.yaml --quality-profile-file /path/to/quality.yaml --environment-profile-file /path/to/environment.yaml
-```
-
-`galley claude args --output json` returns an execution plan with `work_dir` and an argv array suitable for `exec.Command`. The default executor prompt and result schema are embedded in the `galley` binary. If `--system-prompt-file` or `--json-schema-file` is set, Galley reads that file and passes its contents as a literal Claude argument.
-
-The default shell output is a human preview. Embedded defaults are shown as literal argument values; explicit prompt/schema files are rendered as absolute-path `$(cat file)` substitutions before changing into the task cwd.
-
 ### Daemon
 
 ```sh
-galley daemon run --once
-galley daemon run --once --supervisor codex
 galley daemon start
 galley daemon status --output json
 galley daemon stop
+galley daemon run --once
 ```
 
 `galley daemon run --once` drains queued tasks once and exits. Background `galley daemon start` also performs daemon maintenance such as PR comment polling and closed/merged PR worktree cleanup according to `environment.yaml`.
@@ -397,7 +386,6 @@ The `examples/` directory is for Galley checkout development and CI validation. 
 galley task validate examples/afk-task.yaml
 galley task work-order examples/afk-task.yaml
 galley daemon run --once
-galley claude args examples/afk-task.yaml --output json
 ```
 
 For local development and release notes, see [CONTRIBUTING.md](CONTRIBUTING.md) and [CHANGELOG.md](CHANGELOG.md).
@@ -413,12 +401,6 @@ With `worktree.cleanup: true`, the daemon scans `tasks/done` PR tasks and checks
 - Dirty worktrees are preserved and recorded as task risks for manual review.
 
 This is intentionally conservative. A dirty worktree may contain useful work, failed recovery state, or files that should be inspected before removal.
-
-## Claude Code Compatibility
-
-Galley currently targets Claude Code `2.1.132`.
-
-That version supports `--system-prompt` and `--append-system-prompt`, but does not expose `--system-prompt-file`, `--append-system-prompt-file`, or `--max-turns` in `claude --help`. For that reason Galley reads prompt and schema files itself and passes their contents through `--system-prompt` / `--append-system-prompt` and `--json-schema`.
 
 ## Operational Notes
 

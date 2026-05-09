@@ -4,7 +4,7 @@
 
 Galley is a local orchestration runtime for supervised Claude Code task execution.
 
-It runs locally, keeps work in git-visible changes, and records evidence for review before accepting unattended AI-assisted repository work.
+It runs locally, keeps work in git-visible changes, and records evidence for review before each acceptance decision.
 
 Galley is Claude-first today. The executor path targets Claude Code, and supervisor review defaults to Claude. Codex can be selected as an alternate model supervisor.
 
@@ -13,8 +13,6 @@ Status: early preview.
 ## Install
 
 Galley is intended to run from any repository you are working in, so install the `galley` binary on your `PATH`.
-
-For guided setup, install the plugin and ask the Galley skill to create profiles, task YAML, and queueing commands for your repository. See [Plugin And Skill](#plugin-and-skill).
 
 Install the latest GitHub Release binary:
 
@@ -36,19 +34,38 @@ Or use Go directly:
 go install github.com/shinpr/galley/cmd/galley@latest
 ```
 
-The installer installs the `galley` CLI. Queue processing and background daemon control are available under `galley daemon ...`.
+The installer installs the `galley` CLI. After installation, use the plugin skill for normal setup and task authoring. The skill inspects the repository, creates `quality.yaml` and `environment.yaml`, drafts valid task YAML, explains the execution settings, and queues only after approval.
+
+For Claude Code:
+
+```text
+/plugin marketplace add shinpr/galley
+/plugin install galley@galley-tools
+/reload-plugins
+/galley:galley Set up Galley for this repository.
+```
+
+For Codex:
+
+```sh
+codex plugin marketplace add shinpr/galley
+```
+
+Then invoke the skill with `$galley`.
+
+Use the CLI directly when checking installation, inspecting status, or operating the daemon:
 
 ```sh
 galley --help
-galley daemon run --once
 galley daemon start
 galley daemon status --output json
 galley daemon stop
+galley daemon run --once
 ```
 
 ## Plugin And Skill
 
-Galley includes a plugin that packages one Agent Skill for Claude Code and Codex. This is the easiest setup path: install the plugin, ask the skill to inspect your repository, and let it draft profiles, task YAML, validation steps, queueing commands, and troubleshooting guidance.
+Galley includes a plugin that packages one Agent Skill for Claude Code and Codex. This is the recommended setup and authoring path: install the plugin, ask the skill to inspect your repository, and let it draft profiles, task YAML, validation steps, queueing commands, and troubleshooting guidance.
 
 Profiles are worth setting up early. They tell Galley which commands are available, which quality checks are required, what evidence the supervisor should expect, and which findings should block acceptance. The skill can create these interactively from the target repository.
 
@@ -66,15 +83,7 @@ plugins/galley/
 
 ### Claude Code
 
-Install from the GitHub-hosted marketplace:
-
-```text
-/plugin marketplace add shinpr/galley
-/plugin install galley@galley-tools
-/reload-plugins
-```
-
-Then invoke the skill:
+After installing the plugin as shown above, invoke the skill:
 
 ```text
 /galley:galley Create a Galley task for this feature request.
@@ -99,11 +108,7 @@ You can also add the checkout as a local marketplace for testing:
 
 ### Codex
 
-Galley ships a Codex marketplace file at `.agents/plugins/marketplace.json`, which points to `./plugins/galley`. Install it from the GitHub repository:
-
-```sh
-codex plugin marketplace add shinpr/galley
-```
+Galley ships a Codex marketplace file at `.agents/plugins/marketplace.json`, which points to `./plugins/galley`.
 
 For local development:
 
@@ -232,36 +237,29 @@ Galley also records `workspace.json` for the effective execution workspace and w
 
 ## Quick Start
 
-Install the CLI, then use the plugin skill to create repository profiles and a draft task:
+Install the CLI and plugin, then ask the skill to set up the current repository:
 
-```sh
-./scripts/install.sh
-galley profile resolve --cwd /path/to/repo --mkdir --output json
+```text
+/galley:galley Set up Galley for this repository.
 ```
 
-After the skill writes and validates a draft task, approve queueing and process the queue:
+The examples here use the Claude Code slash command. In Codex, use `$galley` with the same request text.
 
-```sh
-galley task queue ./TASK.yaml --reason "queue for daemon"
-galley daemon run --once
+The skill will resolve the profile paths, inspect the repository, propose `quality.yaml` and `environment.yaml`, validate them, and ask whether to start the daemon.
+
+For a task, describe the work to the skill:
+
+```text
+/galley:galley Create a Galley task for this feature request and queue it after approval.
 ```
 
-The daemon root defaults to `~/.galley`, and `galley task queue` targets the running daemon root when one is available. Use `--root <path>` only for repo-local, test, or advanced multi-root workflows. Use `--move` only when the source draft should be removed after queueing.
+The skill asks for reference files when needed, confirms scope and execution settings, writes a draft task YAML, validates it, and asks before queueing. If the daemon is running, it will pick up queued tasks and move accepted work toward a PR according to `environment.yaml`.
 
-Development build and tests:
+For hand-authored task YAML, use [docs/task-yaml.md](docs/task-yaml.md) as the reference.
 
-```sh
-go test ./...
-go build ./cmd/galley
-```
+The daemon root defaults to `~/.galley`, and `galley task queue` targets the running daemon root when one is available. Use `--root <path>` only for repo-local, test, or advanced multi-root workflows.
 
-Run the local smoke test:
-
-```sh
-./scripts/smoke-local.sh
-```
-
-The smoke test builds the binaries, creates a temporary git repository, installs a fake `claude` executable, queues a draft AFK task, runs the daemon once, and verifies that the task reaches `done/accepted` with run evidence.
+For one-shot local checks, use `galley daemon run --once` to drain the current queue and exit.
 
 ## Commands
 
@@ -306,35 +304,18 @@ galley schema generate
 
 `galley schema generate` writes the task, quality profile, and environment profile schemas into the packaged skill references. `galley schema check` verifies those reference files still match the Go contracts and is run in CI.
 
-### Claude Invocation
-
-```sh
-galley claude args ~/.galley/tasks/draft/TASK.yaml
-galley claude args ~/.galley/tasks/draft/TASK.yaml --output json
-galley claude args ~/.galley/tasks/draft/TASK.yaml --quality-profile-file /path/to/quality.yaml --environment-profile-file /path/to/environment.yaml
-```
-
-`galley claude args --output json` returns an execution plan with `work_dir` and an argv array suitable for `exec.Command`. The default executor prompt and result schema are embedded in the `galley` binary. If `--system-prompt-file` or `--json-schema-file` is set, Galley reads that file and passes its contents as a literal Claude argument.
-
-The default shell output is a human preview. Embedded defaults are shown as literal argument values; explicit prompt/schema files are rendered as absolute-path `$(cat file)` substitutions before changing into the task cwd.
-
 ### Daemon
 
 ```sh
-galley daemon run --once
-galley daemon run --once --supervisor codex
 galley daemon start
 galley daemon status --output json
 galley daemon stop
+galley daemon run --once
 ```
 
 `galley daemon run --once` drains queued tasks once and exits. Background `galley daemon start` also performs daemon maintenance such as PR comment polling and closed/merged PR worktree cleanup according to `environment.yaml`.
 
 `--root` points at the daemon root and defaults to `~/.galley`. Use `--root .agent-workflow` only for repo-local or test workflows.
-
-`galley daemon run --once` processes the current queue in bounded concurrent batches. `--max-concurrent-per-repo` limits simultaneously running source repositories so local services, branch operations, and CI quotas are less likely to collide.
-
-Without `--once`, `galley daemon run` runs continuously and checks for work every `--poll-interval`, which defaults to `10s`.
 
 `galley daemon start` launches the daemon in the background. It writes a PID file and appends stdout/stderr to a log file. By default those files are under `~/.galley`; override them with `--pid-file` and `--log-file`.
 
@@ -342,7 +323,7 @@ Without `--once`, `galley daemon run` runs continuously and checks for work ever
 
 Use the installed `galley` binary for `start`, `status`, and `stop`. PID verification records the executable path, so `go run ./cmd/galley ... daemon start` is not suitable for background daemon control because later `go run` invocations use different temporary binaries.
 
-Foreground and background daemons use the same shutdown path. On `SIGINT` or `SIGTERM`, Galley stops claiming new queued tasks, lets active attempts finish until `--shutdown-timeout`, which defaults to `5m`, records evidence, and avoids starting another retry attempt after shutdown is requested.
+Foreground and background daemons use the same shutdown path. On `SIGINT` or `SIGTERM`, Galley stops claiming new queued tasks, lets active attempts finish until the shutdown timeout, records evidence, and avoids starting another retry attempt after shutdown is requested.
 
 ## Supervisor Behavior
 
@@ -389,21 +370,6 @@ With `pr.comments.reply: true`, Galley posts an acknowledgement comment after ha
 
 Supervisor review defaults to Claude. Use `--supervisor codex` to select Codex instead, or `--supervisor claude` to be explicit. Repository-specific PR behavior, comment polling, and worktree cleanup live in the environment profile resolved from `scope.cwd`.
 
-## Development Examples
-
-The `examples/` directory is for Galley checkout development and CI validation. These files are useful for smoke tests and command previews, but normal users should prefer `~/.galley` tasks created by the plugin skill.
-
-```sh
-galley task validate examples/afk-task.yaml
-galley task work-order examples/afk-task.yaml
-galley daemon run --once
-galley claude args examples/afk-task.yaml --output json
-```
-
-For local development and release notes, see [CONTRIBUTING.md](CONTRIBUTING.md) and [CHANGELOG.md](CHANGELOG.md).
-
-Release assets are built by GitHub Actions when a GitHub Release is published. See [.github/workflows/release.yml](.github/workflows/release.yml) and [.goreleaser.yaml](.goreleaser.yaml).
-
 ## Worktree Cleanup
 
 With `worktree.cleanup: true`, the daemon scans `tasks/done` PR tasks and checks PR state through `gh api`.
@@ -413,12 +379,6 @@ With `worktree.cleanup: true`, the daemon scans `tasks/done` PR tasks and checks
 - Dirty worktrees are preserved and recorded as task risks for manual review.
 
 This is intentionally conservative. A dirty worktree may contain useful work, failed recovery state, or files that should be inspected before removal.
-
-## Claude Code Compatibility
-
-Galley currently targets Claude Code `2.1.132`.
-
-That version supports `--system-prompt` and `--append-system-prompt`, but does not expose `--system-prompt-file`, `--append-system-prompt-file`, or `--max-turns` in `claude --help`. For that reason Galley reads prompt and schema files itself and passes their contents through `--system-prompt` / `--append-system-prompt` and `--json-schema`.
 
 ## Operational Notes
 
@@ -444,6 +404,35 @@ Run Galley only for repositories and task authors you trust. Keep secrets out of
 Automatic commit/PR creation currently stages the accepted worktree state with `git add -A`, so repository `.gitignore` should cover local editor, OS, cache, and secret files.
 
 See [SECURITY.md](SECURITY.md) for reporting and operational trust boundaries.
+
+## Development Examples
+
+The `examples/` directory is for Galley checkout development and CI validation. Normal users should prefer `~/.galley` tasks created by the plugin skill.
+
+Development build and tests:
+
+```sh
+go test ./...
+go build ./cmd/galley
+```
+
+Run the local smoke test:
+
+```sh
+./scripts/smoke-local.sh
+```
+
+The smoke test builds the binaries, creates a temporary git repository, installs a fake `claude` executable, queues a draft AFK task, runs the daemon once, and verifies that the task reaches `done/accepted` with run evidence.
+
+```sh
+galley task validate examples/afk-task.yaml
+galley task work-order examples/afk-task.yaml
+galley daemon run --once
+```
+
+For local development and release notes, see [CONTRIBUTING.md](CONTRIBUTING.md) and [CHANGELOG.md](CHANGELOG.md).
+
+Release assets are built by GitHub Actions when a GitHub Release is published. See [.github/workflows/release.yml](.github/workflows/release.yml) and [.goreleaser.yaml](.goreleaser.yaml).
 
 ## License
 

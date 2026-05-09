@@ -103,4 +103,4 @@ galley daemon start \
   --reply-pr-comments
 ```
 
-`--poll-pr-comments` enables `/galley rerun` style review feedback handling when implemented by the repository version.
+`--poll-pr-comments` enables `/galley rerun` or `/galley requeue` review feedback handling.

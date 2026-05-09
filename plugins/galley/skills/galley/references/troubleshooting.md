@@ -36,7 +36,7 @@ Inspect the latest attempt directory:
 | `claude_result.json` or executor result | Structured executor output |
 | `supervisor_verdict.json` | Model supervisor decision |
 | `diff.patch` | Code changes reviewed by the supervisor |
-| `command_plan.json` | Planned verification commands |
+| `command_plan.json` | Claude executor invocation plan |
 | `codex_supervisor_request.json` | Evidence sent to Codex supervisor |
 | `claude_supervisor_request.json` | Evidence sent to Claude supervisor |
 

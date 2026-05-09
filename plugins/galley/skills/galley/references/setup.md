@@ -26,12 +26,6 @@ Then verify the installed binary. Start with `galley --help`; when it is still n
 galley --help
 ```
 
-For a specific release:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/shinpr/galley/main/scripts/install.sh | sh -s -- --version v0.1.0
-```
-
 Use a local checkout install only when working inside the Galley repository, when the user explicitly asks for a local build, or when the release installer is unavailable:
 
 ```bash

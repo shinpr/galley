@@ -22,12 +22,6 @@ Install the latest GitHub Release binary:
 curl -fsSL https://raw.githubusercontent.com/shinpr/galley/main/scripts/install.sh | sh
 ```
 
-Install a specific release:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/shinpr/galley/main/scripts/install.sh | sh -s -- --version v0.1.0
-```
-
 From a cloned checkout:
 
 ```sh
@@ -109,12 +103,6 @@ Galley ships a Codex marketplace file at `.agents/plugins/marketplace.json`, whi
 
 ```sh
 codex plugin marketplace add shinpr/galley
-```
-
-To pin a release or branch:
-
-```sh
-codex plugin marketplace add shinpr/galley --ref v0.1.0
 ```
 
 For local development:

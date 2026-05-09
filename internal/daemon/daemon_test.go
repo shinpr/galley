@@ -18,7 +18,7 @@ func TestRunOnceMovesTaskToDoneAndWritesRunEvidence(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -32,6 +32,7 @@ func TestRunOnceMovesTaskToDoneAndWritesRunEvidence(t *testing.T) {
 		JSONSchemaFile:     schemaPath,
 		Once:               true,
 		MaxConcurrentTasks: 1,
+		ClaudeBin:          claudeBin,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +58,7 @@ func TestRunOnceMovesTaskToDoneAndWritesRunEvidence(t *testing.T) {
 	if !strings.Contains(doneTask.Attempts[0].Summary, "workspace=") {
 		t.Fatalf("attempt summary missing workspace: %q", doneTask.Attempts[0].Summary)
 	}
-	if len(doneTask.Verification.Commands) < 2 || doneTask.Verification.Commands[1].Status != "passed" {
+	if len(doneTask.Verification.Commands) < 1 || doneTask.Verification.Commands[0].Status != "passed" {
 		t.Fatalf("verification got %#v", doneTask.Verification.Commands)
 	}
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "task.yaml"), 1)
@@ -76,8 +77,8 @@ func TestRunOnceUsesModelSupervisorProvider(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
-	writeFakeCodexSupervisor(t, `{"status":"accepted","summary":"codex accepted","acceptance_gaps":[],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["diff"]}],"findings":[],"residual_risks":[],"confidence":"high","next_work_order":""}`)
+	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	codexBin := writeFakeCodexSupervisor(t, `{"status":"accepted","summary":"codex accepted","acceptance_gaps":[],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["diff"]}],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}`)
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -91,6 +92,8 @@ func TestRunOnceUsesModelSupervisorProvider(t *testing.T) {
 		Once:               true,
 		MaxConcurrentTasks: 1,
 		Supervisor:         "codex",
+		ClaudeBin:          claudeBin,
+		CodexBin:           codexBin,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -109,7 +112,7 @@ func TestRunOnceRetriesModelSupervisorWorkOrderUntilAccepted(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	writeFakeClaude(t, `if [ -f retry.marker ]; then
+	claudeBin := writeFakeClaude(t, `if [ -f retry.marker ]; then
 echo change > daemon-output.txt
 echo '{"status":"completed","summary":"done","files_modified":["daemon-output.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"decisions":[],"risks":[]}'
 else
@@ -128,6 +131,7 @@ fi
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
+		ClaudeBin:          claudeBin,
 		Once:               true,
 		MaxConcurrentTasks: 1,
 	})
@@ -155,7 +159,7 @@ func TestRunOncePreservesExecutorDecisionsWithVerificationEvidence(t *testing.T)
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"chose a small reversible path\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[{\"question\":\"Which implementation should be used?\",\"chosen\":\"small reversible change\",\"rationale\":\"It satisfies AC1 with minimal blast radius.\",\"reversibility\":\"high\",\"needs_human_review\":true}],\"risks\":[]}'\n")
+	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"chose a small reversible path\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[{\"question\":\"Which implementation should be used?\",\"chosen\":\"small reversible change\",\"rationale\":\"It satisfies AC1 with minimal blast radius.\",\"reversibility\":\"high\",\"needs_human_review\":true}],\"risks\":[]}'\n")
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -166,6 +170,7 @@ func TestRunOncePreservesExecutorDecisionsWithVerificationEvidence(t *testing.T)
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
+		ClaudeBin:          claudeBin,
 		Once:               true,
 		MaxConcurrentTasks: 1,
 	})
@@ -191,8 +196,8 @@ func TestRunOnceOpenPRCommitsPushesAndUpdatesTask(t *testing.T) {
 	runDaemonGit(t, t.TempDir(), "init", "--bare", remote)
 	runDaemonGit(t, repo, "remote", "add", "origin", remote)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
-	writeFakeCommand(t, "gh", "echo https://github.com/example/galley/pull/123\n")
+	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	ghBin := writeFakeCommand(t, "gh", "echo https://github.com/example/galley/pull/123\n")
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -203,10 +208,12 @@ func TestRunOnceOpenPRCommitsPushesAndUpdatesTask(t *testing.T) {
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
+		ClaudeBin:          claudeBin,
 		Once:               true,
 		MaxConcurrentTasks: 1,
 		OpenPR:             true,
 		PRBase:             "main",
+		GHBin:              ghBin,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -235,8 +242,8 @@ func TestRunOnceOpenPRUsesExecutorCommit(t *testing.T) {
 	runDaemonGit(t, t.TempDir(), "init", "--bare", remote)
 	runDaemonGit(t, repo, "remote", "add", "origin", remote)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	writeFakeClaude(t, "echo committed > daemon-output.txt\ngit add daemon-output.txt\ngit commit -m executor-commit\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"committed diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
-	writeFakeCommand(t, "gh", "echo https://github.com/example/galley/pull/789\n")
+	claudeBin := writeFakeClaude(t, "echo committed > daemon-output.txt\ngit add daemon-output.txt\ngit commit -m executor-commit\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"committed diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	ghBin := writeFakeCommand(t, "gh", "echo https://github.com/example/galley/pull/789\n")
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -247,10 +254,12 @@ func TestRunOnceOpenPRUsesExecutorCommit(t *testing.T) {
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
+		ClaudeBin:          claudeBin,
 		Once:               true,
 		MaxConcurrentTasks: 1,
 		OpenPR:             true,
 		PRBase:             "main",
+		GHBin:              ghBin,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -283,8 +292,8 @@ func TestRunOnceCopiesInputFileAndRemovesBeforeCommit(t *testing.T) {
 	if err := os.WriteFile(inputPath, []byte("design note from plan\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	writeFakeClaude(t, "grep 'design note' docs/plan.md >/dev/null\necho change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"used plan\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\",\"plan read\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
-	writeFakeCommand(t, "gh", "echo https://github.com/example/galley/pull/456\n")
+	claudeBin := writeFakeClaude(t, "grep 'design note' docs/plan.md >/dev/null\necho change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"used plan\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\",\"plan read\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	ghBin := writeFakeCommand(t, "gh", "echo https://github.com/example/galley/pull/456\n")
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -308,10 +317,12 @@ func TestRunOnceCopiesInputFileAndRemovesBeforeCommit(t *testing.T) {
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
+		ClaudeBin:          claudeBin,
 		Once:               true,
 		MaxConcurrentTasks: 1,
 		OpenPR:             true,
 		PRBase:             "main",
+		GHBin:              ghBin,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -362,7 +373,7 @@ func TestRunOnceHardStopMovesTaskToFailed(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	writeFakeClaude(t, "echo '{\"status\":\"hard_stop\",\"summary\":\"blocked\",\"files_modified\":[],\"acceptance_criteria\":[],\"verification\":[],\"decisions\":[],\"risks\":[],\"hard_stop\":{\"reason\":\"missing secret\",\"attempted\":[],\"needed_to_continue\":[\"secret\"]}}'\n")
+	claudeBin := writeFakeClaude(t, "echo '{\"status\":\"hard_stop\",\"summary\":\"blocked\",\"files_modified\":[],\"acceptance_criteria\":[],\"verification\":[],\"decisions\":[],\"risks\":[],\"hard_stop\":{\"reason\":\"missing secret\",\"attempted\":[],\"needed_to_continue\":[\"secret\"]}}'\n")
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -373,6 +384,7 @@ func TestRunOnceHardStopMovesTaskToFailed(t *testing.T) {
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
+		ClaudeBin:          claudeBin,
 		Once:               true,
 		MaxConcurrentTasks: 1,
 	})
@@ -392,7 +404,7 @@ func TestRunOnceParseFailureNeedsSupervisorReview(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	writeFakeClaude(t, "echo not-json\n")
+	claudeBin := writeFakeClaude(t, "echo not-json\n")
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -403,6 +415,7 @@ func TestRunOnceParseFailureNeedsSupervisorReview(t *testing.T) {
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
+		ClaudeBin:          claudeBin,
 		Once:               true,
 		MaxConcurrentTasks: 1,
 	})
@@ -425,7 +438,7 @@ func TestRunOnceCompletedWithRisksNeedsSupervisorReview(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	writeFakeClaude(t, "echo '{\"status\":\"completed_with_risks\",\"summary\":\"done\",\"files_modified\":[],\"acceptance_criteria\":[],\"verification\":[],\"decisions\":[],\"risks\":[{\"type\":\"partial_verification\",\"detail\":\"tests skipped\",\"mitigation\":\"raw logs saved\",\"needs_human_review\":true}]}'\n")
+	claudeBin := writeFakeClaude(t, "echo '{\"status\":\"completed_with_risks\",\"summary\":\"done\",\"files_modified\":[],\"acceptance_criteria\":[],\"verification\":[],\"decisions\":[],\"risks\":[{\"type\":\"partial_verification\",\"detail\":\"tests skipped\",\"mitigation\":\"raw logs saved\",\"needs_human_review\":true}]}'\n")
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -436,6 +449,7 @@ func TestRunOnceCompletedWithRisksNeedsSupervisorReview(t *testing.T) {
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
+		ClaudeBin:          claudeBin,
 		Once:               true,
 		MaxConcurrentTasks: 1,
 	})
@@ -458,7 +472,7 @@ func TestRunOnceCompletedWithoutDiffNeedsSupervisorReview(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	writeFakeClaude(t, "echo '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[],\"acceptance_criteria\":[],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	claudeBin := writeFakeClaude(t, "echo '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[],\"acceptance_criteria\":[],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -469,6 +483,7 @@ func TestRunOnceCompletedWithoutDiffNeedsSupervisorReview(t *testing.T) {
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
+		ClaudeBin:          claudeBin,
 		Once:               true,
 		MaxConcurrentTasks: 1,
 	})
@@ -491,7 +506,7 @@ func TestRunOnceStopsAfterConsecutiveNoDiffAttempts(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	writeFakeClaude(t, "echo '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"claimed\"],\"notes\":\"claimed\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	claudeBin := writeFakeClaude(t, "echo '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"claimed\"],\"notes\":\"claimed\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -503,6 +518,7 @@ func TestRunOnceStopsAfterConsecutiveNoDiffAttempts(t *testing.T) {
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
+		ClaudeBin:          claudeBin,
 		Once:               true,
 		MaxConcurrentTasks: 1,
 	})
@@ -529,7 +545,7 @@ func TestRunOnceDrainsQueue(t *testing.T) {
 	repo1 := initDaemonGitRepo(t)
 	repo2 := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
 	queueDir := filepath.Join(root, "tasks", "queued")
 	if err := os.MkdirAll(queueDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -541,6 +557,7 @@ func TestRunOnceDrainsQueue(t *testing.T) {
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
+		ClaudeBin:          claudeBin,
 		Once:               true,
 		MaxConcurrentTasks: 1,
 	})
@@ -555,7 +572,7 @@ func TestRunOnceContinuesAfterTaskFailure(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
 	queueDir := filepath.Join(root, "tasks", "queued")
 	if err := os.MkdirAll(queueDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -569,6 +586,7 @@ func TestRunOnceContinuesAfterTaskFailure(t *testing.T) {
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
+		ClaudeBin:          claudeBin,
 		Once:               true,
 		MaxConcurrentTasks: 1,
 	})
@@ -595,7 +613,7 @@ func TestProcessAvailableSkipsClaimConflict(t *testing.T) {
 	if err := os.WriteFile(queuedPath, []byte("queued"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(runningPath, []byte("running"), 0o600); err != nil {
+	if err := task.Save(runningPath, task.Task{ID: "task", Status: "running", Scope: task.Scope{CWD: t.TempDir()}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -612,7 +630,7 @@ func TestProcessAvailableSkipsConflictAndClaimsLaterTask(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
 	queueDir := filepath.Join(root, "tasks", "queued")
 	runningDir := filepath.Join(root, "tasks", "running")
 	if err := os.MkdirAll(queueDir, 0o755); err != nil {
@@ -624,7 +642,7 @@ func TestProcessAvailableSkipsConflictAndClaimsLaterTask(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(queueDir, "a-conflict.yaml"), []byte("queued"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(runningDir, "a-conflict.yaml"), []byte("running"), 0o600); err != nil {
+	if err := task.Save(filepath.Join(runningDir, "a-conflict.yaml"), task.Task{ID: "a-conflict", Status: "running", Scope: task.Scope{CWD: t.TempDir()}}); err != nil {
 		t.Fatal(err)
 	}
 	writeDaemonTask(t, filepath.Join(queueDir, "b-good.yaml"), repo)
@@ -633,6 +651,7 @@ func TestProcessAvailableSkipsConflictAndClaimsLaterTask(t *testing.T) {
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
+		ClaudeBin:          claudeBin,
 		MaxConcurrentTasks: 1,
 		ClaimTTL:           time.Hour,
 	}.withDefaults())
@@ -650,7 +669,7 @@ func TestProcessAvailableHonorsMaxConcurrentPerRepo(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
 	queueDir := filepath.Join(root, "tasks", "queued")
 	runningDir := filepath.Join(root, "tasks", "running")
 	if err := os.MkdirAll(queueDir, 0o755); err != nil {
@@ -666,6 +685,7 @@ func TestProcessAvailableHonorsMaxConcurrentPerRepo(t *testing.T) {
 		Root:                 root,
 		SystemPromptFile:     promptPath,
 		JSONSchemaFile:       schemaPath,
+		ClaudeBin:            claudeBin,
 		MaxConcurrentTasks:   2,
 		MaxConcurrentPerRepo: 1,
 		ClaimTTL:             time.Hour,
@@ -684,7 +704,7 @@ func TestProcessAvailableAllowsDifferentRepos(t *testing.T) {
 	repo1 := initDaemonGitRepo(t)
 	repo2 := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
 	queueDir := filepath.Join(root, "tasks", "queued")
 	runningDir := filepath.Join(root, "tasks", "running")
 	if err := os.MkdirAll(queueDir, 0o755); err != nil {
@@ -700,6 +720,7 @@ func TestProcessAvailableAllowsDifferentRepos(t *testing.T) {
 		Root:                 root,
 		SystemPromptFile:     promptPath,
 		JSONSchemaFile:       schemaPath,
+		ClaudeBin:            claudeBin,
 		MaxConcurrentTasks:   2,
 		MaxConcurrentPerRepo: 1,
 		ClaimTTL:             time.Hour,
@@ -747,7 +768,8 @@ func TestProcessAvailableLetsClaimedTaskFinishAfterShutdown(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	writeFakeClaude(t, "sleep 0.05\necho change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	started := filepath.Join(t.TempDir(), "claude-started")
+	claudeBin := writeFakeClaude(t, "touch "+started+"\nsleep 0.05\necho change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
 	queueDir := filepath.Join(root, "tasks", "queued")
 	if err := os.MkdirAll(queueDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -760,6 +782,7 @@ func TestProcessAvailableLetsClaimedTaskFinishAfterShutdown(t *testing.T) {
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
+		ClaudeBin:          claudeBin,
 		MaxConcurrentTasks: 1,
 		ClaimTTL:           time.Hour,
 		ShutdownTimeout:    time.Second,
@@ -778,13 +801,14 @@ func TestProcessAvailableLetsClaimedTaskFinishAfterShutdown(t *testing.T) {
 			Root:               root,
 			SystemPromptFile:   promptPath,
 			JSONSchemaFile:     schemaPath,
+			ClaudeBin:          claudeBin,
 			MaxConcurrentTasks: 1,
 			ClaimTTL:           time.Hour,
 			ShutdownTimeout:    time.Second,
 		}.withDefaults())
 		done <- err
 	}()
-	time.Sleep(10 * time.Millisecond)
+	waitForFile(t, started)
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
@@ -797,8 +821,8 @@ func TestShutdownStopsBeforeRetryAttempt(t *testing.T) {
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
 	attemptLog := filepath.Join(t.TempDir(), "attempts.log")
-	writeFakeClaude(t, "echo attempt >> "+attemptLog+"\nsleep 0.05\necho change >> daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
-	writeFakeCodexSupervisor(t, `{"status":"needs_revision","summary":"codex wants retry","acceptance_gaps":["retry"],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[],"findings":[{"severity":"medium","category":"acceptance","file":"daemon-output.txt","summary":"retry","blocks_acceptance":true}],"residual_risks":[],"confidence":"high","next_work_order":"try again"}`)
+	claudeBin := writeFakeClaude(t, "echo attempt >> "+attemptLog+"\nsleep 0.05\necho change >> daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	codexBin := writeFakeCodexSupervisor(t, `{"status":"needs_revision","summary":"codex wants retry","acceptance_gaps":["retry"],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[],"findings":[{"severity":"medium","category":"acceptance","file":"daemon-output.txt","summary":"retry","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"try again"}`)
 	queueDir := filepath.Join(root, "tasks", "queued")
 	if err := os.MkdirAll(queueDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -812,14 +836,16 @@ func TestShutdownStopsBeforeRetryAttempt(t *testing.T) {
 			Root:               root,
 			SystemPromptFile:   promptPath,
 			JSONSchemaFile:     schemaPath,
+			ClaudeBin:          claudeBin,
 			MaxConcurrentTasks: 1,
 			ClaimTTL:           time.Hour,
 			ShutdownTimeout:    5 * time.Second,
 			Supervisor:         "codex",
+			CodexBin:           codexBin,
 		}.withDefaults())
 		done <- err
 	}()
-	time.Sleep(10 * time.Millisecond)
+	waitForFile(t, attemptLog)
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
@@ -857,7 +883,7 @@ func TestRunOnceStopsWhenOnlyClaimConflictsRemain(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(queueDir, "task.yaml"), []byte("queued"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(runningDir, "task.yaml"), []byte("running"), 0o600); err != nil {
+	if err := task.Save(filepath.Join(runningDir, "task.yaml"), task.Task{ID: "task", Status: "running", Scope: task.Scope{CWD: t.TempDir()}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -910,9 +936,9 @@ func TestCleanupWorktreesKeepsOpenPRWorktree(t *testing.T) {
 	taskPath := filepath.Join(root, "tasks", "done", "task.yaml")
 	writeDaemonTask(t, taskPath, repo)
 	doneTask, worktreePath := prepareDonePRTask(t, taskPath, repo, "open")
-	writeFakeCommand(t, "gh", "echo '{\"state\":\"open\",\"merged\":false}'\n")
+	ghBin := writeFakeCommand(t, "gh", "echo '{\"state\":\"open\",\"merged\":false}'\n")
 
-	if err := cleanupWorktrees(context.Background(), Options{Root: root}.withDefaults()); err != nil {
+	if err := cleanupWorktrees(context.Background(), Options{Root: root, GHBin: ghBin}.withDefaults()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(worktreePath); err != nil {
@@ -936,9 +962,9 @@ func TestCleanupWorktreesRemovesCleanMergedPRWorktree(t *testing.T) {
 	taskPath := filepath.Join(root, "tasks", "done", "task.yaml")
 	writeDaemonTask(t, taskPath, repo)
 	_, worktreePath := prepareDonePRTask(t, taskPath, repo, "open")
-	writeFakeCommand(t, "gh", "echo '{\"state\":\"closed\",\"merged\":true}'\n")
+	ghBin := writeFakeCommand(t, "gh", "echo '{\"state\":\"closed\",\"merged\":true}'\n")
 
-	if err := cleanupWorktrees(context.Background(), Options{Root: root}.withDefaults()); err != nil {
+	if err := cleanupWorktrees(context.Background(), Options{Root: root, GHBin: ghBin}.withDefaults()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
@@ -971,9 +997,9 @@ func TestCleanupWorktreesSkipsDirtyClosedPRWorktree(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(worktreePath, "dirty.txt"), []byte("dirty\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	writeFakeCommand(t, "gh", "echo '{\"state\":\"closed\",\"merged\":false}'\n")
+	ghBin := writeFakeCommand(t, "gh", "echo '{\"state\":\"closed\",\"merged\":false}'\n")
 
-	if err := cleanupWorktrees(context.Background(), Options{Root: root}.withDefaults()); err != nil {
+	if err := cleanupWorktrees(context.Background(), Options{Root: root, GHBin: ghBin}.withDefaults()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(worktreePath); err != nil {
@@ -994,26 +1020,26 @@ func TestCleanupWorktreesSkipsDirtyClosedPRWorktree(t *testing.T) {
 	}
 }
 
-func writeFakeClaude(t *testing.T, body string) {
+func writeFakeClaude(t *testing.T, body string) string {
 	t.Helper()
-	writeFakeCommand(t, "claude", `supervisor=0
+	return writeFakeCommand(t, "claude", `supervisor=0
 for arg in "$@"; do
-  if [ "$arg" = "plan" ]; then
+  if [ "$arg" = "--no-session-persistence" ]; then
     supervisor=1
   fi
 done
 if [ "$supervisor" = "1" ]; then
   request="$(cat)"
   if printf '%s' "$request" | grep -q '"status":"hard_stop"'; then
-    printf '%s\n' '{"status":"hard_stop","summary":"executor reported hard_stop","acceptance_gaps":[],"reviewed_files":[],"acceptance_evidence":[],"findings":[{"severity":"high","category":"execution","file":"","summary":"executor reported hard_stop","blocks_acceptance":true}],"residual_risks":[],"confidence":"high","next_work_order":""}'
+    printf '%s\n' '{"status":"hard_stop","summary":"executor reported hard_stop","acceptance_gaps":[],"reviewed_files":[],"acceptance_evidence":[],"findings":[{"severity":"high","category":"execution","file":"","summary":"executor reported hard_stop","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}'
   elif printf '%s' "$request" | grep -q '"parse_error":"'; then
-    printf '%s\n' '{"status":"needs_revision","summary":"executor result was invalid","acceptance_gaps":["executor result JSON is invalid"],"reviewed_files":[],"acceptance_evidence":[],"findings":[{"severity":"medium","category":"verification","file":"","summary":"executor result JSON is invalid","blocks_acceptance":true}],"residual_risks":[],"confidence":"high","next_work_order":"Return valid structured JSON and preserve any useful workspace changes."}'
+    printf '%s\n' '{"status":"needs_revision","summary":"executor result was invalid","acceptance_gaps":["executor result JSON is invalid"],"reviewed_files":[],"acceptance_evidence":[],"findings":[{"severity":"medium","category":"verification","file":"","summary":"executor result JSON is invalid","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"Return valid structured JSON and preserve any useful workspace changes."}'
   elif printf '%s' "$request" | grep -q '"status":"completed_with_risks"'; then
-    printf '%s\n' '{"status":"needs_revision","summary":"executor reported risks","acceptance_gaps":["executor reported risks"],"reviewed_files":[],"acceptance_evidence":[],"findings":[{"severity":"medium","category":"verification","file":"","summary":"executor reported risks","blocks_acceptance":true}],"residual_risks":[],"confidence":"high","next_work_order":"Resolve the reported risks and rerun verification."}'
+    printf '%s\n' '{"status":"needs_revision","summary":"executor reported risks","acceptance_gaps":["executor reported risks"],"reviewed_files":[],"acceptance_evidence":[],"findings":[{"severity":"medium","category":"verification","file":"","summary":"executor reported risks","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"Resolve the reported risks and rerun verification."}'
   elif printf '%s' "$request" | grep -q '"diff_dirty":false'; then
-    printf '%s\n' '{"status":"needs_revision","summary":"no repository diff was produced","acceptance_gaps":["no repository diff was produced"],"reviewed_files":[],"acceptance_evidence":[],"findings":[{"severity":"medium","category":"acceptance","file":"","summary":"no repository diff was produced","blocks_acceptance":true}],"residual_risks":[],"confidence":"high","next_work_order":"Make the required repository change and return valid structured JSON."}'
+    printf '%s\n' '{"status":"needs_revision","summary":"no repository diff was produced","acceptance_gaps":["no repository diff was produced"],"reviewed_files":[],"acceptance_evidence":[],"findings":[{"severity":"medium","category":"acceptance","file":"","summary":"no repository diff was produced","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"Make the required repository change and return valid structured JSON."}'
   else
-    printf '%s\n' '{"status":"accepted","summary":"fake claude supervisor accepted","acceptance_gaps":[],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["diff"]}],"findings":[],"residual_risks":[],"confidence":"high","next_work_order":""}'
+    printf '%s\n' '{"status":"accepted","summary":"fake claude supervisor accepted","acceptance_gaps":[],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["diff"]}],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}'
   fi
   exit 0
 fi
@@ -1026,7 +1052,7 @@ func prepareDonePRTask(t *testing.T, taskPath, repo, prStatus string) (task.Task
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared, err := workspace.Prepare(context.Background(), repo, loaded.Worktree)
+	prepared, err := workspace.Prepare(context.Background(), repo, loaded.Worktree, workspace.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1039,19 +1065,33 @@ func prepareDonePRTask(t *testing.T, taskPath, repo, prStatus string) (task.Task
 	return loaded, prepared.CWD
 }
 
-func writeFakeCommand(t *testing.T, name, body string) {
+func writeFakeCommand(t *testing.T, name, body string) string {
 	t.Helper()
 	binDir := t.TempDir()
 	commandPath := filepath.Join(binDir, name)
 	if err := os.WriteFile(commandPath, []byte("#!/bin/sh\n"+body), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return commandPath
 }
 
-func writeFakeCodexSupervisor(t *testing.T, verdict string) {
+func waitForFile(t *testing.T, path string) {
 	t.Helper()
-	writeFakeCommand(t, "codex", `out=""
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", path)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func writeFakeCodexSupervisor(t *testing.T, verdict string) string {
+	t.Helper()
+	return writeFakeCommand(t, "codex", `out=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --output-last-message)

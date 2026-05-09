@@ -1,11 +1,11 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 
+	"github.com/shinpr/galley/internal/fileutil"
 	"github.com/shinpr/galley/internal/galleyhome"
 	"github.com/shinpr/galley/internal/profile"
 	"github.com/spf13/cobra"
@@ -65,23 +65,16 @@ func newProfileResolveCommand() *cobra.Command {
 				RepoKey:                key,
 				QualityProfileFile:     qualityPath,
 				EnvironmentProfileFile: environmentPath,
-				QualityExists:          fileExists(qualityPath),
-				EnvironmentExists:      fileExists(environmentPath),
+				QualityExists:          fileutil.ExistsFile(qualityPath),
+				EnvironmentExists:      fileutil.ExistsFile(environmentPath),
 			}
-			switch output {
-			case "json":
-				enc := json.NewEncoder(cmd.OutOrStdout())
-				enc.SetIndent("", "  ")
-				return enc.Encode(payload)
-			case "text":
+			return renderOutput(cmd, output, payload, func() error {
 				fmt.Fprintf(cmd.OutOrStdout(), "root: %s\n", payload.Root)
 				fmt.Fprintf(cmd.OutOrStdout(), "repo_key: %s\n", payload.RepoKey)
 				fmt.Fprintf(cmd.OutOrStdout(), "quality_profile_file: %s\n", payload.QualityProfileFile)
 				fmt.Fprintf(cmd.OutOrStdout(), "environment_profile_file: %s\n", payload.EnvironmentProfileFile)
 				return nil
-			default:
-				return fmt.Errorf("unsupported output format %q", output)
-			}
+			})
 		},
 	}
 	cmd.Flags().StringVar(&root, "root", galleyhome.DefaultRoot(), "Galley daemon root directory")
@@ -103,14 +96,7 @@ func newProfileValidateCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			switch output {
-			case "json":
-				enc := json.NewEncoder(cmd.OutOrStdout())
-				enc.SetIndent("", "  ")
-				if err := enc.Encode(result); err != nil {
-					return err
-				}
-			case "text":
+			if err := renderOutput(cmd, output, result, func() error {
 				if result.Valid() {
 					fmt.Fprintf(cmd.OutOrStdout(), "valid: %s %s\n", result.Kind, result.ID)
 				} else {
@@ -122,8 +108,9 @@ func newProfileValidateCommand() *cobra.Command {
 				for _, validationErr := range result.Errors {
 					fmt.Fprintf(cmd.OutOrStdout(), "error: %s\n", validationErr)
 				}
-			default:
-				return fmt.Errorf("unsupported output format %q", output)
+				return nil
+			}); err != nil {
+				return err
 			}
 			if !result.Valid() {
 				return fmt.Errorf("profile validation failed")
@@ -166,9 +153,4 @@ func validateProfile(kind, path string) (profile.ValidationResult, error) {
 	default:
 		return profile.ValidationResult{}, fmt.Errorf("unsupported profile kind %q", kind)
 	}
-}
-
-func fileExists(path string) bool {
-	stat, err := os.Stat(path)
-	return err == nil && !stat.IsDir()
 }

@@ -2,6 +2,7 @@ package runner
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -62,33 +63,21 @@ type ClaudeHardStop struct {
 
 // ExtractClaudeResult parses Claude's structured result from stdout.
 func ExtractClaudeResult(stdout string) (ClaudeResult, error) {
-	if result, ok := parseClaudeResult(stdout); ok {
-		return result, result.Validate()
+	if result, found, err := extractClaudeResultLine(strings.TrimSpace(stdout)); found {
+		return result, err
 	}
+	var firstErr error
 	for _, line := range strings.Split(stdout, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
+		result, found, err := extractClaudeResultLine(strings.TrimSpace(line))
+		if found && err == nil {
+			return result, nil
 		}
-		var event map[string]json.RawMessage
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			continue
+		if found && firstErr == nil && err != nil {
+			firstErr = err
 		}
-		for _, key := range []string{"result", "response", "message"} {
-			raw, ok := event[key]
-			if !ok {
-				continue
-			}
-			var text string
-			if err := json.Unmarshal(raw, &text); err == nil {
-				if result, ok := parseClaudeResult(text); ok {
-					return result, result.Validate()
-				}
-			}
-			if result, ok := parseRawClaudeResult(raw); ok {
-				return result, result.Validate()
-			}
-		}
+	}
+	if firstErr != nil {
+		return ClaudeResult{}, firstErr
 	}
 	return ClaudeResult{}, fmt.Errorf("structured Claude result not found")
 }
@@ -266,7 +255,9 @@ func extractClaudeResultLine(line string) (ClaudeResult, bool, error) {
 
 func parseRawClaudeResult(data []byte) (ClaudeResult, bool) {
 	var result ClaudeResult
-	if err := json.Unmarshal(data, &result); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&result); err != nil {
 		return ClaudeResult{}, false
 	}
 	if result.Status == "" {

@@ -61,7 +61,7 @@ Write ACs as testable statements. Use `references/authoring-quality.md` for EARS
 ```yaml
 - id: AC1
   text: <observable requirement>
-  verification: <command or evidence source>
+  verification: <verification method or evidence source>
   status: pending
 ```
 
@@ -85,7 +85,7 @@ goal: <one concrete outcome>
 acceptance_criteria:
   - id: AC1
     text: <observable requirement>
-    verification: <command or evidence source>
+    verification: <verification method or evidence source>
     status: pending
 scope:
   cwd: /absolute/path/to/repo

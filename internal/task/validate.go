@@ -105,6 +105,9 @@ func validateInputFiles(result *ValidationResult, t Task) {
 		prefix := fmt.Sprintf("files[%d]", i)
 		require(result, file.Source != "", "%s.source is required", prefix)
 		require(result, file.Destination != "", "%s.destination is required", prefix)
+		if file.Source != "" && !filepath.IsAbs(file.Source) {
+			validateRelativePath(result, prefix+".source", file.Source)
+		}
 		if file.Destination != "" {
 			validateRelativePath(result, prefix+".destination", file.Destination)
 		}

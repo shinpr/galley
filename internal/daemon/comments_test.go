@@ -55,15 +55,15 @@ func TestPollPRCommentsRequeuesTaskOnce(t *testing.T) {
 	if err := task.Save(donePath, loaded); err != nil {
 		t.Fatal(err)
 	}
-	writeFakeCommand(t, "gh", `if [ "$1" = "api" ]; then
-	echo '[[{"id":42,"body":"/galley rerun tighten tests","html_url":"https://github.com/example/galley/pull/123#issuecomment-42","author_association":"MEMBER","user":{"login":"maintainer"}}]]'
+	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ]; then
+	echo '[[{"id":42,"body":"/galley rerun tighten tests","html_url":"https://github.com/example/galley/pull/123#issuecomment-42","author_association":"COLLABORATOR","user":{"login":"maintainer"}}]]'
 else
 echo unexpected-gh >&2
 exit 1
 fi
 `)
 
-	if err := pollPRComments(context.Background(), Options{Root: root}.withDefaults()); err != nil {
+	if err := pollPRComments(context.Background(), Options{Root: root, GHBin: ghBin}.withDefaults()); err != nil {
 		t.Fatal(err)
 	}
 	queuedPath := filepath.Join(root, "tasks", "queued", "task.yaml")
@@ -81,7 +81,7 @@ fi
 		t.Fatalf("revision requests got %#v", requeued.RevisionRequests)
 	}
 
-	if err := pollPRComments(context.Background(), Options{Root: root}.withDefaults()); err != nil {
+	if err := pollPRComments(context.Background(), Options{Root: root, GHBin: ghBin}.withDefaults()); err != nil {
 		t.Fatal(err)
 	}
 	assertGlobCount(t, filepath.Join(root, "tasks", "queued", "*.yaml"), 1)
@@ -109,7 +109,7 @@ func TestPollPRCommentsPostsReply(t *testing.T) {
 		t.Fatal(err)
 	}
 	marker := filepath.Join(t.TempDir(), "posted")
-	writeFakeCommand(t, "gh", `if [ "$1" = "api" ] && [ "$3" = "--paginate" ]; then
+	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ] && [ "$3" = "--paginate" ]; then
 echo '[[{"id":99,"body":"/galley rerun reply please","html_url":"https://github.com/example/galley/pull/123#issuecomment-99","author_association":"OWNER","user":{"login":"owner"}}]]'
 elif [ "$1" = "api" ]; then
 echo "$*" > `+marker+`
@@ -121,7 +121,7 @@ exit 1
 fi
 `)
 
-	if err := pollPRComments(context.Background(), Options{Root: root, ReplyPRComments: true}.withDefaults()); err != nil {
+	if err := pollPRComments(context.Background(), Options{Root: root, ReplyPRComments: true, GHBin: ghBin}.withDefaults()); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(marker)
@@ -151,8 +151,8 @@ func TestPollPRCommentsContinuesAfterReplyFailure(t *testing.T) {
 	if err := task.Save(donePath, loaded); err != nil {
 		t.Fatal(err)
 	}
-	writeFakeCommand(t, "gh", `if [ "$1" = "api" ] && [ "$3" = "--paginate" ]; then
-echo '[[{"id":42,"body":"/galley rerun first fix","html_url":"https://github.com/example/galley/pull/123#issuecomment-42","author_association":"MEMBER","user":{"login":"maintainer"}},{"id":43,"body":"/galley rerun second fix","html_url":"https://github.com/example/galley/pull/123#issuecomment-43","author_association":"MEMBER","user":{"login":"maintainer"}}]]'
+	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ] && [ "$3" = "--paginate" ]; then
+echo '[[{"id":42,"body":"/galley rerun first fix","html_url":"https://github.com/example/galley/pull/123#issuecomment-42","author_association":"COLLABORATOR","user":{"login":"maintainer"}},{"id":43,"body":"/galley rerun second fix","html_url":"https://github.com/example/galley/pull/123#issuecomment-43","author_association":"COLLABORATOR","user":{"login":"maintainer"}}]]'
 elif [ "$1" = "api" ]; then
 echo reply-failed >&2
 exit 1
@@ -162,7 +162,7 @@ exit 1
 fi
 `)
 
-	if err := pollPRComments(context.Background(), Options{Root: root, ReplyPRComments: true}.withDefaults()); err == nil {
+	if err := pollPRComments(context.Background(), Options{Root: root, ReplyPRComments: true, GHBin: ghBin}.withDefaults()); err == nil {
 		t.Fatal("expected reply error")
 	}
 	queuedPath := filepath.Join(root, "tasks", "queued", "task.yaml")
@@ -170,15 +170,17 @@ fi
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{"42", "43"} {
-		if !slices.Contains(requeued.PR.ProcessedCommentIDs, id) {
-			t.Fatalf("processed comments missing %s: %#v", id, requeued.PR.ProcessedCommentIDs)
-		}
+	if !slices.Contains(requeued.PR.ProcessedCommentIDs, "42") {
+		t.Fatalf("processed comments missing 42: %#v", requeued.PR.ProcessedCommentIDs)
 	}
-	for _, id := range []string{"pr-comment-42", "pr-comment-43"} {
-		if !hasRevisionRequest(requeued.RevisionRequests, id) {
-			t.Fatalf("revision requests missing %s: %#v", id, requeued.RevisionRequests)
-		}
+	if slices.Contains(requeued.PR.ProcessedCommentIDs, "43") {
+		t.Fatalf("requeue should stop after first command, got processed comments %#v", requeued.PR.ProcessedCommentIDs)
+	}
+	if !hasRevisionRequest(requeued.RevisionRequests, "pr-comment-42") {
+		t.Fatalf("revision requests missing pr-comment-42: %#v", requeued.RevisionRequests)
+	}
+	if hasRevisionRequest(requeued.RevisionRequests, "pr-comment-43") {
+		t.Fatalf("requeue should stop after first command, got revision requests %#v", requeued.RevisionRequests)
 	}
 }
 
@@ -202,7 +204,7 @@ func TestPollPRCommentsRecordsFailedRequeueForManualRecovery(t *testing.T) {
 	if err := task.Save(donePath, loaded); err != nil {
 		t.Fatal(err)
 	}
-	writeFakeCommand(t, "gh", `if [ "$1" = "api" ]; then
+	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ]; then
 echo '[[{"id":42,"body":"/galley rerun retry after queue clears","html_url":"https://github.com/example/galley/pull/123#issuecomment-42","author_association":"COLLABORATOR","user":{"login":"collab"}}]]'
 else
 echo unexpected-gh >&2
@@ -210,7 +212,7 @@ exit 1
 fi
 `)
 
-	if err := pollPRComments(context.Background(), Options{Root: root}.withDefaults()); err == nil {
+	if err := pollPRComments(context.Background(), Options{Root: root, GHBin: ghBin}.withDefaults()); err == nil {
 		t.Fatal("expected requeue destination error")
 	}
 	stillDone, err := task.Load(donePath)
@@ -255,15 +257,15 @@ func TestPollPRCommentsIgnoresUntrustedAuthor(t *testing.T) {
 	if err := task.Save(donePath, loaded); err != nil {
 		t.Fatal(err)
 	}
-	writeFakeCommand(t, "gh", `if [ "$1" = "api" ]; then
-echo '[[{"id":77,"body":"/galley rerun please run my code","html_url":"https://github.com/example/galley/pull/123#issuecomment-77","author_association":"NONE","user":{"login":"stranger"}}]]'
+	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ]; then
+echo '[[{"id":77,"body":"/galley rerun please run my code","html_url":"https://github.com/example/galley/pull/123#issuecomment-77","author_association":"MEMBER","user":{"login":"org-member"}}]]'
 else
 echo unexpected-gh >&2
 exit 1
 fi
 `)
 
-	if err := pollPRComments(context.Background(), Options{Root: root}.withDefaults()); err != nil {
+	if err := pollPRComments(context.Background(), Options{Root: root, GHBin: ghBin}.withDefaults()); err != nil {
 		t.Fatal(err)
 	}
 	stillDone, err := task.Load(donePath)

@@ -100,7 +100,7 @@ Task YAML AC format:
 ```yaml
 - id: AC1
   text: <observable behavior or constraint>
-  verification: <command, test, screenshot, file review, PR evidence, or manual evidence>
+  verification: <verification method, evidence source, or runnable command when one is known>
   status: pending
 ```
 
@@ -142,7 +142,7 @@ Weak AC:
 AC traceability checks:
 
 - Every must-have requirement from an available spec, issue, or work plan is covered by at least one AC, or listed as out of scope with a reason.
-- Every AC has a verification method or evidence source.
+- Every AC has a verification method or evidence source. Prefer profile required checks for runnable commands that must be enforced by Galley.
 - Every risky boundary crossing has an AC or quality finding target: API/schema, data persistence, authorization, UI state, CLI output, migration, external service, or config.
 - Each AC names one observable obligation. Split one AC when "and" joins independently verifiable obligations or the AC crosses multiple boundaries.
 

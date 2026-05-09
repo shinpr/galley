@@ -11,7 +11,9 @@ import (
 func TestRunAdapterPayloadCodexUsesEmbeddedPromptAndSchema(t *testing.T) {
 	binDir := t.TempDir()
 	fakeCodex := filepath.Join(binDir, "codex")
+	capturePath := filepath.Join(t.TempDir(), "codex.args")
 	if err := os.WriteFile(fakeCodex, []byte(`#!/bin/sh
+printf '%s\n' "$*" > `+capturePath+`
 out=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -25,7 +27,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 cat >/dev/null
-printf '%s\n' '{"status":"accepted","summary":"ok","acceptance_gaps":[],"reviewed_files":["README.md"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["checked"]}],"findings":[],"residual_risks":[],"confidence":"medium","next_work_order":""}' > "$out"
+printf '%s\n' '{"status":"accepted","summary":"ok","acceptance_gaps":[],"reviewed_files":["README.md"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["checked"]}],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"medium","next_work_order":""}' > "$out"
 printf '%s\n' '{"event":"done"}'
 `), 0o700); err != nil {
 		t.Fatal(err)
@@ -53,6 +55,15 @@ printf '%s\n' '{"event":"done"}'
 			t.Fatalf("prompt missing %q:\n%s", want, prompt)
 		}
 	}
+	args, err := os.ReadFile(capturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"exec", "--sandbox", "workspace-write", "--output-schema", "--output-last-message"} {
+		if !strings.Contains(string(args), want) {
+			t.Fatalf("codex args missing %q:\n%s", want, args)
+		}
+	}
 	if _, err := os.Stat(filepath.Join(artifactDir, "supervisor-verdict.schema.json")); err != nil {
 		t.Fatal(err)
 	}
@@ -61,11 +72,13 @@ printf '%s\n' '{"event":"done"}'
 func TestRunAdapterPayloadClaudeUsesEmbeddedPromptAndSchema(t *testing.T) {
 	binDir := t.TempDir()
 	capturePath := filepath.Join(t.TempDir(), "claude.args")
+	envPath := filepath.Join(t.TempDir(), "claude.env")
 	fakeClaude := filepath.Join(binDir, "claude")
 	if err := os.WriteFile(fakeClaude, []byte(`#!/bin/sh
 printf '%s\n' "$*" > `+capturePath+`
+printf '%s\n' "$GALLEY_CLAUDE_GUARD_MODE" > `+envPath+`
 cat >/dev/null
-printf '%s\n' '{"status":"accepted","summary":"ok","acceptance_gaps":[],"reviewed_files":["README.md"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["checked"]}],"findings":[],"residual_risks":[],"confidence":"medium","next_work_order":""}'
+printf '%s\n' '{"status":"accepted","summary":"ok","acceptance_gaps":[],"reviewed_files":["README.md"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["checked"]}],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"medium","next_work_order":""}'
 `), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -86,10 +99,22 @@ printf '%s\n' '{"status":"accepted","summary":"ok","acceptance_gaps":[],"reviewe
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"--system-prompt", "--json-schema", "--allowedTools", "Galley Supervisor Verdict"} {
+	for _, want := range []string{"--system-prompt", "--json-schema", "--plugin-dir", "--permission-mode", "bypassPermissions", "--tools", "default", "--disallowedTools", "Write,Edit,MultiEdit,NotebookEdit", "Galley Supervisor Verdict"} {
 		if !strings.Contains(string(args), want) {
 			t.Fatalf("claude args missing %q:\n%s", want, args)
 		}
+	}
+	for _, unwanted := range []string{"--allowedTools", "--allowed-tools"} {
+		if strings.Contains(string(args), unwanted) {
+			t.Fatalf("claude args should not set %q:\n%s", unwanted, args)
+		}
+	}
+	env, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(env)) != "supervisor" {
+		t.Fatalf("guard mode env got %q, want supervisor", env)
 	}
 }
 
@@ -99,7 +124,7 @@ func TestRunAdapterPayloadClaudeReadsFullStdoutVerdict(t *testing.T) {
 	longSummary := strings.Repeat("x", 70*1024)
 	if err := os.WriteFile(fakeClaude, []byte(`#!/bin/sh
 cat >/dev/null
-printf '%s' '{"status":"accepted","summary":"`+longSummary+`","acceptance_gaps":[],"reviewed_files":["README.md"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["checked"]}],"findings":[],"residual_risks":[],"confidence":"medium","next_work_order":""}'
+printf '%s' '{"status":"accepted","summary":"`+longSummary+`","acceptance_gaps":[],"reviewed_files":["README.md"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["checked"]}],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"medium","next_work_order":""}'
 `), 0o700); err != nil {
 		t.Fatal(err)
 	}

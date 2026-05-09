@@ -107,6 +107,21 @@ defaults:
 	}
 }
 
+func TestPreflightRejectsOpenPRWithExplicitCommitDisabled(t *testing.T) {
+	t.Parallel()
+	_, err := Preflight(Options{
+		Root:           t.TempDir(),
+		OpenPR:         true,
+		CommitOnAccept: false,
+		Explicit: ExplicitOptions{
+			CommitOnAccept: true,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected open PR commit-on-accept conflict")
+	}
+}
+
 func writeOptionsManifest(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "repos.yaml")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
@@ -11,10 +12,12 @@ import (
 
 	"github.com/shinpr/galley/internal/config"
 	"github.com/shinpr/galley/internal/galleyhome"
+	"github.com/shinpr/galley/internal/inputfiles"
 	"github.com/shinpr/galley/internal/jsonio"
 	"github.com/shinpr/galley/internal/queue"
 	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/task"
+	"github.com/shinpr/galley/internal/taskstate"
 	"github.com/shinpr/galley/internal/workspace"
 )
 
@@ -42,6 +45,10 @@ type Options struct {
 	ShutdownTimeout        time.Duration
 	DisableClaudeGuard     bool
 	ClaudeGuardPluginDir   string
+	ClaudeBin              string
+	CodexBin               string
+	GitBin                 string
+	GHBin                  string
 	Explicit               ExplicitOptions
 }
 
@@ -75,21 +82,9 @@ func Run(ctx context.Context, opts Options) error {
 	if opts.Once {
 		var firstErr error
 		for {
-			if opts.PollPRComments {
-				if err := pollPRComments(ctx, opts); err != nil && firstErr == nil {
-					firstErr = err
-				}
-			}
-			if opts.CleanupWorktrees {
-				if err := cleanupWorktrees(ctx, opts); err != nil && firstErr == nil {
-					firstErr = err
-				}
-			}
-			processed, err := processAvailable(ctx, opts)
-			if err != nil {
-				if firstErr == nil {
-					firstErr = err
-				}
+			processed, err := runIteration(ctx, opts)
+			if err != nil && firstErr == nil {
+				firstErr = err
 			}
 			if processed == 0 {
 				return firstErr
@@ -100,18 +95,8 @@ func Run(ctx context.Context, opts Options) error {
 	ticker := time.NewTicker(opts.PollInterval)
 	defer ticker.Stop()
 	for {
-		if opts.PollPRComments {
-			if err := pollPRComments(ctx, opts); err != nil {
-				fmt.Fprintf(os.Stderr, "galley: poll PR comments failed: %v\n", err)
-			}
-		}
-		if opts.CleanupWorktrees {
-			if err := cleanupWorktrees(ctx, opts); err != nil {
-				fmt.Fprintf(os.Stderr, "galley: cleanup worktrees failed: %v\n", err)
-			}
-		}
-		if _, err := processAvailable(ctx, opts); err != nil {
-			fmt.Fprintf(os.Stderr, "galley: process available tasks failed: %v\n", err)
+		if _, err := runIteration(ctx, opts); err != nil {
+			fmt.Fprintf(os.Stderr, "galley: iteration failed: %v\n", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -119,6 +104,25 @@ func Run(ctx context.Context, opts Options) error {
 		case <-ticker.C:
 		}
 	}
+}
+
+func runIteration(ctx context.Context, opts Options) (int, error) {
+	var errs []error
+	if opts.PollPRComments {
+		if err := pollPRComments(ctx, opts); err != nil {
+			errs = append(errs, fmt.Errorf("poll PR comments: %w", err))
+		}
+	}
+	if opts.CleanupWorktrees {
+		if err := cleanupWorktrees(ctx, opts); err != nil {
+			errs = append(errs, fmt.Errorf("cleanup worktrees: %w", err))
+		}
+	}
+	processed, err := processAvailable(ctx, opts)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("process available tasks: %w", err))
+	}
+	return processed, errors.Join(errs...)
 }
 
 // Preflight resolves daemon options and verifies startup prerequisites.
@@ -129,6 +133,9 @@ func Preflight(opts Options) (Options, error) {
 		return Options{}, err
 	}
 	opts = opts.withDefaults()
+	if opts.OpenPR && !opts.CommitOnAccept {
+		return Options{}, fmt.Errorf("open PR requires commit-on-accept")
+	}
 	if opts.Supervisor != "" && opts.Supervisor != "codex" && opts.Supervisor != "claude" {
 		return Options{}, fmt.Errorf("supervisor must be one of: codex, claude")
 	}
@@ -147,55 +154,30 @@ func (opts Options) withManifest() (Options, error) {
 		return Options{}, err
 	}
 	defaults := manifest.Defaults
-	if !opts.Explicit.SystemPromptFile {
-		opts.SystemPromptFile = defaults.SystemPromptFile
-	}
-	if !opts.Explicit.JSONSchemaFile {
-		opts.JSONSchemaFile = defaults.JSONSchemaFile
-	}
-	if !opts.Explicit.QualityProfileFile {
-		opts.QualityProfileFile = defaults.QualityProfileFile
-	}
-	if !opts.Explicit.EnvironmentProfileFile {
-		opts.EnvironmentProfileFile = defaults.EnvironmentProfileFile
-	}
-	if !opts.Explicit.MaxConcurrentTasks {
-		opts.MaxConcurrentTasks = defaults.MaxConcurrentTasks
-	}
-	if !opts.Explicit.MaxConcurrentPerRepo {
-		opts.MaxConcurrentPerRepo = defaults.MaxConcurrentPerRepo
-	}
-	if !opts.Explicit.PollInterval {
-		opts.PollInterval = defaults.PollInterval
-	}
-	if !opts.Explicit.ClaimTTL {
-		opts.ClaimTTL = defaults.ClaimTTL
-	}
-	if !opts.Explicit.HeartbeatInterval {
-		opts.HeartbeatInterval = defaults.HeartbeatInterval
-	}
-	if !opts.Explicit.CommitOnAccept {
-		opts.CommitOnAccept = defaults.CommitOnAccept
-	}
-	if !opts.Explicit.OpenPR {
-		opts.OpenPR = defaults.OpenPR
-	}
-	if !opts.Explicit.PollPRComments {
-		opts.PollPRComments = defaults.PollPRComments
-	}
-	if !opts.Explicit.ReplyPRComments {
-		opts.ReplyPRComments = defaults.ReplyPRComments
-	}
-	if !opts.Explicit.CleanupWorktrees {
-		opts.CleanupWorktrees = defaults.CleanupWorktrees
-	}
-	if !opts.Explicit.PRBase {
-		opts.PRBase = defaults.PRBase
-	}
-	if !opts.Explicit.Supervisor {
-		opts.Supervisor = defaults.Supervisor
-	}
+	applyDefault(&opts.SystemPromptFile, defaults.SystemPromptFile, opts.Explicit.SystemPromptFile)
+	applyDefault(&opts.JSONSchemaFile, defaults.JSONSchemaFile, opts.Explicit.JSONSchemaFile)
+	applyDefault(&opts.QualityProfileFile, defaults.QualityProfileFile, opts.Explicit.QualityProfileFile)
+	applyDefault(&opts.EnvironmentProfileFile, defaults.EnvironmentProfileFile, opts.Explicit.EnvironmentProfileFile)
+	applyDefault(&opts.MaxConcurrentTasks, defaults.MaxConcurrentTasks, opts.Explicit.MaxConcurrentTasks)
+	applyDefault(&opts.MaxConcurrentPerRepo, defaults.MaxConcurrentPerRepo, opts.Explicit.MaxConcurrentPerRepo)
+	applyDefault(&opts.PollInterval, defaults.PollInterval, opts.Explicit.PollInterval)
+	applyDefault(&opts.ClaimTTL, defaults.ClaimTTL, opts.Explicit.ClaimTTL)
+	applyDefault(&opts.HeartbeatInterval, defaults.HeartbeatInterval, opts.Explicit.HeartbeatInterval)
+	applyDefault(&opts.CommitOnAccept, defaults.CommitOnAccept, opts.Explicit.CommitOnAccept)
+	applyDefault(&opts.OpenPR, defaults.OpenPR, opts.Explicit.OpenPR)
+	applyDefault(&opts.PollPRComments, defaults.PollPRComments, opts.Explicit.PollPRComments)
+	applyDefault(&opts.ReplyPRComments, defaults.ReplyPRComments, opts.Explicit.ReplyPRComments)
+	applyDefault(&opts.CleanupWorktrees, defaults.CleanupWorktrees, opts.Explicit.CleanupWorktrees)
+	applyDefault(&opts.PRBase, defaults.PRBase, opts.Explicit.PRBase)
+	applyDefault(&opts.Supervisor, defaults.Supervisor, opts.Explicit.Supervisor)
 	return opts, nil
+}
+
+func applyDefault[T any](dst *T, value T, explicit bool) {
+	if explicit {
+		return
+	}
+	*dst = value
 }
 
 func (opts Options) withDefaults() Options {
@@ -232,7 +214,7 @@ func (opts Options) withDefaults() Options {
 			opts.HeartbeatInterval = time.Minute
 		}
 	}
-	if opts.OpenPR {
+	if opts.OpenPR && !opts.Explicit.CommitOnAccept {
 		opts.CommitOnAccept = true
 	}
 	return opts
@@ -267,42 +249,47 @@ func processAvailable(ctx context.Context, opts Options) (int, error) {
 	errs := make(chan error, limit)
 	taskCtx, stopTaskCtx := gracefulTaskContext(ctx, opts.ShutdownTimeout)
 	defer stopTaskCtx()
+	repoCounts, err := queue.RunningRepoCounts(opts.Root)
+	if err != nil {
+		return 0, err
+	}
+	claimedCount, firstClaimErr := claimAvailableTasks(ctx, taskCtx, opts, queued, limit, repoCounts, &wg, errs)
+	// This wait is load-bearing: each daemon iteration completes its claimed
+	// task goroutines before the next stale-recovery pass can run. That prevents
+	// Galley from requeueing work it started in the same process.
+	wg.Wait()
+	close(errs)
+
+	firstErr := firstClaimErr
+	for err := range errs {
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	return claimedCount, firstErr
+}
+
+func claimAvailableTasks(ctx, taskCtx context.Context, opts Options, queued []string, limit int, repoCounts map[string]int, wg *sync.WaitGroup, errs chan<- error) (int, error) {
 	claimedCount := 0
 	var firstClaimErr error
-	repoCounts := queue.RunningRepoCounts(opts.Root)
-	stopClaiming := false
 	for _, queuedPath := range queued {
-		if claimedCount >= limit || stopClaiming {
+		if claimedCount >= limit {
 			break
 		}
 		select {
 		case <-ctx.Done():
-			if firstClaimErr == nil {
-				firstClaimErr = ctx.Err()
-			}
-			stopClaiming = true
-			continue
+			return claimedCount, firstNonNil(firstClaimErr, ctx.Err())
 		default:
 		}
-		repoKey := ""
-		var repoLoadErr error
-		if queuedHasClaimConflict(opts.Root, queuedPath) {
+		repoKey, skip, err := repoKeyForClaim(opts, queuedPath, repoCounts)
+		if err != nil {
+			if firstClaimErr == nil {
+				firstClaimErr = err
+			}
 			continue
 		}
-		if opts.MaxConcurrentPerRepo > 0 {
-			loaded, loadErr := task.Load(queuedPath)
-			if loadErr != nil {
-				repoLoadErr = loadErr
-				if firstClaimErr == nil {
-					firstClaimErr = fmt.Errorf("load queued task for repo limit %s: %w", queuedPath, repoLoadErr)
-				}
-				continue
-			} else {
-				repoKey = loaded.Scope.CWD
-				if repoKey != "" && repoCounts[repoKey] >= opts.MaxConcurrentPerRepo {
-					continue
-				}
-			}
+		if skip {
+			continue
 		}
 		claimed, err := queue.ClaimTask(opts.Root, queuedPath)
 		if err != nil {
@@ -326,27 +313,60 @@ func processAvailable(ctx context.Context, opts Options) (int, error) {
 			}
 		}(claimed)
 	}
-	wg.Wait()
-	close(errs)
-
-	firstErr := firstClaimErr
-	for err := range errs {
-		if firstErr == nil {
-			firstErr = err
-		}
-	}
-	return claimedCount, firstErr
+	return claimedCount, firstClaimErr
 }
 
-func queuedHasClaimConflict(root, queuedPath string) bool {
+func repoKeyForClaim(opts Options, queuedPath string, repoCounts map[string]int) (string, bool, error) {
+	conflict, err := queuedHasClaimConflict(opts.Root, queuedPath)
+	if err != nil {
+		return "", false, err
+	}
+	if conflict {
+		return "", true, nil
+	}
+	if opts.MaxConcurrentPerRepo <= 0 {
+		return "", false, nil
+	}
+	loaded, err := task.Load(queuedPath)
+	if err != nil {
+		return "", false, fmt.Errorf("load queued task for repo limit %s: %w", queuedPath, err)
+	}
+	repoKey := loaded.Scope.CWD
+	if repoKey != "" && repoCounts[repoKey] >= opts.MaxConcurrentPerRepo {
+		return repoKey, true, nil
+	}
+	return repoKey, false, nil
+}
+
+func firstNonNil(primary, fallback error) error {
+	if primary != nil {
+		return primary
+	}
+	return fallback
+}
+
+func queuedHasClaimConflict(root, queuedPath string) (bool, error) {
+	if exists, err := pathExistsForClaim(queuedPath + ".lock"); err != nil || exists {
+		return exists, err
+	}
 	runningPath := filepath.Join(root, "tasks", "running", filepath.Base(queuedPath))
-	if _, err := os.Stat(runningPath); err == nil {
-		return true
+	if exists, err := pathExistsForClaim(runningPath); err != nil || exists {
+		return exists, err
 	}
-	if _, err := os.Stat(runningPath + ".lock"); err == nil {
-		return true
+	if exists, err := pathExistsForClaim(runningPath + ".lock"); err != nil || exists {
+		return exists, err
 	}
-	return false
+	return false, nil
+}
+
+func pathExistsForClaim(path string) (bool, error) {
+	if _, err := os.Stat(path); err == nil {
+		return true, nil
+	} else if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	} else {
+		return false, fmt.Errorf("inspect claim conflict path %s: %w", path, err)
+	}
 }
 
 func gracefulTaskContext(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
@@ -374,49 +394,77 @@ func gracefulTaskContext(parent context.Context, timeout time.Duration) (context
 }
 
 func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningPath string) error {
+	loaded, err := loadClaimedTask(runningPath)
+	if err != nil {
+		return taskstate.FailMove(opts.Root, runningPath, nil, err)
+	}
+	stopHeartbeat := startHeartbeat(ctx, runningPath, opts.HeartbeatInterval)
+	defer stopHeartbeat()
+
+	validation, err := validateClaimedTask(&loaded)
+	if err != nil {
+		return taskstate.FailMove(opts.Root, runningPath, &loaded, err)
+	}
+	runID, runDir, err := initializeRunEvidence(opts.Root, runningPath, loaded, validation)
+	if err != nil {
+		return taskstate.FailMove(opts.Root, runningPath, &loaded, err)
+	}
+
+	prepared, err := prepareClaimedWorkspace(ctx, opts, runningPath, runDir, &loaded)
+	if err != nil {
+		return taskstate.FailMove(opts.Root, runningPath, &loaded, err)
+	}
+	return runSupervisorLoop(ctx, shutdownCtx, opts, runningPath, &loaded, prepared, runDir, runID)
+}
+
+func loadClaimedTask(runningPath string) (task.Task, error) {
 	loaded, err := task.Load(runningPath)
 	if err != nil {
-		return failTaskMove(opts.Root, runningPath, nil, err)
+		return task.Task{}, err
 	}
 	task.ResolveFileSources(runningPath, &loaded)
 	task.ApplyDefaults(&loaded)
 	loaded.Status = "running"
 	if err := task.Save(runningPath, loaded); err != nil {
-		return failTaskMove(opts.Root, runningPath, nil, err)
+		return task.Task{}, err
 	}
-	stopHeartbeat := startHeartbeat(ctx, runningPath, opts.HeartbeatInterval)
-	defer stopHeartbeat()
+	return loaded, nil
+}
 
-	validation := task.Validate(loaded)
-	if !validation.Valid() {
-		loaded.Status = "failed"
-		loaded.Attempts = append(loaded.Attempts, task.Attempt{
-			Number:            len(loaded.Attempts) + 1,
-			StartedAt:         time.Now().UTC().Format(time.RFC3339Nano),
-			CompletedAt:       time.Now().UTC().Format(time.RFC3339Nano),
-			ClaudeStatus:      "not_run",
-			SupervisorVerdict: "validation_failed",
-			Summary:           "Task validation failed before executor run.",
-		})
-		return failTaskMove(opts.Root, runningPath, &loaded, fmt.Errorf("task validation failed: %v", validation.Errors))
+func validateClaimedTask(loaded *task.Task) (task.ValidationResult, error) {
+	validation := task.Validate(*loaded)
+	if validation.Valid() {
+		return validation, nil
 	}
+	loaded.Attempts = append(loaded.Attempts, task.Attempt{
+		Number:            len(loaded.Attempts) + 1,
+		StartedAt:         time.Now().UTC().Format(time.RFC3339Nano),
+		CompletedAt:       time.Now().UTC().Format(time.RFC3339Nano),
+		ClaudeStatus:      "not_run",
+		SupervisorVerdict: "validation_failed",
+		Summary:           "Task validation failed before executor run.",
+	})
+	return validation, fmt.Errorf("task validation failed: %v", validation.Errors)
+}
 
+func initializeRunEvidence(root, runningPath string, loaded task.Task, validation task.ValidationResult) (string, string, error) {
 	runID := fmt.Sprintf("%s-%d", loaded.ID, time.Now().UnixNano())
-	runDir := filepath.Join(opts.Root, "runs", runID)
+	runDir := filepath.Join(root, "runs", runID)
 	if err := os.MkdirAll(runDir, 0o700); err != nil {
-		return failTaskMove(opts.Root, runningPath, &loaded, fmt.Errorf("create run dir %s: %w", runDir, err))
+		return "", "", fmt.Errorf("create run dir %s: %w", runDir, err)
 	}
 	if err := copyFile(runningPath, filepath.Join(runDir, "task.yaml")); err != nil {
-		return failTaskMove(opts.Root, runningPath, &loaded, err)
+		return "", "", err
 	}
-
 	if err := writeJSON(filepath.Join(runDir, "validation.json"), validation); err != nil {
-		return failTaskMove(opts.Root, runningPath, &loaded, err)
+		return "", "", err
 	}
+	return runID, runDir, nil
+}
 
-	prepared, err := workspace.Prepare(ctx, loaded.Scope.CWD, loaded.Worktree)
+func prepareClaimedWorkspace(ctx context.Context, opts Options, runningPath, runDir string, loaded *task.Task) (workspace.Prepared, error) {
+	prepared, err := workspace.Prepare(ctx, loaded.Scope.CWD, loaded.Worktree, workspaceOptions(opts))
 	if err != nil {
-		loaded.Status = "failed"
 		loaded.Attempts = append(loaded.Attempts, task.Attempt{
 			Number:            len(loaded.Attempts) + 1,
 			StartedAt:         time.Now().UTC().Format(time.RFC3339Nano),
@@ -425,20 +473,23 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 			SupervisorVerdict: "workspace_failed",
 			Summary:           err.Error(),
 		})
-		return failTaskMove(opts.Root, runningPath, &loaded, err)
+		return workspace.Prepared{}, err
 	}
 	if err := writeJSON(filepath.Join(runDir, "workspace.json"), prepared); err != nil {
-		loaded.Status = "failed"
-		return failTaskMove(opts.Root, runningPath, &loaded, err)
+		return workspace.Prepared{}, err
 	}
-	preparedFiles, err := prepareInputFiles(prepared.CWD, loaded.Files)
+	preparedFiles, err := inputfiles.Prepare(prepared.CWD, loaded.Files)
 	if err != nil {
-		loaded.Status = "failed"
-		return failTaskMove(opts.Root, runningPath, &loaded, err)
+		return workspace.Prepared{}, err
 	}
+	cleanupPrepared := true
+	defer func() {
+		if cleanupPrepared {
+			_ = inputfiles.CleanupPrepared(preparedFiles)
+		}
+	}()
 	if err := writeJSON(filepath.Join(runDir, "input_files.json"), preparedFiles); err != nil {
-		loaded.Status = "failed"
-		return failTaskMove(opts.Root, runningPath, &loaded, err)
+		return workspace.Prepared{}, err
 	}
 	if prepared.WorktreeReused && prepared.Dirty {
 		loaded.Risks = append(loaded.Risks, task.Risk{
@@ -448,17 +499,15 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 			Mitigation:           "Preserved existing worktree state and recorded git status porcelain in workspace.json.",
 			HumanReviewSuggested: true,
 		})
-		if err := task.Save(runningPath, loaded); err != nil {
-			loaded.Status = "failed"
-			return failTaskMove(opts.Root, runningPath, &loaded, err)
+		if err := task.Save(runningPath, *loaded); err != nil {
+			return workspace.Prepared{}, err
 		}
 	}
 	if err := copyFile(runningPath, filepath.Join(runDir, "task.effective.yaml")); err != nil {
-		loaded.Status = "failed"
-		return failTaskMove(opts.Root, runningPath, &loaded, err)
+		return workspace.Prepared{}, err
 	}
-
-	return runSupervisorLoop(ctx, shutdownCtx, opts, runningPath, &loaded, prepared, runDir, runID)
+	cleanupPrepared = false
+	return prepared, nil
 }
 
 func startHeartbeat(ctx context.Context, path string, interval time.Duration) func() {
@@ -466,7 +515,9 @@ func startHeartbeat(ctx context.Context, path string, interval time.Duration) fu
 	done := make(chan struct{})
 	touch := func() {
 		now := time.Now()
-		_ = os.Chtimes(path, now, now)
+		if err := os.Chtimes(path, now, now); err != nil && !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "galley: heartbeat update failed for %s: %v\n", path, err)
+		}
 	}
 	touch()
 	go func() {
@@ -486,30 +537,6 @@ func startHeartbeat(ctx context.Context, path string, interval time.Duration) fu
 		cancel()
 		<-done
 	}
-}
-
-func moveTask(root, currentPath, state string, updated *task.Task) error {
-	if updated != nil {
-		if err := task.Save(currentPath, *updated); err != nil {
-			return err
-		}
-	}
-	nextPath := filepath.Join(root, "tasks", state, filepath.Base(currentPath))
-	if err := os.Rename(currentPath, nextPath); err != nil {
-		return fmt.Errorf("move task to %s: %w", state, err)
-	}
-	return nil
-}
-
-func failTaskMove(root, runningPath string, updated *task.Task, primary error) error {
-	if updated != nil && (updated.Status == "" || updated.Status == "queued" || updated.Status == "running") {
-		updated.Status = "failed"
-	}
-	if moveErr := moveTask(root, runningPath, "failed", updated); moveErr != nil {
-		fmt.Fprintf(os.Stderr, "galley: failed to move task %s to failed: %v (primary: %v)\n", runningPath, moveErr, primary)
-		return errors.Join(primary, moveErr)
-	}
-	return primary
 }
 
 func claudeStatus(result runner.RunResult, err error) string {

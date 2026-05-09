@@ -14,6 +14,7 @@ import (
 
 // ClaudeOptions contains the task-derived settings needed to construct a Claude Code invocation.
 type ClaudeOptions struct {
+	Bin               string
 	Model             string
 	Effort            string
 	PromptMode        string
@@ -35,6 +36,7 @@ type Command struct {
 	WorkDir  string   `json:"work_dir"`
 	Argv     []string `json:"argv"`
 	Stdin    string   `json:"stdin,omitempty"`
+	Env      []string `json:"env,omitempty"`
 	Warnings []string `json:"warnings,omitempty"`
 }
 
@@ -87,7 +89,7 @@ func ClaudeCommandPlan(opts ClaudeOptions) (Command, error) {
 	if opts.PromptMode == "" {
 		opts.PromptMode = "replace"
 	}
-	applyDefaultEmbeddedOptions(&opts)
+	opts = withDefaultEmbeddedOptions(opts)
 
 	warnings := claudeWarnings(opts)
 	argv, err := buildClaudeArgv(opts, func(label, path string) (string, error) {
@@ -110,7 +112,7 @@ func ClaudeShellPreview(opts ClaudeOptions) (string, []string, error) {
 	if opts.PromptMode == "" {
 		opts.PromptMode = "replace"
 	}
-	applyDefaultEmbeddedOptions(&opts)
+	opts = withDefaultEmbeddedOptions(opts)
 
 	argv, err := buildClaudeArgv(opts, func(_ string, path string) (string, error) {
 		absolute, err := absPath(path)
@@ -130,7 +132,11 @@ func ClaudeShellPreview(opts ClaudeOptions) (string, []string, error) {
 }
 
 func buildClaudeArgv(opts ClaudeOptions, fileValue func(label, path string) (string, error)) ([]string, error) {
-	argv := []string{"claude", "-p", "--output-format", "stream-json", "--verbose"}
+	bin := opts.Bin
+	if bin == "" {
+		bin = "claude"
+	}
+	argv := []string{bin, "-p", "--output-format", "stream-json", "--verbose"}
 	if opts.Model != "" {
 		argv = append(argv, "--model", opts.Model)
 	}
@@ -187,13 +193,14 @@ func buildClaudeArgv(opts ClaudeOptions, fileValue func(label, path string) (str
 	return argv, nil
 }
 
-func applyDefaultEmbeddedOptions(opts *ClaudeOptions) {
+func withDefaultEmbeddedOptions(opts ClaudeOptions) ClaudeOptions {
 	if opts.SystemPromptFile == "" && opts.SystemPrompt == "" {
 		opts.SystemPrompt = prompts.ClaudeExecutorFull()
 	}
 	if opts.JSONSchemaFile == "" && opts.JSONSchema == "" {
 		opts.JSONSchema = schemas.ClaudeResult
 	}
+	return opts
 }
 
 // ShellQuote formats argv as a POSIX shell command preview.

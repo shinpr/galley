@@ -35,7 +35,7 @@ func cleanupTaskWorktree(ctx context.Context, opts Options, path string) error {
 	if loaded.PR.URL == "" || loaded.Worktree.Path == "" || !loaded.Worktree.Enabled {
 		return nil
 	}
-	state, err := vcs.FetchPRState(ctx, opts.Root, loaded.PR.URL)
+	state, err := vcs.FetchPRState(ctx, vcsBinaries(opts), opts.Root, loaded.PR.URL)
 	if err != nil {
 		return err
 	}
@@ -47,7 +47,7 @@ func cleanupTaskWorktree(ctx context.Context, opts Options, path string) error {
 	}
 	finalStatus := closedPRTaskStatus(state)
 	alreadyFinal := loaded.PR.Status == "merged" || loaded.PR.Status == "closed"
-	cleanupResult, err := workspace.Remove(ctx, loaded.Scope.CWD, loaded.Worktree)
+	cleanupResult, err := workspace.Remove(ctx, loaded.Scope.CWD, loaded.Worktree, workspaceOptions(opts))
 	if err != nil {
 		if errors.Is(err, workspace.ErrDirtyWorktree) {
 			loaded.Status = finalStatus

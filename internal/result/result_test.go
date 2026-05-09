@@ -10,7 +10,7 @@ import (
 	"github.com/shinpr/galley/internal/profile"
 )
 
-func TestCompleteWritesValidatedResultFromTaskVerification(t *testing.T) {
+func TestCompleteRecordsAcceptanceGuidanceWithoutExecutingIt(t *testing.T) {
 	t.Parallel()
 	repo := t.TempDir()
 	runGit(t, repo, "init")
@@ -28,7 +28,7 @@ goal: "prove result generation"
 acceptance_criteria:
   - id: "AC1"
     text: "proof file exists"
-    verification: "test -f proof.txt"
+    verification: "Inspect proof.txt or run a focused proof check."
     status: "pending"
 scope:
   cwd: "`+repo+`"
@@ -80,8 +80,11 @@ pr:
 	if generated.Status != "completed" {
 		t.Fatalf("status got %q", generated.Status)
 	}
-	if generated.AcceptanceCriteria[0].Status != "satisfied" {
+	if generated.AcceptanceCriteria[0].Status != "not_satisfied" {
 		t.Fatalf("ac status got %q", generated.AcceptanceCriteria[0].Status)
+	}
+	if len(generated.Verification) != 0 {
+		t.Fatalf("acceptance guidance should not be executed as verification: %#v", generated.Verification)
 	}
 	if _, err := os.Stat(output); err != nil {
 		t.Fatal(err)

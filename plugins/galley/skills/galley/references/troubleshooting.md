@@ -46,7 +46,7 @@ Read the files that exist. Focus on the newest attempt first.
 
 | Symptom | Likely Cause | Action |
 | --- | --- | --- |
-| task remains in `queued` | daemon stopped, concurrency limit, or root mismatch | Check `galley daemon status`, daemon log, and `--root`. |
+| task remains in `queued` | daemon stopped, concurrency limit, or queue mismatch | Check `galley daemon status`, daemon log, and the queued file path. |
 | task remains in `running` | stale claim or active attempt | Check heartbeat age and claim TTL. |
 | `needs_revision` loops | AC too broad, executor missing context, or supervisor finding unclear | Rewrite AC or add `revision_requests` with concrete next work. |
 | task failed due to usage limit or transient provider failure | executor stopped for a temporary external limit | Wait until the limit resets, then requeue with a reason. |
@@ -63,14 +63,14 @@ For a failed task with a clear next step:
 3. Requeue through Galley CLI.
 
 ```bash
-galley task requeue ~/.galley/tasks/failed/TASK.yaml --reason "retry after fixing the blocker"
+galley task requeue <task-id-or-task-file> --reason "retry after fixing the blocker"
 ```
 
 For usage limits or temporary provider failures:
 
 ```bash
 galley task show <task-id>
-galley task requeue ~/.galley/tasks/failed/TASK.yaml --reason "retry after usage limit reset"
+galley task requeue <task-id-or-task-file> --reason "retry after usage limit reset"
 ```
 
 For a weak supervisor acceptance:

@@ -38,12 +38,23 @@ func ValidateVerdict(verdict Verdict) error {
 			return fmt.Errorf("supervisor verdict findings[%d].summary is required", i)
 		}
 	}
+	for i, item := range verdict.DiscussionItems {
+		if item.Topic == "" {
+			return fmt.Errorf("supervisor verdict discussion_items[%d].topic is required", i)
+		}
+		if item.Summary == "" {
+			return fmt.Errorf("supervisor verdict discussion_items[%d].summary is required", i)
+		}
+	}
 	return nil
 }
 
 func ValidateVerdictForEvidence(verdict Verdict, evidence Evidence) error {
 	if err := ValidateVerdict(verdict); err != nil {
 		return err
+	}
+	if verdict.Status != "accepted" && len(verdict.DiscussionItems) > 0 {
+		return fmt.Errorf("supervisor verdict discussion_items are only valid for accepted verdicts")
 	}
 	for i, finding := range verdict.Findings {
 		shouldBlock := severityBlocksAcceptance(finding.Severity, evidence.Profiles.Quality)

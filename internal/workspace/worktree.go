@@ -6,10 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/task"
 )
 
@@ -42,6 +42,18 @@ type Prepared struct {
 	Path            string `json:"path,omitempty"`
 }
 
+// Options controls git execution for workspace operations.
+type Options struct {
+	GitBin string
+}
+
+func (opts Options) git() string {
+	if opts.GitBin != "" {
+		return opts.GitBin
+	}
+	return "git"
+}
+
 // CleanupResult records the result of a worktree cleanup attempt.
 type CleanupResult struct {
 	Path            string `json:"path"`
@@ -52,7 +64,7 @@ type CleanupResult struct {
 }
 
 // Prepare creates an isolated git worktree when the task requests one.
-func Prepare(ctx context.Context, sourceCWD string, spec task.Worktree) (Prepared, error) {
+func Prepare(ctx context.Context, sourceCWD string, spec task.Worktree, opts Options) (Prepared, error) {
 	if !spec.Enabled {
 		return Prepared{CWD: sourceCWD}, nil
 	}
@@ -69,7 +81,7 @@ func Prepare(ctx context.Context, sourceCWD string, spec task.Worktree) (Prepare
 	}
 	worktreePath = filepath.Clean(worktreePath)
 	if _, err := os.Stat(worktreePath); err == nil {
-		return reuseExistingWorktree(ctx, worktreePath, spec.Branch)
+		return reuseExistingWorktree(ctx, worktreePath, spec.Branch, opts)
 	} else if !os.IsNotExist(err) {
 		return Prepared{}, fmt.Errorf("inspect worktree path %s: %w", worktreePath, err)
 	}
@@ -78,18 +90,27 @@ func Prepare(ctx context.Context, sourceCWD string, spec task.Worktree) (Prepare
 	}
 
 	args := []string{"-C", sourceCWD, "worktree", "add"}
-	if branchExists(ctx, sourceCWD, spec.Branch) {
+	exists, err := branchExists(ctx, sourceCWD, spec.Branch, opts)
+	if err != nil {
+		return Prepared{}, err
+	}
+	if exists {
 		args = append(args, worktreePath, spec.Branch)
 	} else {
 		args = append(args, "-b", spec.Branch, worktreePath)
 	}
-	cmd := exec.CommandContext(ctx, "git", args...)
-	output, err := cmd.CombinedOutput()
+	result, err := runGitCommand(ctx, opts, "", args...)
 	if err != nil {
-		return Prepared{}, fmt.Errorf("git worktree add: %w: %s", err, string(output))
+		return Prepared{}, fmt.Errorf("git worktree add: %w: %s", err, strings.TrimSpace(result.Stderr))
 	}
-	status, dirty := statusPorcelain(ctx, worktreePath)
-	baseSHA, _ := headSHA(ctx, worktreePath)
+	status, dirty, err := statusPorcelain(ctx, worktreePath, opts)
+	if err != nil {
+		return Prepared{}, err
+	}
+	baseSHA, err := headSHA(ctx, worktreePath, opts)
+	if err != nil {
+		return Prepared{}, fmt.Errorf("git rev-parse HEAD for worktree %s: %w", worktreePath, err)
+	}
 	return Prepared{
 		CWD:             worktreePath,
 		WorktreeCreated: true,
@@ -101,20 +122,26 @@ func Prepare(ctx context.Context, sourceCWD string, spec task.Worktree) (Prepare
 	}, nil
 }
 
-func reuseExistingWorktree(ctx context.Context, worktreePath, branch string) (Prepared, error) {
-	inside, err := gitOutput(ctx, worktreePath, "rev-parse", "--is-inside-work-tree")
+func reuseExistingWorktree(ctx context.Context, worktreePath, branch string, opts Options) (Prepared, error) {
+	inside, err := gitOutput(ctx, opts, worktreePath, "rev-parse", "--is-inside-work-tree")
 	if err != nil || inside != "true" {
 		return Prepared{}, fmt.Errorf("worktree path already exists and is not a git worktree: %s", worktreePath)
 	}
-	currentBranch, err := gitOutput(ctx, worktreePath, "branch", "--show-current")
+	currentBranch, err := gitOutput(ctx, opts, worktreePath, "branch", "--show-current")
 	if err != nil {
 		return Prepared{}, fmt.Errorf("inspect worktree branch %s: %w", worktreePath, err)
 	}
 	if currentBranch != branch {
 		return Prepared{}, fmt.Errorf("worktree path %s is on branch %q, want %q", worktreePath, currentBranch, branch)
 	}
-	status, dirty := statusPorcelain(ctx, worktreePath)
-	baseSHA, _ := headSHA(ctx, worktreePath)
+	status, dirty, err := statusPorcelain(ctx, worktreePath, opts)
+	if err != nil {
+		return Prepared{}, err
+	}
+	baseSHA, err := headSHA(ctx, worktreePath, opts)
+	if err != nil {
+		return Prepared{}, fmt.Errorf("git rev-parse HEAD for worktree %s: %w", worktreePath, err)
+	}
 	return Prepared{
 		CWD:             worktreePath,
 		WorktreeReused:  true,
@@ -126,65 +153,69 @@ func reuseExistingWorktree(ctx context.Context, worktreePath, branch string) (Pr
 	}, nil
 }
 
-func headSHA(ctx context.Context, cwd string) (string, error) {
-	return gitOutput(ctx, cwd, "rev-parse", "HEAD")
+func headSHA(ctx context.Context, cwd string, opts Options) (string, error) {
+	return gitOutput(ctx, opts, cwd, "rev-parse", "HEAD")
 }
 
-func branchExists(ctx context.Context, sourceCWD, branch string) bool {
-	cmd := exec.CommandContext(ctx, "git", "-C", sourceCWD, "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
-	return cmd.Run() == nil
-}
-
-func gitOutput(ctx context.Context, cwd string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = cwd
-	output, err := cmd.Output()
+func branchExists(ctx context.Context, sourceCWD, branch string, opts Options) (bool, error) {
+	result, err := runGitCommand(ctx, opts, "", "-C", sourceCWD, "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
 	if err != nil {
-		return "", err
+		if result.ExitCode == 1 {
+			return false, nil
+		}
+		return false, fmt.Errorf("git show-ref branch %s: %w: %s", branch, err, strings.TrimSpace(result.Stderr))
 	}
-	return string(bytes.TrimSpace(output)), nil
+	return true, nil
 }
 
-func statusPorcelain(ctx context.Context, cwd string) (string, bool) {
-	status, err := gitOutput(ctx, cwd, "status", "--porcelain")
+func gitOutput(ctx context.Context, opts Options, cwd string, args ...string) (string, error) {
+	result, err := runGitCommand(ctx, opts, cwd, args...)
 	if err != nil {
-		return "", false
+		return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(result.Stderr))
 	}
-	return status, status != ""
+	return string(bytes.TrimSpace([]byte(result.Stdout))), nil
+}
+
+func statusPorcelain(ctx context.Context, cwd string, opts Options) (string, bool, error) {
+	status, err := gitOutput(ctx, opts, cwd, "status", "--porcelain")
+	if err != nil {
+		return "", false, fmt.Errorf("git status porcelain %s: %w", cwd, err)
+	}
+	return status, status != "", nil
 }
 
 // CaptureSnapshot captures status and diff evidence for supervisor review.
-func CaptureSnapshot(ctx context.Context, cwd string) (Snapshot, error) {
-	return CaptureSnapshotFromBase(ctx, cwd, "")
+func CaptureSnapshot(ctx context.Context, cwd string, opts Options) (Snapshot, error) {
+	return CaptureSnapshotFromBase(ctx, cwd, "", opts)
 }
 
 // CaptureSnapshotFromBase captures committed, staged, and unstaged changes for supervisor review.
-func CaptureSnapshotFromBase(ctx context.Context, cwd, baseSHA string) (Snapshot, error) {
-	status, err := gitOutput(ctx, cwd, "status", "--porcelain")
+func CaptureSnapshotFromBase(ctx context.Context, cwd, baseSHA string, opts Options) (Snapshot, error) {
+	status, err := gitOutput(ctx, opts, cwd, "status", "--porcelain")
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("git status: %w", err)
 	}
-	head, err := headSHA(ctx, cwd)
+	head, err := headSHA(ctx, cwd, opts)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("git rev-parse HEAD: %w", err)
 	}
 	branchDiff := ""
 	var branchFiles []string
 	if baseSHA != "" && baseSHA != head {
-		branchDiff, err = gitOutput(ctx, cwd, "diff", "--binary", baseSHA+"..HEAD")
+		branchDiff, err = gitOutput(ctx, opts, cwd, "diff", "--binary", baseSHA+"..HEAD")
 		if err != nil {
 			return Snapshot{}, fmt.Errorf("git branch diff: %w", err)
 		}
-		branchFiles, err = gitChangedFiles(ctx, cwd, baseSHA+"..HEAD")
+		branchFiles, err = gitChangedFiles(ctx, cwd, baseSHA+"..HEAD", opts)
 		if err != nil {
 			return Snapshot{}, fmt.Errorf("git branch changed files: %w", err)
 		}
 	}
-	stagedDiff, err := gitOutput(ctx, cwd, "diff", "--cached", "--binary")
+	stagedDiff, err := gitOutput(ctx, opts, cwd, "diff", "--cached", "--binary")
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("git staged diff: %w", err)
 	}
-	unstagedDiff, err := gitOutput(ctx, cwd, "diff", "--binary")
+	unstagedDiff, err := gitOutput(ctx, opts, cwd, "diff", "--binary")
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("git diff: %w", err)
 	}
@@ -203,13 +234,12 @@ func CaptureSnapshotFromBase(ctx context.Context, cwd, baseSHA string) (Snapshot
 	}, nil
 }
 
-func gitChangedFiles(ctx context.Context, cwd, revision string) ([]string, error) {
-	cmd := exec.CommandContext(ctx, "git", "diff", "--name-only", "-z", revision)
-	cmd.Dir = cwd
-	output, err := cmd.Output()
+func gitChangedFiles(ctx context.Context, cwd, revision string, opts Options) ([]string, error) {
+	result, err := runGitCommand(ctx, opts, cwd, "diff", "--name-only", "-z", revision)
 	if err != nil {
 		return nil, err
 	}
+	output := []byte(result.Stdout)
 	if len(output) == 0 {
 		return nil, nil
 	}
@@ -234,7 +264,7 @@ func joinDiffs(parts ...string) string {
 }
 
 // Remove removes a clean git worktree for a completed task.
-func Remove(ctx context.Context, sourceCWD string, spec task.Worktree) (CleanupResult, error) {
+func Remove(ctx context.Context, sourceCWD string, spec task.Worktree, opts Options) (CleanupResult, error) {
 	if !spec.Enabled || spec.Path == "" {
 		return CleanupResult{}, nil
 	}
@@ -250,17 +280,24 @@ func Remove(ctx context.Context, sourceCWD string, spec task.Worktree) (CleanupR
 	} else if err != nil {
 		return result, fmt.Errorf("inspect worktree path %s: %w", worktreePath, err)
 	}
-	status, dirty := statusPorcelain(ctx, worktreePath)
+	status, dirty, err := statusPorcelain(ctx, worktreePath, opts)
+	if err != nil {
+		return result, err
+	}
 	result.StatusPorcelain = status
 	result.Dirty = dirty
 	if dirty {
 		return result, fmt.Errorf("%w: %s", ErrDirtyWorktree, worktreePath)
 	}
-	cmd := exec.CommandContext(ctx, "git", "-C", sourceCWD, "worktree", "remove", worktreePath)
-	output, err := cmd.CombinedOutput()
+	gitResult, err := runGitCommand(ctx, opts, "", "-C", sourceCWD, "worktree", "remove", worktreePath)
 	if err != nil {
-		return result, fmt.Errorf("git worktree remove: %w: %s", err, string(output))
+		return result, fmt.Errorf("git worktree remove: %w: %s", err, strings.TrimSpace(gitResult.Stderr))
 	}
 	result.Removed = true
 	return result, nil
+}
+
+func runGitCommand(ctx context.Context, opts Options, cwd string, args ...string) (runner.RunResult, error) {
+	argv := append([]string{opts.git()}, args...)
+	return runner.RunCommand(ctx, runner.Command{WorkDir: cwd, Argv: argv}, runner.RunOptions{TailBytes: -1})
 }

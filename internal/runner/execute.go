@@ -12,7 +12,10 @@ import (
 	"time"
 )
 
-const defaultTailBytes = 64 * 1024
+const (
+	defaultTailBytes       = 64 * 1024
+	processCancelWaitLimit = 5 * time.Second
+)
 
 // RunOptions controls subprocess execution and optional audit file capture.
 type RunOptions struct {
@@ -46,10 +49,13 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 		defer cancel()
 	}
 
-	cmd := exec.Command(command.Argv[0], command.Argv[1:]...)
+	cmd := exec.CommandContext(runCtx, command.Argv[0], command.Argv[1:]...)
 	cmd.SysProcAttr = processGroupAttr()
 	if command.WorkDir != "" {
 		cmd.Dir = command.WorkDir
+	}
+	if command.Env != nil {
+		cmd.Env = command.Env
 	}
 	if command.Stdin != "" {
 		cmd.Stdin = strings.NewReader(command.Stdin)
@@ -86,11 +92,17 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 	}()
 
 	var runErr error
+	waitTimedOut := false
 	select {
 	case runErr = <-done:
 	case <-runCtx.Done():
 		killProcessGroup(cmd)
-		runErr = <-done
+		select {
+		case runErr = <-done:
+		case <-time.After(processCancelWaitLimit):
+			waitTimedOut = true
+			runErr = fmt.Errorf("process did not exit after cancellation")
+		}
 	}
 
 	result := RunResult{
@@ -98,12 +110,26 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 		Stdout:   stdout.String(),
 		Stderr:   stderr.String(),
 		Duration: time.Since(started),
-		TimedOut: runCtx.Err() == context.DeadlineExceeded,
+		TimedOut: errors.Is(runCtx.Err(), context.DeadlineExceeded),
 	}
 	if cmd.ProcessState != nil {
 		result.ExitCode = cmd.ProcessState.ExitCode()
 	}
-	closeErr := errors.Join(stdoutFile.Close(), stderrFile.Close())
+	var closeErr error
+	if !waitTimedOut {
+		closeErr = errors.Join(stdoutFile.Close(), stderrFile.Close())
+	} else {
+		// cmd.Wait owns the stdout/stderr copy goroutines. Closing the capture
+		// files before it returns can race with those writers, so final close is
+		// deferred to a goroutine. If the OS never reaps the process, this leaks
+		// until the daemon exits; at that point returning is preferable to blocking
+		// all task processing indefinitely.
+		go func() {
+			<-done
+			_ = stdoutFile.Close()
+			_ = stderrFile.Close()
+		}()
+	}
 	if result.TimedOut {
 		return result, errors.Join(fmt.Errorf("command timed out after %s", opts.Timeout), closeErr)
 	}
@@ -113,18 +139,13 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 	return result, closeErr
 }
 
-type closeFunc func() error
+type nopCloser struct{}
 
-func (f closeFunc) Close() error {
-	if f == nil {
-		return nil
-	}
-	return f()
-}
+func (nopCloser) Close() error { return nil }
 
 func captureWriter(buffer io.Writer, path string) (io.Writer, io.Closer, error) {
 	if path == "" {
-		return buffer, closeFunc(nil), nil
+		return buffer, nopCloser{}, nil
 	}
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {

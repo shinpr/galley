@@ -28,7 +28,6 @@ func NewCommand(use string) *cobra.Command {
 	var logFile string
 	var stopTimeout time.Duration
 	var readinessTimeout time.Duration
-	var daemonToken string
 
 	cmd := &cobra.Command{
 		Use:           use,
@@ -48,6 +47,13 @@ func NewCommand(use string) *cobra.Command {
 					fmt.Fprintf(cmd.ErrOrStderr(), "galley: shutdown requested; active attempts have up to %s to finish\n", opts.ShutdownTimeout)
 					cancel()
 				case <-done:
+					return
+				}
+				select {
+				case <-signals:
+					fmt.Fprintln(cmd.ErrOrStderr(), "galley: second shutdown signal received; exiting")
+					os.Exit(130)
+				case <-done:
 				}
 			}()
 			if supervisorProvider != "" {
@@ -58,30 +64,18 @@ func NewCommand(use string) *cobra.Command {
 					return fmt.Errorf("--supervisor must be one of: codex, claude")
 				}
 			}
-			opts.Explicit = daemon.ExplicitOptions{
-				Root:                   cmd.Flags().Changed("root"),
-				SystemPromptFile:       cmd.Flags().Changed("system-prompt-file"),
-				JSONSchemaFile:         cmd.Flags().Changed("json-schema-file"),
-				QualityProfileFile:     cmd.Flags().Changed("quality-profile-file"),
-				EnvironmentProfileFile: cmd.Flags().Changed("environment-profile-file"),
-				MaxConcurrentTasks:     cmd.Flags().Changed("max-concurrent-tasks"),
-				MaxConcurrentPerRepo:   cmd.Flags().Changed("max-concurrent-per-repo"),
-				PollInterval:           cmd.Flags().Changed("poll-interval"),
-				ClaimTTL:               cmd.Flags().Changed("claim-ttl"),
-				HeartbeatInterval:      cmd.Flags().Changed("heartbeat-interval"),
-				CommitOnAccept:         cmd.Flags().Changed("commit-on-accept"),
-				OpenPR:                 cmd.Flags().Changed("open-pr"),
-				PollPRComments:         cmd.Flags().Changed("poll-pr-comments"),
-				ReplyPRComments:        cmd.Flags().Changed("reply-pr-comments"),
-				CleanupWorktrees:       cmd.Flags().Changed("cleanup-worktrees"),
-				PRBase:                 cmd.Flags().Changed("pr-base"),
-				Supervisor:             cmd.Flags().Changed("supervisor"),
-			}
+			opts.Explicit = explicitOptionsFromFlags(cmd)
 			if pollInterval > 0 {
 				opts.PollInterval = pollInterval
 			}
-			stopPIDHeartbeat := func() {}
-			if daemonToken != "" && pidFile != "" {
+			daemonToken := os.Getenv(daemonctl.EnvToken)
+			if daemonToken != "" {
+				_ = os.Unsetenv(daemonctl.EnvToken)
+			}
+			if daemonToken != "" && pidFile == "" {
+				return fmt.Errorf("%s requires --pid-file", daemonctl.EnvToken)
+			}
+			if daemonToken != "" {
 				exe, err := os.Executable()
 				if err != nil {
 					return err
@@ -98,8 +92,7 @@ func NewCommand(use string) *cobra.Command {
 				if err := daemonctl.Heartbeat(pidFile, meta); err != nil {
 					return err
 				}
-				stopPIDHeartbeat = startPIDHeartbeat(pidFile, meta)
-				defer stopPIDHeartbeat()
+				defer startPIDHeartbeat(pidFile, meta)()
 				defer daemonctl.RemovePID(pidFile, os.Getpid())
 			}
 			err := daemon.Run(ctx, opts)
@@ -135,9 +128,6 @@ func NewCommand(use string) *cobra.Command {
 	flags.StringVar(&logFile, "log-file", "", "Log file path for start; defaults to ROOT/galley-daemon.log")
 	flags.DurationVar(&stopTimeout, "stop-timeout", 30*time.Second, "How long stop waits after sending SIGTERM")
 	flags.DurationVar(&readinessTimeout, "readiness-timeout", 750*time.Millisecond, "How long start waits to detect immediate daemon startup failure")
-	flags.StringVar(&daemonToken, "daemon-token", "", "Internal daemon control token")
-	_ = flags.MarkHidden("daemon-token")
-
 	cmd.AddCommand(
 		newRunCommand(cmd),
 		newStartCommand(&opts, &pidFile, &logFile, &readinessTimeout),
@@ -146,6 +136,29 @@ func NewCommand(use string) *cobra.Command {
 	)
 
 	return cmd
+}
+
+func explicitOptionsFromFlags(cmd *cobra.Command) daemon.ExplicitOptions {
+	changed := cmd.Flags().Changed
+	return daemon.ExplicitOptions{
+		Root:                   changed("root"),
+		SystemPromptFile:       changed("system-prompt-file"),
+		JSONSchemaFile:         changed("json-schema-file"),
+		QualityProfileFile:     changed("quality-profile-file"),
+		EnvironmentProfileFile: changed("environment-profile-file"),
+		MaxConcurrentTasks:     changed("max-concurrent-tasks"),
+		MaxConcurrentPerRepo:   changed("max-concurrent-per-repo"),
+		PollInterval:           changed("poll-interval"),
+		ClaimTTL:               changed("claim-ttl"),
+		HeartbeatInterval:      changed("heartbeat-interval"),
+		CommitOnAccept:         changed("commit-on-accept"),
+		OpenPR:                 changed("open-pr"),
+		PollPRComments:         changed("poll-pr-comments"),
+		ReplyPRComments:        changed("reply-pr-comments"),
+		CleanupWorktrees:       changed("cleanup-worktrees"),
+		PRBase:                 changed("pr-base"),
+		Supervisor:             changed("supervisor"),
+	}
 }
 
 func newRunCommand(parent *cobra.Command) *cobra.Command {
@@ -209,12 +222,12 @@ func newStartCommand(opts *daemon.Options, pidFile, logFile *string, readinessTi
 				return err
 			}
 			childArgs := foregroundArgs(os.Args[1:], cmd.Name())
-			childArgs = append(childArgs, "--pid-file", paths.PIDFile, "--daemon-token", token)
+			childArgs = append(childArgs, "--pid-file", paths.PIDFile)
 			child := exec.Command(exe, childArgs...)
 			child.Stdout = log
 			child.Stderr = log
 			child.Stdin = nil
-			child.Env = os.Environ()
+			child.Env = append(os.Environ(), daemonctl.EnvToken+"="+token)
 			configureBackgroundProcess(child)
 			if err := child.Start(); err != nil {
 				return err
@@ -379,7 +392,9 @@ func waitReady(pidFile, root, executable string, timeout time.Duration) error {
 
 func startPIDHeartbeat(pidFile string, meta daemonctl.PIDFile) func() {
 	done := make(chan struct{})
+	finished := make(chan struct{})
 	go func() {
+		defer close(finished)
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 		for {
@@ -393,6 +408,7 @@ func startPIDHeartbeat(pidFile string, meta daemonctl.PIDFile) func() {
 	}()
 	return func() {
 		close(done)
+		<-finished
 	}
 }
 

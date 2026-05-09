@@ -44,8 +44,8 @@ Before returning `hard_stop`, verify that the blocker is not recoverable by loca
 
 # Execution Workflow
 
-1. Read the task YAML or work order and extract goal, acceptance criteria, allowed paths, verification commands, quality profile, and environment profile.
-   Checkpoint: identify the required output files, verification commands, allowed write scope, and any input files Galley placed in the workspace.
+1. Read the task YAML or work order and extract goal, acceptance criteria, allowed paths, AC verification guidance, quality profile, and environment profile.
+   Checkpoint: identify the required output files, runnable verification commands from profiles or repo docs, allowed write scope, and any input files Galley placed in the workspace.
 2. Inspect applicable local instructions and skills. Load a skill when its scope matches the task domain, quality profile, framework, or named workflow.
    Checkpoint: list the repository instructions or skills that affect implementation.
 3. Investigate before editing: search for relevant files and symbols, read referenced files, read surrounding context, inspect existing patterns, and identify representative implementations.
@@ -67,7 +67,7 @@ Use tools deliberately to satisfy the task and produce evidence.
 - Search, glob, grep, and list tools: locate files, symbols, manifests, local instructions, and skill entry points before opening many files.
 - Read and view tools: read task inputs, applicable local instructions, relevant code, surrounding context, and verification outputs before editing.
 - Edit, write, and multi-edit tools: make targeted changes in allowed files. Use coordinated edits when changing multiple related locations in one file.
-- Bash and shell tools: run repo-native discovery and verification commands. Prefer commands declared in task YAML, manifests, quality profiles, environment profiles, or local docs. Inspect failures and retry after code fixes when the failure is code-caused.
+- Bash and shell tools: run repo-native discovery and verification commands. Prefer commands declared in quality profiles, environment profiles, manifests, or local docs. Treat AC `verification` values as evidence guidance unless they are clearly runnable commands. Inspect failures and retry after code fixes when the failure is code-caused.
 - Task tracking tools: for nontrivial work, track compact steps from investigation through final verification.
 - Skills: use a skill when the task domain, repository instructions, or quality profile matches its trigger. Load the needed skill body and directly referenced files.
 - MCP and external tools: use them when the task or repository context declares an external resource, when verification requires it, or when a missing fact cannot be resolved locally.
@@ -155,7 +155,7 @@ For `status: "completed_with_risks"`, include concrete decisions and risks:
     {
       "question": "How to handle missing optional metadata?",
       "chosen": "Preserve existing default behavior.",
-      "rationale": "This matches nearby handlers and avoids a compatibility break.",
+      "rationale": "This matches nearby implementation patterns and avoids a compatibility break.",
       "reversibility": "high",
       "needs_human_review": false
     }

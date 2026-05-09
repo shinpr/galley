@@ -3,6 +3,7 @@ package vcs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -35,12 +36,41 @@ type PullRequestState struct {
 	Merged bool   `json:"merged"`
 }
 
+// Binaries identifies the git and gh executables used by VCS operations.
+type Binaries struct {
+	Git string
+	GH  string
+}
+
+var safeEvidenceNamePattern = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
+
+func (b Binaries) git() string {
+	if b.Git != "" {
+		return b.Git
+	}
+	return "git"
+}
+
+func (b Binaries) gh() string {
+	if b.GH != "" {
+		return b.GH
+	}
+	return "gh"
+}
+
 // AddAllowedPaths stages only the task allowed paths and unstages forbidden paths.
-func AddAllowedPaths(ctx context.Context, workDir, runDir string, allowedPaths, forbiddenPaths []string) error {
+func AddAllowedPaths(ctx context.Context, bins Binaries, workDir, runDir string, allowedPaths, forbiddenPaths []string) error {
 	if len(allowedPaths) == 0 {
 		return fmt.Errorf("git add allowed paths is empty")
 	}
-	argv := append([]string{"git", "add", "-A", "--"}, allowedPaths...)
+	stagePaths, err := stageablePaths(ctx, bins, workDir, runDir, allowedPaths)
+	if err != nil {
+		return err
+	}
+	if len(stagePaths) == 0 {
+		return fmt.Errorf("git add allowed paths has no existing or tracked paths")
+	}
+	argv := append([]string{bins.git(), "add", "-A", "--"}, stagePaths...)
 	result, err := runner.RunCommand(ctx, runner.Command{
 		WorkDir: workDir,
 		Argv:    argv,
@@ -48,16 +78,17 @@ func AddAllowedPaths(ctx context.Context, workDir, runDir string, allowedPaths, 
 		StdoutPath: filepath.Join(runDir, "git_add.stdout.log"),
 		StderrPath: filepath.Join(runDir, "git_add.stderr.log"),
 	})
+	writeErr := writeJSON(filepath.Join(runDir, "git_add_result.json"), result)
 	if err != nil {
-		return fmt.Errorf("git add failed: %w", err)
+		return errors.Join(fmt.Errorf("git add failed: %w", err), writeErr)
 	}
-	if err := writeJSON(filepath.Join(runDir, "git_add_result.json"), result); err != nil {
-		return err
+	if writeErr != nil {
+		return writeErr
 	}
 	if len(forbiddenPaths) == 0 {
 		return nil
 	}
-	resetArgv := append([]string{"git", "reset", "-q", "--"}, forbiddenPaths...)
+	resetArgv := append([]string{bins.git(), "reset", "-q", "--"}, forbiddenPaths...)
 	resetResult, err := runner.RunCommand(ctx, runner.Command{
 		WorkDir: workDir,
 		Argv:    resetArgv,
@@ -65,58 +96,92 @@ func AddAllowedPaths(ctx context.Context, workDir, runDir string, allowedPaths, 
 		StdoutPath: filepath.Join(runDir, "git_reset_forbidden.stdout.log"),
 		StderrPath: filepath.Join(runDir, "git_reset_forbidden.stderr.log"),
 	})
-	if writeErr := writeJSON(filepath.Join(runDir, "git_reset_forbidden_result.json"), resetResult); writeErr != nil {
-		return writeErr
-	}
+	writeErr = writeJSON(filepath.Join(runDir, "git_reset_forbidden_result.json"), resetResult)
 	if err != nil {
-		return fmt.Errorf("git reset forbidden paths failed: %w", err)
+		return errors.Join(fmt.Errorf("git reset forbidden paths failed: %w", err), writeErr)
+	}
+	if writeErr != nil {
+		return writeErr
 	}
 	return nil
 }
 
+func stageablePaths(ctx context.Context, bins Binaries, workDir, runDir string, allowedPaths []string) ([]string, error) {
+	stagePaths := make([]string, 0, len(allowedPaths))
+	for _, path := range allowedPaths {
+		if _, err := os.Stat(filepath.Join(workDir, path)); err == nil {
+			stagePaths = append(stagePaths, path)
+			continue
+		} else if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("stat allowed path %s: %w", path, err)
+		}
+
+		result, err := runner.RunCommand(ctx, runner.Command{
+			WorkDir: workDir,
+			Argv:    []string{bins.git(), "ls-files", "--", path},
+		}, runner.RunOptions{
+			StdoutPath: filepath.Join(runDir, "git_ls_files_"+safeEvidenceName(path)+".stdout.log"),
+			StderrPath: filepath.Join(runDir, "git_ls_files_"+safeEvidenceName(path)+".stderr.log"),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("git ls-files allowed path %s: %w", path, err)
+		}
+		if strings.TrimSpace(result.Stdout) != "" {
+			stagePaths = append(stagePaths, path)
+		}
+	}
+	return stagePaths, nil
+}
+
+func safeEvidenceName(path string) string {
+	return safeEvidenceNamePattern.ReplaceAllString(path, "_")
+}
+
 // Commit creates a git commit and writes command evidence.
-func Commit(ctx context.Context, workDir, runDir, message string) error {
+func Commit(ctx context.Context, bins Binaries, workDir, runDir, message string) error {
 	result, err := runner.RunCommand(ctx, runner.Command{
 		WorkDir: workDir,
-		Argv:    []string{"git", "commit", "-m", message},
+		Argv:    []string{bins.git(), "commit", "-m", message},
 	}, runner.RunOptions{
 		StdoutPath: filepath.Join(runDir, "git_commit.stdout.log"),
 		StderrPath: filepath.Join(runDir, "git_commit.stderr.log"),
 	})
-	if writeErr := writeJSON(filepath.Join(runDir, "git_commit_result.json"), result); writeErr != nil {
-		return writeErr
-	}
+	writeErr := writeJSON(filepath.Join(runDir, "git_commit_result.json"), result)
 	if err != nil {
-		return fmt.Errorf("git commit failed: %w", err)
+		return errors.Join(fmt.Errorf("git commit failed: %w", err), writeErr)
+	}
+	if writeErr != nil {
+		return writeErr
 	}
 	return nil
 }
 
 // PushCurrentBranch pushes HEAD to origin and writes command evidence.
-func PushCurrentBranch(ctx context.Context, workDir, runDir string) error {
+func PushCurrentBranch(ctx context.Context, bins Binaries, workDir, runDir string) error {
 	result, err := runner.RunCommand(ctx, runner.Command{
 		WorkDir: workDir,
-		Argv:    []string{"git", "push", "-u", "origin", "HEAD"},
+		Argv:    []string{bins.git(), "push", "-u", "origin", "HEAD"},
 	}, runner.RunOptions{
 		StdoutPath: filepath.Join(runDir, "git_push.stdout.log"),
 		StderrPath: filepath.Join(runDir, "git_push.stderr.log"),
 	})
-	if writeErr := writeJSON(filepath.Join(runDir, "git_push_result.json"), result); writeErr != nil {
-		return writeErr
-	}
+	writeErr := writeJSON(filepath.Join(runDir, "git_push_result.json"), result)
 	if err != nil {
-		return fmt.Errorf("git push failed: %w", err)
+		return errors.Join(fmt.Errorf("git push failed: %w", err), writeErr)
+	}
+	if writeErr != nil {
+		return writeErr
 	}
 	return nil
 }
 
 // CreatePullRequest opens a GitHub PR with gh and writes command evidence.
-func CreatePullRequest(ctx context.Context, workDir, runDir, bodyPath, base, title string) (string, error) {
+func CreatePullRequest(ctx context.Context, bins Binaries, workDir, runDir, bodyPath, base, title string) (string, error) {
 	absoluteBodyPath, err := filepath.Abs(bodyPath)
 	if err != nil {
 		return "", fmt.Errorf("resolve pr body path: %w", err)
 	}
-	argv := []string{"gh", "pr", "create", "--title", title, "--body-file", absoluteBodyPath}
+	argv := []string{bins.gh(), "pr", "create", "--title", title, "--body-file", absoluteBodyPath}
 	if base != "" {
 		argv = append(argv, "--base", base)
 	}
@@ -127,11 +192,12 @@ func CreatePullRequest(ctx context.Context, workDir, runDir, bodyPath, base, tit
 		StdoutPath: filepath.Join(runDir, "gh_pr_create.stdout.log"),
 		StderrPath: filepath.Join(runDir, "gh_pr_create.stderr.log"),
 	})
-	if writeErr := writeJSON(filepath.Join(runDir, "gh_pr_create_result.json"), result); writeErr != nil {
-		return "", writeErr
-	}
+	writeErr := writeJSON(filepath.Join(runDir, "gh_pr_create_result.json"), result)
 	if err != nil {
-		return "", fmt.Errorf("gh pr create failed: %w", err)
+		return "", errors.Join(fmt.Errorf("gh pr create failed: %w", err), writeErr)
+	}
+	if writeErr != nil {
+		return "", writeErr
 	}
 	prURL := ExtractFirstHTTPSURL(result.Stdout)
 	if prURL == "" {
@@ -141,7 +207,7 @@ func CreatePullRequest(ctx context.Context, workDir, runDir, bodyPath, base, tit
 }
 
 // FetchPRComments returns all PR comments using gh api pagination.
-func FetchPRComments(ctx context.Context, root, prURL string) ([]PRComment, error) {
+func FetchPRComments(ctx context.Context, bins Binaries, root, prURL string) ([]PRComment, error) {
 	owner, repo, number, err := ParseGitHubPRURL(prURL)
 	if err != nil {
 		return nil, err
@@ -158,7 +224,7 @@ func FetchPRComments(ctx context.Context, root, prURL string) ([]PRComment, erro
 	defer os.Remove(stdoutPath)
 	_, err = runner.RunCommand(ctx, runner.Command{
 		WorkDir: root,
-		Argv:    []string{"gh", "api", apiPath, "--paginate", "--slurp"},
+		Argv:    []string{bins.gh(), "api", apiPath, "--paginate", "--slurp"},
 	}, runner.RunOptions{StdoutPath: stdoutPath})
 	if err != nil {
 		return nil, fmt.Errorf("gh api PR comments failed: %w", err)
@@ -175,7 +241,7 @@ func FetchPRComments(ctx context.Context, root, prURL string) ([]PRComment, erro
 }
 
 // PostPRComment posts a single GitHub PR comment via gh api.
-func PostPRComment(ctx context.Context, root, prURL, body string) error {
+func PostPRComment(ctx context.Context, bins Binaries, root, prURL, body string) error {
 	owner, repo, number, err := ParseGitHubPRURL(prURL)
 	if err != nil {
 		return err
@@ -187,7 +253,7 @@ func PostPRComment(ctx context.Context, root, prURL, body string) error {
 	}
 	_, err = runner.RunCommand(ctx, runner.Command{
 		WorkDir: root,
-		Argv:    []string{"gh", "api", "-X", "POST", apiPath, "--input", "-"},
+		Argv:    []string{bins.gh(), "api", "-X", "POST", apiPath, "--input", "-"},
 		Stdin:   string(payload),
 	}, runner.RunOptions{})
 	if err != nil {
@@ -197,21 +263,34 @@ func PostPRComment(ctx context.Context, root, prURL, body string) error {
 }
 
 // FetchPRState returns the current GitHub PR state via gh api.
-func FetchPRState(ctx context.Context, root, prURL string) (PullRequestState, error) {
+func FetchPRState(ctx context.Context, bins Binaries, root, prURL string) (PullRequestState, error) {
 	owner, repo, number, err := ParseGitHubPRURL(prURL)
 	if err != nil {
 		return PullRequestState{}, err
 	}
 	apiPath := fmt.Sprintf("repos/%s/%s/pulls/%s", owner, repo, number)
-	result, err := runner.RunCommand(ctx, runner.Command{
+	stdoutFile, err := os.CreateTemp("", "galley-pr-state-*.json")
+	if err != nil {
+		return PullRequestState{}, fmt.Errorf("create PR state temp file: %w", err)
+	}
+	stdoutPath := stdoutFile.Name()
+	if err := stdoutFile.Close(); err != nil {
+		return PullRequestState{}, fmt.Errorf("close PR state temp file: %w", err)
+	}
+	defer os.Remove(stdoutPath)
+	_, err = runner.RunCommand(ctx, runner.Command{
 		WorkDir: root,
-		Argv:    []string{"gh", "api", apiPath},
-	}, runner.RunOptions{})
+		Argv:    []string{bins.gh(), "api", apiPath},
+	}, runner.RunOptions{StdoutPath: stdoutPath})
 	if err != nil {
 		return PullRequestState{}, fmt.Errorf("gh api PR state failed: %w", err)
 	}
+	output, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		return PullRequestState{}, fmt.Errorf("read PR state response: %w", err)
+	}
 	var state PullRequestState
-	if err := json.Unmarshal([]byte(result.Stdout), &state); err != nil {
+	if err := json.Unmarshal(output, &state); err != nil {
 		return PullRequestState{}, fmt.Errorf("decode PR state: %w", err)
 	}
 	return state, nil
@@ -260,7 +339,7 @@ var httpsURLPattern = regexp.MustCompile(`https://[^\s]+`)
 
 // ExtractFirstHTTPSURL returns the first URL-looking token from command output.
 func ExtractFirstHTTPSURL(stdout string) string {
-	return httpsURLPattern.FindString(strings.TrimSpace(stdout))
+	return strings.TrimRight(httpsURLPattern.FindString(strings.TrimSpace(stdout)), ".,);]")
 }
 
 func writeJSON(path string, value any) error {

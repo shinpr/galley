@@ -11,6 +11,7 @@
     "acceptance_evidence",
     "findings",
     "residual_risks",
+    "discussion_items",
     "confidence",
     "next_work_order"
   ],
@@ -63,7 +64,22 @@
     },
     "residual_risks": {
       "type": "array",
+      "description": "Non-blocking uncertainty as plain strings only. Do not emit objects here; use findings for severity/category/file/blocking metadata.",
       "items": { "type": "string" }
+    },
+    "discussion_items": {
+      "type": "array",
+      "description": "Accepted-work reviewer notes only. Each object must use topic, summary, and requires_human_decision.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["topic", "summary", "requires_human_decision"],
+        "properties": {
+          "topic": { "type": "string", "minLength": 1 },
+          "summary": { "type": "string", "minLength": 1 },
+          "requires_human_decision": { "type": "boolean" }
+        }
+      }
     },
     "confidence": {
       "type": "string",

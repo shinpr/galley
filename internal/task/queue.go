@@ -2,11 +2,17 @@ package task
 
 import (
 	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
+
+	"github.com/shinpr/galley/internal/strutil"
 )
 
 type QueueOptions struct {
-	Reason string
+	Reason     string
+	Root       string
+	MoveSource bool
 }
 
 type QueueResult struct {
@@ -37,17 +43,45 @@ func Queue(path string, opts QueueOptions) (QueueResult, error) {
 		CompletedAt:       time.Now().UTC().Format(time.RFC3339Nano),
 		ClaudeStatus:      "not_run",
 		SupervisorVerdict: "queued",
-		Summary:           firstNonEmpty(opts.Reason, "Task queued for daemon execution."),
+		Summary:           strutil.FirstNonEmpty(opts.Reason, "Task queued for daemon execution."),
 	})
-	nextPath := queuedPathFor(path)
+	nextPath := queuedPathFor(path, opts.Root)
 	if nextPath == path {
 		if err := Save(path, loaded); err != nil {
 			return QueueResult{}, err
 		}
 	} else {
-		if err := writeMovedTask(path, nextPath, loaded); err != nil {
+		removeSource := opts.MoveSource || taskPathUnderRoot(path, opts.Root)
+		if err := writeQueuedTask(path, nextPath, loaded, removeSource); err != nil {
 			return QueueResult{}, err
 		}
 	}
 	return QueueResult{Task: loaded, From: path, To: nextPath}, nil
+}
+
+func queuedPathFor(path, root string) string {
+	if root != "" {
+		return filepath.Join(root, "tasks", "queued", filepath.Base(path))
+	}
+	return siblingTaskPath(path, "queued")
+}
+
+func taskPathUnderRoot(path, root string) bool {
+	if root == "" {
+		return true
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	tasksRoot := filepath.Join(filepath.Clean(absRoot), "tasks")
+	rel, err := filepath.Rel(tasksRoot, filepath.Clean(absPath))
+	if err != nil {
+		return false
+	}
+	return rel != "." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".."
 }

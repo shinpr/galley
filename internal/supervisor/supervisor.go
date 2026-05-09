@@ -15,6 +15,7 @@ type Verdict struct {
 	AcceptanceEvidence []AcceptanceEvidence `json:"acceptance_evidence,omitempty"`
 	Findings           []Finding            `json:"findings,omitempty"`
 	ResidualRisks      []string             `json:"residual_risks,omitempty"`
+	DiscussionItems    []DiscussionItem     `json:"discussion_items,omitempty"`
 	Confidence         string               `json:"confidence,omitempty"`
 	NextWorkOrder      string               `json:"next_work_order,omitempty"`
 }
@@ -32,6 +33,13 @@ type Finding struct {
 	File             string `json:"file,omitempty"`
 	Summary          string `json:"summary"`
 	BlocksAcceptance bool   `json:"blocks_acceptance"`
+}
+
+// DiscussionItem records accepted-work follow-up context for human reviewers.
+type DiscussionItem struct {
+	Topic                 string `json:"topic"`
+	Summary               string `json:"summary"`
+	RequiresHumanDecision bool   `json:"requires_human_decision"`
 }
 
 // Evidence is the local evidence sent to a model supervisor.

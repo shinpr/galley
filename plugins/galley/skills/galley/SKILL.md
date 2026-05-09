@@ -25,7 +25,7 @@ Galley executes task YAML files through a file-backed queue. Task authoring is c
 2. For task or profile authoring, always load `references/authoring-quality.md` with the domain reference.
 3. Gather repository context and read supplied or already-existing planning/reference files when available before drafting.
 4. Extract concrete requirements first, then apply `authoring-quality.md` question strategy.
-5. Write the task file under the Galley daemon root, usually `~/.galley/tasks/draft/`.
+5. Write the draft task file in a convenient local path; `galley task queue` places it into the active Galley queue after approval.
 6. Validate using the handoff reference.
 7. Present the goal, acceptance criteria, scope, and verification plan for user approval.
 8. Queue using the handoff reference only after explicit user approval.
@@ -40,7 +40,7 @@ When authoring or repairing a task, report:
 - acceptance criteria summary
 - reference files used and commit policy
 - scope and forbidden paths
-- verification commands
+- verification commands from profiles or repo docs, plus AC verification guidance
 - quality/profile basis used
 - decisions made while filling gaps
 - validation result
@@ -57,7 +57,7 @@ When troubleshooting, report:
 ## Quality Checklist
 
 - The task has one concrete goal and observable completion criteria.
-- Each acceptance criterion has an ID, text, and verification command or evidence source.
+- Each acceptance criterion has an ID, text, and verification method or evidence source. Runnable checks belong in repo/profile verification commands when possible.
 - `scope.cwd` is an absolute path to the target repository.
 - `scope.permission` follows the field guidance in `references/task-authoring.md`.
 - `allowed_paths` is as narrow as the task permits.

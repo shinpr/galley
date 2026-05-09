@@ -43,6 +43,31 @@ func TestClaimTaskDoesNotOverwriteRunningTask(t *testing.T) {
 	if _, err := os.Stat(runningPath + ".lock"); !os.IsNotExist(err) {
 		t.Fatalf("lock should be cleaned up, err=%v", err)
 	}
+	if _, err := os.Stat(queuedPath + ".lock"); !os.IsNotExist(err) {
+		t.Fatalf("source lock should be cleaned up, err=%v", err)
+	}
+}
+
+func TestClaimTaskHonorsExistingSourceLock(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	if err := EnsureLayout(root); err != nil {
+		t.Fatal(err)
+	}
+	queuedPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	if err := os.WriteFile(queuedPath, []byte("queued"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(queuedPath+".lock", []byte("lock"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ClaimTask(root, queuedPath)
+	if !errors.Is(err, ErrClaimConflict) {
+		t.Fatalf("expected claim conflict, got %v", err)
+	}
+	if _, err := os.Stat(queuedPath); err != nil {
+		t.Fatalf("queued task should remain: %v", err)
+	}
 }
 
 func TestRecoverStaleClaimsRequeuesRunningTaskAndRemovesLock(t *testing.T) {
@@ -86,5 +111,76 @@ func TestRecoverStaleClaimsRequeuesRunningTaskAndRemovesLock(t *testing.T) {
 	}
 	if _, err := os.Stat(runningPath); !os.IsNotExist(err) {
 		t.Fatalf("expected running task moved, err=%v", err)
+	}
+}
+
+func TestRecoverStaleClaimsIgnoresQueuedDestinationConflict(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	if err := EnsureLayout(root); err != nil {
+		t.Fatal(err)
+	}
+	runningPath := filepath.Join(root, "tasks", "running", "task.yaml")
+	if err := task.Save(runningPath, task.Task{
+		ID:     "running",
+		Status: "running",
+		Scope:  task.Scope{CWD: t.TempDir()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	queuedPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	if err := task.Save(queuedPath, task.Task{
+		ID:     "queued",
+		Status: "queued",
+		Scope:  task.Scope{CWD: t.TempDir()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(runningPath, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RecoverStaleClaims(root, time.Hour, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	running, err := task.Load(runningPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := running.Status, "queued"; got != want {
+		t.Fatalf("running status got %q, want %q", got, want)
+	}
+	queued, err := task.Load(queuedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := queued.ID, "queued"; got != want {
+		t.Fatalf("queued task ID got %q, want %q", got, want)
+	}
+}
+
+func TestRecoverStaleClaimsRemovesQueuedSourceLock(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	if err := EnsureLayout(root); err != nil {
+		t.Fatal(err)
+	}
+	queuedPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	if err := os.WriteFile(queuedPath, []byte("queued"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lockPath := queuedPath + ".lock"
+	if err := os.WriteFile(lockPath, []byte("lock"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(lockPath, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RecoverStaleClaims(root, time.Hour, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Fatalf("expected stale queued lock removed, err=%v", err)
 	}
 }

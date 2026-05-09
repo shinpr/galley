@@ -1,13 +1,14 @@
 package cli
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/shinpr/galley/internal/daemonctl"
 	"github.com/shinpr/galley/internal/galleyhome"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/spf13/cobra"
@@ -43,20 +44,13 @@ func newTaskArchiveCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			switch output {
-			case "json":
-				enc := json.NewEncoder(cmd.OutOrStdout())
-				enc.SetIndent("", "  ")
-				return enc.Encode(result)
-			case "text":
+			return renderOutput(cmd, output, result, func() error {
 				fmt.Fprintf(cmd.OutOrStdout(), "archived: %s\n", result.Task.ID)
 				if result.From != result.To {
 					fmt.Fprintf(cmd.OutOrStdout(), "moved: %s -> %s\n", result.From, result.To)
 				}
 				return nil
-			default:
-				return fmt.Errorf("unsupported output format %q", output)
-			}
+			})
 		},
 	}
 	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text or json")
@@ -87,12 +81,7 @@ func newTaskListCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			switch output {
-			case "json":
-				enc := json.NewEncoder(cmd.OutOrStdout())
-				enc.SetIndent("", "  ")
-				return enc.Encode(items)
-			case "text":
+			return renderOutput(cmd, output, items, func() error {
 				for _, item := range items {
 					fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s", item.State, item.Status, item.ID)
 					if item.PRURL != "" {
@@ -107,12 +96,10 @@ func newTaskListCommand() *cobra.Command {
 					fmt.Fprintln(cmd.OutOrStdout())
 				}
 				return nil
-			default:
-				return fmt.Errorf("unsupported output format %q", output)
-			}
+			})
 		},
 	}
-	cmd.Flags().StringVar(&root, "root", galleyhome.DefaultRoot(), "Galley daemon root directory")
+	cmd.Flags().StringVar(&root, "root", galleyhome.DefaultRoot(), "Galley daemon root directory; defaults to the running daemon root when available")
 	cmd.Flags().StringVar(&state, "state", "", "Filter by task directory/state")
 	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text or json")
 	return cmd
@@ -132,7 +119,7 @@ func newTaskShowCommand() *cobra.Command {
 				resolved, err := findTaskByID(root, path)
 				if err != nil {
 					if _, statErr := os.Stat(path); statErr != nil {
-						return err
+						return fmt.Errorf("resolve %q as task ID under %s failed: %w; as file path failed: %v", path, root, err, statErr)
 					}
 				} else {
 					path = resolved
@@ -143,16 +130,11 @@ func newTaskShowCommand() *cobra.Command {
 				return err
 			}
 			item := taskSummary(path, loaded)
-			switch output {
-			case "json":
-				payload := struct {
-					Summary taskListItem `json:"summary"`
-					Task    task.Task    `json:"task"`
-				}{Summary: item, Task: loaded}
-				enc := json.NewEncoder(cmd.OutOrStdout())
-				enc.SetIndent("", "  ")
-				return enc.Encode(payload)
-			case "text":
+			payload := struct {
+				Summary taskListItem `json:"summary"`
+				Task    task.Task    `json:"task"`
+			}{Summary: item, Task: loaded}
+			return renderOutput(cmd, output, payload, func() error {
 				fmt.Fprintf(cmd.OutOrStdout(), "id: %s\n", loaded.ID)
 				fmt.Fprintf(cmd.OutOrStdout(), "status: %s\n", loaded.Status)
 				fmt.Fprintf(cmd.OutOrStdout(), "state: %s\n", item.State)
@@ -180,12 +162,10 @@ func newTaskShowCommand() *cobra.Command {
 					}
 				}
 				return nil
-			default:
-				return fmt.Errorf("unsupported output format %q", output)
-			}
+			})
 		},
 	}
-	cmd.Flags().StringVar(&root, "root", galleyhome.DefaultRoot(), "Galley daemon root directory")
+	cmd.Flags().StringVar(&root, "root", galleyhome.DefaultRoot(), "Galley daemon root directory; defaults to the running daemon root when available")
 	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text or json")
 	return cmd
 }
@@ -243,6 +223,35 @@ func findTaskByID(root, id string) (string, error) {
 	}
 }
 
+func resolveTaskRoot(root string, explicit bool) (string, error) {
+	if explicit {
+		return root, nil
+	}
+	defaultRoot := galleyhome.DefaultRoot()
+	paths := daemonctl.ResolvePaths(defaultRoot, "", "")
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	status, err := daemonctl.Inspect(paths.PIDFile, "", exe)
+	if errors.Is(err, daemonctl.ErrNotRunning) {
+		return root, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if !status.Alive {
+		return root, nil
+	}
+	if !status.Verified {
+		return "", fmt.Errorf("%w: pid=%d; pass --root to target a root explicitly", daemonctl.ErrUnverifiedProcess, status.Meta.PID)
+	}
+	if status.Meta.Root != "" {
+		return status.Meta.Root, nil
+	}
+	return root, nil
+}
+
 func taskFiles(dir string) ([]string, error) {
 	var paths []string
 	for _, pattern := range []string{"*.yaml", "*.yml"} {
@@ -275,69 +284,80 @@ func taskSummary(path string, loaded task.Task) taskListItem {
 func newTaskQueueCommand() *cobra.Command {
 	var output string
 	var reason string
+	var root string
+	var moveSource bool
 
 	cmd := &cobra.Command{
 		Use:   "queue TASK.yaml",
 		Short: "Validate and move a task YAML into the queued state",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := task.Queue(args[0], task.QueueOptions{Reason: reason})
+			resolvedRoot, err := resolveTaskRoot(root, cmd.Flags().Changed("root"))
 			if err != nil {
 				return err
 			}
-			switch output {
-			case "json":
-				enc := json.NewEncoder(cmd.OutOrStdout())
-				enc.SetIndent("", "  ")
-				return enc.Encode(result)
-			case "text":
+			result, err := task.Queue(args[0], task.QueueOptions{Reason: reason, Root: resolvedRoot, MoveSource: moveSource})
+			if err != nil {
+				return err
+			}
+			return renderOutput(cmd, output, result, func() error {
 				fmt.Fprintf(cmd.OutOrStdout(), "queued: %s\n", result.Task.ID)
 				if result.From != result.To {
 					fmt.Fprintf(cmd.OutOrStdout(), "moved: %s -> %s\n", result.From, result.To)
 				}
 				return nil
-			default:
-				return fmt.Errorf("unsupported output format %q", output)
-			}
+			})
 		},
 	}
 	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text or json")
 	cmd.Flags().StringVar(&reason, "reason", "", "Reason to record in the task YAML")
+	cmd.Flags().StringVar(&root, "root", galleyhome.DefaultRoot(), "Galley daemon root directory; defaults to the running daemon root when available")
+	cmd.Flags().BoolVar(&moveSource, "move", false, "Remove the source task file after copying it into the daemon root")
 	return cmd
 }
 
 func newTaskRequeueCommand() *cobra.Command {
 	var output string
 	var reason string
+	var root string
 
 	cmd := &cobra.Command{
-		Use:   "requeue TASK.yaml",
+		Use:   "requeue TASK.yaml|TASK_ID",
 		Short: "Move a reviewed task back to queued for another daemon run",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := task.Requeue(args[0], task.RequeueOptions{Reason: reason})
+			resolvedRoot, err := resolveTaskRoot(root, cmd.Flags().Changed("root"))
 			if err != nil {
 				return err
 			}
-			switch output {
-			case "json":
-				enc := json.NewEncoder(cmd.OutOrStdout())
-				enc.SetIndent("", "  ")
-				return enc.Encode(result)
-			case "text":
+			path := args[0]
+			if !strings.Contains(path, string(os.PathSeparator)) {
+				resolved, err := findTaskByID(resolvedRoot, path)
+				if err != nil {
+					if _, statErr := os.Stat(path); statErr != nil {
+						return fmt.Errorf("resolve %q as task ID under %s failed: %w; as file path failed: %v", path, resolvedRoot, err, statErr)
+					}
+				} else {
+					path = resolved
+				}
+			}
+			result, err := task.Requeue(path, task.RequeueOptions{Reason: reason, Root: resolvedRoot})
+			if err != nil {
+				return err
+			}
+			return renderOutput(cmd, output, result, func() error {
 				fmt.Fprintf(cmd.OutOrStdout(), "requeued: %s\n", result.Task.ID)
 				if result.From != result.To {
 					fmt.Fprintf(cmd.OutOrStdout(), "moved: %s -> %s\n", result.From, result.To)
 				}
 				return nil
-			default:
-				return fmt.Errorf("unsupported output format %q", output)
-			}
+			})
 		},
 	}
 
 	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text or json")
 	cmd.Flags().StringVar(&reason, "reason", "", "Reason to record in the task YAML")
+	cmd.Flags().StringVar(&root, "root", galleyhome.DefaultRoot(), "Galley daemon root directory; defaults to the running daemon root when available")
 	return cmd
 }
 
@@ -354,14 +374,7 @@ func newTaskValidateCommand() *cobra.Command {
 				return err
 			}
 
-			switch output {
-			case "json":
-				enc := json.NewEncoder(cmd.OutOrStdout())
-				enc.SetIndent("", "  ")
-				if err := enc.Encode(result); err != nil {
-					return err
-				}
-			case "text":
+			if err := renderOutput(cmd, output, result, func() error {
 				if result.Valid() {
 					fmt.Fprintf(cmd.OutOrStdout(), "valid: %s\n", result.Task.ID)
 				} else {
@@ -373,8 +386,9 @@ func newTaskValidateCommand() *cobra.Command {
 				for _, validationErr := range result.Errors {
 					fmt.Fprintf(cmd.OutOrStdout(), "error: %s\n", validationErr)
 				}
-			default:
-				return fmt.Errorf("unsupported output format %q", output)
+				return nil
+			}); err != nil {
+				return err
 			}
 
 			if !result.Valid() {

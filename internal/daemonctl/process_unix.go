@@ -3,9 +3,11 @@
 package daemonctl
 
 import (
+	"context"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ProcessInfoResult contains process identity fields from the OS process table.
@@ -38,7 +40,9 @@ func ProcessInfo(pid int) (ProcessInfoResult, error) {
 }
 
 func psField(pid, field string) (string, error) {
-	output, err := exec.Command("ps", "-p", pid, "-o", field).Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, "ps", "-p", pid, "-o", field).Output()
 	if err != nil {
 		return "", err
 	}
@@ -47,7 +51,9 @@ func psField(pid, field string) (string, error) {
 
 // Zombie reports whether pid is a zombie process.
 func Zombie(pid int) bool {
-	output, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "stat=").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, "ps", "-p", strconv.Itoa(pid), "-o", "stat=").Output()
 	if err != nil {
 		return false
 	}

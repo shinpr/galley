@@ -1,6 +1,8 @@
 package daemonctl
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +11,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/shinpr/galley/internal/jsonio"
 )
 
 // ErrNotRunning indicates the PID file is absent or points at a dead process.
@@ -16,6 +20,10 @@ var ErrNotRunning = errors.New("daemon is not running")
 
 // ErrUnverifiedProcess indicates the PID exists but cannot be identified as the Galley daemon.
 var ErrUnverifiedProcess = errors.New("pid file process identity is not verified")
+
+// EnvToken carries the daemon control token from `galley daemon start` to the
+// foreground daemon process without exposing it in argv.
+const EnvToken = "GALLEY_DAEMON_TOKEN"
 
 // Paths contains daemon control file paths.
 type Paths struct {
@@ -31,7 +39,8 @@ type PIDFile struct {
 	Argv             []string `json:"argv"`
 	StartedAt        string   `json:"started_at"`
 	ProcessStartedAt string   `json:"process_started_at,omitempty"`
-	Token            string   `json:"token,omitempty"`
+	TokenHash        string   `json:"token_hash,omitempty"`
+	Token            string   `json:"-"`
 	HeartbeatAt      string   `json:"heartbeat_at,omitempty"`
 }
 
@@ -86,7 +95,7 @@ func NewPIDFile(pid int, executable, root string, argv []string) PIDFile {
 		PID:              pid,
 		Executable:       cleanPath(executable),
 		Root:             cleanPath(root),
-		Argv:             append([]string(nil), argv...),
+		Argv:             sanitizeArgv(argv),
 		StartedAt:        time.Now().UTC().Format(time.RFC3339Nano),
 		ProcessStartedAt: processStartedAt,
 	}
@@ -95,6 +104,7 @@ func NewPIDFile(pid int, executable, root string, argv []string) PIDFile {
 // WithToken returns metadata with a daemon control token.
 func (p PIDFile) WithToken(token string) PIDFile {
 	p.Token = token
+	p.TokenHash = tokenHash(token)
 	return p
 }
 
@@ -103,19 +113,7 @@ func WritePID(path string, meta PIDFile) error {
 	if meta.PID <= 0 {
 		return fmt.Errorf("invalid pid %d", meta.PID)
 	}
-	data, err := json.MarshalIndent(meta, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(data, '\n'), 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return nil
+	return jsonio.Write(path, meta)
 }
 
 // Heartbeat refreshes PID metadata if the PID and token still match.
@@ -124,7 +122,7 @@ func Heartbeat(path string, meta PIDFile) error {
 	if err != nil {
 		return err
 	}
-	if current.PID != meta.PID || current.Token == "" || current.Token != meta.Token {
+	if current.PID != meta.PID || current.TokenHash == "" || current.TokenHash != tokenHash(meta.Token) {
 		return ErrUnverifiedProcess
 	}
 	current.HeartbeatAt = time.Now().UTC().Format(time.RFC3339Nano)
@@ -168,6 +166,7 @@ func ReadPIDFile(path string) (PIDFile, error) {
 	if err := json.Unmarshal(data, &meta); err == nil && meta.PID > 0 {
 		meta.Executable = cleanPath(meta.Executable)
 		meta.Root = cleanPath(meta.Root)
+		meta.Argv = sanitizeArgv(meta.Argv)
 		return meta, nil
 	}
 	return PIDFile{}, fmt.Errorf("invalid pid file %s", path)
@@ -228,7 +227,7 @@ func Verify(meta PIDFile, expectedRoot, expectedExecutable string) bool {
 }
 
 func freshHeartbeat(meta PIDFile, maxAge time.Duration) bool {
-	if meta.Token == "" || meta.HeartbeatAt == "" {
+	if meta.TokenHash == "" || meta.HeartbeatAt == "" {
 		return false
 	}
 	heartbeatAt, err := time.Parse(time.RFC3339Nano, meta.HeartbeatAt)
@@ -236,6 +235,34 @@ func freshHeartbeat(meta PIDFile, maxAge time.Duration) bool {
 		return false
 	}
 	return time.Since(heartbeatAt) <= maxAge
+}
+
+func tokenHash(token string) string {
+	if token == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+func sanitizeArgv(argv []string) []string {
+	out := make([]string, 0, len(argv))
+	skipNext := false
+	for _, arg := range argv {
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		if arg == "--daemon-token" {
+			skipNext = true
+			continue
+		}
+		if strings.HasPrefix(arg, "--daemon-token=") {
+			continue
+		}
+		out = append(out, arg)
+	}
+	return out
 }
 
 // Alive reports whether pid exists.

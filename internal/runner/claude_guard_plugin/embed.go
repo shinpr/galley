@@ -69,12 +69,7 @@ func Ensure(dst string) (string, error) {
 		return "", fmt.Errorf("write guard plugin marker: %w", err)
 	}
 	if err := os.Rename(staging, dst); err != nil {
-		if os.IsExist(err) {
-			cleanup = true
-			return dst, nil
-		}
 		if _, statErr := os.Stat(filepath.Join(dst, ".complete")); statErr == nil {
-			cleanup = true
 			return dst, nil
 		}
 		return "", fmt.Errorf("publish guard plugin dir %s: %w", dst, err)

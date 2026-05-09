@@ -3,6 +3,8 @@ package task
 import (
 	"fmt"
 	"time"
+
+	"github.com/shinpr/galley/internal/strutil"
 )
 
 // ArchiveOptions controls how a task is archived.
@@ -35,7 +37,7 @@ func Archive(path string, opts ArchiveOptions) (ArchiveResult, error) {
 		CompletedAt:       time.Now().UTC().Format(time.RFC3339Nano),
 		ClaudeStatus:      "not_run",
 		SupervisorVerdict: "archived",
-		Summary:           firstNonEmpty(opts.Reason, "Task archived."),
+		Summary:           strutil.FirstNonEmpty(opts.Reason, "Task archived."),
 	})
 	nextPath := siblingTaskPath(path, "archived")
 	if nextPath == path {
@@ -43,7 +45,7 @@ func Archive(path string, opts ArchiveOptions) (ArchiveResult, error) {
 			return ArchiveResult{}, err
 		}
 	} else {
-		if err := writeMovedTask(path, nextPath, loaded); err != nil {
+		if err := WriteMovedTask(path, nextPath, loaded); err != nil {
 			return ArchiveResult{}, err
 		}
 	}

@@ -1,6 +1,8 @@
 package daemonctl
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -48,6 +50,33 @@ func TestWriteReadPIDFileJSON(t *testing.T) {
 	}
 	if read.PID != os.Getpid() || read.Executable != meta.Executable || read.Root != meta.Root {
 		t.Fatalf("metadata got %#v, want %#v", read, meta)
+	}
+}
+
+func TestWritePIDFileStoresTokenHashOnly(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "galley-daemon.pid")
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta := NewPIDFile(os.Getpid(), exe, t.TempDir(), []string{exe, "--daemon-token", "secret"}).WithToken("secret")
+	if err := WritePID(path, meta); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(data, []byte("secret")) || bytes.Contains(data, []byte("--daemon-token")) {
+		t.Fatalf("pid file leaked token material: %s", data)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if raw["token_hash"] == "" || raw["token"] != nil {
+		t.Fatalf("token fields got %#v", raw)
 	}
 }
 

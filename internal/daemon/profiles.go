@@ -1,8 +1,7 @@
 package daemon
 
 import (
-	"os"
-
+	"github.com/shinpr/galley/internal/fileutil"
 	"github.com/shinpr/galley/internal/galleyhome"
 )
 
@@ -22,16 +21,11 @@ func resolveProfileFiles(opts Options, repoCWD string) (resolvedProfileFiles, er
 		return resolvedProfileFiles{}, err
 	}
 	resolved.RepoKey = key
-	if resolved.QualityProfileFile == "" && fileExists(qualityPath) {
+	if resolved.QualityProfileFile == "" && fileutil.ExistsFile(qualityPath) {
 		resolved.QualityProfileFile = qualityPath
 	}
-	if resolved.EnvironmentProfileFile == "" && fileExists(environmentPath) {
+	if resolved.EnvironmentProfileFile == "" && fileutil.ExistsFile(environmentPath) {
 		resolved.EnvironmentProfileFile = environmentPath
 	}
 	return resolved, nil
-}
-
-func fileExists(path string) bool {
-	stat, err := os.Stat(path)
-	return err == nil && !stat.IsDir()
 }

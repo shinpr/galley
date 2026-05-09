@@ -18,7 +18,7 @@ func TestPrepareCreatesGitWorktree(t *testing.T) {
 		Enabled: true,
 		Branch:  "agent/test-worktree",
 		Path:    "../worktrees/test-worktree",
-	})
+	}, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,11 +37,11 @@ func TestPrepareReusesExistingWorktree(t *testing.T) {
 		Branch:  "agent/reuse-worktree",
 		Path:    "../worktrees/reuse-worktree",
 	}
-	first, err := Prepare(context.Background(), repo, spec)
+	first, err := Prepare(context.Background(), repo, spec, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := Prepare(context.Background(), repo, spec)
+	second, err := Prepare(context.Background(), repo, spec, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,14 +60,14 @@ func TestPrepareRecordsDirtyReusedWorktree(t *testing.T) {
 		Branch:  "agent/dirty-worktree",
 		Path:    "../worktrees/dirty-worktree",
 	}
-	first, err := Prepare(context.Background(), repo, spec)
+	first, err := Prepare(context.Background(), repo, spec, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(first.CWD, "dirty.txt"), []byte("dirty\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	second, err := Prepare(context.Background(), repo, spec)
+	second, err := Prepare(context.Background(), repo, spec, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestPrepareUsesExistingBranchWhenPathMissing(t *testing.T) {
 		Enabled: true,
 		Branch:  "agent/existing-branch",
 		Path:    "../worktrees/existing-branch",
-	})
+	}, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestPrepareUsesExistingBranchWhenPathMissing(t *testing.T) {
 
 func TestPrepareSkipsWhenDisabled(t *testing.T) {
 	dir := t.TempDir()
-	prepared, err := Prepare(context.Background(), dir, task.Worktree{})
+	prepared, err := Prepare(context.Background(), dir, task.Worktree{}, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,11 +111,11 @@ func TestRemoveCleanWorktree(t *testing.T) {
 		Branch:  "agent/remove-worktree",
 		Path:    "../worktrees/remove-worktree",
 	}
-	prepared, err := Prepare(context.Background(), repo, spec)
+	prepared, err := Prepare(context.Background(), repo, spec, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := Remove(context.Background(), repo, spec)
+	result, err := Remove(context.Background(), repo, spec, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,14 +134,14 @@ func TestRemoveDirtyWorktreeIsSkipped(t *testing.T) {
 		Branch:  "agent/dirty-remove-worktree",
 		Path:    "../worktrees/dirty-remove-worktree",
 	}
-	prepared, err := Prepare(context.Background(), repo, spec)
+	prepared, err := Prepare(context.Background(), repo, spec, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(prepared.CWD, "dirty.txt"), []byte("dirty\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	result, err := Remove(context.Background(), repo, spec)
+	result, err := Remove(context.Background(), repo, spec, Options{})
 	if !errors.Is(err, ErrDirtyWorktree) {
 		t.Fatalf("expected dirty error, got %v", err)
 	}
@@ -158,7 +158,7 @@ func TestCaptureSnapshot(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repo, "changed.txt"), []byte("changed\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	snapshot, err := CaptureSnapshot(context.Background(), repo)
+	snapshot, err := CaptureSnapshot(context.Background(), repo, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestCaptureSnapshotFromBaseDetectsExecutorCommit(t *testing.T) {
 	runGit(t, repo, "add", "committed.txt")
 	runGit(t, repo, "commit", "-m", "executor commit")
 
-	snapshot, err := CaptureSnapshotFromBase(context.Background(), repo, base)
+	snapshot, err := CaptureSnapshotFromBase(context.Background(), repo, base, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

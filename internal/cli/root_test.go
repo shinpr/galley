@@ -80,7 +80,8 @@ func TestTaskRequeueText(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stdout, stderr, err := executeCommand("task", "requeue", "--reason", "review fixed", failedPath)
+	root := filepath.Dir(filepath.Dir(filepath.Dir(failedPath)))
+	stdout, stderr, err := executeCommand("task", "requeue", "--root", root, "--reason", "review fixed", failedPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +111,8 @@ func TestTaskQueueText(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stdout, stderr, err := executeCommand("task", "queue", "--reason", "draft approved for daemon", draftPath)
+	root := filepath.Dir(filepath.Dir(filepath.Dir(draftPath)))
+	stdout, stderr, err := executeCommand("task", "queue", "--root", root, "--reason", "draft approved for daemon", draftPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +302,8 @@ func TestTaskRequeueJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stdout, stderr, err := executeCommand("task", "requeue", "--output", "json", taskPath)
+	root := t.TempDir()
+	stdout, stderr, err := executeCommand("task", "requeue", "--root", root, "--output", "json", taskPath)
 	if err != nil {
 		t.Fatal(err)
 	}

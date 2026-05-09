@@ -29,12 +29,64 @@ printf '%s' '[[{"id":1,"body":"`+longBody+`","html_url":"https://github.com/exam
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	comments, err := FetchPRComments(t.Context(), t.TempDir(), "https://github.com/example/galley/pull/1")
+	comments, err := FetchPRComments(t.Context(), Binaries{}, t.TempDir(), "https://github.com/example/galley/pull/1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(comments) != 1 || comments[0].Body != longBody {
 		t.Fatal("large PR comment response was not decoded intact")
+	}
+}
+
+func TestPostPRCommentSendsJSONBodyOnStdin(t *testing.T) {
+	binDir := t.TempDir()
+	bodyPath := filepath.Join(t.TempDir(), "body.json")
+	fakeGH := filepath.Join(binDir, "gh")
+	if err := os.WriteFile(fakeGH, []byte(`#!/bin/sh
+cat > `+bodyPath+`
+`), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	if err := PostPRComment(t.Context(), Binaries{}, t.TempDir(), "https://github.com/example/galley/pull/1", "@owner please check"); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(bodyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `"body":"@owner please check"`) {
+		t.Fatalf("body was not posted as JSON stdin: %s", body)
+	}
+}
+
+func TestFetchPRStateReadsFullResponse(t *testing.T) {
+	binDir := t.TempDir()
+	fakeGH := filepath.Join(binDir, "gh")
+	padding := strings.Repeat(" ", 70*1024)
+	if err := os.WriteFile(fakeGH, []byte(`#!/bin/sh
+printf '%s' '{"state":"open","merged":false,"padding":"`+padding+`"}'
+`), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	state, err := FetchPRState(t.Context(), Binaries{}, t.TempDir(), "https://github.com/example/galley/pull/1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.State != "open" || state.Merged {
+		t.Fatalf("state got %#v", state)
+	}
+}
+
+func TestExtractFirstHTTPSURLTrimsTrailingPunctuation(t *testing.T) {
+	t.Parallel()
+	got := ExtractFirstHTTPSURL("created (https://github.com/example/galley/pull/123).")
+	want := "https://github.com/example/galley/pull/123"
+	if got != want {
+		t.Fatalf("url got %q, want %q", got, want)
 	}
 }
 

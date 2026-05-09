@@ -101,3 +101,72 @@ func TestRequeueDoesNotOverwriteQueuedTask(t *testing.T) {
 		t.Fatalf("queued task overwritten: %q", string(data))
 	}
 }
+
+func TestRequeueCopiesExternalReviewedTaskIntoRoot(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	external := writeTaskYAML(t, "loop_budget: 3")
+	loaded, err := Load(external)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Status = "failed"
+	if err := Save(external, loaded); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Requeue(external, RequeueOptions{Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	queuedPath := filepath.Join(root, "tasks", "queued", filepath.Base(external))
+	if result.To != queuedPath {
+		t.Fatalf("to got %q", result.To)
+	}
+	if _, err := os.Stat(external); err != nil {
+		t.Fatalf("external source should remain: %v", err)
+	}
+	requeued, err := Load(queuedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requeued.Status != "queued" {
+		t.Fatalf("requeued status got %q", requeued.Status)
+	}
+}
+
+func TestRequeueAssignsUniqueRevisionRequestIDs(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	failedPath := filepath.Join(root, "tasks", "failed", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(failedPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	taskPath := writeTaskYAML(t, "loop_budget: 3")
+	loaded, err := Load(taskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Status = "failed"
+	loaded.RevisionRequests = []RevisionRequest{{ID: "revision-2", Text: "existing"}}
+	if err := Save(failedPath, loaded); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Requeue(failedPath, RequeueOptions{RevisionRequests: []RevisionRequest{
+		{Text: "first"},
+		{Text: "second"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(result.Task.RevisionRequests), 3; got != want {
+		t.Fatalf("revision request count got %d, want %d: %#v", got, want, result.Task.RevisionRequests)
+	}
+	if got, want := result.Task.RevisionRequests[1].ID, "revision-3"; got != want {
+		t.Fatalf("first generated ID got %q, want %q", got, want)
+	}
+	if got, want := result.Task.RevisionRequests[2].ID, "revision-4"; got != want {
+		t.Fatalf("second generated ID got %q, want %q", got, want)
+	}
+}

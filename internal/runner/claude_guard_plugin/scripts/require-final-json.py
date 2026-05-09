@@ -28,12 +28,30 @@ RESULT_TEMPLATE = """{
   "risks": []
 }"""
 
+SUPERVISOR_TEMPLATE = """{
+  "status": "accepted",
+  "summary": "One concise review summary.",
+  "acceptance_gaps": [],
+  "reviewed_files": ["path/to/file.ext"],
+  "acceptance_evidence": [
+    {
+      "ac_id": "AC1",
+      "evidence": ["Concrete evidence from changed files or verification output."]
+    }
+  ],
+  "findings": [],
+  "residual_risks": [],
+  "discussion_items": [],
+  "confidence": "medium",
+  "next_work_order": ""
+}"""
+
 
 def block(reason):
     print(json.dumps({
         "decision": "block",
         "reason": reason,
-        "systemMessage": "Return the Galley executor result as valid JSON.",
+        "systemMessage": "Return the Galley result as valid JSON.",
     }))
 
 
@@ -145,6 +163,81 @@ def validate_result(result):
         raise ValueError("hard_stop is only valid when status is hard_stop")
 
 
+def validate_supervisor_verdict(verdict):
+    require_object(verdict, "verdict")
+    if verdict.get("status") not in {"accepted", "needs_revision", "needs_supervisor_review", "hard_stop"}:
+        raise ValueError("status must be accepted, needs_revision, needs_supervisor_review, or hard_stop")
+    required = [
+        "status",
+        "summary",
+        "acceptance_gaps",
+        "reviewed_files",
+        "acceptance_evidence",
+        "findings",
+        "residual_risks",
+        "discussion_items",
+        "confidence",
+        "next_work_order",
+    ]
+    for field in required:
+        if field not in verdict:
+            raise ValueError(f"{field} is required")
+    if not isinstance(verdict["summary"], str) or not verdict["summary"].strip():
+        raise ValueError("summary must be a non-empty string")
+    require_array(verdict["acceptance_gaps"], "acceptance_gaps")
+    require_array(verdict["reviewed_files"], "reviewed_files")
+    require_array(verdict["acceptance_evidence"], "acceptance_evidence")
+    require_array(verdict["findings"], "findings")
+    require_array(verdict["residual_risks"], "residual_risks")
+    require_array(verdict["discussion_items"], "discussion_items")
+    if verdict.get("confidence") not in {"high", "medium", "low"}:
+        raise ValueError("confidence must be high, medium, or low")
+    if not isinstance(verdict["next_work_order"], str):
+        raise ValueError("next_work_order must be a string")
+
+    for index, risk in enumerate(verdict["residual_risks"]):
+        if not isinstance(risk, str):
+            raise ValueError(f"residual_risks[{index}] must be a string")
+
+    for index, item in enumerate(verdict["discussion_items"]):
+        require_object(item, f"discussion_items[{index}]")
+        for field in ["topic", "summary", "requires_human_decision"]:
+            if field not in item:
+                raise ValueError(f"discussion_items[{index}].{field} is required")
+        if not isinstance(item["topic"], str) or not item["topic"].strip():
+            raise ValueError(f"discussion_items[{index}].topic must be a non-empty string")
+        if not isinstance(item["summary"], str) or not item["summary"].strip():
+            raise ValueError(f"discussion_items[{index}].summary must be a non-empty string")
+        if not isinstance(item["requires_human_decision"], bool):
+            raise ValueError(f"discussion_items[{index}].requires_human_decision must be a boolean")
+
+    for index, evidence in enumerate(verdict["acceptance_evidence"]):
+        require_object(evidence, f"acceptance_evidence[{index}]")
+        for field in ["ac_id", "evidence"]:
+            if field not in evidence:
+                raise ValueError(f"acceptance_evidence[{index}].{field} is required")
+        require_array(evidence["evidence"], f"acceptance_evidence[{index}].evidence")
+
+    for index, finding in enumerate(verdict["findings"]):
+        require_object(finding, f"findings[{index}]")
+        for field in ["severity", "category", "file", "summary", "blocks_acceptance"]:
+            if field not in finding:
+                raise ValueError(f"findings[{index}].{field} is required")
+        if finding.get("severity") not in {"critical", "high", "medium", "low"}:
+            raise ValueError(f"findings[{index}].severity is invalid")
+        if not isinstance(finding["blocks_acceptance"], bool):
+            raise ValueError(f"findings[{index}].blocks_acceptance must be a boolean")
+
+    if verdict["status"] == "needs_revision" and not verdict["next_work_order"].strip():
+        raise ValueError("next_work_order is required when status is needs_revision")
+    if verdict["status"] != "needs_revision" and verdict["next_work_order"].strip():
+        raise ValueError("next_work_order must be empty unless status is needs_revision")
+    if verdict["status"] == "accepted" and verdict["confidence"] == "low":
+        raise ValueError("accepted verdicts require medium or high confidence")
+    if verdict["status"] != "accepted" and verdict["discussion_items"]:
+        raise ValueError("discussion_items are only valid for accepted verdicts")
+
+
 def main():
     try:
         hook_input = json.load(sys.stdin)
@@ -164,16 +257,28 @@ def main():
         )
         return
 
+    mode = os.environ.get("GALLEY_CLAUDE_GUARD_MODE", "executor")
     try:
         result = json.loads(text)
-        validate_result(result)
-    except Exception as err:
-        block(
-            "The final assistant response must be exactly one JSON object matching the Galley executor result contract.\n\n"
-            f"Validation error: {err}\n\n"
-            "Respond again with only the JSON object. Use this shape and fill it with the actual task evidence:\n\n"
-            f"{RESULT_TEMPLATE}"
-        )
+        if mode == "supervisor":
+            validate_supervisor_verdict(result)
+        else:
+            validate_result(result)
+    except (json.JSONDecodeError, ValueError, TypeError) as err:
+        if mode == "supervisor":
+            block(
+                "The final assistant response must be exactly one JSON object matching the Galley supervisor verdict contract.\n\n"
+                f"Validation error: {err}\n\n"
+                "Respond again with only the JSON object. Use this shape and fill it with the actual review evidence:\n\n"
+                f"{SUPERVISOR_TEMPLATE}"
+            )
+        else:
+            block(
+                "The final assistant response must be exactly one JSON object matching the Galley executor result contract.\n\n"
+                f"Validation error: {err}\n\n"
+                "Respond again with only the JSON object. Use this shape and fill it with the actual task evidence:\n\n"
+                f"{RESULT_TEMPLATE}"
+            )
 
 
 if __name__ == "__main__":

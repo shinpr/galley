@@ -21,6 +21,7 @@ type Task struct {
 	Executor           Executor              `yaml:"executor" json:"executor"`
 	Decisions          []Decision            `yaml:"decisions" json:"decisions"`
 	Risks              []Risk                `yaml:"risks" json:"risks"`
+	DiscussionItems    []DiscussionItem      `yaml:"discussion_items,omitempty" json:"discussion_items,omitempty"`
 	RevisionRequests   []RevisionRequest     `yaml:"revision_requests,omitempty" json:"revision_requests,omitempty"`
 	Attempts           []Attempt             `yaml:"attempts" json:"attempts"`
 	Verification       Verification          `yaml:"verification" json:"verification"`
@@ -35,7 +36,9 @@ type InputFile struct {
 	Commit      bool   `yaml:"commit" json:"commit"`
 }
 
-// AcceptanceCriterion describes one observable completion requirement.
+// AcceptanceCriterion describes one observable completion requirement. The
+// Verification field is guidance for evidence collection; required runnable
+// checks are configured through profiles and recorded under Task.Verification.
 type AcceptanceCriterion struct {
 	ID           string `yaml:"id" json:"id"`
 	Text         string `yaml:"text" json:"text"`
@@ -65,7 +68,7 @@ type ExecutionPolicy struct {
 type LoopBudget struct {
 	Count    int  `json:"count,omitempty"`
 	Infinite bool `json:"infinite,omitempty"`
-	Set      bool `json:"-"`
+	Set      bool `yaml:"-" json:"-"`
 }
 
 // UnmarshalYAML accepts a positive integer or the literal string "infinite".
@@ -159,6 +162,14 @@ type Risk struct {
 	Detail               string `yaml:"detail" json:"detail"`
 	Mitigation           string `yaml:"mitigation" json:"mitigation"`
 	HumanReviewSuggested bool   `yaml:"human_review_suggested" json:"human_review_suggested"`
+}
+
+// DiscussionItem records accepted-work feedback that does not change the acceptance verdict.
+type DiscussionItem struct {
+	ID                    string `yaml:"id" json:"id"`
+	Topic                 string `yaml:"topic" json:"topic"`
+	Summary               string `yaml:"summary" json:"summary"`
+	RequiresHumanDecision bool   `yaml:"requires_human_decision" json:"requires_human_decision"`
 }
 
 // RevisionRequest records a PR comment or review instruction that must be addressed before acceptance.

@@ -30,7 +30,7 @@ func TestRenderPRBodyOmitsResolvedAttemptRisks(t *testing.T) {
 			{ID: "workspace-dirty-2", Type: "technical_debt", Detail: "old dirty tree", Mitigation: "recorded"},
 			{ID: "security-1", Type: "security", Detail: "manual review still needed", Mitigation: "review"},
 		},
-	}, "run-1")
+	})
 	if strings.Contains(body, "old test failed") || strings.Contains(body, "old dirty tree") {
 		t.Fatalf("PR body leaked resolved attempt risks:\n%s", body)
 	}
@@ -52,12 +52,50 @@ func TestRenderPRBodyIncludesDecisionRationale(t *testing.T) {
 			Reversibility:    "high",
 			NeedsHumanReview: true,
 		}},
-	}, "run-1")
+	})
 	for _, want := range []string{
 		"Record<string,string>",
 		"Matches CLI key=value flags",
 		"Reversibility: high",
 		"Human review suggested: true",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("PR body missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestRenderPRBodyIsReviewerFacing(t *testing.T) {
+	t.Parallel()
+	body := renderPRBody(task.Task{
+		ID:   "T1",
+		Goal: "Ship it",
+		Verification: task.Verification{Commands: []task.VerificationCommand{
+			{Cmd: "go test ./...", Status: "failed"},
+			{Cmd: "go vet ./...", Status: "passed"},
+			{Cmd: "go test ./...", Status: "passed"},
+		}},
+		DiscussionItems: []task.DiscussionItem{{
+			ID:                    "discussion-1",
+			Topic:                 "AC wording",
+			Summary:               "The implementation satisfies the fixed AC, but the wording could be clearer for future tasks.",
+			RequiresHumanDecision: true,
+		}},
+	})
+	for _, forbidden := range []string{"Run Evidence", "run-1", "runs/"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("PR body leaked local evidence detail %q:\n%s", forbidden, body)
+		}
+	}
+	if strings.Contains(body, "`go test ./...`: failed") {
+		t.Fatalf("PR body included superseded verification result:\n%s", body)
+	}
+	for _, want := range []string{
+		"## Final Verification",
+		"`go vet ./...`: passed",
+		"`go test ./...`: passed",
+		"## Discussion Items",
+		"Human decision required: true",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("PR body missing %q:\n%s", want, body)

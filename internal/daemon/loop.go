@@ -2,178 +2,265 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/shinpr/galley/internal/inputfiles"
 	"github.com/shinpr/galley/internal/profile"
 	"github.com/shinpr/galley/internal/result"
 	"github.com/shinpr/galley/internal/runner"
 	claudeguard "github.com/shinpr/galley/internal/runner/claude_guard_plugin"
 	"github.com/shinpr/galley/internal/supervisor"
 	"github.com/shinpr/galley/internal/task"
+	"github.com/shinpr/galley/internal/taskstate"
 	"github.com/shinpr/galley/internal/workspace"
 )
 
+const progressNoDiffThreshold = 2
+
 func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPath string, loaded *task.Task, prepared workspace.Prepared, runDir, runID string) error {
 	fmt.Fprintf(os.Stderr, "galley: task %s running in %s (run_id=%s)\n", loaded.ID, prepared.CWD, runID)
-	resolvedProfiles, err := resolveProfileFiles(opts, loaded.Scope.CWD)
+	profiles, err := loadSupervisorProfiles(opts, loaded, runDir)
 	if err != nil {
-		loaded.Status = "failed"
-		return failTaskMove(opts.Root, runningPath, loaded, err)
-	}
-	profiles, err := profile.LoadBundle(resolvedProfiles.QualityProfileFile, resolvedProfiles.EnvironmentProfileFile)
-	if err != nil {
-		loaded.Status = "failed"
-		return failTaskMove(opts.Root, runningPath, loaded, err)
-	}
-	if err := writeJSON(filepath.Join(runDir, "profiles.json"), struct {
-		Resolved resolvedProfileFiles `json:"resolved"`
-		Bundle   profile.Bundle       `json:"bundle"`
-	}{Resolved: resolvedProfiles, Bundle: profiles}); err != nil {
-		loaded.Status = "failed"
-		return failTaskMove(opts.Root, runningPath, loaded, err)
+		return taskstate.FailMove(opts.Root, runningPath, loaded, err)
 	}
 	prompt := task.RenderWorkOrderWithProfiles(executionTask(*loaded, prepared.CWD), profiles)
 	budget := attemptBudget(loaded.ExecutionPolicy.LoopBudget)
 	consecutiveNoDiff := 0
 	for attempt := 1; budget < 0 || attempt <= budget; attempt++ {
-		fmt.Fprintf(os.Stderr, "galley: task %s attempt %d/%s starting\n", loaded.ID, attempt, loaded.ExecutionPolicy.LoopBudget.String())
-		attemptDir := filepath.Join(runDir, fmt.Sprintf("attempt-%d", attempt))
-		if err := os.MkdirAll(attemptDir, 0o700); err != nil {
-			loaded.Status = "failed"
-			return failTaskMove(opts.Root, runningPath, loaded, fmt.Errorf("create attempt dir %s: %w", attemptDir, err))
-		}
-		effectiveTask := executionTask(*loaded, prepared.CWD)
-		effectiveTaskPath := filepath.Join(attemptDir, "task.effective.yaml")
-		if err := task.Save(effectiveTaskPath, effectiveTask); err != nil {
-			loaded.Status = "failed"
-			return failTaskMove(opts.Root, runningPath, loaded, err)
-		}
-		outcome, err := runExecutorAttempt(ctx, opts, effectiveTask, profiles, prepared.CWD, prepared.BaseSHA, attemptDir, prompt, effectiveTaskPath)
+		review, err := runOneSupervisorAttempt(ctx, supervisorAttemptRequest{
+			Opts:     opts,
+			Loaded:   loaded,
+			Prepared: prepared,
+			Profiles: profiles,
+			RunDir:   runDir,
+			RunID:    runID,
+			Attempt:  attempt,
+			Budget:   budget,
+			Prompt:   prompt,
+		})
 		if err != nil {
-			loaded.Status = "failed"
-			return failTaskMove(opts.Root, runningPath, loaded, err)
+			return taskstate.FailMove(opts.Root, runningPath, loaded, err)
 		}
-		mergeAttemptEvidence(loaded, outcome, runID, prepared.CWD, attemptDir)
-		if outcome.DiffErr == nil && !outcome.DiffDirty {
+		mergeAttemptEvidence(loaded, review.Outcome, runID, prepared.CWD, review.AttemptDir)
+		if review.Outcome.DiffErr == nil && !review.Outcome.DiffDirty {
 			consecutiveNoDiff++
 		} else {
 			consecutiveNoDiff = 0
 		}
-		evidence := supervisor.Evidence{
-			Task:         *loaded,
-			Profiles:     profiles,
-			Claude:       outcome.ClaudeResult,
-			ParseError:   outcome.ParseErr,
-			RunError:     outcome.RunErr,
-			DiffDirty:    outcome.DiffDirty,
-			Diff:         outcome.Diff,
-			DiffError:    outcome.DiffErr,
-			Attempt:      attempt,
-			AttemptsLeft: attemptsLeft(budget, attempt),
-		}
-		verdict, err := evaluateSupervisor(ctx, opts, evidence, attemptDir, prepared.CWD)
-		if err != nil {
-			loaded.Status = "failed"
-			return failTaskMove(opts.Root, runningPath, loaded, err)
-		}
-		if err := writeJSON(filepath.Join(attemptDir, "supervisor_verdict.json"), verdict); err != nil {
-			loaded.Status = "failed"
-			return failTaskMove(opts.Root, runningPath, loaded, err)
-		}
-		fmt.Fprintf(os.Stderr, "galley: task %s attempt %d verdict=%s summary=%s\n", loaded.ID, attempt, verdict.Status, verdict.Summary)
-		loaded.Attempts[len(loaded.Attempts)-1].SupervisorVerdict = verdict.Status
-		loaded.Attempts[len(loaded.Attempts)-1].Summary = fmt.Sprintf("%s; run_id=%s; attempt=%d; workspace=%s", verdict.Summary, runID, attempt, prepared.CWD)
+		fmt.Fprintf(os.Stderr, "galley: task %s attempt %d verdict=%s summary=%s\n", loaded.ID, attempt, review.Verdict.Status, review.Verdict.Summary)
+		loaded.Attempts[len(loaded.Attempts)-1].SupervisorVerdict = review.Verdict.Status
+		loaded.Attempts[len(loaded.Attempts)-1].Summary = fmt.Sprintf("%s; run_id=%s; attempt=%d; workspace=%s", review.Verdict.Summary, runID, attempt, prepared.CWD)
 		if err := task.Save(runningPath, *loaded); err != nil {
-			loaded.Status = "failed"
-			return failTaskMove(opts.Root, runningPath, loaded, err)
+			return taskstate.FailMove(opts.Root, runningPath, loaded, err)
 		}
-		if shutdownCtx.Err() != nil && verdict.Status == "needs_revision" {
-			loaded.Status = "needs_supervisor_review"
-			loaded.Risks = append(loaded.Risks, task.Risk{
-				ID:                   fmt.Sprintf("shutdown-%d", len(loaded.Risks)+1),
-				Type:                 "partial_verification",
-				Detail:               "Shutdown was requested after an attempt that needs revision; Galley did not start another retry attempt.",
-				Mitigation:           "Review the run evidence and requeue the task when ready.",
-				HumanReviewSuggested: true,
-			})
-			fmt.Fprintf(os.Stderr, "galley: task %s stopped after attempt %d due to shutdown\n", loaded.ID, attempt)
-			return moveTask(opts.Root, runningPath, "failed", loaded)
+		nextPrompt, done, err := applySupervisorVerdict(ctx, shutdownCtx, verdictApplication{
+			Opts:              opts,
+			RunningPath:       runningPath,
+			Loaded:            loaded,
+			Prepared:          prepared,
+			RunDir:            runDir,
+			Attempt:           attempt,
+			ConsecutiveNoDiff: consecutiveNoDiff,
+			Verdict:           review.Verdict,
+		})
+		if err != nil || done {
+			return err
 		}
-		if verdict.Status == "needs_revision" && consecutiveNoDiff >= 2 {
-			loaded.Status = "needs_supervisor_review"
-			loaded.Risks = append(loaded.Risks, task.Risk{
-				ID:                   fmt.Sprintf("progress-%d", len(loaded.Risks)+1),
-				Type:                 "partial_verification",
-				Detail:               "Two consecutive executor attempts produced no git diff.",
-				Mitigation:           "A supervisor should inspect the task, work order, and executor logs before requeueing.",
-				HumanReviewSuggested: true,
-			})
-			fmt.Fprintf(os.Stderr, "galley: task %s stopped by progress invariant: consecutive no-diff attempts\n", loaded.ID)
-			return moveTask(opts.Root, runningPath, "failed", loaded)
-		}
-
-		switch verdict.Status {
-		case "accepted":
-			markRevisionRequestsAddressed(loaded, verdict.Summary)
-			if opts.CommitOnAccept {
-				fmt.Fprintf(os.Stderr, "galley: task %s accepted; finalizing commit/pr\n", loaded.ID)
-				if err := finalizeAcceptedChange(ctx, opts, loaded, prepared.CWD, prepared.BaseSHA, runDir, runID); err != nil {
-					loaded.Status = "needs_supervisor_review"
-					loaded.Risks = append(loaded.Risks, task.Risk{
-						ID:                   fmt.Sprintf("finalize-%d", len(loaded.Risks)+1),
-						Type:                 "partial_verification",
-						Detail:               err.Error(),
-						Mitigation:           "The executor diff and run evidence were stored; a supervisor should inspect and finish commit or PR creation.",
-						HumanReviewSuggested: true,
-					})
-					return failTaskMove(opts.Root, runningPath, loaded, err)
-				}
-			} else if err := cleanupNonCommittedInputFiles(prepared.CWD, loaded.Files); err != nil {
-				loaded.Status = "needs_supervisor_review"
-				loaded.Risks = append(loaded.Risks, task.Risk{
-					ID:                   fmt.Sprintf("input-file-cleanup-%d", len(loaded.Risks)+1),
-					Type:                 "partial_verification",
-					Detail:               err.Error(),
-					Mitigation:           "Remove non-committed task input files from the execution workspace before archiving or reusing it.",
-					HumanReviewSuggested: true,
-				})
-				return failTaskMove(opts.Root, runningPath, loaded, err)
-			}
-			loaded.Status = "accepted"
-			if opts.OpenPR {
-				loaded.Status = "pr_opened"
-			}
-			fmt.Fprintf(os.Stderr, "galley: task %s completed with status=%s\n", loaded.ID, loaded.Status)
-			return moveTask(opts.Root, runningPath, "done", loaded)
-		case "needs_revision":
-			prompt = verdict.NextWorkOrder
+		if nextPrompt != "" {
+			prompt = nextPrompt
 			continue
-		case "hard_stop":
-			loaded.Status = "failed"
-			return moveTask(opts.Root, runningPath, "failed", loaded)
-		case "needs_supervisor_review":
-			loaded.Status = "needs_supervisor_review"
-			return moveTask(opts.Root, runningPath, "failed", loaded)
-		default:
-			loaded.Status = "needs_supervisor_review"
-			loaded.Risks = append(loaded.Risks, task.Risk{
-				ID:                   fmt.Sprintf("supervisor-verdict-%d", len(loaded.Risks)+1),
-				Type:                 "partial_verification",
-				Detail:               fmt.Sprintf("Supervisor returned unknown verdict status %q.", verdict.Status),
-				Mitigation:           "Inspect supervisor_verdict.json and rerun after correcting the supervisor output.",
-				HumanReviewSuggested: true,
-			})
-			fmt.Fprintf(os.Stderr, "galley: task %s unknown supervisor verdict=%q\n", loaded.ID, verdict.Status)
-			return moveTask(opts.Root, runningPath, "failed", loaded)
 		}
 	}
 	loaded.Status = "needs_supervisor_review"
 	fmt.Fprintf(os.Stderr, "galley: task %s exhausted attempts; needs supervisor review\n", loaded.ID)
-	return moveTask(opts.Root, runningPath, "failed", loaded)
+	return taskstate.Move(opts.Root, runningPath, "failed", loaded)
+}
+
+type attemptReview struct {
+	AttemptDir string
+	Outcome    attemptOutcome
+	Verdict    supervisor.Verdict
+}
+
+type supervisorAttemptRequest struct {
+	Opts     Options
+	Loaded   *task.Task
+	Prepared workspace.Prepared
+	Profiles profile.Bundle
+	RunDir   string
+	RunID    string
+	Attempt  int
+	Budget   int
+	Prompt   string
+}
+
+func loadSupervisorProfiles(opts Options, loaded *task.Task, runDir string) (profile.Bundle, error) {
+	resolvedProfiles, err := resolveProfileFiles(opts, loaded.Scope.CWD)
+	if err != nil {
+		return profile.Bundle{}, err
+	}
+	profiles, err := profile.LoadBundle(resolvedProfiles.QualityProfileFile, resolvedProfiles.EnvironmentProfileFile)
+	if err != nil {
+		return profile.Bundle{}, err
+	}
+	if err := writeJSON(filepath.Join(runDir, "profiles.json"), struct {
+		Resolved resolvedProfileFiles `json:"resolved"`
+		Bundle   profile.Bundle       `json:"bundle"`
+	}{Resolved: resolvedProfiles, Bundle: profiles}); err != nil {
+		return profile.Bundle{}, err
+	}
+	return profiles, nil
+}
+
+func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) (attemptReview, error) {
+	fmt.Fprintf(os.Stderr, "galley: task %s attempt %d/%s starting\n", req.Loaded.ID, req.Attempt, req.Loaded.ExecutionPolicy.LoopBudget.String())
+	attemptDir := filepath.Join(req.RunDir, fmt.Sprintf("attempt-%d", req.Attempt))
+	if err := os.MkdirAll(attemptDir, 0o700); err != nil {
+		return attemptReview{}, fmt.Errorf("create attempt dir %s: %w", attemptDir, err)
+	}
+	effectiveTask := executionTask(*req.Loaded, req.Prepared.CWD)
+	effectiveTaskPath := filepath.Join(attemptDir, "task.effective.yaml")
+	if err := task.Save(effectiveTaskPath, effectiveTask); err != nil {
+		return attemptReview{}, err
+	}
+	outcome, err := runExecutorAttempt(ctx, req.Opts, effectiveTask, req.Profiles, req.Prepared.CWD, req.Prepared.BaseSHA, attemptDir, req.Prompt, effectiveTaskPath)
+	if err != nil {
+		return attemptReview{}, err
+	}
+	evidence := supervisor.Evidence{
+		Task:         *req.Loaded,
+		Profiles:     req.Profiles,
+		Claude:       outcome.ClaudeResult,
+		ParseError:   outcome.ParseErr,
+		RunError:     outcome.RunErr,
+		DiffDirty:    outcome.DiffDirty,
+		Diff:         outcome.Diff,
+		DiffError:    outcome.DiffErr,
+		Attempt:      req.Attempt,
+		AttemptsLeft: attemptsLeft(req.Budget, req.Attempt),
+	}
+	verdict, err := evaluateSupervisor(ctx, req.Opts, evidence, attemptDir, req.Prepared.CWD)
+	if err != nil {
+		return attemptReview{}, err
+	}
+	if err := writeJSON(filepath.Join(attemptDir, "supervisor_verdict.json"), verdict); err != nil {
+		return attemptReview{}, err
+	}
+	return attemptReview{AttemptDir: attemptDir, Outcome: outcome, Verdict: verdict}, nil
+}
+
+type verdictApplication struct {
+	Opts              Options
+	RunningPath       string
+	Loaded            *task.Task
+	Prepared          workspace.Prepared
+	RunDir            string
+	Attempt           int
+	ConsecutiveNoDiff int
+	Verdict           supervisor.Verdict
+}
+
+func applySupervisorVerdict(ctx, shutdownCtx context.Context, req verdictApplication) (string, bool, error) {
+	if shutdownCtx.Err() != nil && req.Verdict.Status == "needs_revision" {
+		req.Loaded.Status = "needs_supervisor_review"
+		req.Loaded.Risks = append(req.Loaded.Risks, task.Risk{
+			ID:                   fmt.Sprintf("shutdown-%d", len(req.Loaded.Risks)+1),
+			Type:                 "partial_verification",
+			Detail:               "Shutdown was requested after an attempt that needs revision; Galley did not start another retry attempt.",
+			Mitigation:           "Review the run evidence and requeue the task when ready.",
+			HumanReviewSuggested: true,
+		})
+		fmt.Fprintf(os.Stderr, "galley: task %s stopped after attempt %d due to shutdown\n", req.Loaded.ID, req.Attempt)
+		return "", true, taskstate.Move(req.Opts.Root, req.RunningPath, "failed", req.Loaded)
+	}
+	if shutdownCtx.Err() != nil && req.Verdict.Status == "accepted" && req.Opts.CommitOnAccept {
+		req.Loaded.Status = "needs_supervisor_review"
+		req.Loaded.Risks = append(req.Loaded.Risks, task.Risk{
+			ID:                   fmt.Sprintf("shutdown-finalize-%d", len(req.Loaded.Risks)+1),
+			Type:                 "partial_verification",
+			Detail:               "Shutdown was requested before accepted work was finalized; Galley skipped commit, push, and PR creation to avoid an interrupted external side effect.",
+			Mitigation:           "Inspect the accepted diff and requeue or finalize manually when ready.",
+			HumanReviewSuggested: true,
+		})
+		fmt.Fprintf(os.Stderr, "galley: task %s accepted during shutdown; skipped finalization\n", req.Loaded.ID)
+		return "", true, taskstate.Move(req.Opts.Root, req.RunningPath, "failed", req.Loaded)
+	}
+	if req.Verdict.Status == "needs_revision" && req.ConsecutiveNoDiff >= progressNoDiffThreshold {
+		req.Loaded.Status = "needs_supervisor_review"
+		req.Loaded.Risks = append(req.Loaded.Risks, task.Risk{
+			ID:                   fmt.Sprintf("progress-%d", len(req.Loaded.Risks)+1),
+			Type:                 "partial_verification",
+			Detail:               "Two consecutive executor attempts produced no git diff.",
+			Mitigation:           "A supervisor should inspect the task, work order, and executor logs before requeueing.",
+			HumanReviewSuggested: true,
+		})
+		fmt.Fprintf(os.Stderr, "galley: task %s stopped by progress invariant: consecutive no-diff attempts\n", req.Loaded.ID)
+		return "", true, taskstate.Move(req.Opts.Root, req.RunningPath, "failed", req.Loaded)
+	}
+
+	switch req.Verdict.Status {
+	case "accepted":
+		return "", true, acceptSupervisorVerdict(ctx, req.Opts, req.RunningPath, req.Loaded, req.Prepared, req.RunDir, req.Verdict)
+	case "needs_revision":
+		return req.Verdict.NextWorkOrder, false, nil
+	case "hard_stop":
+		req.Loaded.Status = "failed"
+		return "", true, taskstate.Move(req.Opts.Root, req.RunningPath, "failed", req.Loaded)
+	case "needs_supervisor_review":
+		req.Loaded.Status = "needs_supervisor_review"
+		return "", true, taskstate.Move(req.Opts.Root, req.RunningPath, "failed", req.Loaded)
+	default:
+		req.Loaded.Status = "needs_supervisor_review"
+		req.Loaded.Risks = append(req.Loaded.Risks, task.Risk{
+			ID:                   fmt.Sprintf("supervisor-verdict-%d", len(req.Loaded.Risks)+1),
+			Type:                 "partial_verification",
+			Detail:               fmt.Sprintf("Supervisor returned unknown verdict status %q.", req.Verdict.Status),
+			Mitigation:           "Inspect supervisor_verdict.json and rerun after correcting the supervisor output.",
+			HumanReviewSuggested: true,
+		})
+		fmt.Fprintf(os.Stderr, "galley: task %s unknown supervisor verdict=%q\n", req.Loaded.ID, req.Verdict.Status)
+		return "", true, taskstate.Move(req.Opts.Root, req.RunningPath, "failed", req.Loaded)
+	}
+}
+
+func acceptSupervisorVerdict(ctx context.Context, opts Options, runningPath string, loaded *task.Task, prepared workspace.Prepared, runDir string, verdict supervisor.Verdict) error {
+	markRevisionRequestsAddressed(loaded, verdict.Summary)
+	mergeDiscussionItems(loaded, verdict)
+	if opts.CommitOnAccept {
+		fmt.Fprintf(os.Stderr, "galley: task %s accepted; finalizing commit/pr\n", loaded.ID)
+		if err := finalizeAcceptedChange(ctx, opts, loaded, prepared.CWD, prepared.BaseSHA, runDir); err != nil {
+			loaded.Status = "needs_supervisor_review"
+			loaded.Risks = append(loaded.Risks, task.Risk{
+				ID:                   fmt.Sprintf("finalize-%d", len(loaded.Risks)+1),
+				Type:                 "partial_verification",
+				Detail:               err.Error(),
+				Mitigation:           "The executor diff and run evidence were stored; a supervisor should inspect and finish commit or PR creation.",
+				HumanReviewSuggested: true,
+			})
+			return taskstate.FailMove(opts.Root, runningPath, loaded, err)
+		}
+	} else if err := inputfiles.CleanupNonCommitted(prepared.CWD, loaded.Files); err != nil {
+		loaded.Status = "needs_supervisor_review"
+		loaded.Risks = append(loaded.Risks, task.Risk{
+			ID:                   fmt.Sprintf("input-file-cleanup-%d", len(loaded.Risks)+1),
+			Type:                 "partial_verification",
+			Detail:               err.Error(),
+			Mitigation:           "Remove non-committed task input files from the execution workspace before archiving or reusing it.",
+			HumanReviewSuggested: true,
+		})
+		return taskstate.FailMove(opts.Root, runningPath, loaded, err)
+	}
+	loaded.Status = "accepted"
+	if opts.OpenPR {
+		loaded.Status = "pr_opened"
+	}
+	fmt.Fprintf(os.Stderr, "galley: task %s completed with status=%s\n", loaded.ID, loaded.Status)
+	return taskstate.Move(opts.Root, runningPath, "done", loaded)
 }
 
 func executionTask(loaded task.Task, workDir string) task.Task {
@@ -187,6 +274,8 @@ func evaluateSupervisor(ctx context.Context, opts Options, evidence supervisor.E
 		WorkDir:     workDir,
 		Timeout:     time.Duration(evidence.Task.ExecutionPolicy.TimeoutMS) * time.Millisecond,
 		ArtifactDir: attemptDir,
+		ClaudeBin:   opts.ClaudeBin,
+		CodexBin:    opts.CodexBin,
 	}, evidence)
 	if err != nil {
 		return supervisor.Verdict{}, err
@@ -211,6 +300,7 @@ type attemptOutcome struct {
 
 func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, profiles profile.Bundle, workDir, baseSHA, attemptDir, prompt, taskFile string) (attemptOutcome, error) {
 	claudeOpts := runner.FromTask(loaded)
+	claudeOpts.Bin = opts.ClaudeBin
 	claudeOpts.WorkDir = workDir
 	claudeOpts.SystemPromptFile = opts.SystemPromptFile
 	claudeOpts.JSONSchemaFile = opts.JSONSchemaFile
@@ -252,14 +342,14 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 	}
 
 	resultPath := filepath.Join(attemptDir, "claude_result.json")
-	claudeResult, parseErr := resolveClaudeResult(ctx, stdoutPath, runResult.Stdout, taskFile, resultPath, workDir, profiles)
+	claudeResult, parseErr := resolveClaudeResult(ctx, opts, stdoutPath, runResult.Stdout, taskFile, resultPath, workDir, profiles)
 	if parseErr == nil {
 		if err := writeJSON(resultPath, claudeResult); err != nil {
 			return attemptOutcome{}, err
 		}
 	}
 
-	diffSnapshot, diffErr := workspace.CaptureSnapshotFromBase(ctx, workDir, baseSHA)
+	diffSnapshot, diffErr := workspace.CaptureSnapshotFromBase(ctx, workDir, baseSHA, workspaceOptions(opts))
 	diffDirty := false
 	diffText := ""
 	if diffErr == nil {
@@ -286,7 +376,7 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 	}, nil
 }
 
-func resolveClaudeResult(ctx context.Context, stdoutPath, stdoutTail, taskFile, resultPath, workDir string, profiles profile.Bundle) (runner.ClaudeResult, error) {
+func resolveClaudeResult(ctx context.Context, opts Options, stdoutPath, stdoutTail, taskFile, resultPath, workDir string, profiles profile.Bundle) (runner.ClaudeResult, error) {
 	claudeResult, claudeErr := runner.ExtractClaudeResultFile(stdoutPath)
 	if claudeErr == nil && claudeResult.Status == "hard_stop" {
 		return claudeResult, nil
@@ -297,6 +387,7 @@ func resolveClaudeResult(ctx context.Context, stdoutPath, stdoutTail, taskFile, 
 		WorkDir:  workDir,
 		Summary:  "Task implementation completed and verification evidence was recorded by Galley.",
 		Profiles: profiles,
+		GitBin:   opts.GitBin,
 	})
 	if generatedErr == nil {
 		if claudeErr == nil {
@@ -311,13 +402,21 @@ func resolveClaudeResult(ctx context.Context, stdoutPath, stdoutTail, taskFile, 
 	if tailErr == nil {
 		return tailResult, nil
 	}
-	return runner.ClaudeResult{}, fmt.Errorf("resolve Claude result: verification evidence generation failed: %w; stdout file parse failed: %v; stdout tail parse failed: %v", generatedErr, claudeErr, tailErr)
+	return runner.ClaudeResult{}, errors.Join(
+		fmt.Errorf("verification evidence generation failed: %w", generatedErr),
+		fmt.Errorf("stdout file parse failed: %w", claudeErr),
+		fmt.Errorf("stdout tail parse failed: %w", tailErr),
+	)
 }
 
 func mergeExecutorJudgment(generated, reported runner.ClaudeResult) runner.ClaudeResult {
 	if reported.Summary != "" {
 		generated.Summary = generated.Summary + " Executor summary: " + reported.Summary
 	}
+	if len(reported.AcceptanceCriteria) > 0 {
+		generated.AcceptanceCriteria = reported.AcceptanceCriteria
+	}
+	generated.Verification = append(reported.Verification, generated.Verification...)
 	generated.Decisions = append(generated.Decisions, reported.Decisions...)
 	generated.Risks = append(generated.Risks, reported.Risks...)
 	if reported.Status == "completed_with_risks" && generated.Status == "completed" && len(reported.Risks) > 0 {
@@ -422,13 +521,21 @@ func mergeAttemptEvidence(loaded *task.Task, outcome attemptOutcome, runID, work
 	}
 }
 
+func mergeDiscussionItems(loaded *task.Task, verdict supervisor.Verdict) {
+	for _, item := range verdict.DiscussionItems {
+		loaded.DiscussionItems = append(loaded.DiscussionItems, task.DiscussionItem{
+			ID:                    fmt.Sprintf("discussion-%d", len(loaded.DiscussionItems)+1),
+			Topic:                 item.Topic,
+			Summary:               item.Summary,
+			RequiresHumanDecision: item.RequiresHumanDecision,
+		})
+	}
+}
+
 func mapAcceptanceStatus(status string) string {
 	switch status {
-	case "satisfied":
-		return "satisfied"
-	case "partially_satisfied", "not_satisfied":
-		// Task YAML stores conservative task state; the full Claude status remains in claude_result.json.
-		return "not_satisfied"
+	case "satisfied", "partially_satisfied", "not_satisfied":
+		return status
 	default:
 		return "unknown"
 	}

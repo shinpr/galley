@@ -3,7 +3,6 @@ package result
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shinpr/galley/internal/jsonio"
 	"github.com/shinpr/galley/internal/profile"
 	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/task"
@@ -23,9 +23,12 @@ type CompleteOptions struct {
 	WorkDir  string
 	Summary  string
 	Profiles profile.Bundle
+	GitBin   string
 }
 
-// Complete runs task verification commands and writes a validated Claude result JSON file.
+// Complete runs required profile checks and writes a validated Claude result
+// JSON file. Acceptance criterion verification strings are evidence guidance
+// for the executor and supervisor; Galley does not execute them as shell.
 func Complete(ctx context.Context, opts CompleteOptions) (runner.ClaudeResult, error) {
 	if opts.TaskFile == "" {
 		return runner.ClaudeResult{}, fmt.Errorf("task file is required")
@@ -61,33 +64,15 @@ func Complete(ctx context.Context, opts CompleteOptions) (runner.ClaudeResult, e
 	}
 
 	criteria := make([]runner.ClaudeAcceptanceCriterion, 0, len(loaded.AcceptanceCriteria))
-	verification := make([]runner.ClaudeVerification, 0, len(loaded.AcceptanceCriteria))
+	verification := []runner.ClaudeVerification{}
 	risks := []runner.ClaudeRisk{}
 	status := "completed"
 	for _, ac := range loaded.AcceptanceCriteria {
-		commandResult := runVerification(runCtx, workDir, ac.Verification)
-		acStatus := "satisfied"
-		if commandResult.err != nil {
-			acStatus = "not_satisfied"
-			status = "completed_with_risks"
-			risks = append(risks, runner.ClaudeRisk{
-				Type:             "partial_verification",
-				Detail:           fmt.Sprintf("%s failed: %s", ac.ID, commandResult.reason()),
-				Mitigation:       "Inspect the executor workspace and rerun the verification command after fixing the task output.",
-				NeedsHumanReview: true,
-			})
-		}
 		criteria = append(criteria, runner.ClaudeAcceptanceCriterion{
 			ID:       ac.ID,
-			Status:   acStatus,
-			Evidence: []string{commandResult.evidence()},
-			Notes:    commandResult.reason(),
-		})
-		verification = append(verification, runner.ClaudeVerification{
-			Command:       ac.Verification,
-			Status:        commandResult.status(),
-			Reason:        commandResult.reason(),
-			OutputExcerpt: commandResult.outputExcerpt(),
+			Status:   "not_satisfied",
+			Evidence: []string{},
+			Notes:    fmt.Sprintf("Acceptance verification guidance: %s", ac.Verification),
 		})
 	}
 	for _, check := range requiredChecks(opts.Profiles) {
@@ -109,7 +94,7 @@ func Complete(ctx context.Context, opts CompleteOptions) (runner.ClaudeResult, e
 		})
 	}
 
-	files, err := gitChangedFiles(runCtx, workDir)
+	files, err := gitChangedFiles(runCtx, workDir, opts.GitBin)
 	if err != nil {
 		status = "completed_with_risks"
 	}
@@ -140,12 +125,7 @@ func Complete(ctx context.Context, opts CompleteOptions) (runner.ClaudeResult, e
 	if err := os.MkdirAll(filepath.Dir(opts.Output), 0o700); err != nil {
 		return runner.ClaudeResult{}, fmt.Errorf("create result dir: %w", err)
 	}
-	data, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
-		return runner.ClaudeResult{}, err
-	}
-	data = append(data, '\n')
-	if err := os.WriteFile(opts.Output, data, 0o600); err != nil {
+	if err := jsonio.Write(opts.Output, result); err != nil {
 		return runner.ClaudeResult{}, fmt.Errorf("write result file %s: %w", opts.Output, err)
 	}
 	return result, nil
@@ -192,17 +172,17 @@ type verificationRun struct {
 }
 
 func runVerification(ctx context.Context, workDir, command string) verificationRun {
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
-	cmd.Dir = workDir
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
+	// Profile commands are trusted operator-authored shell commands. Run them
+	// through the shared runner so cancellation, process cleanup, and output
+	// bounding behave like the rest of Galley's subprocesses.
+	result, err := runner.RunCommand(ctx, runner.Command{
+		WorkDir: workDir,
+		Argv:    []string{"/bin/sh", "-c", command},
+	}, runner.RunOptions{TailBytes: 2048})
 	return verificationRun{
 		command: command,
-		stdout:  stdout.String(),
-		stderr:  stderr.String(),
+		stdout:  result.Stdout,
+		stderr:  result.Stderr,
 		err:     err,
 	}
 }
@@ -221,13 +201,6 @@ func (r verificationRun) reason() string {
 	return "verification command passed"
 }
 
-func (r verificationRun) evidence() string {
-	if r.err != nil {
-		return fmt.Sprintf("%s failed: %s", r.command, r.outputExcerpt())
-	}
-	return fmt.Sprintf("%s passed: %s", r.command, r.outputExcerpt())
-}
-
 func (r verificationRun) outputExcerpt() string {
 	output := strings.TrimSpace(strings.Join([]string{r.stdout, r.stderr}, "\n"))
 	if len(output) > 2048 {
@@ -236,8 +209,11 @@ func (r verificationRun) outputExcerpt() string {
 	return output
 }
 
-func gitChangedFiles(ctx context.Context, workDir string) ([]string, error) {
-	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain", "-z")
+func gitChangedFiles(ctx context.Context, workDir, gitBin string) ([]string, error) {
+	if gitBin == "" {
+		gitBin = "git"
+	}
+	cmd := exec.CommandContext(ctx, gitBin, "status", "--porcelain", "-z")
 	cmd.Dir = workDir
 	output, err := cmd.Output()
 	if err != nil {

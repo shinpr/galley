@@ -5,17 +5,11 @@ Use this reference when validating, repairing, or queueing a Galley task file.
 ## Validation Flow
 
 1. Locate the task file.
-2. Confirm it is under the daemon root's `tasks/draft/` directory or another user-specified path.
+2. Confirm it is a draft task file.
 3. Run validation:
 
 ```bash
 galley task validate <task-file>
-```
-
-or:
-
-```bash
-python3 plugins/galley/skills/galley/scripts/validate_task.py <task-file>
 ```
 
 4. Repair YAML or task fields until validation succeeds.
@@ -30,13 +24,9 @@ Queue only after the user approves the exact task file.
 galley task queue <task-file>
 ```
 
-or:
-
-```bash
-python3 plugins/galley/skills/galley/scripts/queue_task.py <task-file>
-```
-
 After queueing, report the queued path and the daemon command the user can run.
+
+Advanced roots: `galley task queue` normally targets the running daemon queue, or the default queue when no daemon is running. Pass `--root <path>` only when the user explicitly chose a non-default root. Pass `--move` only when the source draft file should be removed after queueing.
 
 ## Common Validation Fixes
 
@@ -51,7 +41,7 @@ After queueing, report the queued path and the daemon command the user can run.
 | `files[n].source is required` | Add the source path or remove the file entry. |
 | `files[n].destination is required` | Add the destination path where Galley should copy the input file in the worktree. |
 | `files[n].destination must stay within scope.allowed_paths` | Move the destination under an allowed path or expand `scope.allowed_paths` deliberately. |
-| `executor.cli must be claude` | Use `executor.cli: claude` for the current implementation. |
+| `executor.cli must be claude` | Use `executor.cli: claude`. |
 | `execution_policy.loop_budget must be positive` | Use a positive integer or `infinite`. |
 
 ## Approval Prompt

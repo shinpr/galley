@@ -75,17 +75,20 @@ func TestExtractClaudeResultRejectsHardStopWithoutDetails(t *testing.T) {
 
 func TestExtractClaudeResultRejectsInvalidNestedEnums(t *testing.T) {
 	t.Parallel()
-	tests := []string{
-		`{"status":"completed","summary":"done","files_modified":[],"acceptance_criteria":[{"id":"AC1","status":"ok","evidence":[],"notes":""}],"verification":[],"decisions":[],"risks":[]}`,
-		`{"status":"completed","summary":"done","files_modified":[],"acceptance_criteria":[],"verification":[{"command":"test","status":"ok","reason":"","output_excerpt":""}],"decisions":[],"risks":[]}`,
-		`{"status":"completed","summary":"done","files_modified":[],"acceptance_criteria":[],"verification":[],"decisions":[{"question":"q","chosen":"c","rationale":"r","reversibility":"sometimes","needs_human_review":false}],"risks":[]}`,
-		`{"status":"completed","summary":"done","files_modified":[],"acceptance_criteria":[],"verification":[],"decisions":[],"risks":[{"type":"bad","detail":"d","mitigation":"m","needs_human_review":false}]}`,
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{name: "invalid acceptance status", input: `{"status":"completed","summary":"done","files_modified":[],"acceptance_criteria":[{"id":"AC1","status":"ok","evidence":[],"notes":""}],"verification":[],"decisions":[],"risks":[]}`},
+		{name: "invalid verification status", input: `{"status":"completed","summary":"done","files_modified":[],"acceptance_criteria":[],"verification":[{"command":"test","status":"ok","reason":"","output_excerpt":""}],"decisions":[],"risks":[]}`},
+		{name: "invalid decision reversibility", input: `{"status":"completed","summary":"done","files_modified":[],"acceptance_criteria":[],"verification":[],"decisions":[{"question":"q","chosen":"c","rationale":"r","reversibility":"sometimes","needs_human_review":false}],"risks":[]}`},
+		{name: "invalid risk type", input: `{"status":"completed","summary":"done","files_modified":[],"acceptance_criteria":[],"verification":[],"decisions":[],"risks":[{"type":"bad","detail":"d","mitigation":"m","needs_human_review":false}]}`},
 	}
-	for _, input := range tests {
-		input := input
-		t.Run(input[:30], func(t *testing.T) {
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := ExtractClaudeResult(input)
+			_, err := ExtractClaudeResult(tt.input)
 			if err == nil {
 				t.Fatal("expected error")
 			}
@@ -95,17 +98,20 @@ func TestExtractClaudeResultRejectsInvalidNestedEnums(t *testing.T) {
 
 func TestExtractClaudeResultRejectsNestedRequiredFields(t *testing.T) {
 	t.Parallel()
-	tests := []string{
-		`{"status":"completed","summary":"done","files_modified":[],"acceptance_criteria":[{"id":"","status":"satisfied","evidence":[],"notes":""}],"verification":[],"decisions":[],"risks":[]}`,
-		`{"status":"completed","summary":"done","files_modified":[],"acceptance_criteria":[],"verification":[{"command":"","status":"passed","reason":"ok","output_excerpt":""}],"decisions":[],"risks":[]}`,
-		`{"status":"completed","summary":"done","files_modified":[],"acceptance_criteria":[],"verification":[],"decisions":[{"question":"","chosen":"c","rationale":"r","reversibility":"high","needs_human_review":false}],"risks":[]}`,
-		`{"status":"completed","summary":"done","files_modified":[],"acceptance_criteria":[],"verification":[],"decisions":[],"risks":[{"type":"other","detail":"","mitigation":"m","needs_human_review":false}]}`,
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{name: "missing acceptance id", input: `{"status":"completed","summary":"done","files_modified":[],"acceptance_criteria":[{"id":"","status":"satisfied","evidence":[],"notes":""}],"verification":[],"decisions":[],"risks":[]}`},
+		{name: "missing verification command", input: `{"status":"completed","summary":"done","files_modified":[],"acceptance_criteria":[],"verification":[{"command":"","status":"passed","reason":"ok","output_excerpt":""}],"decisions":[],"risks":[]}`},
+		{name: "missing decision question", input: `{"status":"completed","summary":"done","files_modified":[],"acceptance_criteria":[],"verification":[],"decisions":[{"question":"","chosen":"c","rationale":"r","reversibility":"high","needs_human_review":false}],"risks":[]}`},
+		{name: "missing risk detail", input: `{"status":"completed","summary":"done","files_modified":[],"acceptance_criteria":[],"verification":[],"decisions":[],"risks":[{"type":"other","detail":"","mitigation":"m","needs_human_review":false}]}`},
 	}
-	for _, input := range tests {
-		input := input
-		t.Run(input[:30], func(t *testing.T) {
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := ExtractClaudeResult(input)
+			_, err := ExtractClaudeResult(tt.input)
 			if err == nil {
 				t.Fatal("expected error")
 			}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/shinpr/galley/internal/profile"
 	"github.com/shinpr/galley/internal/runner"
+	claudeguard "github.com/shinpr/galley/internal/runner/claude_guard_plugin"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/prompts"
 	"github.com/shinpr/galley/schemas"
@@ -134,13 +135,14 @@ func runCodexAdapter(ctx context.Context, opts AdapterOptions, request []byte) (
 			opts.CodexBin,
 			"exec",
 			"--cd", opts.WorkDir,
-			"--sandbox", "read-only",
+			"--sandbox", "workspace-write",
 			"--json",
 			"--output-schema", schemaPath,
 			"--output-last-message", outPath,
 			"-",
 		},
 		Stdin: prompt,
+		Env:   runner.RestrictedEnv(),
 	}, runner.RunOptions{Timeout: opts.Timeout, StdoutPath: eventsPath})
 	if err != nil {
 		return nil, fmt.Errorf("codex supervisor failed: %w", err)
@@ -165,16 +167,21 @@ func runClaudeAdapter(ctx context.Context, opts AdapterOptions, request []byte) 
 	if err := writeSupervisorFile(requestPath, request); err != nil {
 		return nil, err
 	}
+	guardDir, err := claudeguard.Ensure(filepath.Join(dir, "claude-guard-plugin"))
+	if err != nil {
+		return nil, err
+	}
 	args := []string{
 		opts.ClaudeBin,
 		"-p",
 		"--no-session-persistence",
-		"--permission-mode", "plan",
+		"--permission-mode", "bypassPermissions",
 		"--tools", "default",
-		"--allowedTools", "Read,Grep,Glob,Bash(pwd),Bash(ls *),Bash(rg *),Bash(sed -n *),Bash(git diff *),Bash(git status *),Bash(go test *),Bash(pnpm test *),Bash(pnpm typecheck *),Bash(npm test *)",
+		"--disallowedTools", "Write,Edit,MultiEdit,NotebookEdit",
 		"--output-format", "text",
 		"--system-prompt", prompts.ClaudeSupervisor(),
 		"--json-schema", schemas.SupervisorVerdict,
+		"--plugin-dir", guardDir,
 	}
 	if opts.ArtifactDir != "" {
 		args = append(args, "--debug-file", debugPath)
@@ -183,6 +190,7 @@ func runClaudeAdapter(ctx context.Context, opts AdapterOptions, request []byte) 
 		WorkDir: opts.WorkDir,
 		Argv:    args,
 		Stdin:   string(request),
+		Env:     runner.RestrictedEnv("GALLEY_CLAUDE_GUARD_MODE=supervisor"),
 	}, runner.RunOptions{Timeout: opts.Timeout, StdoutPath: stdoutPath})
 	if err != nil {
 		return nil, fmt.Errorf("claude supervisor failed: %w", err)

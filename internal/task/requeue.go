@@ -1,18 +1,19 @@
 package task
 
 import (
+	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
+	"github.com/shinpr/galley/internal/strutil"
 	"go.yaml.in/yaml/v3"
 )
 
 // RequeueOptions controls how a task is returned to the queued state.
 type RequeueOptions struct {
 	Reason              string
+	Root                string
 	ProcessedCommentIDs []string
 	RevisionRequests    []RevisionRequest
 }
@@ -44,7 +45,7 @@ func Requeue(path string, opts RequeueOptions) (RequeueResult, error) {
 	}
 	for _, request := range opts.RevisionRequests {
 		if request.ID == "" {
-			request.ID = fmt.Sprintf("revision-%d", len(loaded.RevisionRequests)+1)
+			request.ID = nextRevisionRequestID(loaded.RevisionRequests)
 		}
 		if request.Status == "" {
 			request.Status = "pending"
@@ -52,7 +53,7 @@ func Requeue(path string, opts RequeueOptions) (RequeueResult, error) {
 		if request.Source == "" {
 			request.Source = "manual"
 		}
-		if !containsRevisionRequest(loaded.RevisionRequests, request.ID) {
+		if !ContainsRevisionRequest(loaded.RevisionRequests, request.ID) {
 			loaded.RevisionRequests = append(loaded.RevisionRequests, request)
 		}
 	}
@@ -71,64 +72,57 @@ func Requeue(path string, opts RequeueOptions) (RequeueResult, error) {
 		CompletedAt:       time.Now().UTC().Format(time.RFC3339Nano),
 		ClaudeStatus:      "not_run",
 		SupervisorVerdict: "requeued",
-		Summary:           firstNonEmpty(opts.Reason, "Task requeued for another executor attempt."),
+		Summary:           strutil.FirstNonEmpty(opts.Reason, "Task requeued for another executor attempt."),
 	})
 
-	nextPath := queuedPathFor(path)
+	nextPath := queuedPathFor(path, opts.Root)
 	if nextPath == path {
 		if err := Save(path, loaded); err != nil {
 			return RequeueResult{}, err
 		}
 	} else {
-		if err := writeMovedTask(path, nextPath, loaded); err != nil {
+		if err := writeQueuedTask(path, nextPath, loaded, taskPathUnderRoot(path, opts.Root)); err != nil {
 			return RequeueResult{}, err
 		}
 	}
 	return RequeueResult{Task: loaded, From: path, To: nextPath}, nil
 }
 
-func queuedPathFor(path string) string {
-	return siblingTaskPath(path, "queued")
+func nextRevisionRequestID(requests []RevisionRequest) string {
+	for i := len(requests) + 1; ; i++ {
+		id := fmt.Sprintf("revision-%d", i)
+		if !ContainsRevisionRequest(requests, id) {
+			return id
+		}
+	}
 }
 
-func writeMovedTask(src, dst string, loaded Task) error {
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return fmt.Errorf("create queue dir %s: %w", filepath.Dir(dst), err)
-	}
+// WriteMovedTask writes task YAML to dst without overwriting and removes src after success.
+func WriteMovedTask(src, dst string, loaded Task) error {
+	return writeQueuedTask(src, dst, loaded, true)
+}
+
+func writeQueuedTask(src, dst string, loaded Task, removeSource bool) error {
 	data, err := yaml.Marshal(loaded)
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", dst, err)
 	}
-	file, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		if os.IsExist(err) {
-			return fmt.Errorf("destination already exists: %s", dst)
+	if err := writeFileNoOverwriteAtomic(dst, data, 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", dst, err)
+	}
+	if removeSource {
+		if err := os.Remove(src); err != nil {
+			rollbackErr := os.Remove(dst)
+			if rollbackErr != nil {
+				return errors.Join(
+					fmt.Errorf("remove moved task %s: %w", src, err),
+					fmt.Errorf("rollback queued task %s: %w", dst, rollbackErr),
+				)
+			}
+			return fmt.Errorf("remove moved task %s: %w", src, err)
 		}
-		return fmt.Errorf("reserve destination %s: %w", dst, err)
-	}
-	if _, err := file.Write(data); err != nil {
-		_ = os.Remove(dst)
-		_ = file.Close()
-		return fmt.Errorf("write %s: %w", dst, err)
-	}
-	if err := file.Close(); err != nil {
-		_ = os.Remove(dst)
-		return fmt.Errorf("write %s: %w", dst, err)
-	}
-	if err := os.Remove(src); err != nil {
-		_ = os.Remove(dst)
-		return fmt.Errorf("remove moved task %s: %w", src, err)
 	}
 	return nil
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
 }
 
 func containsString(values []string, want string) bool {
@@ -140,7 +134,8 @@ func containsString(values []string, want string) bool {
 	return false
 }
 
-func containsRevisionRequest(values []RevisionRequest, wantID string) bool {
+// ContainsRevisionRequest reports whether values already include wantID.
+func ContainsRevisionRequest(values []RevisionRequest, wantID string) bool {
 	for _, value := range values {
 		if value.ID == wantID {
 			return true

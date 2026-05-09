@@ -27,7 +27,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Create a Galley task YAML skeleton.")
     parser.add_argument("title", help="Short task title used for id and branch.")
     parser.add_argument("--cwd", required=True, help="Absolute target repository path.")
-    parser.add_argument("--root", default=str(pathlib.Path.home() / ".galley"), help="Galley daemon root.")
+    parser.add_argument("--output-dir", default=".", help="Directory for the draft task YAML.")
+    parser.add_argument("--root", help=argparse.SUPPRESS)
     parser.add_argument("--loop-budget", default="2", help='Positive integer or "infinite".')
     parser.add_argument("--allowed-path", action="append", default=["."], help="Relative path allowed for edits. Repeatable.")
     parser.add_argument(
@@ -63,10 +64,12 @@ def main() -> int:
 
     short = slugify(args.title)
     task_id = f"task-{dt.datetime.now(dt.UTC).strftime('%Y%m%d')}-{short}"
-    root = pathlib.Path(args.root)
-    draft_dir = root / "tasks" / "draft"
-    draft_dir.mkdir(parents=True, exist_ok=True)
-    task_file = draft_dir / f"{task_id}.yaml"
+    if args.root:
+        output_dir = pathlib.Path(args.root).expanduser() / "tasks" / "draft"
+    else:
+        output_dir = pathlib.Path(args.output_dir).expanduser()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    task_file = output_dir / f"{task_id}.yaml"
 
     allowed = "\n".join(f"    - {path}" for path in args.allowed_path)
     file_entries: list[str] = []
@@ -102,7 +105,7 @@ goal: TODO: replace with one concrete outcome.
 acceptance_criteria:
   - id: AC1
     text: TODO: observable requirement.
-    verification: TODO: command or evidence source.
+    verification: TODO: verification method or evidence source.
     status: pending
 scope:
   cwd: {cwd}

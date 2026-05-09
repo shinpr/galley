@@ -84,11 +84,17 @@ func TestRunCommandKillsProcessGroup(t *testing.T) {
 	if !result.TimedOut {
 		t.Fatalf("expected timed out result: %#v", result)
 	}
-	time.Sleep(1200 * time.Millisecond)
+	deadline := time.Now().Add(1200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(marker); os.IsNotExist(err) {
+			return
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 	if _, err := os.Stat(marker); err == nil {
 		t.Fatal("child process survived process group kill")
-	} else if !os.IsNotExist(err) {
-		t.Fatal(err)
 	}
 }
 

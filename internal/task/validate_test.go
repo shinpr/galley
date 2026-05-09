@@ -153,6 +153,13 @@ func TestValidateStructuralRejectsInvalidCases(t *testing.T) {
 			want: `files[0].destination contains parent traversal path "../plan.md"`,
 		},
 		{
+			name: "parent input file source",
+			mutate: func(task *Task) {
+				task.Files = []InputFile{{Source: "../plan.md", Destination: "src/plan.md"}}
+			},
+			want: `files[0].source contains parent traversal path "../plan.md"`,
+		},
+		{
 			name: "input file outside allowed paths",
 			mutate: func(task *Task) {
 				task.Scope.AllowedPaths = []string{"src"}

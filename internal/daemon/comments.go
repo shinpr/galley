@@ -23,12 +23,13 @@ func pollPRComments(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
+	var errs []error
 	for _, path := range candidates {
 		if err := processTaskPRComments(ctx, opts, path); err != nil {
-			return err
+			errs = append(errs, err)
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func tasksWithPR(root string) ([]string, error) {
@@ -52,7 +53,7 @@ func processTaskPRComments(ctx context.Context, opts Options, path string) error
 	if loaded.PR.URL == "" {
 		return nil
 	}
-	comments, err := vcs.FetchPRComments(ctx, opts.Root, loaded.PR.URL)
+	comments, err := vcs.FetchPRComments(ctx, vcsBinaries(opts), opts.Root, loaded.PR.URL)
 	if err != nil {
 		return err
 	}
@@ -72,7 +73,7 @@ func processTaskPRComments(ctx context.Context, opts Options, path string) error
 				return err
 			}
 			if opts.ReplyPRComments {
-				if err := vcs.PostPRComment(ctx, opts.Root, loaded.PR.URL, fmt.Sprintf("Galley ignored comment %s from @%s because author_association=%s is not allowed.", command.CommentID, comment.User.Login, comment.AuthorAssociation)); err != nil {
+				if err := vcs.PostPRComment(ctx, vcsBinaries(opts), opts.Root, loaded.PR.URL, fmt.Sprintf("Galley ignored comment %s from @%s because author_association=%s is not allowed.", command.CommentID, comment.User.Login, comment.AuthorAssociation)); err != nil {
 					errs = append(errs, err)
 				}
 			}
@@ -84,7 +85,7 @@ func processTaskPRComments(ctx context.Context, opts Options, path string) error
 				return err
 			}
 			if opts.ReplyPRComments {
-				if err := vcs.PostPRComment(ctx, opts.Root, loaded.PR.URL, fmt.Sprintf("Galley noted comment %s; task is already %s.", command.CommentID, loaded.Status)); err != nil {
+				if err := vcs.PostPRComment(ctx, vcsBinaries(opts), opts.Root, loaded.PR.URL, fmt.Sprintf("Galley noted comment %s; task is already %s.", command.CommentID, loaded.Status)); err != nil {
 					errs = append(errs, err)
 				}
 			}
@@ -120,10 +121,11 @@ func processTaskPRComments(ctx context.Context, opts Options, path string) error
 		path = result.To
 		loaded = result.Task
 		if opts.ReplyPRComments {
-			if err := vcs.PostPRComment(ctx, opts.Root, loaded.PR.URL, fmt.Sprintf("Galley requeued task `%s` from comment %s. Reason: %s", loaded.ID, command.CommentID, command.Reason)); err != nil {
+			if err := vcs.PostPRComment(ctx, vcsBinaries(opts), opts.Root, loaded.PR.URL, fmt.Sprintf("Galley requeued task `%s` from comment %s. Reason: %s", loaded.ID, command.CommentID, command.Reason)); err != nil {
 				errs = append(errs, err)
 			}
 		}
+		break
 	}
 	return errors.Join(errs...)
 }
@@ -139,23 +141,14 @@ func applyPRCommandToLoadedTask(loaded *task.Task, command prCommand) {
 		Text:      command.Reason,
 		Status:    "pending",
 	}
-	if !containsRevisionRequest(loaded.RevisionRequests, request.ID) {
+	if !task.ContainsRevisionRequest(loaded.RevisionRequests, request.ID) {
 		loaded.RevisionRequests = append(loaded.RevisionRequests, request)
 	}
 }
 
-func containsRevisionRequest(values []task.RevisionRequest, wantID string) bool {
-	for _, value := range values {
-		if value.ID == wantID {
-			return true
-		}
-	}
-	return false
-}
-
 func trustedPRCommentAuthor(comment vcs.PRComment) bool {
 	switch comment.AuthorAssociation {
-	case "OWNER", "MEMBER", "COLLABORATOR":
+	case "OWNER", "COLLABORATOR":
 		return true
 	default:
 		return false

@@ -179,6 +179,33 @@ func TestValidateVerdictForEvidenceRejectsBlocksAcceptanceMismatch(t *testing.T)
 	}
 }
 
+func TestValidateVerdictForEvidenceAllowsDiscussionItemsOnlyForAccepted(t *testing.T) {
+	evidence := Evidence{
+		Task: task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},
+	}
+	accepted := Verdict{
+		Status:             "accepted",
+		Summary:            "ok",
+		ReviewedFiles:      []string{"README.md"},
+		AcceptanceEvidence: []AcceptanceEvidence{{ACID: "AC1", Evidence: []string{"diff"}}},
+		DiscussionItems:    []DiscussionItem{{Topic: "AC wording", Summary: "Future tasks could clarify value coercion."}},
+		Confidence:         "medium",
+	}
+	if err := ValidateVerdictForEvidence(accepted, evidence); err != nil {
+		t.Fatalf("accepted discussion item rejected: %v", err)
+	}
+	revision := Verdict{
+		Status:          "needs_revision",
+		Summary:         "fix it",
+		DiscussionItems: []DiscussionItem{{Topic: "AC wording", Summary: "Not relevant before acceptance."}},
+		Confidence:      "medium",
+		NextWorkOrder:   "fix it",
+	}
+	if err := ValidateVerdictForEvidence(revision, evidence); err == nil || !strings.Contains(err.Error(), "discussion_items") {
+		t.Fatalf("expected non-accepted discussion item rejection, got %v", err)
+	}
+}
+
 func TestNewAdapterRequestSerializesErrorsAsStrings(t *testing.T) {
 	request := NewAdapterRequest(Evidence{
 		ParseError:   errors.New("bad json"),

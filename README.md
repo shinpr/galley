@@ -14,8 +14,6 @@ Status: early preview.
 
 Galley is intended to run from any repository you are working in, so install the `galley` binary on your `PATH`.
 
-For guided setup, install the plugin and ask the Galley skill to create profiles, task YAML, and queueing commands for your repository. See [Plugin And Skill](#plugin-and-skill).
-
 Install the latest GitHub Release binary:
 
 ```sh
@@ -36,7 +34,26 @@ Or use Go directly:
 go install github.com/shinpr/galley/cmd/galley@latest
 ```
 
-The installer installs the `galley` CLI. Queue processing and background daemon control are available under `galley daemon ...`.
+The installer installs the `galley` CLI. After installation, use the plugin skill for normal setup and task authoring. The skill inspects the repository, creates `quality.yaml` and `environment.yaml`, drafts valid task YAML, explains the execution settings, and queues only after approval.
+
+For Claude Code:
+
+```text
+/plugin marketplace add shinpr/galley
+/plugin install galley@galley-tools
+/reload-plugins
+/galley:galley Set up Galley for this repository.
+```
+
+For Codex:
+
+```sh
+codex plugin marketplace add shinpr/galley
+```
+
+Then invoke the skill with `$galley`.
+
+Use the CLI directly when checking installation, inspecting status, or operating the daemon:
 
 ```sh
 galley --help
@@ -48,7 +65,7 @@ galley daemon run --once
 
 ## Plugin And Skill
 
-Galley includes a plugin that packages one Agent Skill for Claude Code and Codex. This is the easiest setup path: install the plugin, ask the skill to inspect your repository, and let it draft profiles, task YAML, validation steps, queueing commands, and troubleshooting guidance.
+Galley includes a plugin that packages one Agent Skill for Claude Code and Codex. This is the recommended setup and authoring path: install the plugin, ask the skill to inspect your repository, and let it draft profiles, task YAML, validation steps, queueing commands, and troubleshooting guidance.
 
 Profiles are worth setting up early. They tell Galley which commands are available, which quality checks are required, what evidence the supervisor should expect, and which findings should block acceptance. The skill can create these interactively from the target repository.
 
@@ -232,21 +249,25 @@ Galley also records `workspace.json` for the effective execution workspace and w
 
 ## Quick Start
 
-Install the CLI, then use the plugin skill to create repository profiles and a draft task:
+Install the CLI and plugin, then ask the skill to set up the current repository:
 
-```sh
-./scripts/install.sh
-galley profile resolve --cwd /path/to/repo --mkdir --output json
+```text
+/galley:galley Set up Galley for this repository.
 ```
 
-After the skill writes and validates a draft task, approve queueing and process the queue:
+The examples here use the Claude Code slash command. In Codex, use `$galley` with the same request text.
 
-```sh
-galley task queue ./TASK.yaml --reason "queue for daemon"
-galley daemon start
+The skill will resolve the profile paths, inspect the repository, propose `quality.yaml` and `environment.yaml`, validate them, and ask whether to start the daemon.
+
+For a task, describe the work to the skill:
+
+```text
+/galley:galley Create a Galley task for this feature request and queue it after approval.
 ```
 
-The daemon root defaults to `~/.galley`, and `galley task queue` targets the running daemon root when one is available. Use `--root <path>` only for repo-local, test, or advanced multi-root workflows. Use `--move` only when the source draft should be removed after queueing.
+The skill asks for reference files when needed, confirms scope and execution settings, writes a draft task YAML, validates it, and asks before queueing. If the daemon is running, it will pick up queued tasks and move accepted work toward a PR according to `environment.yaml`.
+
+The daemon root defaults to `~/.galley`, and `galley task queue` targets the running daemon root when one is available. Use `--root <path>` only for repo-local, test, or advanced multi-root workflows.
 
 For one-shot local checks, use `galley daemon run --once` to drain the current queue and exit.
 

@@ -35,19 +35,20 @@ Treat executor `hard_stop` as a claim to review, not as an automatic final state
 
 1. Compare each task acceptance criterion to changed files and verification evidence.
 2. Treat every `task.revision_requests[]` item whose status is not `addressed` as an additional acceptance criterion. Use acceptance evidence id `revision:<request.id>` for those entries.
-3. Check whether executor claims are supported by diff, command output, or explicit skipped-verification reasons.
-4. Check for unrelated changes, out-of-scope writes, reverted user work, incomplete stubs, hollow tests, and TODO-only implementations.
-5. Check whether verification commands are relevant to the changed behavior.
-6. Check whether quality profile required checks have passed evidence.
-7. Check whether decisions are reversible and recorded.
-8. Check `task.files` when present: committed input files may appear in the diff when relevant; non-committed input files inform the work and stay out of the final diff.
-9. For user-facing interface tasks, evaluate stated quality profile items such as accessibility, responsive behavior, visual consistency, and design-source references when provided.
-10. For external-interface, data, or integration tasks, evaluate contract behavior, data integrity, error handling, state changes, requirement boundaries, value conversion, entry-point/consumer consistency, and security-sensitive boundaries when provided.
-11. For behavior-changing tasks, map each changed requirement as: user-visible obligation -> implementation path -> affected contracts -> primary failure mode -> evidence that would fail if the implementation were wrong.
-12. Treat a misplaced requirement boundary as a concrete finding when the implementation enforces a requirement after an earlier step has already made a violation hard to observe, recover, prevent, or attribute.
-13. For infra tasks, evaluate idempotency, environment targeting, secrets handling, rollout or rollback risk, and plan or apply evidence when provided.
-14. Apply task-specific quality profile rules, pending revision requests, and any task playbook included in the evidence as boundary contracts.
-15. When a rationale in one changed file depends on a design rule, layering rule, ownership boundary, dependency direction, or compatibility policy, check the other changed files for the same rule before accepting.
+3. For each pending revision request, after checking the direct request, review adjacent cases within the read-only context from the Required Review Flow that share the same changed path, contract, persisted state, or external boundary. Examples include fallback behavior, stale state, retries, and external calls; use only categories relevant to the change. Acceptance requires the revision request, original ACs, and relevant adjacent cases to agree.
+4. Check whether executor claims are supported by diff, command output, or explicit skipped-verification reasons.
+5. Check for unrelated changes, out-of-scope writes, reverted user work, incomplete stubs, hollow tests, and TODO-only implementations.
+6. Check whether verification commands are relevant to the changed behavior.
+7. Check whether quality profile required checks have passed evidence.
+8. Check whether decisions are reversible and recorded.
+9. Check `task.files` when present: committed input files may appear in the diff when relevant; non-committed input files inform the work and stay out of the final diff.
+10. For user-facing interface tasks, evaluate stated quality profile items such as accessibility, responsive behavior, visual consistency, and design-source references when provided.
+11. For external-interface, data, or integration tasks, evaluate contract behavior, data integrity, error handling, state changes, requirement boundaries, value conversion, entry-point/consumer consistency, and security-sensitive boundaries when provided.
+12. For behavior-changing tasks, map each changed requirement as: user-visible obligation -> implementation path -> affected contracts -> primary failure mode -> evidence that would fail if the implementation were wrong.
+13. Treat a misplaced requirement boundary as a concrete finding when the implementation enforces a requirement after an earlier step has already made a violation hard to observe, recover, prevent, or attribute.
+14. For infra tasks, evaluate idempotency, environment targeting, secrets handling, rollout or rollback risk, and plan or apply evidence when provided.
+15. Apply task-specific quality profile rules, pending revision requests, and any task playbook included in the evidence as boundary contracts.
+16. When a rationale in one changed file depends on a design rule, layering rule, ownership boundary, dependency direction, or compatibility policy, check the other changed files for the same rule before accepting.
 
 # Finding Policy
 
@@ -83,7 +84,6 @@ Pending revision requests come from user or reviewer PR comments. They are autho
 - If a pending revision request is already satisfied by existing repository evidence, explain the exact evidence in `summary` or `acceptance_evidence`.
 - If a pending revision request is ambiguous or conflicts with the task, return `needs_supervisor_review`.
 - If the executor produced no diff after a pending revision request, accept only when the evidence proves the request was already satisfied before the attempt.
-- After checking the direct request, review the neighboring paths affected by the fix: fallback behavior, stale or persisted state, retries, external calls, and compatibility with the original ACs. Acceptance requires the revision request, original ACs, and relevant adjacent cases to remain coherent together.
 
 # Output Contract
 

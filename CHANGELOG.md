@@ -6,6 +6,8 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.3.0 - 2026-05-11
+
 ### Added
 
 - Idle-output watchdog for executor runs and built-in model supervisor runs. When a subprocess produces no stdout/stderr for `--idle-timeout` (default 10 minutes; configurable on the daemon), Galley terminates its process group and records a distinct idle-timeout result instead of hanging on a stalled command. The attempt is marked with `error_kind: idle_timeout` and `claude_status: idle_timed_out`, `runs/<run-id>/.../run_result.json` gains `idle_timed_out: true`, and the task loop continues according to its loop budget. The watchdog is independent of the existing total per-attempt timeout.
@@ -16,8 +18,8 @@ This project follows semantic versioning.
 ### Changed
 
 - Restart recovery can reuse an existing task worktree that still has context-only (`commit: false`) input files from a prior run: a destination whose content already matches the task input source is refreshed for a clean re-copy, while a destination with conflicting content fails the claimed task in the `input_files` phase with clear evidence instead of crashing the workspace setup. Committed input files keep the previous overwrite-refusing behavior. The reconciler resolves each destination through the same containment rules as input-file preparation before reading or removing it, so a symlinked destination parent that escapes the worktree is left for the normal input-file validation to reject rather than redirecting a read or delete outside the worktree.
-- Improved Galley task-authoring guidance so reference-file intake happens before additional task scoping questions, supplied plans are treated as single-task implementation guidance, execution settings scale from ordinary-task baselines, and approval summaries favor referenceable decision items over fixed table layouts.
-- Bumped the packaged Claude and Codex Galley plugins to `0.1.3`.
+- Packaged Claude and Codex Galley plugins are now versioned as `0.1.3`: task-authoring guidance improves reference-file intake order, treats supplied plans as single-task implementation guidance, scales execution settings from ordinary-task baselines, and favors referenceable decision items over fixed table layouts.
+- Packaged Claude and Codex Galley plugins are now versioned as `0.1.4`: task authoring presents AC test skeleton preflight as one Task YAML execution setting and leaves generated test output details to the skeleton creator.
 
 ## v0.2.1 - 2026-05-10
 

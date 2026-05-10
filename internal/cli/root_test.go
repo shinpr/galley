@@ -334,6 +334,88 @@ func TestTaskShowByIDWithDots(t *testing.T) {
 	}
 }
 
+func TestTaskShowAcceptedTerminalSuppressesPriorFailure(t *testing.T) {
+	root := t.TempDir()
+	taskPath := writeCLITaskYAML(t)
+	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(donePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(taskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(donePath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := taskpkg.Load(donePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Status = "pr_opened"
+	loaded.PR.URL = "https://example.test/pr/1"
+	loaded.PR.Status = "open"
+	loaded.Attempts = []taskpkg.Attempt{{
+		Number:            3,
+		ClaudeStatus:      "failed",
+		SupervisorVerdict: "accepted",
+		Summary:           "executor retried after transient error",
+		Error: &taskpkg.AttemptError{
+			Phase:   "executor",
+			Kind:    "executor_failed",
+			Message: "earlier transient executor failure",
+		},
+	}}
+	if err := taskpkg.Save(donePath, loaded); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, err := executeCommand("task", "show", "--root", root, "task-cli-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr got %q", stderr)
+	}
+	for _, forbidden := range []string{
+		"latest_claude_status: failed",
+		"latest_error_phase: executor",
+		"latest_error_kind: executor_failed",
+		"latest_error_message: earlier transient executor failure",
+	} {
+		if strings.Contains(stdout, forbidden) {
+			t.Fatalf("accepted task output leaked active failure framing %q:\n%s", forbidden, stdout)
+		}
+	}
+	for _, want := range []string{
+		"status: pr_opened",
+		"prior_attempt_attempt: 3",
+		"prior_attempt_claude_status: failed",
+		"prior_attempt_supervisor_verdict: accepted",
+		"prior_attempt_error_phase: executor",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("expected %q in output, got:\n%s", want, stdout)
+		}
+	}
+
+	jsonStdout, _, err := executeCommand("task", "show", "--root", root, "--output", "json", "task-cli-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Task struct {
+			Status string `json:"status"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal([]byte(jsonStdout), &payload); err != nil {
+		t.Fatalf("parse json: %v\n%s", err, jsonStdout)
+	}
+	if payload.Task.Status != "pr_opened" {
+		t.Fatalf("json output must reflect accepted terminal status, got %q", payload.Task.Status)
+	}
+}
+
 func TestTaskArchiveText(t *testing.T) {
 	taskPath := writeCLITaskYAML(t)
 	donePath := filepath.Join(t.TempDir(), "tasks", "done", "task.yaml")

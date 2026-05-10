@@ -88,6 +88,15 @@ func ensureNonCommittedInputsAbsentFromBranch(snapshot workspace.Snapshot, files
 	return nil
 }
 
+// prTitleRuneBudget is the maximum number of runes Galley keeps in a generated
+// PR title. GitHub's PR title byte limit is 256, so 72 runes stays well within
+// it even when every rune is multibyte.
+const prTitleRuneBudget = 72
+
+// prTitleEllipsis marks that prTitle truncated the original task goal so the
+// reader can see the title is shortened.
+const prTitleEllipsis = "…"
+
 func prTitle(loaded task.Task) string {
 	title := strings.TrimSpace(loaded.Goal)
 	if title == "" {
@@ -95,10 +104,41 @@ func prTitle(loaded task.Task) string {
 	}
 	title = strings.ReplaceAll(title, "\n", " ")
 	runes := []rune(title)
-	if len(runes) > 72 {
-		title = string(runes[:72])
+	if len(runes) <= prTitleRuneBudget {
+		return title
 	}
-	return title
+	// Reserve one rune for the ellipsis marker and try to break at a safe word
+	// boundary inside the remaining budget so the trailing context is not cut
+	// mid-word.
+	keep := prTitleRuneBudget - len([]rune(prTitleEllipsis))
+	if keep < 1 {
+		keep = 1
+	}
+	cut := keep
+	for i := keep - 1; i >= 0; i-- {
+		if isPRTitleBreakRune(runes[i]) {
+			cut = i
+			break
+		}
+	}
+	// Drop trailing whitespace before the ellipsis so the marker reads cleanly.
+	trimmed := strings.TrimRightFunc(string(runes[:cut]), func(r rune) bool {
+		return isPRTitleBreakRune(r)
+	})
+	if trimmed == "" {
+		// No usable break boundary inside the budget; fall back to a hard cut
+		// so callers still receive a meaningful title prefix.
+		trimmed = string(runes[:keep])
+	}
+	return trimmed + prTitleEllipsis
+}
+
+func isPRTitleBreakRune(r rune) bool {
+	switch r {
+	case ' ', '\t', '\n', '\r', '　':
+		return true
+	}
+	return false
 }
 
 func renderPRBody(loaded task.Task) string {

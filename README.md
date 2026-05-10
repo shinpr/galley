@@ -279,7 +279,7 @@ galley task archive ~/.galley/tasks/done/TASK.yaml
 
 `galley task list` shows task state, status, PR URL, latest verdict, and latest summary across the workflow root.
 
-`galley task show` accepts a task file or task ID and prints the latest attempt, supervisor verdict, risk, and failed verification context.
+`galley task show` accepts a task file or task ID and prints the latest attempt, supervisor verdict, risk, and failed verification context. Once a task reaches an accepted terminal status (`accepted` or `pr_opened`), the last attempt's claude status and error fields are relabeled under the `prior_attempt_*` prefix so they read as audit history rather than an active failure.
 
 `galley task requeue` accepts a task ID or task file, returns a reviewed task from `tasks/failed`, `tasks/done`, or `tasks/running` to `tasks/queued`, records an optional reason, and increments `supervisor.review_iterations`.
 
@@ -361,6 +361,8 @@ PR automation requires GitHub CLI (`gh`) to be installed and authenticated.
 When `pr.enabled: true` is set in the environment profile, accepted worktree changes are committed with a Galley task commit message and `git_commit_result.json` is written to the run directory.
 
 With `pr.enabled: true`, Galley pushes the current worktree branch to `origin`, writes `pr_body.md`, runs `gh pr create`, updates `pr.url` and `pr.status`, and moves the task to `done/pr_opened`. For AFK implementation tasks, PR creation plus comment polling is the recommended review loop. Local-only runs can leave PR automation disabled when GitHub credentials or network access are unavailable. The branch is the task YAML `worktree.branch`; the base branch comes from `pr.base`.
+
+Galley renders each acceptance criterion in `pr_body.md` using the supervisor verdict, so accepted ACs read as `Status: satisfied` and any IDs the supervisor flagged in `acceptance_gaps` read as `Status: partially_satisfied`. Generated PR titles are truncated at the last whitespace inside Galley's rune budget and end with a single `…` so reviewers can tell the title was shortened.
 
 With `pr.comments.enabled: true`, the daemon scans task files with `pr.url`, reads GitHub issue comments through `gh api`, and processes the oldest unprocessed `/galley rerun ...` or `/galley requeue ...` command for each task. Processed comment IDs are stored in `pr.processed_comment_ids` so rerun commands are not applied twice.
 

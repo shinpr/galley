@@ -17,8 +17,51 @@ import (
 	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/internal/taskstate"
+	"github.com/shinpr/galley/internal/version"
 	"github.com/shinpr/galley/internal/workspace"
 )
+
+// validationEvidence is the audit-friendly payload written to
+// runs/<run-id>/validation.json. It is a superset of task.ValidationResult so
+// existing readers that decode `errors`, `warnings`, or `task` keep working,
+// while supervisor reviewers and downstream tools can rely on `valid`,
+// `task_id`, `schema_version`, and `generated_at` for evidence.
+type validationEvidence struct {
+	Valid         bool      `json:"valid"`
+	TaskID        string    `json:"task_id"`
+	SchemaVersion string    `json:"schema_version"`
+	GeneratedAt   string    `json:"generated_at"`
+	Errors        []string  `json:"errors"`
+	Warnings      []string  `json:"warnings"`
+	Task          task.Task `json:"task"`
+}
+
+func newValidationEvidence(loaded task.Task, validation task.ValidationResult, now time.Time) validationEvidence {
+	errs := validation.Errors
+	if errs == nil {
+		errs = []string{}
+	}
+	warnings := validation.Warnings
+	if warnings == nil {
+		warnings = []string{}
+	}
+	return validationEvidence{
+		Valid:         validation.Valid(),
+		TaskID:        loaded.ID,
+		SchemaVersion: validationSchemaVersion(),
+		GeneratedAt:   now.UTC().Format(time.RFC3339Nano),
+		Errors:        errs,
+		Warnings:      warnings,
+		Task:          loaded,
+	}
+}
+
+func validationSchemaVersion() string {
+	if version.Commit != "" && version.Commit != "unknown" {
+		return fmt.Sprintf("galley-%s+%s", version.Version, version.Commit)
+	}
+	return fmt.Sprintf("galley-%s", version.Version)
+}
 
 // Options configure the file-backed Galley daemon.
 type Options struct {
@@ -410,7 +453,8 @@ func initializeRunEvidence(root, runningPath string, loaded task.Task, validatio
 	if err := copyFile(runningPath, filepath.Join(runDir, "task.yaml")); err != nil {
 		return "", "", err
 	}
-	if err := writeJSON(filepath.Join(runDir, "validation.json"), validation); err != nil {
+	evidence := newValidationEvidence(loaded, validation, time.Now())
+	if err := writeJSON(filepath.Join(runDir, "validation.json"), evidence); err != nil {
 		return "", "", err
 	}
 	return runID, runDir, nil

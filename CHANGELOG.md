@@ -6,6 +6,11 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- Improved Galley task-authoring guidance so reference-file intake happens before additional task scoping questions, supplied plans are treated as single-task implementation guidance, execution settings scale from ordinary-task baselines, and approval summaries favor referenceable decision items over fixed table layouts.
+- Bumped the packaged Claude and Codex Galley plugins to `0.1.3`.
+
 ## v0.2.1 - 2026-05-10
 
 ### Changed

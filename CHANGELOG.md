@@ -6,6 +6,8 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.2.1 - 2026-05-10
+
 ### Changed
 
 - Refined the Galley skill entrypoint into a flow catalog so task authoring, profile setup, daemon setup, queueing, troubleshooting, and Codex daemon use load the intended references.

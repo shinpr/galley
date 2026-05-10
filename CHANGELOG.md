@@ -6,6 +6,14 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- Refined the Galley skill entrypoint into a flow catalog so task authoring, profile setup, daemon setup, queueing, troubleshooting, and Codex daemon use load the intended references.
+- Profile setup now asks review strictness before repository inspection and keeps schema defaults, repository evidence, and user policy separate when drafting profiles.
+- Task authoring now keeps reference-file intake consistent: supplied files are read after path/content, execution workspace destination, and commit policy are known.
+- The OpenAI agent prompt now delegates to the Galley skill flow catalog and routed references instead of carrying a separate profile/task setup procedure.
+- The packaged Claude and Codex Galley plugins are versioned as `0.1.2`.
+
 ## v0.2.0 - 2026-05-10
 
 ### Added

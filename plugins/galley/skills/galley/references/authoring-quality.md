@@ -49,7 +49,7 @@ For each reference file, decide:
 
 When the user supplies reference files and has not stated commit policy, ask explicitly. Recommend context-only for specs, work plans, logs, screenshots, issue exports, and review notes. Use `commit: true` only after the user confirms the supplied file should become part of the branch output.
 
-If the user gives a file path, read the file before drafting when the path resolves to an existing file, the content is text-like enough to summarize or quote safely, and the read succeeds within the permitted scope. When reading fails, record the risk and ask for the missing content or a usable path.
+For Galley task authoring, read supplied reference files after the reference-file intake is complete: path/content, execution-workspace destination, and commit policy are known. Use the content to extract goal, ACs, scope, risks, and verification signals before drafting. When a supplied path is unreadable, record the risk and ask for usable content or a usable path.
 
 ## Goal Quality
 
@@ -151,6 +151,21 @@ AC traceability checks:
 ## Quality Criteria Sources
 
 If quality standards already exist, use them before inventing general gates.
+
+## Profile-Guided Authoring Steps
+
+When repository profiles exist, use them before inventing ACs, verification, or quality gates:
+
+1. Read the resolved `quality.yaml` and `environment.yaml` for the target repo.
+2. Use `quality.required_checks` as the first source for task verification commands.
+3. Use `environment.commands` as the first source for runnable command text.
+4. Use `quality.review_dimensions[].pass` and `pass_policy` as the baseline for ACs, risks, and quality-basis notes.
+5. Use `environment.constraints`, `pr`, and `worktree` settings to shape scope, risks, queueing assumptions, and execution-setting explanations.
+6. Add repo, CI, or generic checks only for gaps not covered by the profiles.
+
+Runnable verification commands should fail when the checked condition fails. Prefer exact commands from `environment.commands`, `quality.required_checks`, or CI. Treat inspection-only commands as evidence sources unless they are wrapped with a failing assertion.
+
+For observable contracts, choose one expected contract before drafting ACs. CLI text, JSON payloads, files, logs, PR bodies, statuses, titles, and public docs should name the required fields, values, ordering, persistence, or fallback behavior. Record alternatives in `decisions` only after a behavior is chosen.
 
 Look for:
 

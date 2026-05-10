@@ -35,12 +35,13 @@ galley profile validate --kind environment <profile.yaml>
    - `quality.yaml` defines the checks, review dimensions, evidence, and severities that Galley uses to decide whether work is acceptable.
    - `environment.yaml` defines the repository cwd, runnable commands, network/secrets policy, services, destructive-operation constraints, PR behavior, and worktree cleanup.
 2. Read `references/quality.schema.json` and `references/environment.schema.json` to establish fields, defaults, and valid shapes.
-3. Ask to inspect the repository for profile candidates. Mention the concrete sources you plan to read, such as README, CI, package scripts, Makefiles, justfiles, test docs, and existing local guidance.
-4. Inspect the approved sources and draft candidate values from discovered evidence plus schema defaults.
-5. Present the proposed profile before writing files: required checks, optional checks, review dimensions, blocking severities, environment constraints, PR/base/comment/cleanup settings, and the evidence behind each choice.
-6. Ask for approval and ask whether the user has additional repository-specific standards to enforce.
-7. Write the profile YAML only after approval.
-8. Validate the profile YAML and report the evidence used to choose each required check.
+3. Ask the user to choose review strictness before repository inspection. This is an operating policy, not repository evidence.
+4. Ask to inspect the repository for profile candidates. Mention the concrete sources you plan to read, such as README, CI, package scripts, Makefiles, justfiles, test docs, and existing local guidance.
+5. Inspect the approved sources and draft candidate values from discovered evidence plus schema defaults and the chosen review strictness.
+6. Present the proposed profile before writing files: required checks, optional checks, review dimensions, blocking severities, environment constraints, PR/base/comment/cleanup settings, and the evidence behind each choice.
+7. Ask for approval and ask whether the user has additional repository-specific standards to enforce.
+8. Write the profile YAML only after approval.
+9. Validate the profile YAML and report the evidence used to choose each required check.
 
 ## Repository Discovery
 
@@ -61,7 +62,7 @@ Stop discovery when you can explain where each proposed required check or enviro
 - Include a required check when it is referenced by CI, package scripts, contributor docs, or a user policy, or when it verifies a documented quality dimension for the task domain.
 - Record why a check is required: CI usage, package script, existing docs, affected file type, or user policy.
 - Present CI-derived checks as candidates before writing; CI evidence is strong, but required/blocking status is a policy choice.
-- Separate "available command" from "blocking quality gate"; not every runnable command should block acceptance.
+- Separate "available command" from "blocking quality gate"; mark a runnable command as blocking only when it enforces an acceptance requirement, a CI gate, or a documented quality dimension for the task domain.
 - Mark external resources as required only when the task domain needs them, such as Figma for UI work, DB services for persistence, or cloud/IaC tooling for infrastructure.
 - Use `N/A` or omit fields for irrelevant domains; ask only about tools that match the task domain.
 
@@ -72,10 +73,23 @@ Ask only the questions needed for the profile being authored.
 Use this sequence:
 
 1. Read the profile schemas.
-2. Ask one question for repository inspection approval. Keep supervisor selection, PR automation, base branch, and cleanup out of this first question.
-3. After inspection, present a single profile proposal using schema defaults plus discovered repo evidence.
-4. Ask for profile approval and additional standards.
-5. Ask follow-up questions only for choices that affect acceptance, execution safety, unavailable services, or repository-specific policy.
+2. Ask one question for review strictness.
+3. Ask one question for repository inspection approval. Keep supervisor selection, PR automation, base branch, and cleanup out of this question.
+4. After inspection, present a single profile proposal using schema defaults, chosen review strictness, and discovered repo evidence.
+5. Ask for profile approval and additional repository-specific standards.
+6. Ask follow-up questions only for choices that affect acceptance, execution safety, unavailable services, or repository-specific policy.
+
+Review strictness question:
+
+```markdown
+Choose the review strictness for this repository profile before I inspect the repository:
+
+- Minimum: block only critical findings. Use when only work that cannot function as requested should stop acceptance.
+- Standard (recommended): block critical, high, and medium findings. Use for normal development where functional failures, user-visible regressions, contract mismatches, and major inconsistencies should block acceptance.
+- Strict: block critical, high, medium, and low findings. Use when small technical-quality issues should also prevent acceptance.
+
+Which strictness should this profile use?
+```
 
 Quality profile questions:
 
@@ -83,7 +97,7 @@ Quality profile questions:
 2. Which discovered checks are mandatory before acceptance, and which are optional: unit tests, integration tests, typecheck, lint, build, e2e, accessibility, visual regression, security scan, infra plan?
 3. Which command should Galley prefer for each mandatory check when repo evidence shows multiple options?
 4. Which review dimensions should block acceptance: correctness, regression, API contract, data integrity, security, performance, accessibility, UI/UX, maintainability, docs?
-5. Which severities block acceptance: critical/high/medium/low?
+5. Which review strictness should map to blocking severities: minimum, standard, or strict?
 6. What level of evidence is required: file/line references, command output excerpts, screenshots, PR links, logs?
 
 Environment profile questions:

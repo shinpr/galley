@@ -1,7 +1,7 @@
 interface:
   display_name: "Galley"
   short_description: "Use for Galley tasks, profiles, daemon, evidence, and troubleshooting"
-  default_prompt: "Use $galley to author Galley tasks and profiles. For task authoring, first ask for reference files plus destination/commit policy, then inspect the repo, get task-direction approval, get execution-settings approval, validate the YAML, and queue only after final approval. For profile setup, read the profile schemas first, ask only for repository inspection approval, then present one quality/environment proposal before writing."
+  default_prompt: "Use $galley to author Galley tasks and profiles. Follow SKILL.md's Flow Catalog and the routed references before acting. For task authoring, use the task-authoring flow and skeleton script, then queue only after validation and final approval. For profile setup, read the profile schemas, ask review strictness, ask repository inspection approval, then present one quality/environment proposal before writing."
 
 policy:
   allow_implicit_invocation: true

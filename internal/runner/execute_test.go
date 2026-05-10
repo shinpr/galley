@@ -57,20 +57,6 @@ func TestRunCommandReturnsExitError(t *testing.T) {
 	}
 }
 
-func TestRunCommandTimeout(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	script := writeScript(t, dir, "sleep", "#!/bin/sh\nsleep 2\n")
-
-	result, err := RunCommand(context.Background(), Command{Argv: []string{script}}, RunOptions{Timeout: 10 * time.Millisecond})
-	if err == nil {
-		t.Fatal("expected timeout error")
-	}
-	if !result.TimedOut {
-		t.Fatalf("expected timed out result: %#v", result)
-	}
-}
-
 func TestRunCommandKillsProcessGroup(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

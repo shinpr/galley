@@ -33,18 +33,19 @@ type AdapterRequest struct {
 
 // AdapterEvidence is the serializable evidence passed to model supervisors.
 type AdapterEvidence struct {
-	Task         task.Task           `json:"task"`
-	Profiles     profile.Bundle      `json:"profiles"`
-	Claude       runner.ClaudeResult `json:"claude"`
-	ParseError   string              `json:"parse_error,omitempty"`
-	RunError     string              `json:"run_error,omitempty"`
-	DiffDirty    bool                `json:"diff_dirty"`
-	Diff         string              `json:"diff"`
-	DiffError    string              `json:"diff_error,omitempty"`
-	Attempt      int                 `json:"attempt"`
-	AttemptsLeft int                 `json:"attempts_left"`
-	SourceCWD    string              `json:"source_cwd,omitempty"`
-	WorktreeCWD  string              `json:"worktree_cwd,omitempty"`
+	Task            task.Task           `json:"task"`
+	Profiles        profile.Bundle      `json:"profiles"`
+	Claude          runner.ClaudeResult `json:"claude"`
+	ParseError      string              `json:"parse_error,omitempty"`
+	RunError        string              `json:"run_error,omitempty"`
+	DiffDirty       bool                `json:"diff_dirty"`
+	Diff            string              `json:"diff"`
+	DiffError       string              `json:"diff_error,omitempty"`
+	Attempt         int                 `json:"attempt"`
+	AttemptsLeft    int                 `json:"attempts_left"`
+	SourceCWD       string              `json:"source_cwd,omitempty"`
+	WorktreeCWD     string              `json:"worktree_cwd,omitempty"`
+	PreflightResult any                 `json:"preflight_result,omitempty"`
 }
 
 // RunAdapter reviews evidence with a built-in model supervisor.
@@ -93,17 +94,18 @@ func RunAdapterPayload(ctx context.Context, opts AdapterOptions, request []byte)
 // NewAdapterRequest converts in-process evidence into the adapter JSON contract.
 func NewAdapterRequest(evidence Evidence) AdapterRequest {
 	return AdapterRequest{Evidence: AdapterEvidence{
-		Task:         evidence.Task,
-		Profiles:     evidence.Profiles,
-		Claude:       evidence.Claude,
-		ParseError:   errorString(evidence.ParseError),
-		RunError:     errorString(evidence.RunError),
-		DiffDirty:    evidence.DiffDirty,
-		Diff:         evidence.Diff,
-		DiffError:    errorString(evidence.DiffError),
-		Attempt:      evidence.Attempt,
-		AttemptsLeft: evidence.AttemptsLeft,
-		SourceCWD:    evidence.Task.Scope.CWD,
+		Task:            evidence.Task,
+		Profiles:        evidence.Profiles,
+		Claude:          evidence.Claude,
+		ParseError:      errorString(evidence.ParseError),
+		RunError:        errorString(evidence.RunError),
+		DiffDirty:       evidence.DiffDirty,
+		Diff:            evidence.Diff,
+		DiffError:       errorString(evidence.DiffError),
+		Attempt:         evidence.Attempt,
+		AttemptsLeft:    evidence.AttemptsLeft,
+		SourceCWD:       evidence.Task.Scope.CWD,
+		PreflightResult: evidence.PreflightResult,
 	}}
 }
 

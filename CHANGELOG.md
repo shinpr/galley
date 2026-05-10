@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Added
+
+- Optional `preflight.acceptance_skeleton` task YAML section. When `enabled: true`, the daemon runs a built-in test-creator stage after `inputfiles.Prepare` and before the first executor attempt, writes AC-linked test skeleton files, persists `runs/<run-id>/preflight_result.json` as the runtime source of truth, records generated `outputs[]` back into the running task, annotates AC verification with the skeleton path / satisfied behavior / integration point, and adds runtime skeleton obligations to the executor work order. Creator manifests are validated for AC IDs, safe relative paths, allowed/forbidden scope, duplicate paths, required metadata, and on-disk files. `galley task show` now lists runtime skeleton outputs in text output. The required-check acceptance gate treats a required quality check's `preferred_commands` as an ordered fallback list (mirroring `result.Complete`): a check is satisfied when any preferred command has passing evidence, failed when none passed but one has a failed entry, and missing only when no executor result recorded evidence for any of its commands.
+
 ### Changed
 
 - Improved Galley task-authoring guidance so reference-file intake happens before additional task scoping questions, supplied plans are treated as single-task implementation guidance, execution settings scale from ordinary-task baselines, and approval summaries favor referenceable decision items over fixed table layouts.

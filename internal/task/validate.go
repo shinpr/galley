@@ -37,6 +37,7 @@ func ValidateStructural(t Task) ValidationResult {
 	validateWorktree(&result, t)
 	validateSupervisor(&result, t)
 	validateExecutor(&result, t)
+	validatePreflight(&result, t)
 
 	if t.Mode == "afk" && len(t.Decisions) > 0 {
 		for _, d := range t.Decisions {
@@ -203,6 +204,92 @@ func validateExecutor(result *ValidationResult, t Task) {
 		require(result, slices.Contains(validPromptModes, t.Executor.PromptMode), "executor.prompt_mode must be one of: %s", strings.Join(validPromptModes, ", "))
 	}
 	require(result, t.Executor.MaxBudgetUSD >= 0, "executor.max_budget_usd cannot be negative")
+}
+
+func validatePreflight(result *ValidationResult, t Task) {
+	if t.Preflight == nil {
+		return
+	}
+	cfg := t.Preflight.AcceptanceSkeleton
+	if cfg == nil {
+		return
+	}
+	prefix := "preflight.acceptance_skeleton"
+	if cfg.Mode != "" {
+		require(result, slices.Contains(validPreflightSkeletonModes, cfg.Mode), "%s.mode must be one of: %s", prefix, strings.Join(validPreflightSkeletonModes, ", "))
+	}
+	if !cfg.Enabled {
+		// When the section is disabled, fields like allowed_paths still validate
+		// statically so authors who later toggle enabled get immediate feedback.
+	}
+	for i, p := range cfg.AllowedPaths {
+		field := fmt.Sprintf("%s.allowed_paths[%d]", prefix, i)
+		validateRelativePath(result, field, p)
+		if p == "" {
+			continue
+		}
+		if filepath.IsAbs(p) {
+			continue
+		}
+		clean := filepath.Clean(p)
+		if clean == ".." || strings.HasPrefix(clean, "../") {
+			continue
+		}
+		if !pathAllowedByScope(p, t.Scope.AllowedPaths) {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s value %q must be inside scope.allowed_paths", field, p))
+		}
+		if pathForbiddenByScope(p, t.Scope.ForbiddenPaths) {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s value %q must not be inside scope.forbidden_paths", field, p))
+		}
+	}
+	validatePreflightOutputs(result, t, cfg, prefix)
+}
+
+// validatePreflightOutputs validates each declared skeleton output against
+// the AC list and scope. Effective allowed paths are preflight.allowed_paths
+// when present, else scope.allowed_paths.
+func validatePreflightOutputs(result *ValidationResult, t Task, cfg *AcceptanceSkeletonConfig, prefix string) {
+	if len(cfg.Outputs) == 0 {
+		return
+	}
+	acIDs := map[string]bool{}
+	for _, ac := range t.AcceptanceCriteria {
+		acIDs[ac.ID] = true
+	}
+	effectiveAllowed := cfg.AllowedPaths
+	if len(effectiveAllowed) == 0 {
+		effectiveAllowed = t.Scope.AllowedPaths
+	}
+	seenPaths := map[string]int{}
+	for i, out := range cfg.Outputs {
+		field := fmt.Sprintf("%s.outputs[%d]", prefix, i)
+		require(result, out.ACID != "", "%s.ac_id is required", field)
+		if out.ACID != "" && !acIDs[out.ACID] {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s.ac_id %q does not match any acceptance_criteria.id", field, out.ACID))
+		}
+		require(result, out.Path != "", "%s.path is required", field)
+		require(result, out.Kind != "", "%s.kind is required", field)
+		require(result, out.Purpose != "", "%s.purpose is required", field)
+		if out.Path != "" {
+			validateRelativePath(result, field+".path", out.Path)
+			if !filepath.IsAbs(out.Path) {
+				clean := filepath.Clean(out.Path)
+				if clean != ".." && !strings.HasPrefix(clean, "../") {
+					if !pathAllowedByScope(out.Path, effectiveAllowed) {
+						result.Errors = append(result.Errors, fmt.Sprintf("%s.path %q must be inside the effective preflight allowed paths", field, out.Path))
+					}
+					if pathForbiddenByScope(out.Path, t.Scope.ForbiddenPaths) {
+						result.Errors = append(result.Errors, fmt.Sprintf("%s.path %q must not be inside scope.forbidden_paths", field, out.Path))
+					}
+				}
+			}
+			if prev, ok := seenPaths[filepath.Clean(out.Path)]; ok {
+				result.Errors = append(result.Errors, fmt.Sprintf("%s.path %q is duplicated (also at outputs[%d])", field, out.Path, prev))
+			} else {
+				seenPaths[filepath.Clean(out.Path)] = i
+			}
+		}
+	}
 }
 
 func pathAllowedByScope(path string, allowed []string) bool {

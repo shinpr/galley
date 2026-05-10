@@ -46,6 +46,21 @@ SUPERVISOR_TEMPLATE = """{
   "next_work_order": ""
 }"""
 
+CREATOR_TEMPLATE = """{
+  "outputs": [
+    {
+      "ac_id": "AC1",
+      "path": "tests/example.integration.test.ts",
+      "kind": "integration",
+      "purpose": "Verify the user-visible behavior required by AC1.",
+      "satisfies": "AC1 observable outcome covered by this skeleton.",
+      "integration_point": "Executor completes this skeleton while implementing the feature.",
+      "implementation_required": true
+    }
+  ],
+  "no_skeletons": []
+}"""
+
 
 def block(reason):
     print(json.dumps({
@@ -238,6 +253,43 @@ def validate_supervisor_verdict(verdict):
         raise ValueError("discussion_items are only valid for accepted verdicts")
 
 
+def validate_creator_manifest(manifest):
+    require_object(manifest, "manifest")
+    for field in ["outputs", "no_skeletons"]:
+        if field not in manifest:
+            raise ValueError(f"{field} is required")
+    require_array(manifest["outputs"], "outputs")
+    require_array(manifest["no_skeletons"], "no_skeletons")
+
+    for index, output in enumerate(manifest["outputs"]):
+        require_object(output, f"outputs[{index}]")
+        required = [
+            "ac_id",
+            "path",
+            "kind",
+            "purpose",
+            "satisfies",
+            "integration_point",
+            "implementation_required",
+        ]
+        for field in required:
+            if field not in output:
+                raise ValueError(f"outputs[{index}].{field} is required")
+        for field in ["ac_id", "path", "kind", "purpose", "satisfies", "integration_point"]:
+            if not isinstance(output[field], str) or not output[field].strip():
+                raise ValueError(f"outputs[{index}].{field} must be a non-empty string")
+        if not isinstance(output["implementation_required"], bool):
+            raise ValueError(f"outputs[{index}].implementation_required must be a boolean")
+
+    for index, item in enumerate(manifest["no_skeletons"]):
+        require_object(item, f"no_skeletons[{index}]")
+        for field in ["ac_id", "reason"]:
+            if field not in item:
+                raise ValueError(f"no_skeletons[{index}].{field} is required")
+            if not isinstance(item[field], str) or not item[field].strip():
+                raise ValueError(f"no_skeletons[{index}].{field} must be a non-empty string")
+
+
 def main():
     try:
         hook_input = json.load(sys.stdin)
@@ -262,6 +314,8 @@ def main():
         result = json.loads(text)
         if mode == "supervisor":
             validate_supervisor_verdict(result)
+        elif mode == "acceptance_skeleton_creator":
+            validate_creator_manifest(result)
         else:
             validate_result(result)
     except (json.JSONDecodeError, ValueError, TypeError) as err:
@@ -271,6 +325,13 @@ def main():
                 f"Validation error: {err}\n\n"
                 "Respond again with only the JSON object. Use this shape and fill it with the actual review evidence:\n\n"
                 f"{SUPERVISOR_TEMPLATE}"
+            )
+        elif mode == "acceptance_skeleton_creator":
+            block(
+                "The final assistant response must be exactly one JSON object matching the Galley acceptance skeleton manifest contract.\n\n"
+                f"Validation error: {err}\n\n"
+                "Respond again with only the JSON object. Use this shape and fill it with the actual generated skeleton files:\n\n"
+                f"{CREATOR_TEMPLATE}"
             )
         else:
             block(

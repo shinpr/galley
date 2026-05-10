@@ -14,9 +14,17 @@ var claudeSupervisorReview string
 //go:embed claude-executor-full.md
 var claudeExecutorFull string
 
+//go:embed acceptance-skeleton-creator.md
+var acceptanceSkeletonCreator string
+
 // ClaudeExecutorFull returns the built-in Claude executor system prompt.
 func ClaudeExecutorFull() string {
 	return claudeExecutorFull
+}
+
+// AcceptanceSkeletonCreator returns the built-in test-skeleton creator prompt.
+func AcceptanceSkeletonCreator() string {
+	return acceptanceSkeletonCreator
 }
 
 // CodexSupervisor returns the built-in Codex supervisor prompt.

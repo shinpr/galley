@@ -52,3 +52,43 @@ func TestGuardBlocksNestedFinalizerCommand(t *testing.T) {
 		t.Fatalf("expected orchestrator guidance, got %s", got)
 	}
 }
+
+func TestRequireFinalJSONAcceptsCreatorManifestMode(t *testing.T) {
+	dir, err := Ensure(filepath.Join(t.TempDir(), "guard"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(dir, "scripts", "require-final-json.py")
+	cmd := exec.Command(script)
+	cmd.Env = append(os.Environ(), "GALLEY_CLAUDE_GUARD_MODE=acceptance_skeleton_creator")
+	cmd.Stdin = strings.NewReader(`{"last_assistant_message":"{\"outputs\":[{\"ac_id\":\"AC1\",\"path\":\"tests/foo_test.go\",\"kind\":\"integration\",\"purpose\":\"verify foo\",\"satisfies\":\"AC1 behavior\",\"integration_point\":\"executor fills assertions\",\"implementation_required\":true}],\"no_skeletons\":[]}"}`)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("guard script failed: %v\n%s", err, output)
+	}
+	if strings.TrimSpace(string(output)) != "" {
+		t.Fatalf("expected creator manifest to pass, got %s", output)
+	}
+}
+
+func TestRequireFinalJSONBlocksInvalidCreatorManifest(t *testing.T) {
+	dir, err := Ensure(filepath.Join(t.TempDir(), "guard"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(dir, "scripts", "require-final-json.py")
+	cmd := exec.Command(script)
+	cmd.Env = append(os.Environ(), "GALLEY_CLAUDE_GUARD_MODE=acceptance_skeleton_creator")
+	cmd.Stdin = strings.NewReader(`{"last_assistant_message":"{\"outputs\":[{\"ac_id\":\"AC1\"}],\"no_skeletons\":[]}"}`)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("guard script failed: %v\n%s", err, output)
+	}
+	got := string(output)
+	if !strings.Contains(got, `"decision": "block"`) {
+		t.Fatalf("expected block output, got %s", got)
+	}
+	if !strings.Contains(got, "acceptance skeleton manifest") {
+		t.Fatalf("expected creator manifest guidance, got %s", got)
+	}
+}

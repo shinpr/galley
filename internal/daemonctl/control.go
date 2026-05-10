@@ -307,6 +307,61 @@ func Stop(pid int, timeout time.Duration) error {
 		}
 		return err
 	}
+	return waitExit(pid, timeout, "stop")
+}
+
+// ForceStop requests graceful shutdown and, if the process is still alive after
+// timeout, sends a verified SIGKILL. The boolean result reports whether the
+// force kill was needed. PID identity is re-verified before the kill so a reused
+// PID is never signaled.
+func ForceStop(meta PIDFile, timeout time.Duration) (bool, error) {
+	err := StopVerified(meta, timeout)
+	if err == nil || errors.Is(err, ErrNotRunning) {
+		return false, nil
+	}
+	if !errors.Is(err, ErrUnverifiedProcess) {
+		// Graceful stop timed out (or another transient failure): fall through to
+		// the verified force kill below. Unverified-process errors are returned as
+		// is so callers do not escalate to SIGKILL against an unknown process.
+		alive, aliveErr := Alive(meta.PID)
+		if aliveErr != nil {
+			return false, aliveErr
+		}
+		if !alive {
+			return false, nil
+		}
+		if killErr := KillVerified(meta, timeout); killErr != nil && !errors.Is(killErr, ErrNotRunning) {
+			return false, killErr
+		}
+		return true, nil
+	}
+	return false, err
+}
+
+// KillVerified sends SIGKILL only to a process verified against its PID metadata.
+func KillVerified(meta PIDFile, timeout time.Duration) error {
+	if !Verify(meta, meta.Root, meta.Executable) {
+		return ErrUnverifiedProcess
+	}
+	return Kill(meta.PID, timeout)
+}
+
+// Kill sends SIGKILL and waits for process exit until timeout.
+func Kill(pid int, timeout time.Duration) error {
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	if err := process.Kill(); err != nil {
+		if errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ESRCH) {
+			return ErrNotRunning
+		}
+		return err
+	}
+	return waitExit(pid, timeout, "exit after SIGKILL")
+}
+
+func waitExit(pid int, timeout time.Duration, action string) error {
 	deadline := time.Now().Add(timeout)
 	for {
 		alive, err := Alive(pid)
@@ -317,7 +372,7 @@ func Stop(pid int, timeout time.Duration) error {
 			return nil
 		}
 		if timeout <= 0 || time.Now().After(deadline) {
-			return fmt.Errorf("daemon pid %d did not stop within %s", pid, timeout)
+			return fmt.Errorf("daemon pid %d did not %s within %s", pid, action, timeout)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}

@@ -6,8 +6,15 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Added
+
+- Idle-output watchdog for executor runs and built-in model supervisor runs. When a subprocess produces no stdout/stderr for `--idle-timeout` (default 10 minutes; configurable on the daemon), Galley terminates its process group and records a distinct idle-timeout result instead of hanging on a stalled command. The attempt is marked with `error_kind: idle_timeout` and `claude_status: idle_timed_out`, `runs/<run-id>/.../run_result.json` gains `idle_timed_out: true`, and the task loop continues according to its loop budget. The watchdog is independent of the existing total per-attempt timeout.
+- `galley daemon stop --force`: after the graceful `SIGTERM` and `--stop-timeout`, the daemon's process identity is re-verified and `SIGKILL` is sent if it has not exited. The PID file is still removed only when it points at the stopped process.
+- On startup the daemon now records the owning daemon for each claimed running task and immediately requeues running tasks whose recorded owner is dead or cannot be verified, without waiting for `--claim-ttl`. Running tasks still owned by a verified live daemon are preserved. A running task with no recorded owner — claimed by an older Galley, a claim recorded before its owner sidecar was written, or live work from a concurrently running daemon that did not record ownership — is left for the mtime-based `--claim-ttl` recovery, which continues to run each cycle as a backstop, so freshly claimed live work is never requeued.
+
 ### Changed
 
+- Restart recovery can reuse an existing task worktree that still has context-only (`commit: false`) input files from a prior run: a destination whose content already matches the task input source is refreshed for a clean re-copy, while a destination with conflicting content fails the claimed task in the `input_files` phase with clear evidence instead of crashing the workspace setup. Committed input files keep the previous overwrite-refusing behavior. The reconciler resolves each destination through the same containment rules as input-file preparation before reading or removing it, so a symlinked destination parent that escapes the worktree is left for the normal input-file validation to reject rather than redirecting a read or delete outside the worktree.
 - Improved Galley task-authoring guidance so reference-file intake happens before additional task scoping questions, supplied plans are treated as single-task implementation guidance, execution settings scale from ordinary-task baselines, and approval summaries favor referenceable decision items over fixed table layouts.
 - Bumped the packaged Claude and Codex Galley plugins to `0.1.3`.
 

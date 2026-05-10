@@ -149,6 +149,7 @@ func requeueRunningTask(root, runningPath string) error {
 	if err := noOverwriteRename(runningPath, queuedPath); err != nil {
 		return fmt.Errorf("requeue stale task %s: %w", runningPath, err)
 	}
+	_ = RemoveOwner(runningPath)
 	return nil
 }
 

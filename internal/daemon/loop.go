@@ -262,6 +262,7 @@ func evaluateSupervisor(ctx context.Context, opts Options, evidence supervisor.E
 		Provider:    opts.Supervisor,
 		WorkDir:     workDir,
 		Timeout:     time.Duration(evidence.Task.ExecutionPolicy.TimeoutMS) * time.Millisecond,
+		IdleTimeout: opts.IdleTimeout,
 		ArtifactDir: attemptDir,
 		ClaudeBin:   opts.ClaudeBin,
 		CodexBin:    opts.CodexBin,
@@ -321,9 +322,10 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 	started := time.Now().UTC()
 	stdoutPath := filepath.Join(attemptDir, "claude.stdout.jsonl")
 	runResult, runErr := runner.RunCommand(ctx, commandPlan, runner.RunOptions{
-		Timeout:    time.Duration(loaded.ExecutionPolicy.TimeoutMS) * time.Millisecond,
-		StdoutPath: stdoutPath,
-		StderrPath: filepath.Join(attemptDir, "claude.stderr.log"),
+		Timeout:     time.Duration(loaded.ExecutionPolicy.TimeoutMS) * time.Millisecond,
+		IdleTimeout: opts.IdleTimeout,
+		StdoutPath:  stdoutPath,
+		StderrPath:  filepath.Join(attemptDir, "claude.stderr.log"),
 	})
 	completed := time.Now().UTC()
 	if err := writeJSON(filepath.Join(attemptDir, "run_result.json"), runResult); err != nil {

@@ -77,6 +77,7 @@ type Options struct {
 	PollInterval           time.Duration
 	ClaimTTL               time.Duration
 	HeartbeatInterval      time.Duration
+	IdleTimeout            time.Duration
 	CommitOnAccept         bool
 	OpenPR                 bool
 	PollPRComments         bool
@@ -105,6 +106,7 @@ type ExplicitOptions struct {
 	PollInterval           bool
 	ClaimTTL               bool
 	HeartbeatInterval      bool
+	IdleTimeout            bool
 	CommitOnAccept         bool
 	OpenPR                 bool
 	PollPRComments         bool
@@ -119,6 +121,9 @@ func Run(ctx context.Context, opts Options) error {
 	var err error
 	opts, err = Preflight(opts)
 	if err != nil {
+		return err
+	}
+	if err := recoverInterruptedRunningTasks(opts.Root); err != nil {
 		return err
 	}
 	if opts.Once {
@@ -207,6 +212,9 @@ func (opts Options) withDefaults() Options {
 	}
 	if opts.ShutdownTimeout <= 0 {
 		opts.ShutdownTimeout = 5 * time.Minute
+	}
+	if opts.IdleTimeout <= 0 {
+		opts.IdleTimeout = 10 * time.Minute
 	}
 	if opts.HeartbeatInterval <= 0 {
 		opts.HeartbeatInterval = opts.ClaimTTL / 4
@@ -305,12 +313,18 @@ func claimAvailableTasks(ctx, taskCtx context.Context, opts Options, queued []st
 			continue
 		}
 		claimedCount++
+		if err := queue.WriteOwner(claimed, currentRunningOwner()); err != nil {
+			// Owner metadata is a best-effort recovery aid; if it cannot be written
+			// the task still proceeds and falls back to TTL-based recovery.
+			fmt.Fprintf(os.Stderr, "galley: record task owner failed for %s: %v\n", claimed, err)
+		}
 		if repoKey != "" {
 			repoCounts[repoKey]++
 		}
 		wg.Add(1)
 		go func(path string) {
 			defer wg.Done()
+			defer func() { _ = queue.RemoveOwner(path) }()
 			if err := processClaimedTask(taskCtx, ctx, opts, path); err != nil {
 				errs <- err
 			}
@@ -517,6 +531,12 @@ func prepareClaimedWorkspace(ctx context.Context, opts Options, profiles profile
 		appendFailureAttempt(loaded, "run_evidence", "run_evidence_failed", err, runDir)
 		return workspace.Prepared{}, err
 	}
+	if prepared.WorktreeReused {
+		if err := reconcileReusedInputFiles(prepared.CWD, loaded.Files); err != nil {
+			appendFailureAttempt(loaded, "input_files", "input_files_failed", err, runDir)
+			return workspace.Prepared{}, err
+		}
+	}
 	preparedFiles, err := inputfiles.Prepare(prepared.CWD, loaded.Files)
 	if err != nil {
 		appendFailureAttempt(loaded, "input_files", "input_files_failed", err, runDir)
@@ -583,6 +603,9 @@ func startHeartbeat(ctx context.Context, path string, interval time.Duration) fu
 func claudeStatus(result runner.RunResult, err error) string {
 	if err == nil {
 		return "completed"
+	}
+	if result.IdleTimedOut {
+		return "idle_timed_out"
 	}
 	if result.TimedOut {
 		return "timed_out"

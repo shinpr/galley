@@ -9,12 +9,15 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 const (
 	defaultTailBytes       = 64 * 1024
 	processCancelWaitLimit = 5 * time.Second
+	minIdleCheckInterval   = time.Second
+	maxIdleCheckInterval   = 30 * time.Second
 )
 
 // RunOptions controls subprocess execution and optional audit file capture.
@@ -24,6 +27,10 @@ type RunOptions struct {
 	StderrPath string
 	// TailBytes controls in-memory stdout/stderr tail size. Zero uses the default; negative keeps all output.
 	TailBytes int
+	// IdleTimeout kills the subprocess process group when stdout/stderr produces
+	// no new output for this duration. Zero or negative disables the watchdog.
+	// It is independent of Timeout, which bounds total wall-clock duration.
+	IdleTimeout time.Duration
 }
 
 // RunResult reports the observable result of a subprocess run.
@@ -33,6 +40,9 @@ type RunResult struct {
 	Stderr   string        `json:"stderr,omitempty"`
 	Duration time.Duration `json:"duration"`
 	TimedOut bool          `json:"timed_out"`
+	// IdleTimedOut reports that the idle-output watchdog terminated the process
+	// because it produced no stdout/stderr for RunOptions.IdleTimeout.
+	IdleTimedOut bool `json:"idle_timed_out,omitempty"`
 }
 
 // RunCommand executes a command plan without going through a shell.
@@ -77,8 +87,10 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 		return RunResult{}, err
 	}
 
-	cmd.Stdout = stdoutWriter
-	cmd.Stderr = stderrWriter
+	var lastActivity atomic.Int64
+	lastActivity.Store(time.Now().UnixNano())
+	cmd.Stdout = &activityWriter{w: stdoutWriter, last: &lastActivity}
+	cmd.Stderr = &activityWriter{w: stderrWriter, last: &lastActivity}
 
 	if err := cmd.Start(); err != nil {
 		_ = stdoutFile.Close()
@@ -90,6 +102,34 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 	go func() {
 		done <- cmd.Wait()
 	}()
+
+	var idleTimedOut atomic.Bool
+	watchdogStop := make(chan struct{})
+	if opts.IdleTimeout > 0 {
+		go func() {
+			interval := opts.IdleTimeout / 4
+			if interval < minIdleCheckInterval {
+				interval = minIdleCheckInterval
+			}
+			if interval > maxIdleCheckInterval {
+				interval = maxIdleCheckInterval
+			}
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-watchdogStop:
+					return
+				case now := <-ticker.C:
+					if now.Sub(time.Unix(0, lastActivity.Load())) >= opts.IdleTimeout {
+						idleTimedOut.Store(true)
+						killProcessGroup(cmd)
+						return
+					}
+				}
+			}
+		}()
+	}
 
 	var runErr error
 	waitTimedOut := false
@@ -104,13 +144,15 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 			runErr = fmt.Errorf("process did not exit after cancellation")
 		}
 	}
+	close(watchdogStop)
 
 	result := RunResult{
-		ExitCode: -1,
-		Stdout:   stdout.String(),
-		Stderr:   stderr.String(),
-		Duration: time.Since(started),
-		TimedOut: errors.Is(runCtx.Err(), context.DeadlineExceeded),
+		ExitCode:     -1,
+		Stdout:       stdout.String(),
+		Stderr:       stderr.String(),
+		Duration:     time.Since(started),
+		TimedOut:     errors.Is(runCtx.Err(), context.DeadlineExceeded),
+		IdleTimedOut: idleTimedOut.Load(),
 	}
 	if cmd.ProcessState != nil {
 		result.ExitCode = cmd.ProcessState.ExitCode()
@@ -130,6 +172,9 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 			_ = stderrFile.Close()
 		}()
 	}
+	if result.IdleTimedOut {
+		return result, errors.Join(fmt.Errorf("command produced no output for %s (idle timeout)", opts.IdleTimeout), closeErr)
+	}
 	if result.TimedOut {
 		return result, errors.Join(fmt.Errorf("command timed out after %s", opts.Timeout), closeErr)
 	}
@@ -137,6 +182,21 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 		return result, errors.Join(fmt.Errorf("run %s: %w", command.Argv[0], runErr), closeErr)
 	}
 	return result, closeErr
+}
+
+// activityWriter records the time of the most recent write so the idle-output
+// watchdog can detect a subprocess that has stopped emitting stdout/stderr.
+type activityWriter struct {
+	w    io.Writer
+	last *atomic.Int64
+}
+
+func (a *activityWriter) Write(p []byte) (int, error) {
+	n, err := a.w.Write(p)
+	if n > 0 {
+		a.last.Store(time.Now().UnixNano())
+	}
+	return n, err
 }
 
 type nopCloser struct{}

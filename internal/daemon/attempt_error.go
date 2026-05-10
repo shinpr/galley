@@ -46,7 +46,11 @@ func classifyFailureKind(defaultKind string, err error) string {
 	if err == nil {
 		return defaultKind
 	}
-	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "timed out") {
+	msg := err.Error()
+	if strings.Contains(msg, "idle timeout") {
+		return "idle_timeout"
+	}
+	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(msg, "timed out") {
 		return "timed_out"
 	}
 	return defaultKind

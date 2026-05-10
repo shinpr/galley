@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRunAdapterPayloadCodexUsesEmbeddedPromptAndSchema(t *testing.T) {
@@ -140,5 +141,63 @@ printf '%s' '{"status":"accepted","summary":"`+longSummary+`","acceptance_gaps":
 	}
 	if !strings.Contains(string(output), longSummary) {
 		t.Fatal("large supervisor verdict was truncated")
+	}
+}
+
+func TestRunAdapterPayloadCodexIdleTimeoutTerminatesStalledSupervisor(t *testing.T) {
+	t.Parallel()
+	binDir := t.TempDir()
+	fakeCodex := filepath.Join(binDir, "codex")
+	// Emit one event line, then go idle without ever writing the verdict file.
+	if err := os.WriteFile(fakeCodex, []byte(`#!/bin/sh
+cat >/dev/null
+printf '%s\n' '{"event":"thinking"}'
+sleep 30
+`), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := RunAdapterPayload(context.Background(), AdapterOptions{
+		Provider:    "codex",
+		WorkDir:     t.TempDir(),
+		ArtifactDir: t.TempDir(),
+		CodexBin:    fakeCodex,
+		Timeout:     30 * time.Second,
+		IdleTimeout: time.Second,
+	}, []byte(`{"evidence":{"task":{"id":"task"},"diff":""}}`))
+	if err == nil {
+		t.Fatal("expected idle-timeout failure from stalled codex supervisor")
+	}
+	if !strings.Contains(err.Error(), "codex supervisor failed") || !strings.Contains(err.Error(), "idle timeout") {
+		t.Fatalf("error should report a codex supervisor idle timeout, got %v", err)
+	}
+}
+
+func TestRunAdapterPayloadClaudeIdleTimeoutTerminatesStalledSupervisor(t *testing.T) {
+	t.Parallel()
+	binDir := t.TempDir()
+	fakeClaude := filepath.Join(binDir, "claude")
+	// Emit a partial line, then go idle without completing the verdict JSON.
+	if err := os.WriteFile(fakeClaude, []byte(`#!/bin/sh
+cat >/dev/null
+printf '{"status":'
+sleep 30
+`), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := RunAdapterPayload(context.Background(), AdapterOptions{
+		Provider:    "claude",
+		WorkDir:     t.TempDir(),
+		ArtifactDir: t.TempDir(),
+		ClaudeBin:   fakeClaude,
+		Timeout:     30 * time.Second,
+		IdleTimeout: time.Second,
+	}, []byte(`{"evidence":{"task":{"id":"task"},"diff":""}}`))
+	if err == nil {
+		t.Fatal("expected idle-timeout failure from stalled claude supervisor")
+	}
+	if !strings.Contains(err.Error(), "claude supervisor failed") || !strings.Contains(err.Error(), "idle timeout") {
+		t.Fatalf("error should report a claude supervisor idle timeout, got %v", err)
 	}
 }

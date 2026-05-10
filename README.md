@@ -319,11 +319,13 @@ galley daemon run --once
 
 `galley daemon start` launches the daemon in the background. It writes a PID file and appends stdout/stderr to a log file. By default those files are under `~/.galley`; override them with `--pid-file` and `--log-file`.
 
-`galley daemon stop` reads the PID file, sends `SIGTERM`, waits up to `--stop-timeout`, and removes the PID file when it still points at the stopped process. `galley daemon status` reports whether the PID file points at a live process.
+`galley daemon stop` reads the PID file, sends `SIGTERM`, waits up to `--stop-timeout`, and removes the PID file when it still points at the stopped process. `galley daemon stop --force` keeps the same graceful-first behavior, then re-verifies process identity and sends `SIGKILL` when the daemon has not exited within `--stop-timeout` — an escape hatch for a stalled daemon. A force kill can interrupt an active attempt; the next daemon startup recovers the interrupted running task (see Operational Notes). `galley daemon status` reports whether the PID file points at a live process.
 
 Use the installed `galley` binary for `start`, `status`, and `stop`. PID verification records the executable path, so `go run ./cmd/galley ... daemon start` is not suitable for background daemon control because later `go run` invocations use different temporary binaries.
 
 Foreground and background daemons use the same shutdown path. On `SIGINT` or `SIGTERM`, Galley stops claiming new queued tasks, lets active attempts finish until the shutdown timeout, records evidence, and avoids starting another retry attempt after shutdown is requested.
+
+Each executor run and built-in model supervisor run is guarded by an idle-output watchdog. When a subprocess produces no stdout or stderr for `--idle-timeout` (default 10 minutes), Galley terminates its process group, records a distinct idle-timeout result on the task attempt (`error_kind: idle_timeout`, `claude_status: idle_timed_out`) and in `runs/<run-id>/.../run_result.json` (`idle_timed_out: true`), and lets the loop continue according to the task loop budget instead of hanging on a stalled command. The watchdog is independent of the task's total per-attempt timeout, which still bounds total wall-clock duration. Raise `--idle-timeout` for executors that legitimately stay silent for long stretches while still making progress.
 
 ## Supervisor Behavior
 
@@ -398,6 +400,7 @@ This is intentionally conservative. A dirty worktree may contain useful work, fa
 - Running multiple daemon processes is supported by claim conflict handling, but shared network filesystems may not provide the same rename and mtime behavior as a local disk.
 - Background control uses a local PID file. Avoid sharing the same `--pid-file` across unrelated processes, and prefer one workflow root per managed daemon.
 - Running tasks heartbeat their YAML mtime while the executor loop is active. `--heartbeat-interval` defaults to `min(claim-ttl/4, 1m)`.
+- Each claimed running task records the owning daemon. On startup the daemon immediately requeues running tasks whose recorded owner is dead or cannot be verified — without waiting for `--claim-ttl` — while leaving tasks still owned by a verified live daemon untouched. A running task with no recorded owner (claimed by an older Galley, a claim recorded before its owner sidecar was written, or live work from a concurrent daemon that did not record ownership) is left for the mtime-based `--claim-ttl` recovery so freshly claimed live work is never requeued. Restart recovery can reuse an existing task worktree even when context-only input files are still present from a prior run; identical content is refreshed and conflicting content fails the claimed task with clear evidence. The mtime-based `--claim-ttl` recovery still runs each cycle as a backstop.
 - Avoid very short `--claim-ttl` values. Filesystems with coarse mtime resolution can make overly aggressive stale-claim detection noisy.
 - PR comment polling uses `gh api`; choose a polling interval that respects GitHub API rate limits for your account and repository count.
 - Dirty worktrees are not cleaned automatically. Review their recorded task risks before manual cleanup.

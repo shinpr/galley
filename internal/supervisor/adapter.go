@@ -21,6 +21,7 @@ type AdapterOptions struct {
 	Provider    string
 	WorkDir     string
 	Timeout     time.Duration
+	IdleTimeout time.Duration
 	ArtifactDir string
 	CodexBin    string
 	ClaudeBin   string
@@ -145,7 +146,7 @@ func runCodexAdapter(ctx context.Context, opts AdapterOptions, request []byte) (
 		},
 		Stdin: prompt,
 		Env:   runner.RestrictedEnv(),
-	}, runner.RunOptions{Timeout: opts.Timeout, StdoutPath: eventsPath})
+	}, runner.RunOptions{Timeout: opts.Timeout, IdleTimeout: opts.IdleTimeout, StdoutPath: eventsPath})
 	if err != nil {
 		return nil, fmt.Errorf("codex supervisor failed: %w", err)
 	}
@@ -193,7 +194,7 @@ func runClaudeAdapter(ctx context.Context, opts AdapterOptions, request []byte) 
 		Argv:    args,
 		Stdin:   string(request),
 		Env:     runner.RestrictedEnv("GALLEY_CLAUDE_GUARD_MODE=supervisor"),
-	}, runner.RunOptions{Timeout: opts.Timeout, StdoutPath: stdoutPath})
+	}, runner.RunOptions{Timeout: opts.Timeout, IdleTimeout: opts.IdleTimeout, StdoutPath: stdoutPath})
 	if err != nil {
 		return nil, fmt.Errorf("claude supervisor failed: %w", err)
 	}

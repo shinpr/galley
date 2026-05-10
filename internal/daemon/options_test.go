@@ -2,9 +2,20 @@ package daemon
 
 import (
 	"testing"
+	"time"
 
 	"github.com/shinpr/galley/internal/profile"
 )
+
+func TestWithDefaultsAppliesIdleTimeout(t *testing.T) {
+	t.Parallel()
+	if got := (Options{}).withDefaults().IdleTimeout; got != 10*time.Minute {
+		t.Fatalf("default idle timeout got %s, want 10m", got)
+	}
+	if got := (Options{IdleTimeout: 90 * time.Second}).withDefaults().IdleTimeout; got != 90*time.Second {
+		t.Fatalf("explicit idle timeout overridden: got %s", got)
+	}
+}
 
 func TestEffectiveOptionsForProfilesUsesEnvironmentOperations(t *testing.T) {
 	t.Parallel()

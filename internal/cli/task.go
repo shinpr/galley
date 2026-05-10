@@ -144,16 +144,25 @@ func newTaskShowCommand() *cobra.Command {
 				}
 				if len(loaded.Attempts) > 0 {
 					last := loaded.Attempts[len(loaded.Attempts)-1]
-					fmt.Fprintf(cmd.OutOrStdout(), "latest_attempt: %d\n", last.Number)
-					fmt.Fprintf(cmd.OutOrStdout(), "latest_claude_status: %s\n", last.ClaudeStatus)
-					fmt.Fprintf(cmd.OutOrStdout(), "latest_supervisor_verdict: %s\n", last.SupervisorVerdict)
-					fmt.Fprintf(cmd.OutOrStdout(), "latest_summary: %s\n", last.Summary)
+					// Once the supervisor has accepted the task, the last attempt's
+					// raw claude status and error fields are auditable history rather
+					// than the active runtime state. Relabel them under a
+					// prior_attempt_* prefix so accepted/pr_opened tasks no longer
+					// surface "failed" framing as if it were the current state.
+					prefix := "latest"
+					if isAcceptedTerminalStatus(loaded.Status) {
+						prefix = "prior_attempt"
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "%s_attempt: %d\n", prefix, last.Number)
+					fmt.Fprintf(cmd.OutOrStdout(), "%s_claude_status: %s\n", prefix, last.ClaudeStatus)
+					fmt.Fprintf(cmd.OutOrStdout(), "%s_supervisor_verdict: %s\n", prefix, last.SupervisorVerdict)
+					fmt.Fprintf(cmd.OutOrStdout(), "%s_summary: %s\n", prefix, last.Summary)
 					if last.Error != nil {
-						fmt.Fprintf(cmd.OutOrStdout(), "latest_error_phase: %s\n", last.Error.Phase)
-						fmt.Fprintf(cmd.OutOrStdout(), "latest_error_kind: %s\n", last.Error.Kind)
-						fmt.Fprintf(cmd.OutOrStdout(), "latest_error_message: %s\n", last.Error.Message)
+						fmt.Fprintf(cmd.OutOrStdout(), "%s_error_phase: %s\n", prefix, last.Error.Phase)
+						fmt.Fprintf(cmd.OutOrStdout(), "%s_error_kind: %s\n", prefix, last.Error.Kind)
+						fmt.Fprintf(cmd.OutOrStdout(), "%s_error_message: %s\n", prefix, last.Error.Message)
 						if last.Error.ArtifactDir != "" {
-							fmt.Fprintf(cmd.OutOrStdout(), "latest_error_artifact_dir: %s\n", last.Error.ArtifactDir)
+							fmt.Fprintf(cmd.OutOrStdout(), "%s_error_artifact_dir: %s\n", prefix, last.Error.ArtifactDir)
 						}
 					}
 				}
@@ -271,6 +280,23 @@ func taskFiles(dir string) ([]string, error) {
 	}
 	sort.Strings(paths)
 	return paths, nil
+}
+
+// isAcceptedTerminalStatus reports whether the task has reached a supervisor
+// accepted terminal state. Callers use it to suppress "active failure" framing
+// for the last attempt's error fields when the supervisor already accepted
+// the work. The set covers the full accepted lifecycle: the initial accepted
+// status, the pr_opened status set when the daemon opens a PR, and the
+// closed/merged statuses that the daemon's PR cleanup loop applies after the
+// PR is closed or merged. Without those tail states a previously accepted
+// task would regress to "active failure" framing once cleanup ran, even
+// though the supervisor already approved the work.
+func isAcceptedTerminalStatus(status string) bool {
+	switch status {
+	case "accepted", "pr_opened", "closed", "merged":
+		return true
+	}
+	return false
 }
 
 func taskSummary(path string, loaded task.Task) taskListItem {

@@ -232,6 +232,7 @@ func applySupervisorVerdict(ctx, shutdownCtx context.Context, req verdictApplica
 
 func acceptSupervisorVerdict(ctx context.Context, opts Options, runningPath string, loaded *task.Task, prepared workspace.Prepared, runDir string, verdict supervisor.Verdict) error {
 	markRevisionRequestsAddressed(loaded, verdict.Summary)
+	applyAcceptedAcceptanceCriteria(loaded, verdict)
 	mergeDiscussionItems(loaded, verdict)
 	if opts.CommitOnAccept {
 		fmt.Fprintf(os.Stderr, "galley: task %s accepted; finalizing commit/pr\n", loaded.ID)
@@ -560,6 +561,30 @@ func mapAcceptanceStatus(status string) string {
 		return status
 	default:
 		return "unknown"
+	}
+}
+
+// applyAcceptedAcceptanceCriteria normalizes per-criterion statuses once the
+// supervisor has accepted the attempt. The supervisor verdict represents the
+// final decision over the whole task, so any AC still marked as pending,
+// unknown, or not_satisfied from earlier executor reports would otherwise leak
+// into the rendered PR body and mislead reviewers. AC IDs that the supervisor
+// flagged as gaps are rendered as partially_satisfied to preserve that nuance.
+func applyAcceptedAcceptanceCriteria(loaded *task.Task, verdict supervisor.Verdict) {
+	if verdict.Status != "accepted" {
+		return
+	}
+	gaps := make(map[string]bool, len(verdict.AcceptanceGaps))
+	for _, id := range verdict.AcceptanceGaps {
+		gaps[strings.TrimSpace(id)] = true
+	}
+	for i := range loaded.AcceptanceCriteria {
+		ac := &loaded.AcceptanceCriteria[i]
+		if gaps[ac.ID] {
+			ac.Status = "partially_satisfied"
+			continue
+		}
+		ac.Status = "satisfied"
 	}
 }
 

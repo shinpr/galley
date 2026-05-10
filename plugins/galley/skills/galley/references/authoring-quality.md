@@ -49,7 +49,7 @@ For each reference file, decide:
 
 When the user supplies reference files and has not stated commit policy, ask explicitly. Recommend context-only for specs, work plans, logs, screenshots, issue exports, and review notes. Use `commit: true` only after the user confirms the supplied file should become part of the branch output.
 
-For Galley task authoring, read supplied reference files after the reference-file intake is complete: path/content, execution-workspace destination, and commit policy are known. Use the content to extract goal, ACs, scope, risks, and verification signals before drafting. When a supplied path is unreadable, record the risk and ask for usable content or a usable path.
+For Galley task authoring, read supplied reference files after the reference-file intake is complete: path/content, execution-workspace destination, and commit policy are known. Use the content to extract goal, ACs, implementation boundaries, allowed/protected paths, risks, and verification signals before drafting. When a supplied path is unreadable, record the risk and ask for usable content or a usable path.
 
 ## Goal Quality
 
@@ -162,7 +162,7 @@ When repository profiles exist, use them before inventing ACs, verification, or 
 2. Use `quality.required_checks` as the first source for task verification commands.
 3. Use `environment.commands` as the first source for runnable command text.
 4. Use `quality.review_dimensions[].pass` and `pass_policy` as the baseline for ACs, risks, and quality-basis notes.
-5. Use `environment.constraints`, `pr`, and `worktree` settings to shape scope, risks, queueing assumptions, and execution-setting explanations.
+5. Use `environment.constraints`, `pr`, and `worktree` settings to shape implementation boundaries, risks, queueing assumptions, and execution-setting explanations.
 6. Add repo, CI, or generic checks only for gaps not covered by the profiles.
 
 Runnable verification commands should fail when the checked condition fails. Prefer exact commands from `environment.commands`, `quality.required_checks`, or CI. Treat inspection-only commands as evidence sources unless they are wrapped with a failing assertion.
@@ -227,7 +227,7 @@ Prefer making and recording a reversible decision when the risk is low. Record a
 
 A decision is reversible when undoing it requires only editing the task YAML, rerunning the same command, reverting one commit, or applying a small follow-up patch.
 
-Ask for documents only when the missing information blocks safe goal, AC, scope, or verification definition. Otherwise proceed with the current request and repo evidence.
+Ask for documents only when the missing information blocks safe goal, AC, implementation boundary, or verification definition. Otherwise proceed with the current request and repo evidence.
 
 ## Extracting From Existing Planning Docs
 
@@ -237,14 +237,14 @@ When PRDs, design docs, work plans, or task docs exist, use their useful parts w
 | --- | --- | --- |
 | PRD / issue | user value, must-have requirements, ACs, out-of-scope items | broad roadmap items unrelated to the task |
 | Design doc | affected paths, contracts, data flow, invariants, verification strategy | long rationale not needed by the executor |
-| Work plan | phase/task objective, dependencies, quality mechanisms, risks | schedule estimates and human assignment details |
+| Work plan | overall objective, ordered implementation steps, dependencies, quality mechanisms, risks | schedule estimates, human assignment details, and phase labels used as task-splitting instructions |
 | Existing task doc | investigation targets, target files, operation verification, constraints | task runner instructions that conflict with Galley |
 
 Convert extracted material into Galley fields:
 
 - Goal: one outcome from the source document's objective or task purpose.
 - ACs: EARS-style or measurable requirements with verification evidence.
-- Scope: target files, protected boundaries, and allowed/forbidden paths.
+- Execution boundary: target files, protected boundaries, and allowed/forbidden paths.
 - Reference files: source documents copied through `files[]` only when the executor benefits from reading them in the worktree.
 - Quality basis: existing profile, CI command, documented quality mechanism, or a domain-specific fallback.
 

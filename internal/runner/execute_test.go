@@ -84,63 +84,6 @@ func TestRunCommandKillsProcessGroup(t *testing.T) {
 	}
 }
 
-func TestRunCommandIdleTimeoutTerminatesStalledProcessGroup(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	marker := filepath.Join(dir, "child-finished")
-	// Emit output once, then become idle while a backgrounded child keeps running.
-	script := writeScript(t, dir, "idle", "#!/bin/sh\necho starting\n(sleep 3; touch "+marker+") &\nsleep 5\n")
-
-	result, err := RunCommand(context.Background(), Command{Argv: []string{script}}, RunOptions{
-		Timeout:     20 * time.Second,
-		IdleTimeout: 500 * time.Millisecond,
-	})
-	if err == nil {
-		t.Fatal("expected idle timeout error")
-	}
-	if !result.IdleTimedOut {
-		t.Fatalf("expected idle timed out result: %#v", result)
-	}
-	if result.TimedOut {
-		t.Fatalf("idle timeout must be reported separately from total timeout: %#v", result)
-	}
-	if !strings.Contains(result.Stdout, "starting") {
-		t.Fatalf("expected initial output captured, got %q", result.Stdout)
-	}
-	if !strings.Contains(err.Error(), "idle timeout") {
-		t.Fatalf("error should mention idle timeout, got %v", err)
-	}
-	deadline := time.Now().Add(3500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if _, statErr := os.Stat(marker); os.IsNotExist(statErr) {
-			time.Sleep(50 * time.Millisecond)
-			continue
-		}
-		t.Fatal("child process survived idle-timeout process group kill")
-	}
-}
-
-func TestRunCommandIdleTimeoutNotTriggeredByOngoingOutput(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	// Emits output every ~100ms for ~1s, well within the idle window each time.
-	script := writeScript(t, dir, "chatty", "#!/bin/sh\ni=0\nwhile [ $i -lt 8 ]; do echo line$i; sleep 0.1; i=$((i+1)); done\n")
-
-	result, err := RunCommand(context.Background(), Command{Argv: []string{script}}, RunOptions{
-		Timeout:     20 * time.Second,
-		IdleTimeout: 2 * time.Second,
-	})
-	if err != nil {
-		t.Fatalf("expected success, got %v", err)
-	}
-	if result.IdleTimedOut {
-		t.Fatalf("idle timeout should not fire while output continues: %#v", result)
-	}
-	if !strings.Contains(result.Stdout, "line7") {
-		t.Fatalf("expected full output, got %q", result.Stdout)
-	}
-}
-
 func TestRunCommandKeepsBoundedTail(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

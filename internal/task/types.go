@@ -19,6 +19,7 @@ type Task struct {
 	Worktree           Worktree              `yaml:"worktree" json:"worktree"`
 	Supervisor         Supervisor            `yaml:"supervisor" json:"supervisor"`
 	Executor           Executor              `yaml:"executor" json:"executor"`
+	Preflight          *Preflight            `yaml:"preflight,omitempty" json:"preflight,omitempty"`
 	Decisions          []Decision            `yaml:"decisions" json:"decisions"`
 	Risks              []Risk                `yaml:"risks" json:"risks"`
 	DiscussionItems    []DiscussionItem      `yaml:"discussion_items,omitempty" json:"discussion_items,omitempty"`
@@ -26,6 +27,71 @@ type Task struct {
 	Attempts           []Attempt             `yaml:"attempts" json:"attempts"`
 	Verification       Verification          `yaml:"verification" json:"verification"`
 	PR                 PR                    `yaml:"pr" json:"pr"`
+}
+
+// Preflight groups optional pre-executor stages. A nil pointer or absent
+// fields means the stage is disabled and the daemon flow is unchanged.
+type Preflight struct {
+	AcceptanceSkeleton *AcceptanceSkeletonConfig `yaml:"acceptance_skeleton,omitempty" json:"acceptance_skeleton,omitempty"`
+}
+
+// AcceptanceSkeletonConfig configures the optional acceptance skeleton
+// preflight stage that materializes AC-linked test skeletons in the worktree
+// before the first executor attempt.
+type AcceptanceSkeletonConfig struct {
+	Enabled      bool     `yaml:"enabled" json:"enabled"`
+	Mode         string   `yaml:"mode,omitempty" json:"mode,omitempty"`
+	Required     *bool    `yaml:"required,omitempty" json:"required,omitempty"`
+	AllowedPaths []string `yaml:"allowed_paths,omitempty" json:"allowed_paths,omitempty"`
+	// Creator, when present, is run by the daemon inside the prepared worktree
+	// before the first executor attempt to materialize the skeleton files and
+	// emit a manifest of AC-linked outputs. When Creator is nil the daemon
+	// falls back to the statically declared Outputs below.
+	Creator *AcceptanceSkeletonCreatorDef `yaml:"creator,omitempty" json:"creator,omitempty"`
+	Outputs []AcceptanceSkeletonOutputDef `yaml:"outputs,omitempty" json:"outputs,omitempty"`
+}
+
+// AcceptanceSkeletonCreatorDef configures the skeleton creator pass. Command is
+// a shell command run with cwd set to the prepared worktree. The daemon exports
+// GALLEY_SKELETON_MANIFEST (path the creator must write the JSON manifest to),
+// GALLEY_SKELETON_ACS (comma-separated AC IDs), and GALLEY_SKELETON_ALLOWED_PATHS
+// (newline-separated effective allowed paths) into the command environment.
+type AcceptanceSkeletonCreatorDef struct {
+	Command   string `yaml:"command" json:"command"`
+	TimeoutMS int    `yaml:"timeout_ms,omitempty" json:"timeout_ms,omitempty"`
+}
+
+// AcceptanceSkeletonOutputDef declares one skeleton file the preflight stage
+// must materialize in the worktree before the first executor attempt. Each
+// entry binds an AC ID to a relative path, a kind/purpose pair that documents
+// what the skeleton verifies, an implementation_required flag that controls
+// the daemon-side acceptance gate, and a checkpoint_command the daemon runs
+// after each executor attempt to capture pass/fail evidence.
+type AcceptanceSkeletonOutputDef struct {
+	ACID                   string `yaml:"ac_id" json:"ac_id"`
+	Path                   string `yaml:"path" json:"path"`
+	Kind                   string `yaml:"kind" json:"kind"`
+	Purpose                string `yaml:"purpose" json:"purpose"`
+	ImplementationRequired bool   `yaml:"implementation_required" json:"implementation_required"`
+	CheckpointCommand      string `yaml:"checkpoint_command" json:"checkpoint_command"`
+	Template               string `yaml:"template,omitempty" json:"template,omitempty"`
+}
+
+// IsEnabled reports whether the acceptance skeleton stage should run.
+func (c *AcceptanceSkeletonConfig) IsEnabled() bool {
+	return c != nil && c.Enabled
+}
+
+// IsRequired reports whether missing or failed skeleton/check evidence should
+// downgrade an accepted verdict. Defaults to true when the stage is enabled.
+func (c *AcceptanceSkeletonConfig) IsRequired() bool {
+	if c == nil || !c.Enabled {
+		return false
+	}
+	if c.Required == nil {
+		return true
+	}
+	return *c.Required
 }
 
 // InputFile describes a source file Galley should place in the execution workspace.

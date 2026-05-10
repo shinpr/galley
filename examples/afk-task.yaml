@@ -35,6 +35,30 @@ executor:
   prompt_profile: "codexized-claude-executor-v1"
   prompt_mode: "replace"
   max_budget_usd: 10
+# Optional, default-disabled. Uncomment to materialize AC-linked test skeletons
+# before the first executor attempt. See docs/task-yaml.md "Acceptance Skeleton Preflight".
+# preflight:
+#   acceptance_skeleton:
+#     enabled: true
+#     required: true
+#     # allowed_paths defaults to scope.allowed_paths when omitted.
+#     # allowed_paths:
+#     #   - "internal"
+#     # With creator.command, the daemon runs that command inside the worktree
+#     # (exporting GALLEY_SKELETON_MANIFEST / GALLEY_SKELETON_ACS /
+#     # GALLEY_SKELETON_ALLOWED_PATHS). The command must write every skeleton file
+#     # it declares; Galley fails the stage if a creator-declared file is missing.
+#     # creator:
+#     #   command: "scripts/make-skeletons.sh"
+#     #   timeout_ms: 60000
+#     # Without creator.command, these static outputs[] are materialized instead.
+#     outputs:
+#       - ac_id: "AC1"
+#         path: "internal/foo/foo_test.go"
+#         kind: "go-test"
+#         purpose: "Verify the AC1 behavior boundary"
+#         implementation_required: true
+#         checkpoint_command: "go test ./internal/foo/ -run TestFoo"
 decisions: []
 risks: []
 attempts: []

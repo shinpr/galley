@@ -42,16 +42,32 @@ type DiscussionItem struct {
 	RequiresHumanDecision bool   `json:"requires_human_decision"`
 }
 
+// PreflightCheckpointResult mirrors the daemon-side checkpoint payload so
+// supervisor evidence stays self-contained without importing the daemon
+// package (which would cause a cycle).
+type PreflightCheckpointResult struct {
+	ACID          string `json:"ac_id"`
+	Command       string `json:"command"`
+	Status        string `json:"status"`
+	ExitCode      int    `json:"exit_code"`
+	DurationMS    int64  `json:"duration_ms"`
+	StdoutExcerpt string `json:"stdout_excerpt,omitempty"`
+	StderrExcerpt string `json:"stderr_excerpt,omitempty"`
+	Source        string `json:"source"`
+}
+
 // Evidence is the local evidence sent to a model supervisor.
 type Evidence struct {
-	Task         task.Task
-	Profiles     profile.Bundle
-	Claude       runner.ClaudeResult
-	ParseError   error
-	RunError     error
-	DiffDirty    bool
-	Diff         string
-	DiffError    error
-	Attempt      int
-	AttemptsLeft int
+	Task                      task.Task
+	Profiles                  profile.Bundle
+	Claude                    runner.ClaudeResult
+	ParseError                error
+	RunError                  error
+	DiffDirty                 bool
+	Diff                      string
+	DiffError                 error
+	Attempt                   int
+	AttemptsLeft              int
+	PreflightResult           any
+	SkeletonCheckpointResults []PreflightCheckpointResult
 }

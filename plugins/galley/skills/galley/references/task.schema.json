@@ -309,6 +309,100 @@
       ],
       "type": "object"
     },
+    "preflight": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptance_skeleton": {
+          "additionalProperties": false,
+          "properties": {
+            "allowed_paths": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "creator": {
+              "additionalProperties": false,
+              "properties": {
+                "command": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "timeout_ms": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "command"
+              ],
+              "type": "object"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "mode": {
+              "enum": [
+                "skeleton"
+              ],
+              "type": "string"
+            },
+            "outputs": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "ac_id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "checkpoint_command": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "implementation_required": {
+                    "type": "boolean"
+                  },
+                  "kind": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "path": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "purpose": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "template": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "ac_id",
+                  "path",
+                  "kind",
+                  "purpose",
+                  "implementation_required",
+                  "checkpoint_command"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "required": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "revision_requests": {
       "items": {
         "additionalProperties": false,

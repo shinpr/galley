@@ -429,6 +429,23 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	if err != nil {
 		return taskstate.FailMove(opts.Root, runningPath, &loaded, err)
 	}
+	// Optional acceptance skeleton preflight runs after inputfiles.Prepare and
+	// before the first executor attempt. The stage is a no-op when the task
+	// omits preflight.acceptance_skeleton.enabled or sets it to false (R1,
+	// AC-001). When the stage fails the daemon does not run the executor and
+	// surfaces the failure through task status and run evidence (AC-007).
+	if cfg := loaded.Preflight; cfg != nil && cfg.AcceptanceSkeleton.IsEnabled() {
+		_, perr := AcceptanceSkeletonPreflight(ctx, AcceptanceSkeletonPreflightOptions{
+			Task:     loaded,
+			WorkDir:  prepared.CWD,
+			RunDir:   runDir,
+			Profiles: profiles,
+		})
+		if perr != nil {
+			appendFailureAttempt(&loaded, "acceptance_skeleton_preflight", "acceptance_skeleton_preflight_failed", perr, runDir)
+			return taskstate.FailMove(opts.Root, runningPath, &loaded, perr)
+		}
+	}
 	return runSupervisorLoop(ctx, shutdownCtx, opts, runningPath, &loaded, prepared, profiles, runDir, runID)
 }
 

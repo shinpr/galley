@@ -28,6 +28,7 @@ func TaskJSONSchema() ([]byte, error) {
 		"worktree":            worktreeSchema(),
 		"supervisor":          supervisorSchema(),
 		"executor":            executorSchema(),
+		"preflight":           preflightSchema(),
 		"decisions":           arraySchema(decisionSchema()),
 		"risks":               arraySchema(riskSchema()),
 		"discussion_items":    arraySchema(discussionItemSchema()),
@@ -219,6 +220,45 @@ func verificationSchema() map[string]any {
 					"output_excerpt": stringSchema(),
 				}),
 			)),
+		}),
+	)
+}
+
+func preflightSchema() map[string]any {
+	return object(
+		properties(map[string]any{
+			"acceptance_skeleton": object(
+				required("enabled"),
+				properties(map[string]any{
+					"enabled":       map[string]any{"type": "boolean"},
+					"mode":          enumSchema(validPreflightSkeletonModes),
+					"required":      map[string]any{"type": "boolean"},
+					"allowed_paths": arraySchema(stringSchema("minLength", 1)),
+					"creator": object(
+						required("command"),
+						properties(map[string]any{
+							"command":    stringSchema("minLength", 1),
+							"timeout_ms": map[string]any{"type": "integer", "minimum": 0},
+						}),
+					),
+					"outputs": arraySchema(preflightOutputSchema()),
+				}),
+			),
+		}),
+	)
+}
+
+func preflightOutputSchema() map[string]any {
+	return object(
+		required("ac_id", "path", "kind", "purpose", "implementation_required", "checkpoint_command"),
+		properties(map[string]any{
+			"ac_id":                   stringSchema("minLength", 1),
+			"path":                    stringSchema("minLength", 1),
+			"kind":                    stringSchema("minLength", 1),
+			"purpose":                 stringSchema("minLength", 1),
+			"implementation_required": map[string]any{"type": "boolean"},
+			"checkpoint_command":      stringSchema("minLength", 1),
+			"template":                map[string]any{"type": "string"},
 		}),
 	)
 }

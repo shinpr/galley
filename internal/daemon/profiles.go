@@ -133,10 +133,12 @@ func hasOriginRemote(ctx context.Context, opts Options, sourceCWD string) bool {
 	return err == nil
 }
 
-// fetchOriginRef performs a best-effort `git fetch origin <base>` against the
-// source repository. Errors are returned for the caller to log/ignore; the
-// daemon swallows the error and lets the existing resolution chain pick the
-// best available ref.
+// fetchOriginRef runs `git fetch --no-tags --quiet origin <base>` against the
+// source repository to refresh refs/remotes/origin/<base> before it is used as
+// a worktree start-point. Fetch errors are returned to the caller; they are
+// not swallowed. resolveWorktreeStartPoint propagates the error to fail
+// workspace preparation so the daemon refuses to anchor a new task branch on a
+// possibly stale remote-tracking ref.
 func fetchOriginRef(ctx context.Context, opts Options, sourceCWD, base string) error {
 	gitBin := opts.GitBin
 	if gitBin == "" {

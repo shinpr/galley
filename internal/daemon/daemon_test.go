@@ -1133,10 +1133,16 @@ func TestCleanupWorktreesSkipsDirtyClosedPRWorktree(t *testing.T) {
 func TestRunOnceBranchesNewWorktreeFromEnvironmentPRBaseOriginRef(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
-	// Pin origin/feature-base at the initial commit, then advance source HEAD
-	// so origin/feature-base SHA differs from HEAD SHA.
+	// Wire a real bare origin remote and publish feature-base at the initial
+	// commit. The daemon's pre-resolve `git fetch origin feature-base` must
+	// succeed against this remote so origin/feature-base remains the chosen
+	// start-point. Advance source HEAD so origin/feature-base SHA differs
+	// from the source repo HEAD SHA.
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	runDaemonGit(t, t.TempDir(), "init", "--bare", remote)
+	runDaemonGit(t, repo, "remote", "add", "origin", remote)
 	baseSHA := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "HEAD")))
-	runDaemonGit(t, repo, "update-ref", "refs/remotes/origin/feature-base", baseSHA)
+	runDaemonGit(t, repo, "push", "origin", "HEAD:refs/heads/feature-base")
 	if err := os.WriteFile(filepath.Join(repo, "advance.txt"), []byte("advance\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -1298,6 +1304,79 @@ func TestRunOnceFailsWhenPRBaseRefMissing(t *testing.T) {
 	}
 	if !strings.Contains(last.Error.Message, "refs/remotes/origin/does-not-exist") || !strings.Contains(last.Error.Message, "refs/heads/does-not-exist") {
 		t.Fatalf("attempt error message missing both attempted refs: %q", last.Error.Message)
+	}
+}
+
+// TestRunOnceFailsWhenStaleOriginRefAndFetchFails covers the tightened
+// PR-review behavior: when the source repository has an origin remote, a
+// stale refs/remotes/origin/<pr.base> cached locally, and `git fetch origin
+// <pr.base>` cannot succeed (here, the configured origin URL is unreachable),
+// the daemon must refuse to use the stale remote-tracking ref and instead
+// fail the claimed task in the workspace phase. This prevents a stale local
+// origin/<base> from silently anchoring a new task branch behind the actual
+// remote tip when the daemon cannot confirm freshness.
+func TestRunOnceFailsWhenStaleOriginRefAndFetchFails(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	// Wire origin to a bogus URL so `git fetch origin feature-stale` fails.
+	bogusRemote := filepath.Join(t.TempDir(), "does-not-exist.git")
+	runDaemonGit(t, repo, "remote", "add", "origin", bogusRemote)
+	// Pre-create a stale refs/remotes/origin/feature-stale: if the daemon
+	// did not refuse on fetch failure, this stale ref would still be
+	// resolved as the start-point.
+	staleSHA := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "HEAD")))
+	runDaemonGit(t, repo, "update-ref", "refs/remotes/origin/feature-stale", staleSHA)
+
+	writeRepoEnvironmentProfile(t, root, repo, "feature-stale")
+
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+	claudeBin := writeFakeClaude(t, "echo should-not-run\n")
+	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonTask(t, taskPath, repo)
+
+	err := Run(context.Background(), Options{
+		Root:               root,
+		SystemPromptFile:   promptPath,
+		JSONSchemaFile:     schemaPath,
+		ClaudeBin:          claudeBin,
+		Once:               true,
+		MaxConcurrentTasks: 1,
+	})
+	if err == nil {
+		t.Fatal("expected workspace failure when origin fetch fails and stale origin/<base> exists")
+	}
+	failedTask, err := task.Load(filepath.Join(root, "tasks", "failed", "task.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failedTask.Attempts) == 0 {
+		t.Fatalf("expected a workspace failure attempt: %#v", failedTask)
+	}
+	last := failedTask.Attempts[len(failedTask.Attempts)-1]
+	if last.Error == nil || last.Error.Phase != "workspace" {
+		t.Fatalf("attempt error got %#v", last.Error)
+	}
+	// The error must surface the source repo path, the pr.base value, and
+	// the failed fetch operation so `galley task show` exposes the reason.
+	for _, want := range []string{repo, "feature-stale", "fetch", "refs/remotes/origin/feature-stale"} {
+		if !strings.Contains(last.Error.Message, want) {
+			t.Fatalf("attempt error message missing %q: %q", want, last.Error.Message)
+		}
+	}
+	// No worktree must have been created from the stale ref.
+	doneTask := filepath.Join(root, "tasks", "done", "task.yaml")
+	if _, statErr := os.Stat(doneTask); statErr == nil {
+		t.Fatalf("expected no done task, but found %s", doneTask)
+	}
+	// The stale local ref must remain untouched (the fetch failed, so no
+	// refresh could have updated it). This documents that we did not
+	// silently rewrite the stale ref while refusing to use it.
+	stillStale := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "refs/remotes/origin/feature-stale")))
+	if stillStale != staleSHA {
+		t.Fatalf("stale origin/feature-stale unexpectedly changed; got %q want %q", stillStale, staleSHA)
 	}
 }
 

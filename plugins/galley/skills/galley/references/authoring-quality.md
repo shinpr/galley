@@ -148,6 +148,8 @@ AC traceability checks:
 - Every risky boundary crossing has an AC or quality finding target: API/schema, data persistence, authorization, UI state, CLI output, migration, external service, or config.
 - Each AC names one observable obligation. Split one AC when "and" joins independently verifiable obligations or the AC crosses multiple boundaries.
 
+For bug-fix or behavior-correction tasks, define the smallest reproducing state before finalizing ACs. Include the prior state that makes the bug observable, such as stale local or remote state, cached or generated artifacts, persisted records, existing resources, configuration values, previous run state, or saved history. At least one AC or verification item should prove the fix in that reproducing state.
+
 ## Quality Criteria Sources
 
 If quality standards already exist, use them before inventing general gates.

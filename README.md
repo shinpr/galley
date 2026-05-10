@@ -364,9 +364,19 @@ With `pr.enabled: true`, Galley pushes the current worktree branch to `origin`, 
 
 Galley renders each acceptance criterion in `pr_body.md` using the supervisor verdict, so accepted ACs read as `Status: satisfied` and any IDs the supervisor flagged in `acceptance_gaps` read as `Status: partially_satisfied`. Generated PR titles are truncated at the last whitespace inside Galley's rune budget, enforced against GitHub's 256-byte PR title limit on a valid UTF-8 boundary (so 4-byte runes such as emoji never overflow), and end with a single `…` so reviewers can tell the title was shortened.
 
-With `pr.comments.enabled: true`, the daemon scans task files with `pr.url`, reads GitHub issue comments through `gh api`, and processes the oldest unprocessed `/galley rerun ...` or `/galley requeue ...` command for each task. Processed comment IDs are stored in `pr.processed_comment_ids` so rerun commands are not applied twice.
+With `pr.comments.enabled: true`, the daemon scans task files with `pr.url`, reads GitHub issue comments through `gh api`, and processes the oldest unprocessed Galley command for each task. A comment is accepted when its body, after trimming surrounding whitespace, starts with `/galley`. Recognised forms are:
 
-With `pr.comments.reply: true`, Galley posts an acknowledgement comment after handling a rerun or requeue command.
+- `/galley <free-form request>` — the text after the prefix becomes the request reason (for example `/galley fix the failing test`).
+- `/galley rerun ...` and `/galley requeue ...` — backward-compatible aliases; the alias word is stripped so the parsed reason is the same as before.
+- `/galley` alone — a no-arg requeue using the default reason.
+
+Mid-line mentions like `Looks good, /galley rerun`, a `/galley` line that appears only after the first non-whitespace line, `/galley:galley ...`, and `/galleyfoo ...` are ignored. Processed comment IDs are stored in `pr.processed_comment_ids` so commands are not applied twice.
+
+With `pr.comments.reply: true`, Galley posts a concise acknowledgement comment after handling a Galley command. The reply does not quote the original request body; the parsed request text is preserved on the requeued task as a `RevisionRequest` entry so the executor still receives the user's intent on the next attempt. Reply forms:
+
+- Successful requeue: ``Galley requeued task `<task-id>` from this comment.``
+- Comment received while the task is queued or running: `Galley noted this comment; task is already <status>.`
+- Comment from an untrusted author: `Galley ignored this comment from @<login> because author_association=<assoc> is not allowed.`
 
 ## Supervisors
 

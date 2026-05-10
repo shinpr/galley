@@ -75,6 +75,68 @@ func TestRunOnceMovesTaskToDoneAndWritesRunEvidence(t *testing.T) {
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", "claude.stdout.jsonl"), 1)
 }
 
+func TestRunOnceBuiltInAcceptanceSkeletonCreatorUpdatesTaskBeforeExecutor(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+	claudeBin := writeFakeClaude(t, `creator=0
+for arg in "$@"; do
+  case "$arg" in
+    *"Galley Acceptance Skeleton Manifest"*) creator=1 ;;
+  esac
+done
+if [ "$creator" = "1" ]; then
+  mkdir -p internal/foo
+  printf 'package foo_test\n\n// TODO(galley-skeleton): implement AC1 assertion.\n' > internal/foo/foo_test.go
+  printf '%s\n' '{"type":"result","result":"{\"outputs\":[{\"ac_id\":\"AC1\",\"path\":\"internal/foo/foo_test.go\",\"kind\":\"go-test\",\"purpose\":\"verify AC1\",\"satisfies\":\"AC1 observable behavior\",\"integration_point\":\"executor completes this skeleton before acceptance\",\"implementation_required\":true}],\"no_skeletons\":[]}"}'
+  exit 0
+fi
+echo change > daemon-output.txt
+echo '{"status":"completed","summary":"done","files_modified":["daemon-output.txt","internal/foo/foo_test.go"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"decisions":[],"risks":[]}'
+`)
+	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonTask(t, taskPath, repo)
+	loaded, err := task.Load(taskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Preflight = &task.Preflight{AcceptanceSkeleton: &task.AcceptanceSkeletonConfig{Enabled: true}}
+	if err := task.Save(taskPath, loaded); err != nil {
+		t.Fatal(err)
+	}
+
+	err = Run(context.Background(), Options{
+		Root:               root,
+		SystemPromptFile:   promptPath,
+		JSONSchemaFile:     schemaPath,
+		Once:               true,
+		MaxConcurrentTasks: 1,
+		ClaudeBin:          claudeBin,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	doneTask, err := task.Load(filepath.Join(root, "tasks", "done", "task.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputs := doneTask.Preflight.AcceptanceSkeleton.Outputs
+	if len(outputs) != 1 || outputs[0].Path != "internal/foo/foo_test.go" || outputs[0].Satisfies == "" || outputs[0].IntegrationPoint == "" {
+		t.Fatalf("generated outputs not written to task: %+v", outputs)
+	}
+	if !strings.Contains(doneTask.AcceptanceCriteria[0].Verification, "Acceptance skeleton:") ||
+		!strings.Contains(doneTask.AcceptanceCriteria[0].Verification, "AC1 observable behavior") {
+		t.Fatalf("AC verification not annotated:\n%s", doneTask.AcceptanceCriteria[0].Verification)
+	}
+	assertGlobCount(t, filepath.Join(root, "runs", "*", "preflight_creator_command_plan.json"), 1)
+	assertGlobCount(t, filepath.Join(root, "runs", "*", "preflight_creator_manifest.json"), 1)
+	assertGlobCount(t, filepath.Join(root, "runs", "*", "preflight_result.json"), 1)
+}
+
 func TestRunOnceUsesModelSupervisorProvider(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)

@@ -152,6 +152,33 @@ Example:
   status: "pending"
 ```
 
+## Acceptance Skeleton Preflight
+
+`preflight.acceptance_skeleton` is an optional, default-disabled stage that runs after input files are prepared and before the first executor attempt. When `enabled: true`, Galley runs the built-in test creator, writes AC-linked test skeletons in the worktree, records `runs/<run-id>/preflight_result.json` as the runtime source of truth, updates the running task with the generated skeleton metadata, and adds a skeleton-obligations section to the executor work order.
+
+```yaml
+preflight:
+  acceptance_skeleton:
+    enabled: true
+    required: true            # default true when enabled; require each AC to have output or no_skeletons
+    allowed_paths:            # optional; defaults to scope.allowed_paths
+      - "internal"
+    outputs:                  # daemon-owned; written after the built-in creator runs
+      - ac_id: "AC1"
+        path: "internal/foo/foo_test.go"
+        kind: "go-test"
+        purpose: "Verify the AC1 behavior boundary"
+        satisfies: "AC1's observable foo behavior"
+        integration_point: "Executor completes this skeleton before final acceptance"
+        implementation_required: true
+```
+
+The built-in creator reads the task, ACs, allowed paths, resolved profiles, and task input files such as design docs or work plans; writes AC-linked test skeleton files; and returns a manifest. Galley validates that manifest, writes `preflight_result.json`, updates the running task file with generated `outputs[]`, and annotates each AC's `verification` with the skeleton path, what it satisfies, and the integration point before the executor starts. Generated paths must be relative, inside the effective allowed paths, outside `scope.forbidden_paths`, and backed by real files already written by the creator.
+
+Required-check acceptance gate semantics: this gate is part of the acceptance skeleton stage and runs only when `preflight.acceptance_skeleton.enabled: true` — tasks that omit or disable the section keep the pre-feature accepted-verdict behavior. For preflight-enabled tasks, an accepted verdict is downgraded to `needs_supervisor_review` when a required quality-profile check has no passing verification evidence. `preferred_commands` is treated as an **ordered fallback list**, mirroring how `result.Complete` runs them: the commands run in order, the first that passes is recorded, and only that command's evidence is kept (or the last failure when every command failed). The gate therefore considers a required check satisfied when *any* of its `preferred_commands` has a passing entry, failed when none passed but at least one has a failed entry, and missing only when there is no evidence for any of its commands (which happens when no executor result was produced, e.g. a hard stop). Requiring every fallback command to have evidence would contradict the fallback semantics and is intentionally not done.
+
+`required: false` relaxes AC coverage only: Galley no longer requires every AC to have an output or a `no_skeletons[]` reason. It does not disable required quality-check gating.
+
 ## Loop Budget
 
 `execution_policy.loop_budget` is the maximum number of executor attempts. It accepts an integer greater than or equal to `0`; `0` means unlimited.

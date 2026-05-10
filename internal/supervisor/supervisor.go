@@ -44,14 +44,15 @@ type DiscussionItem struct {
 
 // Evidence is the local evidence sent to a model supervisor.
 type Evidence struct {
-	Task         task.Task
-	Profiles     profile.Bundle
-	Claude       runner.ClaudeResult
-	ParseError   error
-	RunError     error
-	DiffDirty    bool
-	Diff         string
-	DiffError    error
-	Attempt      int
-	AttemptsLeft int
+	Task            task.Task
+	Profiles        profile.Bundle
+	Claude          runner.ClaudeResult
+	ParseError      error
+	RunError        error
+	DiffDirty       bool
+	Diff            string
+	DiffError       error
+	Attempt         int
+	AttemptsLeft    int
+	PreflightResult any
 }

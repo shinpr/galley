@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Galley Acceptance Skeleton Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["outputs", "no_skeletons"],
+  "properties": {
+    "outputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ac_id",
+          "path",
+          "kind",
+          "purpose",
+          "satisfies",
+          "integration_point",
+          "implementation_required"
+        ],
+        "properties": {
+          "ac_id": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "minLength": 1 },
+          "kind": { "type": "string", "minLength": 1 },
+          "purpose": { "type": "string", "minLength": 1 },
+          "satisfies": { "type": "string", "minLength": 1 },
+          "integration_point": { "type": "string", "minLength": 1 },
+          "implementation_required": { "type": "boolean" }
+        }
+      }
+    },
+    "no_skeletons": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ac_id", "reason"],
+        "properties": {
+          "ac_id": { "type": "string", "minLength": 1 },
+          "reason": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

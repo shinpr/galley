@@ -58,7 +58,7 @@ func Complete(ctx context.Context, opts CompleteOptions) (runner.ClaudeResult, e
 
 	runCtx := ctx
 	var cancel context.CancelFunc
-	if loaded.ExecutionPolicy.TimeoutMS > 0 {
+	if loaded.ExecutionPolicy.TimeoutMS > 0 && !contextHasDeadline(ctx) {
 		runCtx, cancel = context.WithTimeout(ctx, time.Duration(loaded.ExecutionPolicy.TimeoutMS)*time.Millisecond)
 		defer cancel()
 	}
@@ -129,6 +129,11 @@ func Complete(ctx context.Context, opts CompleteOptions) (runner.ClaudeResult, e
 		return runner.ClaudeResult{}, fmt.Errorf("write result file %s: %w", opts.Output, err)
 	}
 	return result, nil
+}
+
+func contextHasDeadline(ctx context.Context) bool {
+	_, ok := ctx.Deadline()
+	return ok
 }
 
 func requiredChecks(profiles profile.Bundle) []profile.RequiredCheck {

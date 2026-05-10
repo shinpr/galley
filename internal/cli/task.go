@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/shinpr/galley/internal/daemonctl"
 	"github.com/shinpr/galley/internal/galleyhome"
+	"github.com/shinpr/galley/internal/runlog"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/spf13/cobra"
 )
@@ -130,10 +132,15 @@ func newTaskShowCommand() *cobra.Command {
 				return err
 			}
 			item := taskSummary(path, loaded)
+			preflight := preflightSummary(loaded)
+			if preflight != nil {
+				applyRuntimePreflight(preflight, root, loaded.ID)
+			}
 			payload := struct {
-				Summary taskListItem `json:"summary"`
-				Task    task.Task    `json:"task"`
-			}{Summary: item, Task: loaded}
+				Summary   taskListItem          `json:"summary"`
+				Task      task.Task             `json:"task"`
+				Preflight *preflightSummaryView `json:"preflight,omitempty"`
+			}{Summary: item, Task: loaded, Preflight: preflight}
 			return renderOutput(cmd, output, payload, func() error {
 				fmt.Fprintf(cmd.OutOrStdout(), "id: %s\n", loaded.ID)
 				fmt.Fprintf(cmd.OutOrStdout(), "status: %s\n", loaded.Status)
@@ -176,6 +183,20 @@ func newTaskShowCommand() *cobra.Command {
 						if command.OutputExcerpt != "" {
 							fmt.Fprintf(cmd.OutOrStdout(), "failed_output: %s\n", command.OutputExcerpt)
 						}
+					}
+				}
+				if preflight != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "preflight_enabled: %t\n", preflight.Enabled)
+					fmt.Fprintf(cmd.OutOrStdout(), "preflight_required: %t\n", preflight.Required)
+					fmt.Fprintf(cmd.OutOrStdout(), "preflight_declared_outputs: %d\n", preflight.DeclaredOutputs)
+					if preflight.RuntimeStatus != "" {
+						fmt.Fprintf(cmd.OutOrStdout(), "preflight_runtime_status: %s\n", preflight.RuntimeStatus)
+					}
+					for _, o := range preflight.RuntimeOutputs {
+						fmt.Fprintf(cmd.OutOrStdout(), "preflight_output: ac=%s path=%s kind=%s implementation_required=%t\n", o.ACID, o.Path, o.Kind, o.ImplementationRequired)
+					}
+					if preflight.FailureSummary != "" {
+						fmt.Fprintf(cmd.OutOrStdout(), "preflight_failure: %s\n", preflight.FailureSummary)
 					}
 				}
 				return nil
@@ -434,6 +455,79 @@ func newTaskValidateCommand() *cobra.Command {
 
 	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text or json")
 	return cmd
+}
+
+// preflightSummaryView is the JSON/text view shown by `galley task show` for
+// the optional acceptance skeleton preflight stage. Runtime fields are loaded
+// from runs/<run-id>/preflight_result.json when available.
+type preflightSummaryView struct {
+	Enabled         bool                  `json:"enabled"`
+	Required        bool                  `json:"required"`
+	DeclaredOutputs int                   `json:"declared_outputs"`
+	RuntimeStatus   string                `json:"runtime_status,omitempty"`
+	RuntimeOutputs  []preflightOutputView `json:"runtime_outputs,omitempty"`
+	FailureSummary  string                `json:"failure_summary,omitempty"`
+}
+
+type preflightOutputView struct {
+	ACID                   string `json:"ac_id"`
+	Path                   string `json:"path"`
+	Kind                   string `json:"kind"`
+	ImplementationRequired bool   `json:"implementation_required"`
+}
+
+func preflightSummary(t task.Task) *preflightSummaryView {
+	if t.Preflight == nil || t.Preflight.AcceptanceSkeleton == nil {
+		return nil
+	}
+	cfg := t.Preflight.AcceptanceSkeleton
+	view := &preflightSummaryView{
+		Enabled:         cfg.IsEnabled(),
+		Required:        cfg.IsRequired(),
+		DeclaredOutputs: len(cfg.Outputs),
+	}
+	return view
+}
+
+type runtimePreflightFile struct {
+	Status  string `json:"status"`
+	Outputs []struct {
+		ACID                   string `json:"ac_id"`
+		Path                   string `json:"path"`
+		Kind                   string `json:"kind"`
+		ImplementationRequired bool   `json:"implementation_required"`
+	} `json:"outputs"`
+	Error *struct {
+		Phase   string `json:"phase"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// applyRuntimePreflight resolves the latest run directory for the task under
+// <root>/runs and folds the runtime preflight_result.json into the view
+// (AC-015). When no run directory exists the static declared fields are left
+// unchanged.
+func applyRuntimePreflight(view *preflightSummaryView, root, taskID string) {
+	runDir, _ := runlog.LatestTaskRunDir(root, taskID)
+	if runDir == "" {
+		return
+	}
+	if data, err := os.ReadFile(filepath.Join(runDir, "preflight_result.json")); err == nil {
+		var pf runtimePreflightFile
+		if json.Unmarshal(data, &pf) == nil {
+			view.RuntimeStatus = pf.Status
+			for _, o := range pf.Outputs {
+				view.RuntimeOutputs = append(view.RuntimeOutputs, preflightOutputView{ACID: o.ACID, Path: o.Path, Kind: o.Kind, ImplementationRequired: o.ImplementationRequired})
+			}
+			if pf.Error != nil {
+				if pf.Error.Phase != "" {
+					view.FailureSummary = pf.Error.Phase + ": " + pf.Error.Message
+				} else {
+					view.FailureSummary = pf.Error.Message
+				}
+			}
+		}
+	}
 }
 
 func newTaskWorkOrderCommand() *cobra.Command {

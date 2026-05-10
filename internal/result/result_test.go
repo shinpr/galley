@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/shinpr/galley/internal/profile"
 )
@@ -160,6 +161,31 @@ func TestCompleteRunsRequiredQualityChecks(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("required quality check missing: %#v", generated.Verification)
+	}
+}
+
+func TestCompleteUsesCallerDeadlineInsteadOfStartingAnotherTaskTimeout(t *testing.T) {
+	t.Parallel()
+	repo := t.TempDir()
+	runGit(t, repo, "init")
+	taskFile := writeResultTask(t, repo, "test -d .")
+	output := filepath.Join(t.TempDir(), "result.json")
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := Complete(ctx, CompleteOptions{
+		TaskFile: taskFile,
+		Output:   output,
+		Summary:  "done",
+		Profiles: profile.Bundle{Quality: &profile.Quality{RequiredChecks: []profile.RequiredCheck{
+			{ID: "slow", PreferredCommands: []string{"sleep 2"}, Required: true},
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("Complete ignored caller deadline, elapsed=%s", elapsed)
 	}
 }
 

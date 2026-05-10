@@ -19,6 +19,7 @@ type Task struct {
 	Worktree           Worktree              `yaml:"worktree" json:"worktree"`
 	Supervisor         Supervisor            `yaml:"supervisor" json:"supervisor"`
 	Executor           Executor              `yaml:"executor" json:"executor"`
+	Preflight          *Preflight            `yaml:"preflight,omitempty" json:"preflight,omitempty"`
 	Decisions          []Decision            `yaml:"decisions" json:"decisions"`
 	Risks              []Risk                `yaml:"risks" json:"risks"`
 	DiscussionItems    []DiscussionItem      `yaml:"discussion_items,omitempty" json:"discussion_items,omitempty"`
@@ -26,6 +27,60 @@ type Task struct {
 	Attempts           []Attempt             `yaml:"attempts" json:"attempts"`
 	Verification       Verification          `yaml:"verification" json:"verification"`
 	PR                 PR                    `yaml:"pr" json:"pr"`
+}
+
+// Preflight groups optional pre-executor stages. A nil pointer or absent
+// fields means the stage is disabled and the daemon flow is unchanged.
+type Preflight struct {
+	AcceptanceSkeleton *AcceptanceSkeletonConfig `yaml:"acceptance_skeleton,omitempty" json:"acceptance_skeleton,omitempty"`
+}
+
+// AcceptanceSkeletonConfig configures the optional acceptance skeleton
+// preflight stage that materializes AC-linked test skeletons in the worktree
+// before the first executor attempt.
+type AcceptanceSkeletonConfig struct {
+	Enabled      bool     `yaml:"enabled" json:"enabled"`
+	Mode         string   `yaml:"mode,omitempty" json:"mode,omitempty"`
+	Required     *bool    `yaml:"required,omitempty" json:"required,omitempty"`
+	AllowedPaths []string `yaml:"allowed_paths,omitempty" json:"allowed_paths,omitempty"`
+	// Outputs is daemon-owned runtime metadata. Authors opt in with enabled:true;
+	// the built-in creator writes these bindings back before the executor runs.
+	Outputs []AcceptanceSkeletonOutputDef `yaml:"outputs,omitempty" json:"outputs,omitempty"`
+}
+
+// AcceptanceSkeletonOutputDef declares one skeleton file the preflight stage
+// must materialize in the worktree before the first executor attempt. Each
+// entry binds an AC ID to a relative path, a kind/purpose pair that documents
+// what the skeleton verifies, and an implementation_required flag that tells
+// the supervisor this file must be completed rather than left as a placeholder.
+type AcceptanceSkeletonOutputDef struct {
+	ACID                   string `yaml:"ac_id" json:"ac_id"`
+	Path                   string `yaml:"path" json:"path"`
+	Kind                   string `yaml:"kind" json:"kind"`
+	Purpose                string `yaml:"purpose" json:"purpose"`
+	Satisfies              string `yaml:"satisfies,omitempty" json:"satisfies,omitempty"`
+	IntegrationPoint       string `yaml:"integration_point,omitempty" json:"integration_point,omitempty"`
+	ImplementationRequired bool   `yaml:"implementation_required" json:"implementation_required"`
+	Template               string `yaml:"template,omitempty" json:"template,omitempty"`
+}
+
+// IsEnabled reports whether the acceptance skeleton stage should run.
+func (c *AcceptanceSkeletonConfig) IsEnabled() bool {
+	return c != nil && c.Enabled
+}
+
+// IsRequired reports whether the stage requires every AC to have a skeleton
+// output or no_skeletons reason. Required quality-check evidence still gates
+// acceptance whenever the stage is enabled.
+// Defaults to true when the stage is enabled.
+func (c *AcceptanceSkeletonConfig) IsRequired() bool {
+	if c == nil || !c.Enabled {
+		return false
+	}
+	if c.Required == nil {
+		return true
+	}
+	return *c.Required
 }
 
 // InputFile describes a source file Galley should place in the execution workspace.

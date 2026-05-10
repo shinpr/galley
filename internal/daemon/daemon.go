@@ -443,6 +443,35 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	if err != nil {
 		return taskstate.FailMove(opts.Root, runningPath, &loaded, err)
 	}
+	// Optional acceptance skeleton preflight runs after inputfiles.Prepare and
+	// before the first executor attempt. The stage is a no-op when the task
+	// omits preflight.acceptance_skeleton.enabled or sets it to false (R1,
+	// AC-001). When the stage fails the daemon does not run the executor and
+	// surfaces the failure through task status and run evidence (AC-007).
+	if cfg := loaded.Preflight; cfg != nil && cfg.AcceptanceSkeleton.IsEnabled() {
+		res, perr := AcceptanceSkeletonPreflight(ctx, AcceptanceSkeletonPreflightOptions{
+			Task:      loaded,
+			WorkDir:   prepared.CWD,
+			RunDir:    runDir,
+			Profiles:  profiles,
+			ClaudeBin: opts.ClaudeBin,
+		})
+		if perr != nil {
+			appendFailureAttempt(&loaded, "acceptance_skeleton_preflight", "acceptance_skeleton_preflight_failed", perr, runDir)
+			return taskstate.FailMove(opts.Root, runningPath, &loaded, perr)
+		}
+		if res != nil {
+			applyAcceptanceSkeletonResultToTask(&loaded, res)
+			if err := task.Save(runningPath, loaded); err != nil {
+				appendFailureAttempt(&loaded, "acceptance_skeleton_preflight", "acceptance_skeleton_preflight_failed", err, runDir)
+				return taskstate.FailMove(opts.Root, runningPath, &loaded, err)
+			}
+			if err := copyFile(runningPath, filepath.Join(runDir, "task.effective.yaml")); err != nil {
+				appendFailureAttempt(&loaded, "run_evidence", "run_evidence_failed", err, runDir)
+				return taskstate.FailMove(opts.Root, runningPath, &loaded, err)
+			}
+		}
+	}
 	return runSupervisorLoop(ctx, shutdownCtx, opts, runningPath, &loaded, prepared, profiles, runDir, runID)
 }
 

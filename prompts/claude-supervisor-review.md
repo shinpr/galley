@@ -46,9 +46,11 @@ When a diff is present, `reviewed_files` must reflect this step: include changed
 
 ## Step 3. Trace Acceptance Criteria
 
-For each acceptance criterion and pending revision request, trace the path from input/request to implementation effect/output and verification evidence.
+For each acceptance criterion, pending revision request, and relevant adjacent case, trace the path from input/request to implementation effect/output and verification evidence.
 
 Identify the primary failure mode for that requirement. Passing commands are evidence only when they would fail for that primary failure mode.
+
+For each pending revision request, after checking the direct request, trace adjacent cases within the Step 2 context that share the same changed path, contract, persisted state, or external boundary. Examples include fallback behavior, stale state, retries, and external calls; use only categories relevant to the change. Acceptance requires the revision request, original ACs, and relevant adjacent cases to agree.
 
 ## Step 4. Check Cross-File Design Rules
 

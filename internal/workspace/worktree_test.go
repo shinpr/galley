@@ -93,6 +93,142 @@ func TestPrepareUsesExistingBranchWhenPathMissing(t *testing.T) {
 	}
 }
 
+// TestPrepareUsesStartPointForBrandNewBranch covers AC1: when the brand-new
+// branch path of `git worktree add -b <branch> <path>` runs and a non-empty
+// StartPoint is supplied, the resulting branch must start from that ref
+// instead of the source repository's current HEAD.
+func TestPrepareUsesStartPointForBrandNewBranch(t *testing.T) {
+	repo := initGitRepo(t)
+	// Create an "origin/main" ref at SHA_A and advance source HEAD to SHA_B.
+	shaA := strings.TrimSpace(string(mustGitOutput(t, repo, "rev-parse", "HEAD")))
+	runGit(t, repo, "update-ref", "refs/remotes/origin/main", shaA)
+	if err := os.WriteFile(filepath.Join(repo, "second.txt"), []byte("second\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "second.txt")
+	runGit(t, repo, "commit", "-m", "second")
+	shaB := strings.TrimSpace(string(mustGitOutput(t, repo, "rev-parse", "HEAD")))
+	if shaA == shaB {
+		t.Fatal("setup failed: SHA_A and SHA_B should differ")
+	}
+
+	prepared, err := Prepare(context.Background(), repo, task.Worktree{
+		Enabled: true,
+		Branch:  "agent/start-point",
+		Path:    "../worktrees/start-point",
+	}, Options{StartPoint: "refs/remotes/origin/main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !prepared.WorktreeCreated {
+		t.Fatalf("expected created worktree: %#v", prepared)
+	}
+	got := strings.TrimSpace(string(mustGitOutput(t, prepared.CWD, "rev-parse", "HEAD")))
+	if got != shaA {
+		t.Fatalf("worktree HEAD got %q, want %q (start-point ref); source HEAD=%q", got, shaA, shaB)
+	}
+}
+
+// TestPrepareWithoutStartPointPreservesSourceHEAD covers AC5: when StartPoint
+// is empty, Prepare must not append a trailing positional argument and the new
+// branch must start from the source repository's current HEAD.
+func TestPrepareWithoutStartPointPreservesSourceHEAD(t *testing.T) {
+	repo := initGitRepo(t)
+	headSHA := strings.TrimSpace(string(mustGitOutput(t, repo, "rev-parse", "HEAD")))
+
+	prepared, err := Prepare(context.Background(), repo, task.Worktree{
+		Enabled: true,
+		Branch:  "agent/no-start-point",
+		Path:    "../worktrees/no-start-point",
+	}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !prepared.WorktreeCreated {
+		t.Fatalf("expected created worktree: %#v", prepared)
+	}
+	got := strings.TrimSpace(string(mustGitOutput(t, prepared.CWD, "rev-parse", "HEAD")))
+	if got != headSHA {
+		t.Fatalf("worktree HEAD got %q, want source HEAD %q", got, headSHA)
+	}
+}
+
+// TestPrepareIgnoresStartPointWhenWorktreePathExists covers AC6: when Prepare
+// enters reuseExistingWorktree, StartPoint must be ignored. Re-pointing a
+// materialized branch from a different ref would silently rewrite history.
+func TestPrepareIgnoresStartPointWhenWorktreePathExists(t *testing.T) {
+	repo := initGitRepo(t)
+	spec := task.Worktree{
+		Enabled: true,
+		Branch:  "agent/reuse-start-point",
+		Path:    "../worktrees/reuse-start-point",
+	}
+	first, err := Prepare(context.Background(), repo, spec, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeHEAD := strings.TrimSpace(string(mustGitOutput(t, first.CWD, "rev-parse", "HEAD")))
+	// Create a second commit on the source repo that we expose via
+	// origin/main; if StartPoint were honored, the worktree HEAD would jump.
+	if err := os.WriteFile(filepath.Join(repo, "advance.txt"), []byte("advance\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "advance.txt")
+	runGit(t, repo, "commit", "-m", "advance")
+	advanced := strings.TrimSpace(string(mustGitOutput(t, repo, "rev-parse", "HEAD")))
+	runGit(t, repo, "update-ref", "refs/remotes/origin/main", advanced)
+
+	second, err := Prepare(context.Background(), repo, spec, Options{StartPoint: "refs/remotes/origin/main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !second.WorktreeReused {
+		t.Fatalf("expected reused worktree: %#v", second)
+	}
+	afterHEAD := strings.TrimSpace(string(mustGitOutput(t, second.CWD, "rev-parse", "HEAD")))
+	if afterHEAD != beforeHEAD {
+		t.Fatalf("reused worktree HEAD changed from %q to %q under StartPoint", beforeHEAD, afterHEAD)
+	}
+}
+
+// TestPrepareIgnoresStartPointWhenBranchExistsButPathMissing covers AC6b: when
+// the requested task branch already exists but the worktree path does not, the
+// branch is reused (`git worktree add <path> <branch>`) and StartPoint must be
+// ignored so the branch's existing history is not silently rewritten.
+func TestPrepareIgnoresStartPointWhenBranchExistsButPathMissing(t *testing.T) {
+	repo := initGitRepo(t)
+	// Pre-create branch B at SHA_X.
+	runGit(t, repo, "branch", "agent/existing-branch-start-point")
+	shaX := strings.TrimSpace(string(mustGitOutput(t, repo, "rev-parse", "agent/existing-branch-start-point")))
+	// Advance origin/main to SHA_Y, distinct from SHA_X.
+	if err := os.WriteFile(filepath.Join(repo, "y.txt"), []byte("y\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "y.txt")
+	runGit(t, repo, "commit", "-m", "y")
+	shaY := strings.TrimSpace(string(mustGitOutput(t, repo, "rev-parse", "HEAD")))
+	runGit(t, repo, "update-ref", "refs/remotes/origin/main", shaY)
+	if shaX == shaY {
+		t.Fatal("setup failed: SHA_X and SHA_Y should differ")
+	}
+
+	prepared, err := Prepare(context.Background(), repo, task.Worktree{
+		Enabled: true,
+		Branch:  "agent/existing-branch-start-point",
+		Path:    "../worktrees/existing-branch-start-point",
+	}, Options{StartPoint: "refs/remotes/origin/main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !prepared.WorktreeCreated {
+		t.Fatalf("expected created worktree: %#v", prepared)
+	}
+	got := strings.TrimSpace(string(mustGitOutput(t, prepared.CWD, "rev-parse", "HEAD")))
+	if got != shaX {
+		t.Fatalf("worktree HEAD got %q, want existing branch tip %q (StartPoint=%q must be ignored)", got, shaX, shaY)
+	}
+}
+
 func TestPrepareSkipsWhenDisabled(t *testing.T) {
 	dir := t.TempDir()
 	prepared, err := Prepare(context.Background(), dir, task.Worktree{}, Options{})

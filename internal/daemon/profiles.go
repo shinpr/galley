@@ -1,9 +1,13 @@
 package daemon
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/shinpr/galley/internal/fileutil"
 	"github.com/shinpr/galley/internal/galleyhome"
 	"github.com/shinpr/galley/internal/profile"
+	"github.com/shinpr/galley/internal/runner"
 )
 
 type resolvedProfileFiles struct {
@@ -41,6 +45,131 @@ func loadTaskProfiles(opts Options, repoCWD string) (resolvedProfileFiles, profi
 		return resolvedProfileFiles{}, profile.Bundle{}, err
 	}
 	return resolved, bundle, nil
+}
+
+// resolveWorktreeStartPoint resolves the git ref name to pass to
+// `git worktree add` as the start-point for a brand-new task branch. The
+// resolution chain matches the daemon contract documented in the task design:
+//
+//  1. If the source repository has an origin remote, run
+//     `git fetch --no-tags --quiet origin <base>` to refresh
+//     refs/remotes/origin/<base>. A successful fetch means the remote-tracking
+//     ref now reflects the latest remote tip, so the daemon uses it as the
+//     start-point. A failed fetch is a hard error: the daemon refuses to use a
+//     possibly stale refs/remotes/origin/<base> and fails workspace
+//     preparation with a descriptive message that names the source repo path,
+//     pr.base, and the failed fetch operation. This matches the PR-review
+//     requirement that a stale remote-tracking ref must not silently anchor a
+//     new task branch behind the actual remote tip.
+//  2. If the source repository has no origin remote (origin-less local
+//     checkouts and the smoke test), fall back to refs/heads/<base>. This
+//     keeps offline/local development paths working while preserving the
+//     refresh-or-fail guarantee whenever origin is configured.
+//  3. If the resolved candidate ref does not exist (no origin and
+//     refs/heads/<base> missing, or origin successful fetch yet
+//     refs/remotes/origin/<base> still missing), the daemon fails the claimed
+//     task with a descriptive error naming both attempted refs and the source
+//     repository path.
+//
+// When base is empty (environment profile missing or pr.base set to empty
+// string), this returns ("", nil) so the caller passes StartPoint="" to
+// workspace.Prepare and preserves today's HEAD-derived behavior.
+func resolveWorktreeStartPoint(ctx context.Context, opts Options, sourceCWD, base string) (string, error) {
+	if base == "" {
+		return "", nil
+	}
+	originRef := "refs/remotes/origin/" + base
+	headsRef := "refs/heads/" + base
+	if hasOriginRemote(ctx, opts, sourceCWD) {
+		// Refuse to fall back to a possibly stale refs/remotes/origin/<base>:
+		// surface the fetch failure through the workspace phase so
+		// `galley task show` exposes the reason in latest_error_*.
+		if err := fetchOriginRef(ctx, opts, sourceCWD, base); err != nil {
+			return "", fmt.Errorf(
+				"refresh %s in source repository %s for pr.base %q failed: %w; "+
+					"Galley refused to use the stale remote-tracking ref as the worktree start-point",
+				originRef, sourceCWD, base, err,
+			)
+		}
+		ok, err := refExists(ctx, opts, sourceCWD, originRef)
+		if err != nil {
+			return "", err
+		}
+		if ok {
+			return originRef, nil
+		}
+		return "", fmt.Errorf(
+			"resolve pr.base %q: %s missing in source repository %s after successful fetch (attempted refs: %s, %s)",
+			base, originRef, sourceCWD, originRef, headsRef,
+		)
+	}
+	// Origin-less local repository: use the local branch as the start-point.
+	ok, err := refExists(ctx, opts, sourceCWD, headsRef)
+	if err != nil {
+		return "", err
+	}
+	if ok {
+		return headsRef, nil
+	}
+	return "", fmt.Errorf(
+		"resolve pr.base %q: neither %s nor %s exists in source repository %s",
+		base, originRef, headsRef, sourceCWD,
+	)
+}
+
+// hasOriginRemote reports whether the source repository has an "origin"
+// remote configured. Detection failures are reported as "no origin" so that
+// origin-less local repositories (smoke test, fresh clones without a remote)
+// keep using the refs/heads/<base> fallback path.
+func hasOriginRemote(ctx context.Context, opts Options, sourceCWD string) bool {
+	gitBin := opts.GitBin
+	if gitBin == "" {
+		gitBin = "git"
+	}
+	_, err := runner.RunCommand(ctx, runner.Command{
+		WorkDir: "",
+		Argv:    []string{gitBin, "-C", sourceCWD, "remote", "get-url", "origin"},
+	}, runner.RunOptions{TailBytes: -1})
+	return err == nil
+}
+
+// fetchOriginRef runs `git fetch --no-tags --quiet origin <base>` against the
+// source repository to refresh refs/remotes/origin/<base> before it is used as
+// a worktree start-point. Fetch errors are returned to the caller; they are
+// not swallowed. resolveWorktreeStartPoint propagates the error to fail
+// workspace preparation so the daemon refuses to anchor a new task branch on a
+// possibly stale remote-tracking ref.
+func fetchOriginRef(ctx context.Context, opts Options, sourceCWD, base string) error {
+	gitBin := opts.GitBin
+	if gitBin == "" {
+		gitBin = "git"
+	}
+	_, err := runner.RunCommand(ctx, runner.Command{
+		WorkDir: "",
+		Argv:    []string{gitBin, "-C", sourceCWD, "fetch", "--no-tags", "--quiet", "origin", base},
+	}, runner.RunOptions{TailBytes: -1})
+	if err != nil {
+		return fmt.Errorf("git fetch origin %s: %w", base, err)
+	}
+	return nil
+}
+
+func refExists(ctx context.Context, opts Options, sourceCWD, ref string) (bool, error) {
+	gitBin := opts.GitBin
+	if gitBin == "" {
+		gitBin = "git"
+	}
+	result, err := runner.RunCommand(ctx, runner.Command{
+		WorkDir: "",
+		Argv:    []string{gitBin, "-C", sourceCWD, "show-ref", "--verify", "--quiet", ref},
+	}, runner.RunOptions{TailBytes: -1})
+	if err != nil {
+		if result.ExitCode == 1 {
+			return false, nil
+		}
+		return false, fmt.Errorf("git show-ref %s: %w", ref, err)
+	}
+	return true, nil
 }
 
 func effectiveOptionsForProfiles(opts Options, profiles profile.Bundle) Options {

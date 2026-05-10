@@ -105,6 +105,8 @@ For each criterion, add one `acceptance_evidence` item with `ac_id` equal to the
 
 For each pending `task.revision_requests` item, add one `acceptance_evidence` item with `ac_id` equal to `revision:<id>` when the request is satisfied. Unsatisfied revision requests block acceptance.
 
+After checking the direct revision request, review the neighboring paths affected by the fix: fallback behavior, stale or persisted state, retries, external calls, and compatibility with the original ACs. Acceptance requires the revision request, original ACs, and relevant adjacent cases to remain coherent together.
+
 If `task.acceptance_criteria` is empty, prefer `needs_supervisor_review` unless the task is explicitly a no-op or evidence shows a complete non-code administrative action.
 
 # Quality Rules

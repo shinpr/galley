@@ -83,6 +83,7 @@ Pending revision requests come from user or reviewer PR comments. They are autho
 - If a pending revision request is already satisfied by existing repository evidence, explain the exact evidence in `summary` or `acceptance_evidence`.
 - If a pending revision request is ambiguous or conflicts with the task, return `needs_supervisor_review`.
 - If the executor produced no diff after a pending revision request, accept only when the evidence proves the request was already satisfied before the attempt.
+- After checking the direct request, review the neighboring paths affected by the fix: fallback behavior, stale or persisted state, retries, external calls, and compatibility with the original ACs. Acceptance requires the revision request, original ACs, and relevant adjacent cases to remain coherent together.
 
 # Output Contract
 

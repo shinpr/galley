@@ -1301,6 +1301,85 @@ func TestRunOnceFailsWhenPRBaseRefMissing(t *testing.T) {
 	}
 }
 
+// TestRunOnceRefreshesStaleOriginRefBeforeWorktreeCreation covers the
+// PR-review revision request: when the source repository has an origin remote
+// and a stale refs/remotes/origin/<pr.base> cached locally, the daemon must
+// fetch origin <pr.base> before resolving the start-point so the new task
+// branch starts from the latest remote tip rather than the stale local copy.
+func TestRunOnceRefreshesStaleOriginRefBeforeWorktreeCreation(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	// Bare upstream remote and origin wiring on the source repo.
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	runDaemonGit(t, t.TempDir(), "init", "--bare", remote)
+	runDaemonGit(t, repo, "remote", "add", "origin", remote)
+	// Seed the upstream feature-stale branch at SHA_A from the source repo.
+	runDaemonGit(t, repo, "push", "origin", "HEAD:refs/heads/feature-stale")
+	shaA := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "HEAD")))
+	// Pin the local remote-tracking ref at SHA_A so the cached origin/feature-stale
+	// is genuinely stale once the upstream advances below.
+	runDaemonGit(t, repo, "update-ref", "refs/remotes/origin/feature-stale", shaA)
+	// Advance feature-stale on the upstream via a separate publisher clone so
+	// the remote tip moves to SHA_B without touching the source repo.
+	publisher := filepath.Join(t.TempDir(), "publisher")
+	runDaemonGit(t, t.TempDir(), "clone", remote, publisher)
+	runDaemonGit(t, publisher, "config", "user.email", "test@example.com")
+	runDaemonGit(t, publisher, "config", "user.name", "Test User")
+	runDaemonGit(t, publisher, "checkout", "-b", "feature-stale", "origin/feature-stale")
+	if err := os.WriteFile(filepath.Join(publisher, "remote-advance.txt"), []byte("remote-advance\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runDaemonGit(t, publisher, "add", "remote-advance.txt")
+	runDaemonGit(t, publisher, "commit", "-m", "remote-advance")
+	shaB := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", publisher, "rev-parse", "HEAD")))
+	runDaemonGit(t, publisher, "push", "origin", "feature-stale")
+	if shaA == shaB {
+		t.Fatal("setup failed: shaA and shaB should differ")
+	}
+	// Sanity check: the source repo still sees the stale SHA before the daemon runs.
+	cached := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "refs/remotes/origin/feature-stale")))
+	if cached != shaA {
+		t.Fatalf("setup failed: cached origin/feature-stale got %q, want stale SHA %q", cached, shaA)
+	}
+
+	writeRepoEnvironmentProfile(t, root, repo, "feature-stale")
+
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonTask(t, taskPath, repo)
+
+	if err := Run(context.Background(), Options{
+		Root:               root,
+		SystemPromptFile:   promptPath,
+		JSONSchemaFile:     schemaPath,
+		ClaudeBin:          claudeBin,
+		Once:               true,
+		MaxConcurrentTasks: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	doneTask, err := task.Load(filepath.Join(root, "tasks", "done", "task.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	worktreePath := taskWorktreePath(repo, doneTask.Worktree.Path)
+	got := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", worktreePath, "rev-parse", "HEAD")))
+	if got != shaB {
+		t.Fatalf("worktree HEAD got %q, want refreshed origin/feature-stale tip %q (stale was %q)", got, shaB, shaA)
+	}
+	// The local remote-tracking ref must have been refreshed by the daemon's
+	// pre-resolve fetch, confirming refs/remotes/origin/feature-stale is no
+	// longer stale.
+	refreshed := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "refs/remotes/origin/feature-stale")))
+	if refreshed != shaB {
+		t.Fatalf("refs/remotes/origin/feature-stale not refreshed; got %q want %q", refreshed, shaB)
+	}
+}
+
 func writeRepoEnvironmentProfile(t *testing.T, root, repo, base string) {
 	t.Helper()
 	_, _, environmentPath, err := galleyhome.RepoProfilePaths(root, repo)

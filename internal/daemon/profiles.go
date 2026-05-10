@@ -51,11 +51,17 @@ func loadTaskProfiles(opts Options, repoCWD string) (resolvedProfileFiles, profi
 // `git worktree add` as the start-point for a brand-new task branch. The
 // resolution chain matches the daemon contract documented in the task design:
 //
-//  1. refs/remotes/origin/<base> (matches `gh pr create --base <base>` intent
+//  1. If the source repository has an origin remote, attempt a best-effort
+//     `git fetch origin <base>` so that refs/remotes/origin/<base> is
+//     refreshed before resolution. A stale local origin/<base> would
+//     otherwise anchor the new task branch behind the actual remote tip.
+//     Fetch failures (network, missing ref on remote, etc.) are non-fatal
+//     and fall through to the existing resolution chain.
+//  2. refs/remotes/origin/<base> (matches `gh pr create --base <base>` intent
 //     for AFK runs that ultimately push to origin),
-//  2. refs/heads/<base> (local fallback so origin-less local repos and the
+//  3. refs/heads/<base> (local fallback so origin-less local repos and the
 //     smoke test keep working),
-//  3. if base is non-empty and neither ref exists, the daemon must fail the
+//  4. if base is non-empty and neither ref exists, the daemon must fail the
 //     claimed task with a descriptive error.
 //
 // When base is empty (environment profile missing or pr.base set to empty
@@ -64,6 +70,14 @@ func loadTaskProfiles(opts Options, repoCWD string) (resolvedProfileFiles, profi
 func resolveWorktreeStartPoint(ctx context.Context, opts Options, sourceCWD, base string) (string, error) {
 	if base == "" {
 		return "", nil
+	}
+	// Best-effort: refresh origin/<base> when an origin remote exists so a
+	// stale remote-tracking ref does not silently anchor the new task branch
+	// behind the latest remote tip. Errors are ignored; the resolution chain
+	// below still picks the best available ref (or surfaces a descriptive
+	// failure when none exist).
+	if hasOriginRemote(ctx, opts, sourceCWD) {
+		_ = fetchOriginRef(ctx, opts, sourceCWD, base)
 	}
 	candidates := []string{"refs/remotes/origin/" + base, "refs/heads/" + base}
 	for _, ref := range candidates {
@@ -76,6 +90,41 @@ func resolveWorktreeStartPoint(ctx context.Context, opts Options, sourceCWD, bas
 		}
 	}
 	return "", fmt.Errorf("resolve pr.base %q: neither %s nor %s exists in source repository %s", base, candidates[0], candidates[1], sourceCWD)
+}
+
+// hasOriginRemote reports whether the source repository has an "origin"
+// remote configured. Detection failures are reported as "no origin" so that
+// origin-less local repositories (smoke test, fresh clones without a remote)
+// keep using the refs/heads/<base> fallback path.
+func hasOriginRemote(ctx context.Context, opts Options, sourceCWD string) bool {
+	gitBin := opts.GitBin
+	if gitBin == "" {
+		gitBin = "git"
+	}
+	_, err := runner.RunCommand(ctx, runner.Command{
+		WorkDir: "",
+		Argv:    []string{gitBin, "-C", sourceCWD, "remote", "get-url", "origin"},
+	}, runner.RunOptions{TailBytes: -1})
+	return err == nil
+}
+
+// fetchOriginRef performs a best-effort `git fetch origin <base>` against the
+// source repository. Errors are returned for the caller to log/ignore; the
+// daemon swallows the error and lets the existing resolution chain pick the
+// best available ref.
+func fetchOriginRef(ctx context.Context, opts Options, sourceCWD, base string) error {
+	gitBin := opts.GitBin
+	if gitBin == "" {
+		gitBin = "git"
+	}
+	_, err := runner.RunCommand(ctx, runner.Command{
+		WorkDir: "",
+		Argv:    []string{gitBin, "-C", sourceCWD, "fetch", "--no-tags", "--quiet", "origin", base},
+	}, runner.RunOptions{TailBytes: -1})
+	if err != nil {
+		return fmt.Errorf("git fetch origin %s: %w", base, err)
+	}
+	return nil
 }
 
 func refExists(ctx context.Context, opts Options, sourceCWD, ref string) (bool, error) {

@@ -80,7 +80,7 @@ Setup includes repository profiles. After resolving the profile paths:
 - Profile creation starts by reading `references/quality.schema.json` and `references/environment.schema.json`; use schema defaults as the proposed values unless repo evidence or user choices point elsewhere.
 - `quality.yaml` proposal includes required checks, review dimensions, evidence requirements, and blocking severities.
 - `environment.yaml` proposal includes cwd, commands, network/secrets/destructive-command constraints, PR creation, PR comment handling, base branch, and worktree cleanup.
-- The first profile question is only repository inspection approval. Supervisor selection and PR automation are profile proposal or daemon-start decisions.
+- The profile intake order is schema review, review strictness, then repository inspection approval. Supervisor selection and PR automation are profile proposal or daemon-start decisions.
 - Profile creation requires repository inspection approval and profile approval before writing files.
 - Inspect the repository after approval, then draft candidate profiles from discovered commands, CI, README, config, and existing local guidance.
 - Present one combined profile proposal after inspection. Include the evidence behind each required check and each environment setting.

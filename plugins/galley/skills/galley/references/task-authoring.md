@@ -10,7 +10,7 @@ Use `references/authoring-quality.md` for goal, AC, quality gate, reference file
 
 For a new implementation task, first ask one combined question about reference material and file handling. Ask this as a standalone question before repository investigation, profile resolution, design choices, execution settings, or payload-shape questions. Existing specs or work plans may already contain the goal, ACs, scope, test plan, and design decisions.
 
-If the user already supplied planning/reference files or named an existing PRD, design, work plan, issue, review, log, screenshot, or docs path, treat that as the answer and read those files first.
+If the user already supplied planning/reference files or named an existing PRD, design, work plan, issue, review, log, screenshot, or docs path, treat that as reference-file intake. When path/content, execution-workspace destination, and commit policy are all present, read those files before asking task-design questions. When destination or commit policy is missing, ask for the missing file-handling details first.
 
 Use this standalone prompt:
 

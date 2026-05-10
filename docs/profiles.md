@@ -111,8 +111,8 @@ Supported fields:
 - `constraints.destructive_commands`: destructive command policy.
 - `pr.enabled`: commit accepted changes, push the task branch, and open a PR.
 - `pr.base`: base branch for opened PRs.
-- `pr.comments.enabled`: poll PR comments for `/galley rerun` and `/galley requeue`.
-- `pr.comments.reply`: post an acknowledgement after handling a Galley PR comment.
+- `pr.comments.enabled`: poll PR comments and accept any comment whose trimmed body starts with `/galley`. The free-form prefix `/galley <request>` is treated as the request, and the aliases `/galley rerun ...` and `/galley requeue ...` remain backward compatible. Mid-line mentions or `/galley` lines that are not the first non-whitespace token of the comment are ignored.
+- `pr.comments.reply`: post a concise acknowledgement after handling a Galley PR comment. Replies do not echo the user-supplied request body; the parsed request text is preserved on the requeued task as a `RevisionRequest` so the executor still receives the user's intent.
 - `worktree.cleanup`: remove clean worktrees for closed or merged PR tasks.
 
 Validate an environment profile:

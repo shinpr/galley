@@ -14,14 +14,38 @@ import (
 	"github.com/shinpr/galley/internal/vcs"
 )
 
-func TestParsePRCommand(t *testing.T) {
+func TestParsePRCommandAcceptedForms(t *testing.T) {
 	t.Parallel()
-	command, ok := parsePRCommand(vcs.PRComment{ID: 123, Body: "Looks close.\n/galley rerun fix AC2\n"})
-	if !ok {
-		t.Fatal("expected command")
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "rerun alias keeps backward compatible reason", body: "/galley rerun fix X", want: "fix X"},
+		{name: "requeue alias keeps backward compatible reason", body: "/galley requeue tighten tests", want: "tighten tests"},
+		{name: "free-form request becomes the reason", body: "/galley please re-run with verbose", want: "please re-run with verbose"},
+		{name: "bare /galley falls back to default reason", body: "/galley", want: "PR comment requested another Galley run."},
+		{name: "bare /galley with body block uses block as reason", body: "/galley\n\nMore context.", want: "More context."},
+		{name: "rerun alias with leading whitespace is trimmed", body: "  \n/galley rerun fix Y", want: "fix Y"},
+		{name: "rerun alias exact body falls back to default reason", body: "/galley rerun", want: "PR comment requested another Galley run."},
+		{name: "rerun alias with same-line reason and trailing block joins with blank line", body: "/galley rerun fix X\nMore context", want: "fix X\n\nMore context"},
+		{name: "free-form request with same-line reason and trailing block joins with blank line", body: "/galley please fix X\nMore context", want: "please fix X\n\nMore context"},
+		{name: "requeue alias with same-line reason and trailing block joins with blank line", body: "/galley requeue tighten tests\nfocus on edge cases", want: "tighten tests\n\nfocus on edge cases"},
 	}
-	if command.CommentID != "123" || command.Reason != "fix AC2" {
-		t.Fatalf("command got %#v", command)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			command, ok := parsePRCommand(vcs.PRComment{ID: 123, Body: tc.body})
+			if !ok {
+				t.Fatalf("expected command for %q", tc.body)
+			}
+			if command.CommentID != "123" {
+				t.Fatalf("comment id got %q", command.CommentID)
+			}
+			if command.Reason != tc.want {
+				t.Fatalf("reason got %q want %q", command.Reason, tc.want)
+			}
+		})
 	}
 }
 
@@ -35,6 +59,29 @@ func TestParsePRCommandKeepsMultilineInstruction(t *testing.T) {
 		if !strings.Contains(command.Reason, want) {
 			t.Fatalf("reason missing %q: %q", want, command.Reason)
 		}
+	}
+}
+
+func TestParsePRCommandRejectsNonLeadingOrMalformedBodies(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		body string
+	}{
+		{name: "leading prose with /galley rerun mid-line", body: "Looks good, /galley rerun fix X"},
+		{name: "/galley command on second line is ignored", body: "Plain text on the first line.\n/galley rerun fix X"},
+		{name: "/galley:galley does not match any prefix", body: "/galley:galley do something"},
+		{name: "/galleyfoo does not match any prefix", body: "/galleyfoo bar"},
+		{name: "empty body is ignored", body: ""},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if cmd, ok := parsePRCommand(vcs.PRComment{ID: 7, Body: tc.body}); ok {
+				t.Fatalf("expected reject for %q, got %#v", tc.body, cmd)
+			}
+		})
 	}
 }
 
@@ -131,8 +178,186 @@ fi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), `"body":"Galley requeued`) {
-		t.Fatalf("reply command got %q", string(data))
+	body := string(data)
+	if !strings.Contains(body, "Galley requeued task `") {
+		t.Fatalf("reply command got %q", body)
+	}
+	if !strings.Contains(body, "from this comment.") {
+		t.Fatalf("reply command got %q", body)
+	}
+	if strings.Contains(body, "reply please") {
+		t.Fatalf("reply must not echo the user-supplied reason text: %q", body)
+	}
+	if strings.Contains(body, "comment 99") {
+		t.Fatalf("reply must not include the comment id: %q", body)
+	}
+}
+
+func TestPollPRCommentsReplyOmitsReasonAndCommentID(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	if err := queue.EnsureLayout(root); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonEnvironmentProfile(t, root, repo, true, true)
+	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
+	writeDaemonTask(t, donePath, repo)
+	loaded, err := task.Load(donePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Status = "pr_opened"
+	loaded.PR.URL = "https://github.com/example/galley/pull/123"
+	loaded.PR.Status = "open"
+	if err := task.Save(donePath, loaded); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "posted")
+	// Free-form request with a long body and special characters that must not leak into the reply.
+	wantReason := `please re-run focusing on the AC3 reply path -- trim reply verbosity & keep <tags> intact.`
+	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ] && [ "$3" = "--paginate" ]; then
+echo '[[{"id":555,"body":"/galley `+wantReason+`","html_url":"https://github.com/example/galley/pull/123#issuecomment-555","author_association":"OWNER","user":{"login":"owner"}}]]'
+elif [ "$1" = "api" ]; then
+echo "$*" > `+marker+`
+cat >> `+marker+`
+echo '{"id":556}'
+else
+echo unexpected-gh >&2
+exit 1
+fi
+`)
+
+	if err := pollPRComments(context.Background(), Options{Root: root, ReplyPRComments: true, GHBin: ghBin}.withDefaults()); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(data)
+	if !strings.Contains(body, "Galley requeued task `") || !strings.Contains(body, "from this comment.") {
+		t.Fatalf("reply must use the concise success template, got %q", body)
+	}
+	for _, fragment := range []string{
+		"please re-run focusing",
+		"trim reply verbosity",
+		"<tags>",
+		"comment 555",
+	} {
+		if strings.Contains(body, fragment) {
+			t.Fatalf("reply must not contain %q: %q", fragment, body)
+		}
+	}
+
+	// Reason still travels to the executor through RevisionRequest.Text.
+	queuedPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	requeued, err := task.Load(queuedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(requeued.RevisionRequests) != 1 {
+		t.Fatalf("revision requests got %#v", requeued.RevisionRequests)
+	}
+	if requeued.RevisionRequests[0].Text != wantReason {
+		t.Fatalf("revision request text got %q want %q", requeued.RevisionRequests[0].Text, wantReason)
+	}
+}
+
+func TestPollPRCommentsReplyForQueuedOrRunningTask(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	if err := queue.EnsureLayout(root); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonEnvironmentProfile(t, root, repo, true, true)
+	queuedPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	writeDaemonTask(t, queuedPath, repo)
+	loaded, err := task.Load(queuedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Status = "queued"
+	loaded.PR.URL = "https://github.com/example/galley/pull/123"
+	loaded.PR.Status = "open"
+	if err := task.Save(queuedPath, loaded); err != nil {
+		t.Fatal(err)
+	}
+	// pollPRComments only scans tasks/done and tasks/failed; emulate the
+	// queued/running path through processTaskPRComments directly so we can
+	// assert the reply template without changing scanned states.
+	marker := filepath.Join(t.TempDir(), "posted")
+	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ] && [ "$3" = "--paginate" ]; then
+echo '[[{"id":808,"body":"/galley please nudge it","html_url":"https://github.com/example/galley/pull/123#issuecomment-808","author_association":"OWNER","user":{"login":"owner"}}]]'
+elif [ "$1" = "api" ]; then
+echo "$*" > `+marker+`
+cat >> `+marker+`
+echo '{"id":809}'
+else
+echo unexpected-gh >&2
+exit 1
+fi
+`)
+	opts := Options{Root: root, ReplyPRComments: true, GHBin: ghBin}.withDefaults()
+	if err := processTaskPRComments(context.Background(), opts, queuedPath); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(data)
+	if !strings.Contains(body, "Galley noted this comment; task is already queued.") {
+		t.Fatalf("queued reply got %q", body)
+	}
+	if strings.Contains(body, "nudge it") || strings.Contains(body, "comment 808") {
+		t.Fatalf("queued reply must not echo reason or comment id: %q", body)
+	}
+}
+
+func TestPollPRCommentsReplyForUntrustedAuthor(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	if err := queue.EnsureLayout(root); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonEnvironmentProfile(t, root, repo, true, true)
+	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
+	writeDaemonTask(t, donePath, repo)
+	loaded, err := task.Load(donePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Status = "pr_opened"
+	loaded.PR.URL = "https://github.com/example/galley/pull/123"
+	loaded.PR.Status = "open"
+	if err := task.Save(donePath, loaded); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "posted")
+	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ] && [ "$3" = "--paginate" ]; then
+echo '[[{"id":222,"body":"/galley please run it","html_url":"https://github.com/example/galley/pull/123#issuecomment-222","author_association":"MEMBER","user":{"login":"org-member"}}]]'
+elif [ "$1" = "api" ]; then
+echo "$*" > `+marker+`
+cat >> `+marker+`
+echo '{"id":223}'
+else
+echo unexpected-gh >&2
+exit 1
+fi
+`)
+	if err := pollPRComments(context.Background(), Options{Root: root, ReplyPRComments: true, GHBin: ghBin}.withDefaults()); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(data)
+	if !strings.Contains(body, "Galley ignored this comment from @org-member because author_association=MEMBER is not allowed.") {
+		t.Fatalf("untrusted reply got %q", body)
+	}
+	if strings.Contains(body, "please run it") || strings.Contains(body, "comment 222") {
+		t.Fatalf("untrusted reply must not echo reason or comment id: %q", body)
 	}
 }
 

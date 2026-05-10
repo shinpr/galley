@@ -81,7 +81,7 @@ func processTaskPRComments(ctx context.Context, opts Options, path string) error
 				return err
 			}
 			if effectiveOpts.ReplyPRComments {
-				if err := vcs.PostPRComment(ctx, vcsBinaries(effectiveOpts), effectiveOpts.Root, loaded.PR.URL, fmt.Sprintf("Galley ignored comment %s from @%s because author_association=%s is not allowed.", command.CommentID, comment.User.Login, comment.AuthorAssociation)); err != nil {
+				if err := vcs.PostPRComment(ctx, vcsBinaries(effectiveOpts), effectiveOpts.Root, loaded.PR.URL, fmt.Sprintf("Galley ignored this comment from @%s because author_association=%s is not allowed.", comment.User.Login, comment.AuthorAssociation)); err != nil {
 					errs = append(errs, err)
 				}
 			}
@@ -93,7 +93,7 @@ func processTaskPRComments(ctx context.Context, opts Options, path string) error
 				return err
 			}
 			if effectiveOpts.ReplyPRComments {
-				if err := vcs.PostPRComment(ctx, vcsBinaries(effectiveOpts), effectiveOpts.Root, loaded.PR.URL, fmt.Sprintf("Galley noted comment %s; task is already %s.", command.CommentID, loaded.Status)); err != nil {
+				if err := vcs.PostPRComment(ctx, vcsBinaries(effectiveOpts), effectiveOpts.Root, loaded.PR.URL, fmt.Sprintf("Galley noted this comment; task is already %s.", loaded.Status)); err != nil {
 					errs = append(errs, err)
 				}
 			}
@@ -129,7 +129,7 @@ func processTaskPRComments(ctx context.Context, opts Options, path string) error
 		path = result.To
 		loaded = result.Task
 		if effectiveOpts.ReplyPRComments {
-			if err := vcs.PostPRComment(ctx, vcsBinaries(effectiveOpts), effectiveOpts.Root, loaded.PR.URL, fmt.Sprintf("Galley requeued task `%s` from comment %s. Reason: %s", loaded.ID, command.CommentID, command.Reason)); err != nil {
+			if err := vcs.PostPRComment(ctx, vcsBinaries(effectiveOpts), effectiveOpts.Root, loaded.PR.URL, fmt.Sprintf("Galley requeued task `%s` from this comment.", loaded.ID)); err != nil {
 				errs = append(errs, err)
 			}
 		}
@@ -163,25 +163,92 @@ func trustedPRCommentAuthor(comment vcs.PRComment) bool {
 	}
 }
 
+// parsePRCommand recognises Galley PR-comment requests. The full comment body
+// is trimmed of surrounding whitespace and only the leading characters are
+// inspected. Prefixes are evaluated in this fixed order so backward-compatible
+// alias Reasons are preserved:
+//
+//  1. "/galley rerun"   (exact body or "/galley rerun "/"\n" prefix)
+//  2. "/galley requeue" (exact body or "/galley requeue "/"\n" prefix)
+//  3. "/galley "        (8-character free-form prefix: slash, galley, space)
+//  4. "/galley"         (exact body, optionally followed by a newline block)
+//
+// Once a prefix matches, the rest of the body is split into the command line
+// (the remainder of the first line after the prefix) and the trailing block
+// (every line after the first newline). Each part is TrimSpace'd separately
+// and, when both are non-empty, joined with a blank line ("\n\n"). When only
+// one part is non-empty, that part becomes the Reason verbatim. An empty
+// Reason falls back to a default acknowledgement string. Bodies whose first
+// non-whitespace characters do not match one of the four prefixes are
+// rejected, so mid-line mentions ("Looks good, /galley rerun"), /galley
+// appearing only on a non-leading line, "/galley:galley ...", and
+// "/galleyfoo ..." all fail the prefix check naturally without per-line
+// scanning or code-block detection.
 func parsePRCommand(comment vcs.PRComment) (prCommand, bool) {
-	lines := strings.Split(comment.Body, "\n")
-	for i, line := range lines {
-		line = strings.TrimSpace(line)
-		for _, prefix := range []string{"/galley rerun", "/galley requeue"} {
-			if line == prefix || strings.HasPrefix(line, prefix+" ") {
-				reason := strings.TrimSpace(strings.TrimPrefix(line, prefix))
-				if trailing := strings.TrimSpace(strings.Join(lines[i+1:], "\n")); trailing != "" {
-					if reason != "" {
-						reason += "\n\n"
-					}
-					reason += trailing
-				}
-				if reason == "" {
-					reason = "PR comment requested another Galley run."
-				}
-				return prCommand{CommentID: strconv.FormatInt(comment.ID, 10), Reason: reason}, true
-			}
-		}
+	const (
+		rerunPrefix   = "/galley rerun"
+		requeuePrefix = "/galley requeue"
+		freePrefix    = "/galley "
+		barePrefix    = "/galley"
+		defaultReason = "PR comment requested another Galley run."
+	)
+
+	body := strings.TrimSpace(comment.Body)
+	if body == "" {
+		return prCommand{}, false
 	}
-	return prCommand{}, false
+
+	// matchPrefix reports whether body begins with prefix as a whole token,
+	// i.e. body == prefix or body starts with prefix immediately followed by a
+	// space or newline. It returns the rest of the body after the prefix when
+	// matched. This guards against "/galleyfoo" or "/galley:galley" matching
+	// "/galley".
+	matchPrefix := func(prefix string) (string, bool) {
+		if body == prefix {
+			return "", true
+		}
+		if strings.HasPrefix(body, prefix+" ") || strings.HasPrefix(body, prefix+"\n") {
+			return body[len(prefix):], true
+		}
+		return "", false
+	}
+
+	var (
+		rest    string
+		matched bool
+	)
+	if r, ok := matchPrefix(rerunPrefix); ok {
+		rest, matched = r, true
+	} else if r, ok := matchPrefix(requeuePrefix); ok {
+		rest, matched = r, true
+	} else if strings.HasPrefix(body, freePrefix) {
+		rest, matched = body[len(freePrefix):], true
+	} else if r, ok := matchPrefix(barePrefix); ok {
+		rest, matched = r, true
+	}
+	if !matched {
+		return prCommand{}, false
+	}
+
+	// Preserve the historical reason-assembly semantics: split the rest of the
+	// body into the command line and the trailing block, TrimSpace each part
+	// separately, and join them with a blank line when both are non-empty. An
+	// empty Reason falls back to the default acknowledgement string so a bare
+	// "/galley" (or "/galley rerun" with no body) still produces a stable
+	// Reason.
+	firstLine, trailing, _ := strings.Cut(rest, "\n")
+	firstLine = strings.TrimSpace(firstLine)
+	trailing = strings.TrimSpace(trailing)
+	var reason string
+	switch {
+	case firstLine != "" && trailing != "":
+		reason = firstLine + "\n\n" + trailing
+	case firstLine != "":
+		reason = firstLine
+	case trailing != "":
+		reason = trailing
+	default:
+		reason = defaultReason
+	}
+	return prCommand{CommentID: strconv.FormatInt(comment.ID, 10), Reason: reason}, true
 }

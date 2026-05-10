@@ -13,6 +13,15 @@ This project follows semantic versioning.
 - Task authoring now keeps reference-file intake consistent: supplied files are read after path/content, execution workspace destination, and commit policy are known.
 - The OpenAI agent prompt now delegates to the Galley skill flow catalog and routed references instead of carrying a separate profile/task setup procedure.
 - The packaged Claude and Codex Galley plugins are versioned as `0.1.2`.
+- PR body acceptance criterion lines now reflect the supervisor verdict (`satisfied` / `partially_satisfied`) instead of the original draft `pending` placeholder. Acceptance criterion IDs listed under the supervisor's `acceptance_gaps` render as `partially_satisfied`; everything else under an accepted verdict reads as `satisfied`.
+- `galley task show` no longer surfaces the last attempt's `latest_claude_status` and `latest_error_*` fields as if they were the active state once a task has reached an accepted terminal status (`accepted`, `pr_opened`, `closed`, or `merged`). The same fields are relabeled under the `prior_attempt_*` prefix so the audit trail remains visible after the daemon's PR cleanup loop transitions the task without regressing to active "failed" framing.
+- Generated PR titles are now truncated at the last whitespace boundary inside the rune budget and append a single `…` ellipsis marker. The truncation also enforces GitHub's 256-byte PR title limit while preserving valid UTF-8 boundaries, so goals containing 4-byte runes (for example emoji) no longer overflow the limit. Goals without any whitespace inside the budget fall back to a hard rune-aligned cut and still receive the ellipsis.
+- PR comment intake now accepts any comment whose trimmed body starts with `/galley` (including free-form requests like `/galley fix the failing test`); `/galley rerun` and `/galley requeue` remain backward-compatible aliases. Reply comments are concise acknowledgements that no longer quote the user-supplied request body, while the parsed request text is still preserved on the requeued task as a `RevisionRequest`.
+- AFK task worktrees are now created from the environment profile's `pr.base` ref. When the source repository has an `origin` remote, Galley runs `git fetch --no-tags --quiet origin <pr.base>` and, on success, uses `refs/remotes/origin/<pr.base>` as the start-point; if the fetch fails the daemon refuses to use a possibly stale remote-tracking ref and fails the claimed task in the `workspace` phase so `galley task show` exposes the reason. Origin-less local repositories fall back to `refs/heads/<pr.base>`, and an empty `pr.base` preserves the previous source-HEAD behavior.
+
+### Added
+
+- `runs/<run-id>/validation.json` records auditable evidence — `valid`, `task_id`, `schema_version`, and `generated_at` (UTC, RFC3339 nano) — alongside the existing `errors`, `warnings`, and `task` fields. The file path is unchanged and decoders that ignore unknown fields keep working.
 
 ## v0.2.0 - 2026-05-10
 

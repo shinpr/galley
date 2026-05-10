@@ -13,12 +13,56 @@ import (
 	"github.com/shinpr/galley/internal/galleyhome"
 	"github.com/shinpr/galley/internal/inputfiles"
 	"github.com/shinpr/galley/internal/jsonio"
+	"github.com/shinpr/galley/internal/profile"
 	"github.com/shinpr/galley/internal/queue"
 	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/internal/taskstate"
+	"github.com/shinpr/galley/internal/version"
 	"github.com/shinpr/galley/internal/workspace"
 )
+
+// validationEvidence is the audit-friendly payload written to
+// runs/<run-id>/validation.json. It is a superset of task.ValidationResult so
+// existing readers that decode `errors`, `warnings`, or `task` keep working,
+// while supervisor reviewers and downstream tools can rely on `valid`,
+// `task_id`, `schema_version`, and `generated_at` for evidence.
+type validationEvidence struct {
+	Valid         bool      `json:"valid"`
+	TaskID        string    `json:"task_id"`
+	SchemaVersion string    `json:"schema_version"`
+	GeneratedAt   string    `json:"generated_at"`
+	Errors        []string  `json:"errors"`
+	Warnings      []string  `json:"warnings"`
+	Task          task.Task `json:"task"`
+}
+
+func newValidationEvidence(loaded task.Task, validation task.ValidationResult, now time.Time) validationEvidence {
+	errs := validation.Errors
+	if errs == nil {
+		errs = []string{}
+	}
+	warnings := validation.Warnings
+	if warnings == nil {
+		warnings = []string{}
+	}
+	return validationEvidence{
+		Valid:         validation.Valid(),
+		TaskID:        loaded.ID,
+		SchemaVersion: validationSchemaVersion(),
+		GeneratedAt:   now.UTC().Format(time.RFC3339Nano),
+		Errors:        errs,
+		Warnings:      warnings,
+		Task:          loaded,
+	}
+}
+
+func validationSchemaVersion() string {
+	if version.Commit != "" && version.Commit != "unknown" {
+		return fmt.Sprintf("galley-%s+%s", version.Version, version.Commit)
+	}
+	return fmt.Sprintf("galley-%s", version.Version)
+}
 
 // Options configure the file-backed Galley daemon.
 type Options struct {
@@ -370,11 +414,41 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 		return taskstate.FailMove(opts.Root, runningPath, &loaded, err)
 	}
 
-	prepared, err := prepareClaimedWorkspace(ctx, opts, runningPath, runDir, &loaded)
+	// Profile resolution must happen before workspace.Prepare so that the
+	// resolved environment profile (specifically pr.base) can supply a
+	// start-point ref to the brand-new task branch instead of inheriting
+	// the source repository's current HEAD. The resolved bundle is threaded
+	// into runSupervisorLoop so the supervisor loop never re-loads it.
+	profiles, err := loadAndPersistTaskProfiles(opts, &loaded, runDir)
+	if err != nil {
+		appendFailureAttempt(&loaded, "run_evidence", "run_evidence_failed", err, runDir)
+		return taskstate.FailMove(opts.Root, runningPath, &loaded, err)
+	}
+
+	prepared, err := prepareClaimedWorkspace(ctx, opts, profiles, runningPath, runDir, &loaded)
 	if err != nil {
 		return taskstate.FailMove(opts.Root, runningPath, &loaded, err)
 	}
-	return runSupervisorLoop(ctx, shutdownCtx, opts, runningPath, &loaded, prepared, runDir, runID)
+	return runSupervisorLoop(ctx, shutdownCtx, opts, runningPath, &loaded, prepared, profiles, runDir, runID)
+}
+
+// loadAndPersistTaskProfiles resolves the quality and environment profiles for
+// the claimed task and writes the run evidence file (profiles.json) into the
+// run directory. The same shape that loop.go's loadSupervisorProfiles wrote
+// previously is preserved so existing readers of profiles.json continue to
+// work.
+func loadAndPersistTaskProfiles(opts Options, loaded *task.Task, runDir string) (profile.Bundle, error) {
+	resolved, profiles, err := loadTaskProfiles(opts, loaded.Scope.CWD)
+	if err != nil {
+		return profile.Bundle{}, err
+	}
+	if err := writeJSON(filepath.Join(runDir, "profiles.json"), struct {
+		Resolved resolvedProfileFiles `json:"resolved"`
+		Bundle   profile.Bundle       `json:"bundle"`
+	}{Resolved: resolved, Bundle: profiles}); err != nil {
+		return profile.Bundle{}, err
+	}
+	return profiles, nil
 }
 
 func loadClaimedTask(runningPath string) (task.Task, error) {
@@ -410,14 +484,31 @@ func initializeRunEvidence(root, runningPath string, loaded task.Task, validatio
 	if err := copyFile(runningPath, filepath.Join(runDir, "task.yaml")); err != nil {
 		return "", "", err
 	}
-	if err := writeJSON(filepath.Join(runDir, "validation.json"), validation); err != nil {
+	evidence := newValidationEvidence(loaded, validation, time.Now())
+	if err := writeJSON(filepath.Join(runDir, "validation.json"), evidence); err != nil {
 		return "", "", err
 	}
 	return runID, runDir, nil
 }
 
-func prepareClaimedWorkspace(ctx context.Context, opts Options, runningPath, runDir string, loaded *task.Task) (workspace.Prepared, error) {
-	prepared, err := workspace.Prepare(ctx, loaded.Scope.CWD, loaded.Worktree, workspaceOptions(opts))
+func prepareClaimedWorkspace(ctx context.Context, opts Options, profiles profile.Bundle, runningPath, runDir string, loaded *task.Task) (workspace.Prepared, error) {
+	wsOpts := workspaceOptions(opts)
+	// Resolve the environment profile pr.base into a concrete git ref name and
+	// pass it through workspace.Options.StartPoint so the new task branch is
+	// based on origin/<pr.base> (or the local refs/heads/<pr.base> fallback)
+	// instead of the source repository's current HEAD. When pr.base is empty
+	// the resolved ref is "" and workspace.Prepare preserves today's behavior.
+	prBase := ""
+	if profiles.Environment != nil {
+		prBase = profiles.Environment.PR.Base
+	}
+	startPoint, err := resolveWorktreeStartPoint(ctx, opts, loaded.Scope.CWD, prBase)
+	if err != nil {
+		appendFailureAttempt(loaded, "workspace", "workspace_failed", err, runDir)
+		return workspace.Prepared{}, err
+	}
+	wsOpts.StartPoint = startPoint
+	prepared, err := workspace.Prepare(ctx, loaded.Scope.CWD, loaded.Worktree, wsOpts)
 	if err != nil {
 		appendFailureAttempt(loaded, "workspace", "workspace_failed", err, runDir)
 		return workspace.Prepared{}, err

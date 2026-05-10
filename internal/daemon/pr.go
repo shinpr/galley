@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/shinpr/galley/internal/inputfiles"
 	"github.com/shinpr/galley/internal/strutil"
@@ -88,17 +89,121 @@ func ensureNonCommittedInputsAbsentFromBranch(snapshot workspace.Snapshot, files
 	return nil
 }
 
+// prTitleRuneBudget is the soft visual cap on the number of runes Galley keeps
+// in a generated PR title. Most real goals are ASCII or close to it, so this
+// keeps the title visually short. The hard limit that protects against GitHub
+// rejecting the request is prTitleByteBudget below.
+const prTitleRuneBudget = 72
+
+// prTitleByteBudget is the hard byte cap GitHub enforces on PR titles. A
+// 72-rune title can still exceed 256 bytes when every rune is a 4-byte UTF-8
+// character (for example an emoji such as 🎉, which is 4 bytes, so 72*4=288).
+// Any output of prTitle must satisfy len(title) <= prTitleByteBudget.
+const prTitleByteBudget = 256
+
+// prTitleEllipsis marks that prTitle truncated the original task goal so the
+// reader can see the title is shortened. "…" (U+2026) is 3 bytes in UTF-8.
+const prTitleEllipsis = "…"
+
 func prTitle(loaded task.Task) string {
 	title := strings.TrimSpace(loaded.Goal)
 	if title == "" {
 		title = loaded.ID
 	}
 	title = strings.ReplaceAll(title, "\n", " ")
-	runes := []rune(title)
-	if len(runes) > 72 {
-		title = string(runes[:72])
-	}
+	// First pass: enforce the visual rune cap with whitespace-preferred
+	// truncation. Most goals fit and are returned untouched.
+	title = truncatePRTitleByRunes(title)
+	// Second pass: enforce GitHub's hard byte cap. The rune cap can still
+	// exceed 256 bytes when every rune is a 4-byte UTF-8 character, so this
+	// pass guarantees the result fits while preserving valid UTF-8 and the
+	// ellipsis marker.
+	title = truncatePRTitleByBytes(title)
 	return title
+}
+
+// truncatePRTitleByRunes enforces prTitleRuneBudget while preferring to cut at
+// a whitespace boundary so the trailing context is not lost mid-word.
+func truncatePRTitleByRunes(title string) string {
+	runes := []rune(title)
+	if len(runes) <= prTitleRuneBudget {
+		return title
+	}
+	// Reserve one rune for the ellipsis marker and try to break at a safe word
+	// boundary inside the remaining budget so the trailing context is not cut
+	// mid-word.
+	keep := prTitleRuneBudget - len([]rune(prTitleEllipsis))
+	if keep < 1 {
+		keep = 1
+	}
+	cut := keep
+	for i := keep - 1; i >= 0; i-- {
+		if isPRTitleBreakRune(runes[i]) {
+			cut = i
+			break
+		}
+	}
+	// Drop trailing whitespace before the ellipsis so the marker reads cleanly.
+	trimmed := strings.TrimRightFunc(string(runes[:cut]), func(r rune) bool {
+		return isPRTitleBreakRune(r)
+	})
+	if trimmed == "" {
+		// No usable break boundary inside the budget; fall back to a hard cut
+		// so callers still receive a meaningful title prefix.
+		trimmed = string(runes[:keep])
+	}
+	return trimmed + prTitleEllipsis
+}
+
+// truncatePRTitleByBytes enforces prTitleByteBudget. The cut always lands on a
+// valid UTF-8 rune boundary; the function prefers a whitespace boundary inside
+// the budget and falls back to the nearest rune boundary otherwise. The
+// ellipsis marker is always appended when truncation actually trims the input.
+func truncatePRTitleByBytes(title string) string {
+	if len(title) <= prTitleByteBudget {
+		return title
+	}
+	ellipsisBytes := len(prTitleEllipsis)
+	keep := prTitleByteBudget - ellipsisBytes
+	if keep < 0 {
+		keep = 0
+	}
+	// Walk runes, tracking the largest byte-prefix that fits in keep bytes
+	// while staying on a valid UTF-8 boundary.
+	end := 0
+	lastBreak := -1
+	for i, r := range title {
+		runeEnd := i + utf8.RuneLen(r)
+		if runeEnd > keep {
+			break
+		}
+		end = runeEnd
+		if isPRTitleBreakRune(r) {
+			// Record the byte index BEFORE the whitespace rune so callers
+			// can drop the whitespace itself when cutting.
+			lastBreak = i
+		}
+	}
+	cut := end
+	if lastBreak >= 0 {
+		cut = lastBreak
+	}
+	candidate := strings.TrimRightFunc(title[:cut], isPRTitleBreakRune)
+	if candidate == "" {
+		// No usable whitespace boundary inside the byte budget; fall back to
+		// the largest rune-aligned prefix so callers still receive a
+		// meaningful title prefix.
+		candidate = title[:end]
+	}
+	return candidate + prTitleEllipsis
+}
+
+func isPRTitleBreakRune(r rune) bool {
+	switch r {
+	case ' ', '\t', '\n', '\r', '　':
+		return true
+	}
+	return false
 }
 
 func renderPRBody(loaded task.Task) string {

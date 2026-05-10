@@ -22,12 +22,12 @@ import (
 
 const progressNoDiffThreshold = 2
 
-func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPath string, loaded *task.Task, prepared workspace.Prepared, runDir, runID string) error {
+func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPath string, loaded *task.Task, prepared workspace.Prepared, profiles profile.Bundle, runDir, runID string) error {
 	fmt.Fprintf(os.Stderr, "galley: task %s running in %s (run_id=%s)\n", loaded.ID, prepared.CWD, runID)
-	profiles, err := loadSupervisorProfiles(opts, loaded, runDir)
-	if err != nil {
-		return taskstate.FailMove(opts.Root, runningPath, loaded, err)
-	}
+	// processClaimedTask resolved profiles before workspace creation and
+	// already wrote runs/<run-id>/profiles.json. Threading the resolved
+	// bundle through this function keeps the supervisor loop from
+	// double-loading the environment profile.
 	effectiveOpts := effectiveOptionsForProfiles(opts, profiles)
 	prompt := task.RenderWorkOrderWithProfiles(executionTask(*loaded, prepared.CWD), profiles)
 	budget := attemptBudget(loaded.ExecutionPolicy.LoopBudget)
@@ -98,20 +98,6 @@ type supervisorAttemptRequest struct {
 	Attempt  int
 	Budget   int
 	Prompt   string
-}
-
-func loadSupervisorProfiles(opts Options, loaded *task.Task, runDir string) (profile.Bundle, error) {
-	resolvedProfiles, profiles, err := loadTaskProfiles(opts, loaded.Scope.CWD)
-	if err != nil {
-		return profile.Bundle{}, err
-	}
-	if err := writeJSON(filepath.Join(runDir, "profiles.json"), struct {
-		Resolved resolvedProfileFiles `json:"resolved"`
-		Bundle   profile.Bundle       `json:"bundle"`
-	}{Resolved: resolvedProfiles, Bundle: profiles}); err != nil {
-		return profile.Bundle{}, err
-	}
-	return profiles, nil
 }
 
 func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) (attemptReview, error) {
@@ -232,6 +218,7 @@ func applySupervisorVerdict(ctx, shutdownCtx context.Context, req verdictApplica
 
 func acceptSupervisorVerdict(ctx context.Context, opts Options, runningPath string, loaded *task.Task, prepared workspace.Prepared, runDir string, verdict supervisor.Verdict) error {
 	markRevisionRequestsAddressed(loaded, verdict.Summary)
+	applyAcceptedAcceptanceCriteria(loaded, verdict)
 	mergeDiscussionItems(loaded, verdict)
 	if opts.CommitOnAccept {
 		fmt.Fprintf(os.Stderr, "galley: task %s accepted; finalizing commit/pr\n", loaded.ID)
@@ -560,6 +547,30 @@ func mapAcceptanceStatus(status string) string {
 		return status
 	default:
 		return "unknown"
+	}
+}
+
+// applyAcceptedAcceptanceCriteria normalizes per-criterion statuses once the
+// supervisor has accepted the attempt. The supervisor verdict represents the
+// final decision over the whole task, so any AC still marked as pending,
+// unknown, or not_satisfied from earlier executor reports would otherwise leak
+// into the rendered PR body and mislead reviewers. AC IDs that the supervisor
+// flagged as gaps are rendered as partially_satisfied to preserve that nuance.
+func applyAcceptedAcceptanceCriteria(loaded *task.Task, verdict supervisor.Verdict) {
+	if verdict.Status != "accepted" {
+		return
+	}
+	gaps := make(map[string]bool, len(verdict.AcceptanceGaps))
+	for _, id := range verdict.AcceptanceGaps {
+		gaps[strings.TrimSpace(id)] = true
+	}
+	for i := range loaded.AcceptanceCriteria {
+		ac := &loaded.AcceptanceCriteria[i]
+		if gaps[ac.ID] {
+			ac.Status = "partially_satisfied"
+			continue
+		}
+		ac.Status = "satisfied"
 	}
 }
 

@@ -45,6 +45,15 @@ type Prepared struct {
 // Options controls git execution for workspace operations.
 type Options struct {
 	GitBin string
+	// StartPoint is the git ref name to use as the start-point when Prepare
+	// creates a brand-new task branch (the `git worktree add -b <branch>
+	// <path> <start-point>` form). When empty, Prepare omits the trailing
+	// positional argument and `git worktree add` falls back to the source
+	// repository's current HEAD. StartPoint is intentionally ignored when
+	// Prepare reuses an existing worktree path or attaches to an existing
+	// branch, because re-pointing a materialized branch from a different ref
+	// would silently rewrite its history.
+	StartPoint string
 }
 
 func (opts Options) git() string {
@@ -95,9 +104,14 @@ func Prepare(ctx context.Context, sourceCWD string, spec task.Worktree, opts Opt
 		return Prepared{}, err
 	}
 	if exists {
+		// The branch already exists; reuse its tip. Applying StartPoint here
+		// would re-point an existing branch and silently rewrite history.
 		args = append(args, worktreePath, spec.Branch)
 	} else {
 		args = append(args, "-b", spec.Branch, worktreePath)
+		if opts.StartPoint != "" {
+			args = append(args, opts.StartPoint)
+		}
 	}
 	result, err := runGitCommand(ctx, opts, "", args...)
 	if err != nil {

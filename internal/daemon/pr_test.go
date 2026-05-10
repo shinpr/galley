@@ -83,6 +83,62 @@ func TestPRTitleTruncatesOnWordBoundary(t *testing.T) {
 			t.Fatalf("short goal should not gain ellipsis: %q", title)
 		}
 	})
+
+	// 4-byte UTF-8 runes such as emoji (🎉 = U+1F389, 4 bytes) can push a
+	// rune-budgeted title above GitHub's 256-byte hard limit. Regression
+	// guard for the byte budget enforcement: 200 emoji is 800 bytes, which
+	// must be trimmed back to <= 256 bytes while staying valid UTF-8 and
+	// keeping the ellipsis marker.
+	t.Run("4-byte runes stay within byte budget", func(t *testing.T) {
+		t.Parallel()
+		goal := strings.Repeat("🎉", 200)
+		title := prTitle(task.Task{Goal: goal})
+		if len(title) > prTitleByteBudget {
+			t.Fatalf("title exceeds byte budget: bytes=%d title=%q", len(title), title)
+		}
+		if !utf8.ValidString(title) {
+			t.Fatalf("title is invalid UTF-8: %q", title)
+		}
+		if !strings.HasSuffix(title, prTitleEllipsis) {
+			t.Fatalf("expected ellipsis suffix on truncated 4-byte goal, got %q", title)
+		}
+		// The body before the ellipsis must consist entirely of complete
+		// 🎉 runes — no partial 4-byte sequences sneaking through.
+		core := strings.TrimSuffix(title, prTitleEllipsis)
+		if !utf8.ValidString(core) {
+			t.Fatalf("title core is invalid UTF-8: %q", core)
+		}
+		for _, r := range core {
+			if r != '🎉' {
+				t.Fatalf("title core contains unexpected rune %q in %q", r, title)
+			}
+		}
+	})
+
+	// Mixed ASCII + 4-byte rune goal: GitHub's byte limit must hold even
+	// when the goal carries enough emoji to push a 72-rune cut over 256
+	// bytes. The byte pass should still prefer a whitespace boundary so
+	// reviewers see complete words near the cut.
+	t.Run("ascii plus 4-byte runes break on whitespace under byte budget", func(t *testing.T) {
+		t.Parallel()
+		// 60 emoji * 4 bytes = 240 bytes, plus a long ASCII tail that
+		// forces a break inside the byte budget.
+		goal := strings.Repeat("🎉 ", 60) + "Tail context that should be dropped on truncation"
+		title := prTitle(task.Task{Goal: goal})
+		if len(title) > prTitleByteBudget {
+			t.Fatalf("title exceeds byte budget: bytes=%d title=%q", len(title), title)
+		}
+		if !utf8.ValidString(title) {
+			t.Fatalf("title is invalid UTF-8: %q", title)
+		}
+		if !strings.HasSuffix(title, prTitleEllipsis) {
+			t.Fatalf("expected ellipsis suffix, got %q", title)
+		}
+		core := strings.TrimSuffix(title, prTitleEllipsis)
+		if strings.HasSuffix(core, " ") {
+			t.Fatalf("trailing whitespace before ellipsis: %q", title)
+		}
+	})
 }
 
 func TestRenderPRBodyShowsSupervisorAcceptedStatus(t *testing.T) {

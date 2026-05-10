@@ -9,8 +9,8 @@ This project follows semantic versioning.
 ### Changed
 
 - PR body acceptance criterion lines now reflect the supervisor verdict (`satisfied` / `partially_satisfied`) instead of the original draft `pending` placeholder. Acceptance criterion IDs listed under the supervisor's `acceptance_gaps` render as `partially_satisfied`; everything else under an accepted verdict reads as `satisfied`.
-- `galley task show` no longer surfaces the last attempt's `latest_claude_status` and `latest_error_*` fields as if they were the active state once a task has reached an accepted terminal status (`accepted` or `pr_opened`). The same fields are relabeled under the `prior_attempt_*` prefix so the audit trail remains visible without misleading reviewers.
-- Generated PR titles are now truncated at the last whitespace boundary inside the rune budget and append a single `…` ellipsis marker. Goals without any whitespace inside the budget fall back to a hard rune cut and still receive the ellipsis.
+- `galley task show` no longer surfaces the last attempt's `latest_claude_status` and `latest_error_*` fields as if they were the active state once a task has reached an accepted terminal status (`accepted`, `pr_opened`, `closed`, or `merged`). The same fields are relabeled under the `prior_attempt_*` prefix so the audit trail remains visible after the daemon's PR cleanup loop transitions the task without regressing to active "failed" framing.
+- Generated PR titles are now truncated at the last whitespace boundary inside the rune budget and append a single `…` ellipsis marker. The truncation also enforces GitHub's 256-byte PR title limit while preserving valid UTF-8 boundaries, so goals containing 4-byte runes (for example emoji) no longer overflow the limit. Goals without any whitespace inside the budget fall back to a hard rune-aligned cut and still receive the ellipsis.
 
 ### Added
 

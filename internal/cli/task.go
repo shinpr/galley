@@ -285,10 +285,15 @@ func taskFiles(dir string) ([]string, error) {
 // isAcceptedTerminalStatus reports whether the task has reached a supervisor
 // accepted terminal state. Callers use it to suppress "active failure" framing
 // for the last attempt's error fields when the supervisor already accepted
-// the work.
+// the work. The set covers the full accepted lifecycle: the initial accepted
+// status, the pr_opened status set when the daemon opens a PR, and the
+// closed/merged statuses that the daemon's PR cleanup loop applies after the
+// PR is closed or merged. Without those tail states a previously accepted
+// task would regress to "active failure" framing once cleanup ran, even
+// though the supervisor already approved the work.
 func isAcceptedTerminalStatus(status string) bool {
 	switch status {
-	case "accepted", "pr_opened":
+	case "accepted", "pr_opened", "closed", "merged":
 		return true
 	}
 	return false

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,11 +11,7 @@ import (
 	"github.com/shinpr/galley/internal/task"
 )
 
-// preflightTestTask builds a minimal task with the acceptance skeleton stage
-// enabled and a creator command. The creator command is shell run inside the
-// prepared worktree; it always writes the manifest JSON to
-// $GALLEY_SKELETON_MANIFEST and additionally runs createCmds beforehand.
-func preflightTestTask(creatorCmd string, acIDs ...string) task.Task {
+func preflightTestTask(acIDs ...string) task.Task {
 	if len(acIDs) == 0 {
 		acIDs = []string{"AC1"}
 	}
@@ -29,46 +26,57 @@ func preflightTestTask(creatorCmd string, acIDs ...string) task.Task {
 			AllowedPaths:   []string{"."},
 			ForbiddenPaths: []string{"secret"},
 		},
-		Preflight: &task.Preflight{
-			AcceptanceSkeleton: &task.AcceptanceSkeletonConfig{
-				Enabled: true,
-				Creator: &task.AcceptanceSkeletonCreatorDef{Command: creatorCmd},
-			},
-		},
+		Preflight: &task.Preflight{AcceptanceSkeleton: &task.AcceptanceSkeletonConfig{Enabled: true}},
 	}
 }
 
-func runPreflight(t *testing.T, tk task.Task) (*AcceptanceSkeletonResult, error, string) {
+func runPreflightWithOptions(t *testing.T, tk task.Task, opts AcceptanceSkeletonPreflightOptions) (*AcceptanceSkeletonResult, error, string) {
 	t.Helper()
 	work := t.TempDir()
 	runDir := t.TempDir()
-	res, err := AcceptanceSkeletonPreflight(context.Background(), AcceptanceSkeletonPreflightOptions{
-		Task:    tk,
-		WorkDir: work,
-		RunDir:  runDir,
-	})
+	opts.Task = tk
+	opts.WorkDir = work
+	opts.RunDir = runDir
+	res, err := AcceptanceSkeletonPreflight(context.Background(), opts)
 	return res, err, runDir
 }
 
-// manifestHeredoc returns a shell snippet that writes manifestJSON to
-// $GALLEY_SKELETON_MANIFEST.
-func manifestHeredoc(manifestJSON string) string {
-	return "cat > \"$GALLEY_SKELETON_MANIFEST\" <<'GALLEYEOF'\n" + manifestJSON + "\nGALLEYEOF\n"
+func runPreflightInWorkdir(t *testing.T, tk task.Task, opts AcceptanceSkeletonPreflightOptions, work, runDir string) (*AcceptanceSkeletonResult, error) {
+	t.Helper()
+	opts.Task = tk
+	opts.WorkDir = work
+	opts.RunDir = runDir
+	return AcceptanceSkeletonPreflight(context.Background(), opts)
 }
 
-func TestAcceptanceSkeletonPreflightCreatorHappyPath(t *testing.T) {
-	t.Parallel()
-	manifest := `{"outputs":[{"ac_id":"AC1","path":"internal/foo/foo_test.go","kind":"go-test","purpose":"verify foo","implementation_required":true,"checkpoint_command":"true"}]}`
-	cmd := "mkdir -p internal/foo && printf 'package foo\\n' > internal/foo/foo_test.go && " + manifestHeredoc(manifest)
-	res, err, runDir := runPreflight(t, preflightTestTask(cmd))
+func fakeCreator(t *testing.T, manifest string, fileWrites string) string {
+	t.Helper()
+	return writeFakeCommand(t, "claude", fileWrites+"\nprintf '%s\n' '"+manifest+"'\n")
+}
+
+func resultManifest(outputs string) string {
+	return `{"type":"result","result":"{\"outputs\":` + outputs + `,\"no_skeletons\":[]}"}`
+}
+
+func TestAcceptanceSkeletonPreflightBuiltInCreatorHappyPath(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test-secret")
+	manifest := resultManifest(`[{\"ac_id\":\"AC1\",\"path\":\"internal/foo/foo_test.go\",\"kind\":\"go-test\",\"purpose\":\"verify AC1\",\"satisfies\":\"AC1 user-visible behavior\",\"integration_point\":\"executor completes this test before acceptance\",\"implementation_required\":true}]`)
+	claudeBin := fakeCreator(t, manifest, `mkdir -p internal/foo
+printf 'package foo_test\n\n// TODO(galley-skeleton): implement AC1 assertion.\n' > internal/foo/foo_test.go`)
+
+	res, err, runDir := runPreflightWithOptions(t, preflightTestTask("AC1"), AcceptanceSkeletonPreflightOptions{ClaudeBin: claudeBin})
 	if err != nil {
 		t.Fatalf("preflight error: %v", err)
 	}
 	if res == nil || res.Status != "completed" {
-		t.Fatalf("status = %+v; want completed", res)
+		t.Fatalf("res = %+v", res)
 	}
-	if len(res.Outputs) != 1 || res.Outputs[0].Path != "internal/foo/foo_test.go" || res.Outputs[0].ACID != "AC1" {
+	if len(res.Outputs) != 1 {
 		t.Fatalf("outputs = %+v", res.Outputs)
+	}
+	out := res.Outputs[0]
+	if out.Path != "internal/foo/foo_test.go" || out.Satisfies == "" || out.IntegrationPoint == "" {
+		t.Fatalf("output metadata not propagated: %+v", out)
 	}
 	if len(res.Baseline.SkeletonHashes) != 1 || res.Baseline.SkeletonHashes[0].Path != "internal/foo/foo_test.go" {
 		t.Fatalf("baseline = %+v", res.Baseline)
@@ -76,163 +84,197 @@ func TestAcceptanceSkeletonPreflightCreatorHappyPath(t *testing.T) {
 	if _, statErr := os.Stat(filepath.Join(runDir, "preflight_result.json")); statErr != nil {
 		t.Fatalf("preflight_result.json not written: %v", statErr)
 	}
+	var plan struct {
+		Argv []string `json:"argv"`
+		Env  []string `json:"env"`
+	}
+	data, readErr := os.ReadFile(filepath.Join(runDir, "preflight_creator_command_plan.json"))
+	if readErr != nil {
+		t.Fatalf("read command plan: %v", readErr)
+	}
+	if err := json.Unmarshal(data, &plan); err != nil {
+		t.Fatalf("decode command plan: %v", err)
+	}
+	joinedArgv := strings.Join(plan.Argv, "\n")
+	if !strings.Contains(joinedArgv, "--plugin-dir") || !strings.Contains(joinedArgv, "claude-guard-plugin") {
+		t.Fatalf("creator command plan missing guard plugin: %+v", plan.Argv)
+	}
+	if len(plan.Env) != 0 {
+		t.Fatalf("creator command plan persisted environment: %+v", plan.Env)
+	}
+	if strings.Contains(string(data), "sk-ant-test-secret") || strings.Contains(string(data), "ANTHROPIC_API_KEY") {
+		t.Fatalf("creator command plan persisted secret env: %s", data)
+	}
 }
 
-func TestAcceptanceSkeletonPreflightCreatorMissingDeclaredFile(t *testing.T) {
+func TestAcceptanceSkeletonPreflightMissingDeclaredFileFails(t *testing.T) {
 	t.Parallel()
-	// Creator declares an output but never writes it. Galley must fail rather
-	// than auto-materialize a stub for a creator-declared output.
-	manifest := `{"outputs":[{"ac_id":"AC1","path":"internal/foo/foo_test.go","kind":"go-test","purpose":"p","implementation_required":true,"checkpoint_command":"true"}]}`
-	cmd := manifestHeredoc(manifest)
-	res, err, _ := runPreflight(t, preflightTestTask(cmd))
+	manifest := resultManifest(`[{\"ac_id\":\"AC1\",\"path\":\"internal/foo/foo_test.go\",\"kind\":\"go-test\",\"purpose\":\"p\",\"satisfies\":\"s\",\"integration_point\":\"i\",\"implementation_required\":true}]`)
+	claudeBin := fakeCreator(t, manifest, "")
+	res, err, _ := runPreflightWithOptions(t, preflightTestTask("AC1"), AcceptanceSkeletonPreflightOptions{ClaudeBin: claudeBin})
 	if err == nil {
-		t.Fatalf("expected error for missing creator-declared file")
+		t.Fatal("expected error for missing creator-declared file")
 	}
-	if res == nil || res.Status != "failed" || res.Error == nil {
+	if res == nil || res.Error == nil || res.Error.Phase != "acceptance_skeleton_creator" || !strings.Contains(res.Error.Message, "does not exist") {
+		t.Fatalf("error = %+v", res)
+	}
+}
+
+func TestAcceptanceSkeletonPreflightRejectsUndeclaredCreatorChanges(t *testing.T) {
+	t.Parallel()
+	manifest := resultManifest(`[{\"ac_id\":\"AC1\",\"path\":\"internal/foo/foo_test.go\",\"kind\":\"go-test\",\"purpose\":\"verify AC1\",\"satisfies\":\"AC1 behavior\",\"integration_point\":\"executor completes this test\",\"implementation_required\":true}]`)
+	claudeBin := fakeCreator(t, manifest, `mkdir -p internal/foo
+printf 'package foo_test\n' > internal/foo/foo_test.go
+printf 'package foo_test\n' > internal/foo/extra_test.go`)
+
+	res, err, _ := runPreflightWithOptions(t, preflightTestTask("AC1"), AcceptanceSkeletonPreflightOptions{ClaudeBin: claudeBin})
+	if err == nil {
+		t.Fatal("expected error for undeclared creator file")
+	}
+	if res == nil || res.Error == nil || res.Error.Phase != "acceptance_skeleton_creator" || !strings.Contains(res.Error.Message, "undeclared path") {
+		t.Fatalf("error = %+v", res)
+	}
+}
+
+func TestAcceptanceSkeletonPreflightRequiresDeclaredOutputChangedByCreator(t *testing.T) {
+	t.Parallel()
+	work := t.TempDir()
+	runDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(work, "internal/foo"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "internal/foo/foo_test.go"), []byte("package foo_test\n"), 0o644); err != nil {
+		t.Fatalf("write existing test: %v", err)
+	}
+	manifest := resultManifest(`[{\"ac_id\":\"AC1\",\"path\":\"internal/foo/foo_test.go\",\"kind\":\"go-test\",\"purpose\":\"verify AC1\",\"satisfies\":\"AC1 behavior\",\"integration_point\":\"executor completes this test\",\"implementation_required\":true}]`)
+	claudeBin := fakeCreator(t, manifest, "")
+
+	res, err := runPreflightInWorkdir(t, preflightTestTask("AC1"), AcceptanceSkeletonPreflightOptions{ClaudeBin: claudeBin}, work, runDir)
+	if err == nil {
+		t.Fatal("expected error for unchanged declared output")
+	}
+	if res == nil || res.Error == nil || res.Error.Phase != "acceptance_skeleton_creator" || !strings.Contains(res.Error.Message, "not created or modified") {
+		t.Fatalf("error = %+v", res)
+	}
+}
+
+func TestAcceptanceSkeletonPreflightRejectsRunDirOutput(t *testing.T) {
+	t.Parallel()
+	work := t.TempDir()
+	runDir := filepath.Join(work, ".galley", "runs", "run-1")
+	outputPath := ".galley/runs/run-1/preflight_creator_command_plan.json"
+	manifest := resultManifest(`[{\"ac_id\":\"AC1\",\"path\":\"` + outputPath + `\",\"kind\":\"go-test\",\"purpose\":\"verify AC1\",\"satisfies\":\"AC1 behavior\",\"integration_point\":\"executor completes this test\",\"implementation_required\":true}]`)
+	claudeBin := fakeCreator(t, manifest, "")
+
+	res, err := runPreflightInWorkdir(t, preflightTestTask("AC1"), AcceptanceSkeletonPreflightOptions{ClaudeBin: claudeBin}, work, runDir)
+	if err == nil {
+		t.Fatal("expected error for run evidence output")
+	}
+	if res == nil || res.Error == nil || res.Error.Phase != "acceptance_skeleton_provider" || !strings.Contains(res.Error.Message, "run evidence directory") {
+		t.Fatalf("error = %+v", res)
+	}
+}
+
+func TestAcceptanceSkeletonPreflightRejectsSymlinkDirectoryEscape(t *testing.T) {
+	t.Parallel()
+	work := t.TempDir()
+	outside := t.TempDir()
+	runDir := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(work, "tests")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	manifest := resultManifest(`[{\"ac_id\":\"AC1\",\"path\":\"tests/foo_test.go\",\"kind\":\"go-test\",\"purpose\":\"verify AC1\",\"satisfies\":\"AC1 behavior\",\"integration_point\":\"executor completes this test\",\"implementation_required\":true}]`)
+	claudeBin := fakeCreator(t, manifest, `printf 'package foo_test\n' > tests/foo_test.go`)
+
+	res, err := runPreflightInWorkdir(t, preflightTestTask("AC1"), AcceptanceSkeletonPreflightOptions{ClaudeBin: claudeBin}, work, runDir)
+	if err == nil {
+		t.Fatal("expected error for symlink directory escape")
+	}
+	if res == nil || res.Error == nil || res.Error.Phase != "acceptance_skeleton_creator" || !strings.Contains(res.Error.Message, "escapes the worktree") {
+		t.Fatalf("error = %+v", res)
+	}
+	if _, statErr := os.Stat(filepath.Join(outside, "foo_test.go")); statErr != nil {
+		t.Fatalf("expected creator to write outside file through symlink: %v", statErr)
+	}
+}
+
+func TestAcceptanceSkeletonPreflightIgnoresRunDirInsideWorktreeSnapshot(t *testing.T) {
+	t.Parallel()
+	work := t.TempDir()
+	runDir := filepath.Join(work, ".galley", "runs", "run-1")
+	manifest := resultManifest(`[{\"ac_id\":\"AC1\",\"path\":\"internal/foo/foo_test.go\",\"kind\":\"go-test\",\"purpose\":\"verify AC1\",\"satisfies\":\"AC1 behavior\",\"integration_point\":\"executor completes this test\",\"implementation_required\":true}]`)
+	claudeBin := fakeCreator(t, manifest, `mkdir -p internal/foo
+printf 'package foo_test\n' > internal/foo/foo_test.go`)
+
+	res, err := runPreflightInWorkdir(t, preflightTestTask("AC1"), AcceptanceSkeletonPreflightOptions{ClaudeBin: claudeBin}, work, runDir)
+	if err != nil {
+		t.Fatalf("preflight error: %v", err)
+	}
+	if res == nil || res.Status != "completed" {
 		t.Fatalf("res = %+v", res)
 	}
-	if res.Error.Phase != "acceptance_skeleton_creator" || !strings.Contains(res.Error.Message, "does not exist") {
-		t.Fatalf("error = %+v", res.Error)
-	}
-	// Confirm Galley did not create the file behind the creator's back.
-	// (workDir is gone after runPreflight; assert via the failure path only.)
 }
 
-func TestAcceptanceSkeletonPreflightCreatorAbsolutePath(t *testing.T) {
+func TestAcceptanceSkeletonPreflightRejectsUnsafePath(t *testing.T) {
 	t.Parallel()
-	manifest := `{"outputs":[{"ac_id":"AC1","path":"/etc/galley_skeleton_test.go","kind":"go-test","purpose":"p","implementation_required":true,"checkpoint_command":"true"}]}`
-	cmd := manifestHeredoc(manifest)
-	res, err, _ := runPreflight(t, preflightTestTask(cmd))
-	if err == nil {
-		t.Fatalf("expected error for absolute path")
-	}
-	if res == nil || res.Error == nil || res.Error.Phase != "acceptance_skeleton_provider" || !strings.Contains(res.Error.Message, "absolute") {
-		t.Fatalf("error = %+v", res)
+	for _, tc := range []struct {
+		name     string
+		path     string
+		wantText string
+	}{
+		{name: "absolute", path: "/etc/galley_skeleton_test.go", wantText: "absolute"},
+		{name: "traversal", path: "../escape_test.go", wantText: "traversal"},
+		{name: "forbidden", path: "secret/foo_test.go", wantText: "forbidden_paths"},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			manifest := resultManifest(`[{\"ac_id\":\"AC1\",\"path\":\"` + tc.path + `\",\"kind\":\"go-test\",\"purpose\":\"p\",\"satisfies\":\"s\",\"integration_point\":\"i\",\"implementation_required\":true}]`)
+			claudeBin := fakeCreator(t, manifest, `mkdir -p secret
+printf 'package foo\n' > secret/foo_test.go`)
+			res, err, _ := runPreflightWithOptions(t, preflightTestTask("AC1"), AcceptanceSkeletonPreflightOptions{ClaudeBin: claudeBin})
+			if err == nil {
+				t.Fatalf("expected error for %s", tc.name)
+			}
+			if res == nil || res.Error == nil || res.Error.Phase != "acceptance_skeleton_provider" || !strings.Contains(res.Error.Message, tc.wantText) {
+				t.Fatalf("error = %+v", res)
+			}
+		})
 	}
 }
 
-func TestAcceptanceSkeletonPreflightCreatorParentTraversal(t *testing.T) {
+func TestAcceptanceSkeletonPreflightRejectsInvalidManifestFields(t *testing.T) {
 	t.Parallel()
-	manifest := `{"outputs":[{"ac_id":"AC1","path":"../escape_test.go","kind":"go-test","purpose":"p","implementation_required":true,"checkpoint_command":"true"}]}`
-	cmd := manifestHeredoc(manifest)
-	res, err, _ := runPreflight(t, preflightTestTask(cmd))
-	if err == nil {
-		t.Fatalf("expected error for parent traversal")
+	for _, tc := range []struct {
+		name     string
+		output   string
+		wantText string
+	}{
+		{name: "invalid AC", output: `{\"ac_id\":\"AC-nope\",\"path\":\"foo_test.go\",\"kind\":\"go-test\",\"purpose\":\"p\",\"satisfies\":\"s\",\"integration_point\":\"i\",\"implementation_required\":true}`, wantText: "acceptance_criteria.id"},
+		{name: "missing kind", output: `{\"ac_id\":\"AC1\",\"path\":\"foo_test.go\",\"kind\":\"\",\"purpose\":\"p\",\"satisfies\":\"s\",\"integration_point\":\"i\",\"implementation_required\":true}`, wantText: "kind"},
+		{name: "missing purpose", output: `{\"ac_id\":\"AC1\",\"path\":\"foo_test.go\",\"kind\":\"go-test\",\"purpose\":\" \",\"satisfies\":\"s\",\"integration_point\":\"i\",\"implementation_required\":true}`, wantText: "purpose"},
+		{name: "missing satisfies", output: `{\"ac_id\":\"AC1\",\"path\":\"foo_test.go\",\"kind\":\"go-test\",\"purpose\":\"p\",\"satisfies\":\" \",\"integration_point\":\"i\",\"implementation_required\":true}`, wantText: "satisfies"},
+		{name: "missing integration", output: `{\"ac_id\":\"AC1\",\"path\":\"foo_test.go\",\"kind\":\"go-test\",\"purpose\":\"p\",\"satisfies\":\"s\",\"integration_point\":\" \",\"implementation_required\":true}`, wantText: "integration_point"},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			manifest := resultManifest(`[` + tc.output + `]`)
+			claudeBin := fakeCreator(t, manifest, `printf 'package foo\n' > foo_test.go`)
+			res, err, runDir := runPreflightWithOptions(t, preflightTestTask("AC1"), AcceptanceSkeletonPreflightOptions{ClaudeBin: claudeBin})
+			if err == nil {
+				t.Fatalf("expected error for %s", tc.name)
+			}
+			if res == nil || res.Error == nil || res.Error.Phase != "acceptance_skeleton_provider" || !strings.Contains(res.Error.Message, tc.wantText) {
+				t.Fatalf("error = %+v", res)
+			}
+			persisted, lerr := LoadPreflightResult(runDir)
+			if lerr != nil {
+				t.Fatalf("LoadPreflightResult: %v", lerr)
+			}
+			if persisted == nil || persisted.Status != "failed" {
+				t.Fatalf("persisted preflight_result.json = %+v", persisted)
+			}
+		})
 	}
-	if res == nil || res.Error == nil || res.Error.Phase != "acceptance_skeleton_provider" || !strings.Contains(res.Error.Message, "traversal") {
-		t.Fatalf("error = %+v", res)
-	}
-}
-
-func TestAcceptanceSkeletonPreflightCreatorInvalidACID(t *testing.T) {
-	t.Parallel()
-	manifest := `{"outputs":[{"ac_id":"AC-nope","path":"foo_test.go","kind":"go-test","purpose":"p","implementation_required":true,"checkpoint_command":"true"}]}`
-	cmd := "printf 'package foo\\n' > foo_test.go && " + manifestHeredoc(manifest)
-	res, err, _ := runPreflight(t, preflightTestTask(cmd, "AC1"))
-	if err == nil {
-		t.Fatalf("expected error for invalid ac_id")
-	}
-	if res == nil || res.Error == nil || res.Error.Phase != "acceptance_skeleton_provider" || !strings.Contains(res.Error.Message, "acceptance_criteria.id") {
-		t.Fatalf("error = %+v", res)
-	}
-}
-
-func TestAcceptanceSkeletonPreflightCreatorForbiddenPath(t *testing.T) {
-	t.Parallel()
-	// "secret" is in scope.forbidden_paths; the manifest places an output there.
-	manifest := `{"outputs":[{"ac_id":"AC1","path":"secret/foo_test.go","kind":"go-test","purpose":"p","implementation_required":true,"checkpoint_command":"true"}]}`
-	cmd := "mkdir -p secret && printf 'package foo\\n' > secret/foo_test.go && " + manifestHeredoc(manifest)
-	res, err, _ := runPreflight(t, preflightTestTask(cmd))
-	if err == nil {
-		t.Fatalf("expected error for forbidden path")
-	}
-	if res == nil || res.Error == nil || res.Error.Phase != "acceptance_skeleton_provider" || !strings.Contains(res.Error.Message, "forbidden_paths") {
-		t.Fatalf("error = %+v", res)
-	}
-}
-
-// assertPreflightCreatorRejected runs the preflight stage for a creator
-// command, asserts it failed before the executor could be invoked (the daemon
-// only enters runSupervisorLoop when AcceptanceSkeletonPreflight returns a nil
-// error), and asserts the persisted preflight_result.json records a failed
-// status with the acceptance_skeleton_provider phase and a message containing
-// wantMsgFragment. It also confirms no skeleton baseline was captured, which
-// would only happen after the (never-reached) hashing step.
-func assertPreflightCreatorRejected(t *testing.T, cmd, wantMsgFragment string) {
-	t.Helper()
-	res, err, runDir := runPreflight(t, preflightTestTask(cmd))
-	if err == nil {
-		t.Fatalf("expected preflight to fail before executor invocation, got nil error (res=%+v)", res)
-	}
-	if res == nil || res.Status != "failed" || res.Error == nil {
-		t.Fatalf("res = %+v; want failed status with error", res)
-	}
-	if res.Error.Phase != "acceptance_skeleton_provider" {
-		t.Fatalf("error phase = %q; want acceptance_skeleton_provider (res=%+v)", res.Error.Phase, res)
-	}
-	if !strings.Contains(res.Error.Message, wantMsgFragment) {
-		t.Fatalf("error message = %q; want fragment %q", res.Error.Message, wantMsgFragment)
-	}
-	if len(res.Outputs) != 0 || len(res.Baseline.SkeletonHashes) != 0 {
-		t.Fatalf("rejected preflight should not record outputs/baseline: %+v", res)
-	}
-	persisted, lerr := LoadPreflightResult(runDir)
-	if lerr != nil {
-		t.Fatalf("LoadPreflightResult: %v", lerr)
-	}
-	if persisted == nil || persisted.Status != "failed" || persisted.Error == nil || persisted.Error.Phase != "acceptance_skeleton_provider" {
-		t.Fatalf("persisted preflight_result.json = %+v; want failed provider record", persisted)
-	}
-}
-
-func TestAcceptanceSkeletonPreflightCreatorEmptyCheckpointCommand(t *testing.T) {
-	t.Parallel()
-	// Even when the creator writes the skeleton file, an empty checkpoint
-	// command must abort preflight: the daemon-side accepted gate cannot bind
-	// evidence to an output with no command.
-	manifest := `{"outputs":[{"ac_id":"AC1","path":"foo_test.go","kind":"go-test","purpose":"p","implementation_required":true,"checkpoint_command":"   "}]}`
-	cmd := "printf 'package foo\\n' > foo_test.go && " + manifestHeredoc(manifest)
-	assertPreflightCreatorRejected(t, cmd, "checkpoint_command")
-}
-
-func TestAcceptanceSkeletonPreflightCreatorMissingKind(t *testing.T) {
-	t.Parallel()
-	manifest := `{"outputs":[{"ac_id":"AC1","path":"foo_test.go","kind":"","purpose":"p","implementation_required":true,"checkpoint_command":"true"}]}`
-	cmd := "printf 'package foo\\n' > foo_test.go && " + manifestHeredoc(manifest)
-	assertPreflightCreatorRejected(t, cmd, "kind")
-}
-
-func TestAcceptanceSkeletonPreflightCreatorMissingPurpose(t *testing.T) {
-	t.Parallel()
-	manifest := `{"outputs":[{"ac_id":"AC1","path":"foo_test.go","kind":"go-test","purpose":"  ","implementation_required":true,"checkpoint_command":"true"}]}`
-	cmd := "printf 'package foo\\n' > foo_test.go && " + manifestHeredoc(manifest)
-	assertPreflightCreatorRejected(t, cmd, "purpose")
-}
-
-func TestAcceptanceSkeletonPreflightCreatorCheckpointAbsolutePathToken(t *testing.T) {
-	t.Parallel()
-	manifest := `{"outputs":[{"ac_id":"AC1","path":"foo_test.go","kind":"go-test","purpose":"p","implementation_required":true,"checkpoint_command":"/usr/bin/true"}]}`
-	cmd := "printf 'package foo\\n' > foo_test.go && " + manifestHeredoc(manifest)
-	assertPreflightCreatorRejected(t, cmd, "absolute path token")
-}
-
-func TestAcceptanceSkeletonPreflightCreatorCheckpointTraversalToken(t *testing.T) {
-	t.Parallel()
-	manifest := `{"outputs":[{"ac_id":"AC1","path":"foo_test.go","kind":"go-test","purpose":"p","implementation_required":true,"checkpoint_command":"go test ../other"}]}`
-	cmd := "printf 'package foo\\n' > foo_test.go && " + manifestHeredoc(manifest)
-	assertPreflightCreatorRejected(t, cmd, "parent-directory traversal token")
-}
-
-func TestAcceptanceSkeletonPreflightCreatorCheckpointDisallowedShellFeature(t *testing.T) {
-	t.Parallel()
-	manifest := `{"outputs":[{"ac_id":"AC1","path":"foo_test.go","kind":"go-test","purpose":"p","implementation_required":true,"checkpoint_command":"echo $(whoami)"}]}`
-	cmd := "printf 'package foo\\n' > foo_test.go && " + manifestHeredoc(manifest)
-	assertPreflightCreatorRejected(t, cmd, "disallowed shell feature")
-}
-
-func TestAcceptanceSkeletonPreflightCreatorCheckpointExternalRedirect(t *testing.T) {
-	t.Parallel()
-	manifest := `{"outputs":[{"ac_id":"AC1","path":"foo_test.go","kind":"go-test","purpose":"p","implementation_required":true,"checkpoint_command":"go test ./... 2>>../outside.log"}]}`
-	cmd := "printf 'package foo\\n' > foo_test.go && " + manifestHeredoc(manifest)
-	assertPreflightCreatorRejected(t, cmd, "redirect")
 }

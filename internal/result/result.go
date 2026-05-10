@@ -24,18 +24,6 @@ type CompleteOptions struct {
 	Summary  string
 	Profiles profile.Bundle
 	GitBin   string
-	// SkeletonCheckpoints, when set, are acceptance skeleton checkpoint
-	// commands that Complete executes through the same shell runner used by
-	// required quality checks (D3). The resulting CheckpointResults are added
-	// to the returned ClaudeResult verification list and written to
-	// skeleton_checkpoint_results.json alongside the result file so the daemon
-	// reads them back from the existing completion path rather than running a
-	// separate post-completion runner.
-	SkeletonCheckpoints []CheckpointSpec
-	// SkeletonCheckpointTimeout bounds each checkpoint command independently.
-	// A zero value disables the per-command timeout (the task timeout still
-	// applies through ctx).
-	SkeletonCheckpointTimeout time.Duration
 }
 
 // Complete runs required profile checks and writes a validated Claude result
@@ -70,7 +58,7 @@ func Complete(ctx context.Context, opts CompleteOptions) (runner.ClaudeResult, e
 
 	runCtx := ctx
 	var cancel context.CancelFunc
-	if loaded.ExecutionPolicy.TimeoutMS > 0 {
+	if loaded.ExecutionPolicy.TimeoutMS > 0 && !contextHasDeadline(ctx) {
 		runCtx, cancel = context.WithTimeout(ctx, time.Duration(loaded.ExecutionPolicy.TimeoutMS)*time.Millisecond)
 		defer cancel()
 	}
@@ -104,37 +92,6 @@ func Complete(ctx context.Context, opts CompleteOptions) (runner.ClaudeResult, e
 			Reason:        checkResult.reason(),
 			OutputExcerpt: checkResult.outputExcerpt(),
 		})
-	}
-
-	// Acceptance skeleton checkpoint commands run through the same runner as
-	// required quality checks so the two evidence streams cannot diverge (D3,
-	// AC-009). Their results are persisted next to the result file and folded
-	// into the verification list as additional, source-tagged entries.
-	if len(opts.SkeletonCheckpoints) > 0 {
-		checkpointResults := RunSkeletonCheckpoints(runCtx, workDir, opts.SkeletonCheckpoints, opts.SkeletonCheckpointTimeout)
-		if err := os.MkdirAll(filepath.Dir(opts.Output), 0o700); err != nil {
-			return runner.ClaudeResult{}, fmt.Errorf("create result dir: %w", err)
-		}
-		if err := jsonio.Write(filepath.Join(filepath.Dir(opts.Output), "skeleton_checkpoint_results.json"), checkpointResults); err != nil {
-			return runner.ClaudeResult{}, fmt.Errorf("write skeleton checkpoint results: %w", err)
-		}
-		for _, c := range checkpointResults {
-			if c.Status == "failed" {
-				status = "completed_with_risks"
-				risks = append(risks, runner.ClaudeRisk{
-					Type:             "partial_verification",
-					Detail:           fmt.Sprintf("acceptance skeleton checkpoint for %s failed (exit %d): %s", c.ACID, c.ExitCode, c.Command),
-					Mitigation:       "Complete the skeleton implementation so its checkpoint command passes, then rerun.",
-					NeedsHumanReview: true,
-				})
-			}
-			verification = append(verification, runner.ClaudeVerification{
-				Command:       c.Command,
-				Status:        c.Status,
-				Reason:        fmt.Sprintf("acceptance skeleton checkpoint (source=%s) for %s", c.Source, c.ACID),
-				OutputExcerpt: strings.TrimSpace(c.StdoutExcerpt + "\n" + c.StderrExcerpt),
-			})
-		}
 	}
 
 	files, err := gitChangedFiles(runCtx, workDir, opts.GitBin)
@@ -172,6 +129,11 @@ func Complete(ctx context.Context, opts CompleteOptions) (runner.ClaudeResult, e
 		return runner.ClaudeResult{}, fmt.Errorf("write result file %s: %w", opts.Output, err)
 	}
 	return result, nil
+}
+
+func contextHasDeadline(ctx context.Context) bool {
+	_, ok := ctx.Deadline()
+	return ok
 }
 
 func requiredChecks(profiles profile.Bundle) []profile.RequiredCheck {

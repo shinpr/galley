@@ -28,10 +28,10 @@ func acceptanceGateTask(required bool) *task.Task {
 	}
 }
 
-// writeAcceptanceGateRun seeds runs/<run-id>/preflight_result.json and the
-// latest attempt's skeleton_checkpoint_results.json so evaluateAcceptanceGate
-// reads the same evidence shape the daemon writes at runtime.
-func writeAcceptanceGateRun(t *testing.T, status string, outputs []AcceptanceSkeletonOutput, checkpoints []CheckpointResult) string {
+// writeAcceptanceGateRun seeds runs/<run-id>/preflight_result.json so
+// evaluateAcceptanceGate reads the same preflight evidence shape the daemon
+// writes at runtime.
+func writeAcceptanceGateRun(t *testing.T, status string, outputs []AcceptanceSkeletonOutput) string {
 	t.Helper()
 	runDir := t.TempDir()
 	res := &AcceptanceSkeletonResult{
@@ -41,9 +41,6 @@ func writeAcceptanceGateRun(t *testing.T, status string, outputs []AcceptanceSke
 		Baseline:      AcceptanceSkeletonBaseline{SkeletonHashes: []SkeletonHash{}},
 	}
 	if err := WritePreflightResult(runDir, res); err != nil {
-		t.Fatal(err)
-	}
-	if err := WriteCheckpointResults(filepath.Join(runDir, "attempt-1"), checkpoints); err != nil {
 		t.Fatal(err)
 	}
 	return runDir
@@ -56,47 +53,24 @@ func skeletonOutput() AcceptanceSkeletonOutput {
 		Kind:                   "go-test",
 		Purpose:                "verify AC1",
 		ImplementationRequired: true,
-		CheckpointCommand:      "go test ./internal/foo/",
 	}
 }
 
-func TestAcceptanceGateDowngradesOnFailedSkeletonCheckpoint(t *testing.T) {
+func TestAcceptanceGateDowngradesOnMissingRequiredSkeletonCoverage(t *testing.T) {
 	t.Parallel()
-	runDir := writeAcceptanceGateRun(t, "completed",
-		[]AcceptanceSkeletonOutput{skeletonOutput()},
-		[]CheckpointResult{{ACID: "AC1", Command: "go test ./internal/foo/", Status: "failed", ExitCode: 1, Source: "acceptance_skeleton"}},
-	)
-	reason, ok := evaluateAcceptanceGate(acceptanceGateTask(false), runDir)
-	if ok {
-		t.Fatalf("expected accepted verdict to be blocked, reason=%q", reason)
-	}
-	if !strings.Contains(reason, "AC1") || !strings.Contains(reason, "checkpoint") {
-		t.Fatalf("reason missing skeleton checkpoint detail: %q", reason)
-	}
-}
-
-func TestAcceptanceGateDowngradesOnMissingSkeletonCheckpoint(t *testing.T) {
-	t.Parallel()
-	// No checkpoint result recorded for the implementation_required output.
-	runDir := writeAcceptanceGateRun(t, "completed",
-		[]AcceptanceSkeletonOutput{skeletonOutput()},
-		[]CheckpointResult{},
-	)
+	runDir := writeAcceptanceGateRun(t, "completed", nil)
 	reason, ok := evaluateAcceptanceGate(acceptanceGateTask(true), runDir)
 	if ok {
-		t.Fatalf("expected missing checkpoint to block acceptance, reason=%q", reason)
+		t.Fatalf("expected missing skeleton coverage to block acceptance, reason=%q", reason)
 	}
-	if !strings.Contains(reason, "missing or failed") {
+	if !strings.Contains(reason, "no skeleton output") {
 		t.Fatalf("reason missing detail: %q", reason)
 	}
 }
 
-func TestAcceptanceGateAllowsWhenSkeletonCheckpointPassed(t *testing.T) {
+func TestAcceptanceGateAllowsWhenRequiredSkeletonCoverageExists(t *testing.T) {
 	t.Parallel()
-	runDir := writeAcceptanceGateRun(t, "completed",
-		[]AcceptanceSkeletonOutput{skeletonOutput()},
-		[]CheckpointResult{{ACID: "AC1", Command: "go test ./internal/foo/", Status: "passed", Source: "acceptance_skeleton"}},
-	)
+	runDir := writeAcceptanceGateRun(t, "completed", []AcceptanceSkeletonOutput{skeletonOutput()})
 	reason, ok := evaluateAcceptanceGate(acceptanceGateTask(true), runDir)
 	if !ok {
 		t.Fatalf("expected gate to allow acceptance, reason=%q", reason)
@@ -148,10 +122,7 @@ func TestAcceptanceGateDowngradesOnFailedRequiredCheckEvidence(t *testing.T) {
 
 func TestAcceptanceGateAllowsWhenRequiredCheckPassed(t *testing.T) {
 	t.Parallel()
-	runDir := writeAcceptanceGateRun(t, "completed",
-		[]AcceptanceSkeletonOutput{skeletonOutput()},
-		[]CheckpointResult{{ACID: "AC1", Command: "go test ./internal/foo/", Status: "passed", Source: "acceptance_skeleton"}},
-	)
+	runDir := writeAcceptanceGateRun(t, "completed", []AcceptanceSkeletonOutput{skeletonOutput()})
 	writeRunProfiles(t, runDir, []profile.RequiredCheck{{ID: "tests", Required: true, PreferredCommands: []string{"go test ./..."}}})
 	writeAttemptResult(t, runDir, 1, []runner.ClaudeVerification{{Command: "go test ./...", Status: "passed"}})
 	reason, ok := evaluateAcceptanceGate(acceptanceGateTask(true), runDir)
@@ -183,7 +154,7 @@ func TestAcceptanceGateDefaultFlowIgnoresRequiredCheckEvidence(t *testing.T) {
 // TestAcceptanceGateLifecycleDowngradesAcceptedVerdictBeforeFinalize proves the
 // daemon downgrades an accepted supervisor verdict to needs_supervisor_review —
 // and never reaches acceptSupervisorVerdict / the "done" state — when required
-// skeleton checkpoint evidence is missing or failed.
+// skeleton coverage is missing.
 func TestAcceptanceGateLifecycleDowngradesAcceptedVerdictBeforeFinalize(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -198,10 +169,7 @@ func TestAcceptanceGateLifecycleDowngradesAcceptedVerdictBeforeFinalize(t *testi
 	if err := task.Save(runningPath, *loaded); err != nil {
 		t.Fatal(err)
 	}
-	runDir := writeAcceptanceGateRun(t, "completed",
-		[]AcceptanceSkeletonOutput{skeletonOutput()},
-		[]CheckpointResult{{ACID: "AC1", Command: "go test ./internal/foo/", Status: "failed", ExitCode: 1, Source: "acceptance_skeleton"}},
-	)
+	runDir := writeAcceptanceGateRun(t, "completed", nil)
 
 	nextPrompt, done, err := applySupervisorVerdict(context.Background(), context.Background(), verdictApplication{
 		Opts:        Options{Root: root}.withDefaults(),

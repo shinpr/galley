@@ -129,10 +129,9 @@ func renderReviewContext(b *strings.Builder, t Task) {
 }
 
 // renderPreflightObligations renders concrete skeleton paths, AC bindings,
-// kinds, purposes, and checkpoint commands derived from the task YAML
-// declarations. The daemon may further augment this with the runtime
-// preflight result; this static rendering is what `galley task work-order`
-// prints offline.
+// kinds, and purposes derived from daemon-owned task YAML declarations. The
+// daemon may further augment this with the runtime preflight result; this
+// static rendering is what `galley task work-order` prints offline.
 func renderPreflightObligations(b *strings.Builder, t Task) {
 	if t.Preflight == nil || t.Preflight.AcceptanceSkeleton == nil || !t.Preflight.AcceptanceSkeleton.IsEnabled() {
 		return
@@ -140,16 +139,21 @@ func renderPreflightObligations(b *strings.Builder, t Task) {
 	fmt.Fprintf(b, "\n## Acceptance Skeleton Obligations\n\n")
 	cfg := t.Preflight.AcceptanceSkeleton
 	if len(cfg.Outputs) == 0 {
-		fmt.Fprintf(b, "Galley will pre-create AC-linked test skeletons in the worktree before this attempt. Read each skeleton, complete the implementation it verifies, and ensure its checkpoint command would pass. Do not delete skeleton files or weaken their assertions to satisfy them.\n")
+		fmt.Fprintf(b, "Galley will run the built-in test creator before this attempt. Read each generated skeleton, complete the implementation it verifies, and keep the assertions meaningful. Do not delete skeleton files, leave placeholder assertions, skip the tests, or weaken their assertions.\n")
 		return
 	}
-	fmt.Fprintf(b, "Galley will pre-create the following AC-linked test skeletons in the worktree before this attempt. Read each skeleton, complete the implementation it verifies, and ensure its checkpoint command would pass.\n\n")
+	fmt.Fprintf(b, "Galley pre-created the following AC-linked test skeletons in the worktree before this attempt. Read each skeleton, complete the implementation it verifies, and keep the assertions meaningful.\n\n")
 	for _, out := range cfg.Outputs {
 		fmt.Fprintf(b, "- AC `%s` -> `%s` (kind=%s, implementation_required=%t)\n", out.ACID, out.Path, out.Kind, out.ImplementationRequired)
 		fmt.Fprintf(b, "  Purpose: %s\n", out.Purpose)
-		fmt.Fprintf(b, "  Checkpoint: `%s`\n", out.CheckpointCommand)
+		if out.Satisfies != "" {
+			fmt.Fprintf(b, "  Satisfies: %s\n", out.Satisfies)
+		}
+		if out.IntegrationPoint != "" {
+			fmt.Fprintf(b, "  Integration point: %s\n", out.IntegrationPoint)
+		}
 	}
-	fmt.Fprintf(b, "\nCompletion obligations: every implementation_required skeleton above must have a passing checkpoint before the supervisor accepts the attempt.\n")
+	fmt.Fprintf(b, "\nCompletion obligations: every implementation_required skeleton above must be implemented and covered by the normal required verification checks before the supervisor accepts the attempt.\n")
 }
 
 func renderProfileContext(b *strings.Builder, profiles profile.Bundle) {

@@ -322,23 +322,6 @@
               },
               "type": "array"
             },
-            "creator": {
-              "additionalProperties": false,
-              "properties": {
-                "command": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "timeout_ms": {
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "command"
-              ],
-              "type": "object"
-            },
             "enabled": {
               "type": "boolean"
             },
@@ -356,12 +339,12 @@
                     "minLength": 1,
                     "type": "string"
                   },
-                  "checkpoint_command": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
                   "implementation_required": {
                     "type": "boolean"
+                  },
+                  "integration_point": {
+                    "minLength": 1,
+                    "type": "string"
                   },
                   "kind": {
                     "minLength": 1,
@@ -375,6 +358,10 @@
                     "minLength": 1,
                     "type": "string"
                   },
+                  "satisfies": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
                   "template": {
                     "type": "string"
                   }
@@ -384,8 +371,7 @@
                   "path",
                   "kind",
                   "purpose",
-                  "implementation_required",
-                  "checkpoint_command"
+                  "implementation_required"
                 ],
                 "type": "object"
               },

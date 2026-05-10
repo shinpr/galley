@@ -7,9 +7,8 @@ import (
 
 // TestWorkOrderPreflightIncludesRuntimeSkeletonPathsAndObligations proves the
 // executor work order is augmented with the runtime preflight result: concrete
-// skeleton paths, AC bindings, kinds, checkpoint commands, and the completion
-// obligation that every implementation_required skeleton must have a passing
-// checkpoint before acceptance.
+// skeleton paths, AC bindings, kinds, and the completion obligation that every
+// implementation_required skeleton must be implemented before acceptance.
 func TestWorkOrderPreflightIncludesRuntimeSkeletonPathsAndObligations(t *testing.T) {
 	t.Parallel()
 	base := "## Original work order body\n"
@@ -21,7 +20,6 @@ func TestWorkOrderPreflightIncludesRuntimeSkeletonPathsAndObligations(t *testing
 			Kind:                   "go-test",
 			Purpose:                "verify foo behavior",
 			ImplementationRequired: true,
-			CheckpointCommand:      "go test ./internal/foo/ -run Foo",
 		}},
 	}
 	got := appendPreflightObligations(base, res)
@@ -34,8 +32,7 @@ func TestWorkOrderPreflightIncludesRuntimeSkeletonPathsAndObligations(t *testing
 		"kind=go-test",
 		"implementation_required=true",
 		"verify foo behavior",
-		"go test ./internal/foo/ -run Foo",
-		"every implementation_required skeleton above must have a passing checkpoint",
+		"every implementation_required skeleton above must be implemented",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("work order missing %q:\n%s", want, got)

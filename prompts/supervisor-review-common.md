@@ -22,6 +22,7 @@ For `needs_revision`, set `next_work_order` to concrete instructions the executo
 - Add `acceptance_evidence` for each satisfied task acceptance criterion.
 - Add `acceptance_evidence` with `ac_id` equal to `revision:<id>` for each satisfied pending revision request.
 - Record concrete problems in `findings`.
+- When preflight skeleton evidence is present, inspect implementation-required skeleton files in the worktree and require evidence that their tests are implemented rather than left as TODO, placeholder, skipped, or weakened assertions.
 - Use `residual_risks` for non-blocking uncertainty that remains after review. It is an array of strings; put severity, file, category, and blocking status in `findings`, not in `residual_risks`.
 - Use `discussion_items` only for accepted work, after the verdict is already justified. Discussion items are reviewer-facing notes about acceptance-criteria wording, domain ambiguity, or follow-up product questions. They do not relax acceptance criteria and must not replace `findings`, `acceptance_gaps`, or `next_work_order`. Each item has exactly `topic`, `summary`, and `requires_human_decision`.
 - Set `blocks_acceptance` according to the active quality profile pass policy. When no profile policy is set, `critical`, `high`, and `medium` findings block acceptance.

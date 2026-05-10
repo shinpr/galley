@@ -242,18 +242,12 @@ func validatePreflight(result *ValidationResult, t Task) {
 			result.Errors = append(result.Errors, fmt.Sprintf("%s value %q must not be inside scope.forbidden_paths", field, p))
 		}
 	}
-	if cfg.Creator != nil {
-		if reason := UnsafeCheckpointCommand(cfg.Creator.Command); reason != "" {
-			result.Errors = append(result.Errors, fmt.Sprintf("%s.creator.command is unsafe: %s", prefix, reason))
-		}
-		require(result, cfg.Creator.TimeoutMS >= 0, "%s.creator.timeout_ms cannot be negative", prefix)
-	}
 	validatePreflightOutputs(result, t, cfg, prefix)
 }
 
 // validatePreflightOutputs validates each declared skeleton output against
-// the AC list, scope, and command-safety rules. Effective allowed paths are
-// preflight.allowed_paths when present, else scope.allowed_paths.
+// the AC list and scope. Effective allowed paths are preflight.allowed_paths
+// when present, else scope.allowed_paths.
 func validatePreflightOutputs(result *ValidationResult, t Task, cfg *AcceptanceSkeletonConfig, prefix string) {
 	if len(cfg.Outputs) == 0 {
 		return
@@ -276,7 +270,6 @@ func validatePreflightOutputs(result *ValidationResult, t Task, cfg *AcceptanceS
 		require(result, out.Path != "", "%s.path is required", field)
 		require(result, out.Kind != "", "%s.kind is required", field)
 		require(result, out.Purpose != "", "%s.purpose is required", field)
-		require(result, strings.TrimSpace(out.CheckpointCommand) != "", "%s.checkpoint_command is required", field)
 		if out.Path != "" {
 			validateRelativePath(result, field+".path", out.Path)
 			if !filepath.IsAbs(out.Path) {
@@ -295,9 +288,6 @@ func validatePreflightOutputs(result *ValidationResult, t Task, cfg *AcceptanceS
 			} else {
 				seenPaths[filepath.Clean(out.Path)] = i
 			}
-		}
-		if reason := UnsafeCheckpointCommand(out.CheckpointCommand); reason != "" {
-			result.Errors = append(result.Errors, fmt.Sprintf("%s.checkpoint_command is unsafe: %s", field, reason))
 		}
 	}
 }

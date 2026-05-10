@@ -11,6 +11,7 @@ import (
 
 	"github.com/shinpr/galley/internal/daemonctl"
 	"github.com/shinpr/galley/internal/galleyhome"
+	"github.com/shinpr/galley/internal/runlog"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/spf13/cobra"
 )
@@ -192,13 +193,10 @@ func newTaskShowCommand() *cobra.Command {
 						fmt.Fprintf(cmd.OutOrStdout(), "preflight_runtime_status: %s\n", preflight.RuntimeStatus)
 					}
 					for _, o := range preflight.RuntimeOutputs {
-						fmt.Fprintf(cmd.OutOrStdout(), "preflight_output: ac=%s path=%s kind=%s implementation_required=%t checkpoint=%s\n", o.ACID, o.Path, o.Kind, o.ImplementationRequired, o.CheckpointCommand)
+						fmt.Fprintf(cmd.OutOrStdout(), "preflight_output: ac=%s path=%s kind=%s implementation_required=%t\n", o.ACID, o.Path, o.Kind, o.ImplementationRequired)
 					}
 					if preflight.FailureSummary != "" {
 						fmt.Fprintf(cmd.OutOrStdout(), "preflight_failure: %s\n", preflight.FailureSummary)
-					}
-					for _, c := range preflight.CheckpointStatuses {
-						fmt.Fprintf(cmd.OutOrStdout(), "preflight_checkpoint: ac=%s status=%s command=%s\n", c.ACID, c.Status, c.Command)
 					}
 				}
 				return nil
@@ -460,19 +458,15 @@ func newTaskValidateCommand() *cobra.Command {
 }
 
 // preflightSummaryView is the JSON/text view shown by `galley task show` for
-// the optional acceptance skeleton preflight stage. The runtime status and
-// checkpoint statuses are populated only when a runtime preflight result is
-// available next to the task YAML; in the first version the daemon writes
-// runs/<run-id>/preflight_result.json which is not co-located with the task,
-// so the static fields (declared outputs from the YAML) are surfaced.
+// the optional acceptance skeleton preflight stage. Runtime fields are loaded
+// from runs/<run-id>/preflight_result.json when available.
 type preflightSummaryView struct {
-	Enabled            bool                      `json:"enabled"`
-	Required           bool                      `json:"required"`
-	DeclaredOutputs    int                       `json:"declared_outputs"`
-	RuntimeStatus      string                    `json:"runtime_status,omitempty"`
-	RuntimeOutputs     []preflightOutputView     `json:"runtime_outputs,omitempty"`
-	FailureSummary     string                    `json:"failure_summary,omitempty"`
-	CheckpointStatuses []preflightCheckpointView `json:"checkpoint_statuses,omitempty"`
+	Enabled         bool                  `json:"enabled"`
+	Required        bool                  `json:"required"`
+	DeclaredOutputs int                   `json:"declared_outputs"`
+	RuntimeStatus   string                `json:"runtime_status,omitempty"`
+	RuntimeOutputs  []preflightOutputView `json:"runtime_outputs,omitempty"`
+	FailureSummary  string                `json:"failure_summary,omitempty"`
 }
 
 type preflightOutputView struct {
@@ -480,13 +474,6 @@ type preflightOutputView struct {
 	Path                   string `json:"path"`
 	Kind                   string `json:"kind"`
 	ImplementationRequired bool   `json:"implementation_required"`
-	CheckpointCommand      string `json:"checkpoint_command,omitempty"`
-}
-
-type preflightCheckpointView struct {
-	ACID    string `json:"ac_id"`
-	Command string `json:"command"`
-	Status  string `json:"status"`
 }
 
 func preflightSummary(t task.Task) *preflightSummaryView {
@@ -509,7 +496,6 @@ type runtimePreflightFile struct {
 		Path                   string `json:"path"`
 		Kind                   string `json:"kind"`
 		ImplementationRequired bool   `json:"implementation_required"`
-		CheckpointCommand      string `json:"checkpoint_command"`
 	} `json:"outputs"`
 	Error *struct {
 		Phase   string `json:"phase"`
@@ -517,18 +503,12 @@ type runtimePreflightFile struct {
 	} `json:"error"`
 }
 
-type runtimeCheckpointFile []struct {
-	ACID    string `json:"ac_id"`
-	Command string `json:"command"`
-	Status  string `json:"status"`
-}
-
 // applyRuntimePreflight resolves the latest run directory for the task under
-// <root>/runs and folds the runtime preflight_result.json plus the latest
-// attempt's skeleton_checkpoint_results.json into the view (AC-015). When no
-// run directory exists the static declared fields are left unchanged.
+// <root>/runs and folds the runtime preflight_result.json into the view
+// (AC-015). When no run directory exists the static declared fields are left
+// unchanged.
 func applyRuntimePreflight(view *preflightSummaryView, root, taskID string) {
-	runDir := latestRunDir(root, taskID)
+	runDir, _ := runlog.LatestTaskRunDir(root, taskID)
 	if runDir == "" {
 		return
 	}
@@ -537,7 +517,7 @@ func applyRuntimePreflight(view *preflightSummaryView, root, taskID string) {
 		if json.Unmarshal(data, &pf) == nil {
 			view.RuntimeStatus = pf.Status
 			for _, o := range pf.Outputs {
-				view.RuntimeOutputs = append(view.RuntimeOutputs, preflightOutputView{ACID: o.ACID, Path: o.Path, Kind: o.Kind, ImplementationRequired: o.ImplementationRequired, CheckpointCommand: o.CheckpointCommand})
+				view.RuntimeOutputs = append(view.RuntimeOutputs, preflightOutputView{ACID: o.ACID, Path: o.Path, Kind: o.Kind, ImplementationRequired: o.ImplementationRequired})
 			}
 			if pf.Error != nil {
 				if pf.Error.Phase != "" {
@@ -548,63 +528,6 @@ func applyRuntimePreflight(view *preflightSummaryView, root, taskID string) {
 			}
 		}
 	}
-	if dir := latestAttemptDir(runDir); dir != "" {
-		if data, err := os.ReadFile(filepath.Join(dir, "skeleton_checkpoint_results.json")); err == nil {
-			var cps runtimeCheckpointFile
-			if json.Unmarshal(data, &cps) == nil {
-				for _, c := range cps {
-					view.CheckpointStatuses = append(view.CheckpointStatuses, preflightCheckpointView{ACID: c.ACID, Command: c.Command, Status: c.Status})
-				}
-			}
-		}
-	}
-}
-
-func latestRunDir(root, taskID string) string {
-	entries, err := os.ReadDir(filepath.Join(root, "runs"))
-	if err != nil {
-		return ""
-	}
-	best := ""
-	var bestN int64
-	prefix := taskID + "-"
-	for _, e := range entries {
-		if !e.IsDir() || !strings.HasPrefix(e.Name(), prefix) {
-			continue
-		}
-		var n int64
-		if _, err := fmt.Sscanf(strings.TrimPrefix(e.Name(), prefix), "%d", &n); err != nil {
-			continue
-		}
-		if best == "" || n > bestN {
-			best = filepath.Join(root, "runs", e.Name())
-			bestN = n
-		}
-	}
-	return best
-}
-
-func latestAttemptDir(runDir string) string {
-	entries, err := os.ReadDir(runDir)
-	if err != nil {
-		return ""
-	}
-	best := ""
-	bestN := -1
-	for _, e := range entries {
-		if !e.IsDir() || !strings.HasPrefix(e.Name(), "attempt-") {
-			continue
-		}
-		var n int
-		if _, err := fmt.Sscanf(e.Name(), "attempt-%d", &n); err != nil {
-			continue
-		}
-		if n > bestN {
-			bestN = n
-			best = filepath.Join(runDir, e.Name())
-		}
-	}
-	return best
 }
 
 func newTaskWorkOrderCommand() *cobra.Command {

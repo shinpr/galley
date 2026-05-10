@@ -234,14 +234,7 @@ func preflightSchema() map[string]any {
 					"mode":          enumSchema(validPreflightSkeletonModes),
 					"required":      map[string]any{"type": "boolean"},
 					"allowed_paths": arraySchema(stringSchema("minLength", 1)),
-					"creator": object(
-						required("command"),
-						properties(map[string]any{
-							"command":    stringSchema("minLength", 1),
-							"timeout_ms": map[string]any{"type": "integer", "minimum": 0},
-						}),
-					),
-					"outputs": arraySchema(preflightOutputSchema()),
+					"outputs":       arraySchema(preflightOutputSchema()),
 				}),
 			),
 		}),
@@ -250,14 +243,15 @@ func preflightSchema() map[string]any {
 
 func preflightOutputSchema() map[string]any {
 	return object(
-		required("ac_id", "path", "kind", "purpose", "implementation_required", "checkpoint_command"),
+		required("ac_id", "path", "kind", "purpose", "implementation_required"),
 		properties(map[string]any{
 			"ac_id":                   stringSchema("minLength", 1),
 			"path":                    stringSchema("minLength", 1),
 			"kind":                    stringSchema("minLength", 1),
 			"purpose":                 stringSchema("minLength", 1),
+			"satisfies":               stringSchema("minLength", 1),
+			"integration_point":       stringSchema("minLength", 1),
 			"implementation_required": map[string]any{"type": "boolean"},
-			"checkpoint_command":      stringSchema("minLength", 1),
 			"template":                map[string]any{"type": "string"},
 		}),
 	)

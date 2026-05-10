@@ -12,6 +12,7 @@ import (
 	"github.com/shinpr/galley/internal/inputfiles"
 	"github.com/shinpr/galley/internal/profile"
 	"github.com/shinpr/galley/internal/result"
+	"github.com/shinpr/galley/internal/runlog"
 	"github.com/shinpr/galley/internal/runner"
 	claudeguard "github.com/shinpr/galley/internal/runner/claude_guard_plugin"
 	"github.com/shinpr/galley/internal/supervisor"
@@ -29,8 +30,25 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 	// bundle through this function keeps the supervisor loop from
 	// double-loading the environment profile.
 	effectiveOpts := effectiveOptionsForProfiles(opts, profiles)
-	preflightResult, _ := LoadPreflightResult(runDir)
-	prompt := task.RenderWorkOrderWithProfiles(executionTask(*loaded, prepared.CWD), profiles)
+	preflightResult, err := LoadPreflightResult(runDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "galley: could not load preflight result for run %s: %v\n", runID, err)
+	}
+	promptTask := executionTask(*loaded, prepared.CWD)
+	if preflightResult != nil {
+		// Runtime obligations below are the source of truth after preflight.
+		// Suppress static task-output rendering here to avoid duplicate
+		// sections after processClaimedTask writes generated outputs back to
+		// the running task file for auditability.
+		if promptTask.Preflight != nil && promptTask.Preflight.AcceptanceSkeleton != nil {
+			cfgCopy := *promptTask.Preflight.AcceptanceSkeleton
+			cfgCopy.Outputs = nil
+			preflightCopy := *promptTask.Preflight
+			preflightCopy.AcceptanceSkeleton = &cfgCopy
+			promptTask.Preflight = &preflightCopy
+		}
+	}
+	prompt := task.RenderWorkOrderWithProfiles(promptTask, profiles)
 	if preflightResult != nil {
 		prompt = appendPreflightObligations(prompt, preflightResult)
 	}
@@ -131,47 +149,29 @@ func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) 
 		return attemptReview{}, err
 	}
 	// Load the runtime preflight result before the executor attempt so the
-	// skeleton checkpoint commands can be threaded into the existing result
-	// completion path (D3, AC-009) rather than executed by a separate
-	// post-completion runner.
-	preflightOutputs, _ := LoadPreflightResult(req.RunDir)
+	// executor result and supervisor evidence share the same generated
+	// skeleton bindings.
+	preflightOutputs, err := LoadPreflightResult(req.RunDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "galley: task %s attempt %d could not load preflight result: %v\n", req.Loaded.ID, req.Attempt, err)
+	}
 	outcome, err := runExecutorAttempt(ctx, req.Opts, effectiveTask, req.Profiles, req.Prepared.CWD, req.Prepared.BaseSHA, attemptDir, req.Prompt, effectiveTaskPath, preflightOutputs)
 	if err != nil {
 		appendFailureAttempt(req.Loaded, "executor", classifyFailureKind("executor_failed", err), err, attemptDir)
 		return attemptReview{}, err
 	}
-	// result.Complete (invoked inside runExecutorAttempt) executes the
-	// skeleton checkpoint commands and writes skeleton_checkpoint_results.json
-	// into the attempt directory. Read it back here so the same evidence is
-	// passed to the supervisor adapter and the acceptance gate. When the
-	// executor hard-stopped, no completion ran, so there is no checkpoint file.
-	checkpointResults, _ := LoadCheckpointResults(attemptDir)
-	supervisorCheckpoints := make([]supervisor.PreflightCheckpointResult, 0, len(checkpointResults))
-	for _, c := range checkpointResults {
-		supervisorCheckpoints = append(supervisorCheckpoints, supervisor.PreflightCheckpointResult{
-			ACID:          c.ACID,
-			Command:       c.Command,
-			Status:        c.Status,
-			ExitCode:      c.ExitCode,
-			DurationMS:    c.DurationMS,
-			StdoutExcerpt: c.StdoutExcerpt,
-			StderrExcerpt: c.StderrExcerpt,
-			Source:        c.Source,
-		})
-	}
 	evidence := supervisor.Evidence{
-		Task:                      *req.Loaded,
-		Profiles:                  req.Profiles,
-		Claude:                    outcome.ClaudeResult,
-		ParseError:                outcome.ParseErr,
-		RunError:                  outcome.RunErr,
-		DiffDirty:                 outcome.DiffDirty,
-		Diff:                      outcome.Diff,
-		DiffError:                 outcome.DiffErr,
-		Attempt:                   req.Attempt,
-		AttemptsLeft:              attemptsLeft(req.Budget, req.Attempt),
-		PreflightResult:           preflightOutputs,
-		SkeletonCheckpointResults: supervisorCheckpoints,
+		Task:            *req.Loaded,
+		Profiles:        req.Profiles,
+		Claude:          outcome.ClaudeResult,
+		ParseError:      outcome.ParseErr,
+		RunError:        outcome.RunErr,
+		DiffDirty:       outcome.DiffDirty,
+		Diff:            outcome.Diff,
+		DiffError:       outcome.DiffErr,
+		Attempt:         req.Attempt,
+		AttemptsLeft:    attemptsLeft(req.Budget, req.Attempt),
+		PreflightResult: preflightOutputs,
 	}
 	verdict, err := evaluateSupervisor(ctx, req.Opts, evidence, attemptDir, req.Prepared.CWD)
 	if err != nil {
@@ -237,8 +237,8 @@ func applySupervisorVerdict(ctx, shutdownCtx context.Context, req verdictApplica
 	switch req.Verdict.Status {
 	case "accepted":
 		// Daemon-side acceptance gate (D4 / AC-011). When required skeleton
-		// or required-check evidence is missing or failed, downgrade the
-		// accepted verdict to needs_supervisor_review with a user-visible
+		// coverage or required-check evidence is missing or failed, downgrade
+		// the accepted verdict to needs_supervisor_review with a user-visible
 		// reason. The first version has no waiver mechanism.
 		if reason, ok := evaluateAcceptanceGate(req.Loaded, req.RunDir); !ok {
 			req.Loaded.Status = "needs_supervisor_review"
@@ -246,7 +246,7 @@ func applySupervisorVerdict(ctx, shutdownCtx context.Context, req verdictApplica
 				ID:                   fmt.Sprintf("acceptance-gate-%d", len(req.Loaded.Risks)+1),
 				Type:                 "partial_verification",
 				Detail:               "Accepted verdict downgraded by acceptance skeleton gate: " + reason,
-				Mitigation:           "Inspect preflight_result.json and attempt checkpoint evidence before re-finalizing.",
+				Mitigation:           "Inspect preflight_result.json and required verification evidence before re-finalizing.",
 				HumanReviewSuggested: true,
 			})
 			fmt.Fprintf(os.Stderr, "galley: task %s accepted-verdict downgraded by acceptance gate: %s\n", req.Loaded.ID, reason)
@@ -352,6 +352,14 @@ type attemptOutcome struct {
 }
 
 func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, profiles profile.Bundle, workDir, baseSHA, attemptDir, prompt, taskFile string, preflight *AcceptanceSkeletonResult) (attemptOutcome, error) {
+	attemptCtx := ctx
+	var cancel context.CancelFunc
+	attemptTimeout := time.Duration(loaded.ExecutionPolicy.TimeoutMS) * time.Millisecond
+	if attemptTimeout > 0 {
+		attemptCtx, cancel = context.WithTimeout(ctx, attemptTimeout)
+		defer cancel()
+	}
+
 	claudeOpts := runner.FromTask(loaded)
 	claudeOpts.Bin = opts.ClaudeBin
 	claudeOpts.WorkDir = workDir
@@ -384,8 +392,8 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 
 	started := time.Now().UTC()
 	stdoutPath := filepath.Join(attemptDir, "claude.stdout.jsonl")
-	runResult, runErr := runner.RunCommand(ctx, commandPlan, runner.RunOptions{
-		Timeout:    time.Duration(loaded.ExecutionPolicy.TimeoutMS) * time.Millisecond,
+	runResult, runErr := runner.RunCommand(attemptCtx, commandPlan, runner.RunOptions{
+		Timeout:    attemptTimeout,
 		StdoutPath: stdoutPath,
 		StderrPath: filepath.Join(attemptDir, "claude.stderr.log"),
 	})
@@ -395,7 +403,7 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 	}
 
 	resultPath := filepath.Join(attemptDir, "claude_result.json")
-	claudeResult, parseErr := resolveClaudeResult(ctx, opts, stdoutPath, runResult.Stdout, taskFile, resultPath, workDir, profiles, preflight, time.Duration(loaded.ExecutionPolicy.TimeoutMS)*time.Millisecond)
+	claudeResult, parseErr := resolveClaudeResult(attemptCtx, opts, stdoutPath, runResult.Stdout, taskFile, resultPath, workDir, profiles)
 	if parseErr == nil {
 		if err := writeJSON(resultPath, claudeResult); err != nil {
 			return attemptOutcome{}, err
@@ -430,26 +438,18 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 	}, nil
 }
 
-func resolveClaudeResult(ctx context.Context, opts Options, stdoutPath, stdoutTail, taskFile, resultPath, workDir string, profiles profile.Bundle, preflight *AcceptanceSkeletonResult, checkpointTimeout time.Duration) (runner.ClaudeResult, error) {
+func resolveClaudeResult(ctx context.Context, opts Options, stdoutPath, stdoutTail, taskFile, resultPath, workDir string, profiles profile.Bundle) (runner.ClaudeResult, error) {
 	claudeResult, claudeErr := runner.ExtractClaudeResultFile(stdoutPath)
 	if claudeErr == nil && claudeResult.Status == "hard_stop" {
 		return claudeResult, nil
 	}
-	var checkpointSpecs []result.CheckpointSpec
-	if preflight != nil {
-		for _, out := range preflight.Outputs {
-			checkpointSpecs = append(checkpointSpecs, result.CheckpointSpec{ACID: out.ACID, Command: out.CheckpointCommand})
-		}
-	}
 	generated, generatedErr := result.Complete(ctx, result.CompleteOptions{
-		TaskFile:                  taskFile,
-		Output:                    resultPath,
-		WorkDir:                   workDir,
-		Summary:                   "Task implementation completed and verification evidence was recorded by Galley.",
-		Profiles:                  profiles,
-		GitBin:                    opts.GitBin,
-		SkeletonCheckpoints:       checkpointSpecs,
-		SkeletonCheckpointTimeout: checkpointTimeout,
+		TaskFile: taskFile,
+		Output:   resultPath,
+		WorkDir:  workDir,
+		Summary:  "Task implementation completed and verification evidence was recorded by Galley.",
+		Profiles: profiles,
+		GitBin:   opts.GitBin,
 	})
 	if generatedErr == nil {
 		if claudeErr == nil {
@@ -647,18 +647,17 @@ func applyAcceptedAcceptanceCriteria(loaded *task.Task, verdict supervisor.Verdi
 	}
 }
 
-// evaluateAcceptanceGate inspects the preflight result and recorded
-// checkpoint evidence and returns ("", true) when acceptance is allowed.
+// evaluateAcceptanceGate inspects the preflight result and required-check
+// evidence and returns ("", true) when acceptance is allowed.
 // Tasks without preflight.acceptance_skeleton enabled always pass — the
 // gate (including the required quality-check evidence gate) only activates
 // when a human opted the task into acceptance skeleton preflight via the
 // task contract (D4 / AC-001 / AC-011).
 func evaluateAcceptanceGate(loaded *task.Task, runDir string) (string, bool) {
-	// AC-001 backward compatibility: a task that omits or disables
-	// preflight.acceptance_skeleton must validate and finalize exactly as the
-	// pre-feature daemon flow did. The required quality-check evidence gate is
-	// part of the acceptance skeleton contract, so it must not run here for the
-	// default flow — only a human-authored preflight section opts a task in.
+	// Default flow: a task that omits or disables preflight.acceptance_skeleton
+	// must validate and finalize through the normal daemon path. The required
+	// quality-check evidence gate is part of the acceptance skeleton contract,
+	// so only an enabled preflight section opts a task in.
 	if loaded == nil || loaded.Preflight == nil || loaded.Preflight.AcceptanceSkeleton == nil {
 		return "", true
 	}
@@ -669,7 +668,8 @@ func evaluateAcceptanceGate(loaded *task.Task, runDir string) (string, bool) {
 	// Required quality-check evidence gate (AC-011 / R6). Scoped to
 	// preflight-enabled tasks so a supervisor cannot finalize an accepted
 	// verdict while a required profile check is missing or failed in the
-	// latest executor result.
+	// latest executor result. This gate is tied to enabled:true, not
+	// required:true; required:false only relaxes per-AC skeleton coverage.
 	if reason, ok := requiredCheckEvidenceGate(loaded, runDir); !ok {
 		return reason, false
 	}
@@ -700,13 +700,11 @@ func evaluateAcceptanceGate(loaded *task.Task, runDir string) (string, bool) {
 	for _, ac := range loaded.AcceptanceCriteria {
 		acceptanceIDs = append(acceptanceIDs, ac.ID)
 	}
-	checkpointResults, _, _ := LoadLatestCheckpointResults(runDir)
 	reason, ok := AcceptanceGate(AcceptanceGateInputs{
-		Required:          cfg.IsRequired(),
-		Outputs:           res.Outputs,
-		NoSkeletons:       res.NoSkeletons,
-		CheckpointResults: checkpointResults,
-		AcceptanceIDs:     acceptanceIDs,
+		Required:      cfg.IsRequired(),
+		Outputs:       res.Outputs,
+		NoSkeletons:   res.NoSkeletons,
+		AcceptanceIDs: acceptanceIDs,
 	})
 	return reason, ok
 }
@@ -816,24 +814,9 @@ func loadRunProfiles(runDir string) (profile.Bundle, error) {
 }
 
 func loadLatestClaudeResult(runDir string) (*runner.ClaudeResult, string, error) {
-	entries, err := os.ReadDir(runDir)
+	bestDir, _, err := runlog.LatestAttemptDir(runDir)
 	if err != nil {
 		return nil, "", err
-	}
-	best := -1
-	bestDir := ""
-	for _, e := range entries {
-		if !e.IsDir() || !strings.HasPrefix(e.Name(), "attempt-") {
-			continue
-		}
-		var n int
-		if _, err := fmt.Sscanf(e.Name(), "attempt-%d", &n); err != nil {
-			continue
-		}
-		if n > best {
-			best = n
-			bestDir = filepath.Join(runDir, e.Name())
-		}
 	}
 	if bestDir == "" {
 		return nil, "", nil
@@ -852,10 +835,10 @@ func loadLatestClaudeResult(runDir string) (*runner.ClaudeResult, string, error)
 	return &res, bestDir, nil
 }
 
-// appendPreflightObligations replaces the generic obligation paragraph in
-// the executor work order (rendered by task.RenderWorkOrderWithProfiles)
-// with concrete skeleton paths, AC bindings, kinds, purposes, and checkpoint
-// commands derived from the runtime preflight result.
+// appendPreflightObligations adds runtime skeleton paths, AC bindings, kinds,
+// and purposes derived from the preflight result. The caller suppresses static
+// task-output rendering first so the executor sees a single runtime obligations
+// section.
 func appendPreflightObligations(prompt string, res *AcceptanceSkeletonResult) string {
 	if res == nil {
 		return prompt
@@ -870,13 +853,18 @@ func appendPreflightObligations(prompt string, res *AcceptanceSkeletonResult) st
 		b.WriteString("Preflight enabled with no declared outputs. Add coverage if acceptance criteria require behavior tests.\n")
 		return prompt + b.String()
 	}
-	b.WriteString("Galley pre-created the following AC-linked test skeletons in the worktree before this attempt. Read each skeleton, complete the implementation it verifies, and ensure its checkpoint command would pass. Do not delete skeleton files or weaken their assertions.\n\n")
+	b.WriteString("Galley pre-created the following AC-linked test skeletons in the worktree before this attempt. Read each skeleton, complete the implementation it verifies, and keep the assertions meaningful. Do not delete skeleton files, leave placeholder assertions, skip the tests, or weaken their assertions.\n\n")
 	for _, out := range res.Outputs {
 		b.WriteString(fmt.Sprintf("- AC `%s` -> `%s` (kind=%s, implementation_required=%t)\n", out.ACID, out.Path, out.Kind, out.ImplementationRequired))
 		b.WriteString(fmt.Sprintf("  Purpose: %s\n", out.Purpose))
-		b.WriteString(fmt.Sprintf("  Checkpoint: `%s`\n", out.CheckpointCommand))
+		if out.Satisfies != "" {
+			b.WriteString(fmt.Sprintf("  Satisfies: %s\n", out.Satisfies))
+		}
+		if out.IntegrationPoint != "" {
+			b.WriteString(fmt.Sprintf("  Integration point: %s\n", out.IntegrationPoint))
+		}
 	}
-	b.WriteString("\nCompletion obligations: every implementation_required skeleton above must have a passing checkpoint before the supervisor accepts the attempt.\n")
+	b.WriteString("\nCompletion obligations: every implementation_required skeleton above must be implemented and covered by the normal required verification checks before the supervisor accepts the attempt.\n")
 	return prompt + b.String()
 }
 

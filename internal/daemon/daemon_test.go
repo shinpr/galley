@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shinpr/galley/internal/galleyhome"
 	"github.com/shinpr/galley/internal/queue"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/internal/workspace"
@@ -1120,6 +1122,206 @@ func TestCleanupWorktreesSkipsDirtyClosedPRWorktree(t *testing.T) {
 	}
 	if !hasCleanupRisk(reloaded.Risks) {
 		t.Fatalf("cleanup risk missing: %#v", reloaded.Risks)
+	}
+}
+
+// TestRunOnceBranchesNewWorktreeFromEnvironmentPRBaseOriginRef covers AC2 +
+// AC4 case (1): when the environment profile's pr.base resolves to an
+// origin/<base> ref, the new task worktree is branched from that ref's SHA
+// rather than the source repo's current HEAD. This also exercises the order
+// requirement: profile resolution must happen before workspace.Prepare.
+func TestRunOnceBranchesNewWorktreeFromEnvironmentPRBaseOriginRef(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	// Pin origin/feature-base at the initial commit, then advance source HEAD
+	// so origin/feature-base SHA differs from HEAD SHA.
+	baseSHA := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "HEAD")))
+	runDaemonGit(t, repo, "update-ref", "refs/remotes/origin/feature-base", baseSHA)
+	if err := os.WriteFile(filepath.Join(repo, "advance.txt"), []byte("advance\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runDaemonGit(t, repo, "add", "advance.txt")
+	runDaemonGit(t, repo, "commit", "-m", "advance")
+	headSHA := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "HEAD")))
+	if baseSHA == headSHA {
+		t.Fatal("setup failed: baseSHA and headSHA should differ")
+	}
+	writeRepoEnvironmentProfile(t, root, repo, "feature-base")
+
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonTask(t, taskPath, repo)
+
+	if err := Run(context.Background(), Options{
+		Root:               root,
+		SystemPromptFile:   promptPath,
+		JSONSchemaFile:     schemaPath,
+		ClaudeBin:          claudeBin,
+		Once:               true,
+		MaxConcurrentTasks: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	doneTask, err := task.Load(filepath.Join(root, "tasks", "done", "task.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	worktreePath := taskWorktreePath(repo, doneTask.Worktree.Path)
+	// The fake claude does not commit, so the new branch HEAD equals the
+	// start-point ref's SHA. If profile resolution were skipped or ordered
+	// after Prepare, the worktree HEAD would equal the source repo HEAD
+	// (headSHA) instead.
+	got := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", worktreePath, "rev-parse", "HEAD")))
+	if got != baseSHA {
+		t.Fatalf("worktree HEAD got %q, want origin/feature-base SHA %q (source HEAD=%q)", got, baseSHA, headSHA)
+	}
+	// AC7: profiles.json must still be written into the run directory.
+	matches, err := filepath.Glob(filepath.Join(root, "runs", "*", "profiles.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("expected 1 profiles.json, got %d", len(matches))
+	}
+	var payload struct {
+		Bundle struct {
+			Environment *struct {
+				PR struct {
+					Base string `json:"base,omitempty"`
+				} `json:"pr"`
+			} `json:"environment,omitempty"`
+		} `json:"bundle"`
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("decode profiles.json: %v", err)
+	}
+	if payload.Bundle.Environment == nil || payload.Bundle.Environment.PR.Base != "feature-base" {
+		t.Fatalf("profiles.json bundle.environment.pr.base got %#v", payload.Bundle)
+	}
+}
+
+// TestRunOnceBranchesNewWorktreeFromLocalHeadsFallback covers AC4 case (2):
+// when origin/<base> is missing but refs/heads/<base> exists, the local
+// branch is used as the start-point.
+func TestRunOnceBranchesNewWorktreeFromLocalHeadsFallback(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	baseSHA := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "HEAD")))
+	runDaemonGit(t, repo, "branch", "feature-local")
+	// Advance master/main so HEAD differs from feature-local tip.
+	if err := os.WriteFile(filepath.Join(repo, "advance.txt"), []byte("advance\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runDaemonGit(t, repo, "add", "advance.txt")
+	runDaemonGit(t, repo, "commit", "-m", "advance")
+	headSHA := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "HEAD")))
+	if baseSHA == headSHA {
+		t.Fatal("setup failed: baseSHA and headSHA should differ")
+	}
+	writeRepoEnvironmentProfile(t, root, repo, "feature-local")
+
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonTask(t, taskPath, repo)
+
+	if err := Run(context.Background(), Options{
+		Root:               root,
+		SystemPromptFile:   promptPath,
+		JSONSchemaFile:     schemaPath,
+		ClaudeBin:          claudeBin,
+		Once:               true,
+		MaxConcurrentTasks: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	doneTask, err := task.Load(filepath.Join(root, "tasks", "done", "task.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	worktreePath := taskWorktreePath(repo, doneTask.Worktree.Path)
+	got := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", worktreePath, "rev-parse", "HEAD")))
+	if got != baseSHA {
+		t.Fatalf("worktree HEAD got %q, want refs/heads/feature-local SHA %q", got, baseSHA)
+	}
+}
+
+// TestRunOnceFailsWhenPRBaseRefMissing covers AC4 case (3): when neither
+// origin/<base> nor refs/heads/<base> exists, the daemon must fail the
+// claimed task with a descriptive error and record the attempt as
+// phase=workspace.
+func TestRunOnceFailsWhenPRBaseRefMissing(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	writeRepoEnvironmentProfile(t, root, repo, "does-not-exist")
+
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+	claudeBin := writeFakeClaude(t, "echo should-not-run\n")
+	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonTask(t, taskPath, repo)
+
+	err := Run(context.Background(), Options{
+		Root:               root,
+		SystemPromptFile:   promptPath,
+		JSONSchemaFile:     schemaPath,
+		ClaudeBin:          claudeBin,
+		Once:               true,
+		MaxConcurrentTasks: 1,
+	})
+	if err == nil {
+		t.Fatal("expected pr.base resolution failure")
+	}
+	failedTask, err := task.Load(filepath.Join(root, "tasks", "failed", "task.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failedTask.Attempts) == 0 {
+		t.Fatalf("expected a workspace failure attempt: %#v", failedTask)
+	}
+	last := failedTask.Attempts[len(failedTask.Attempts)-1]
+	if last.Error == nil || last.Error.Phase != "workspace" {
+		t.Fatalf("attempt error got %#v", last.Error)
+	}
+	if !strings.Contains(last.Error.Message, "refs/remotes/origin/does-not-exist") || !strings.Contains(last.Error.Message, "refs/heads/does-not-exist") {
+		t.Fatalf("attempt error message missing both attempted refs: %q", last.Error.Message)
+	}
+}
+
+func writeRepoEnvironmentProfile(t *testing.T, root, repo, base string) {
+	t.Helper()
+	_, _, environmentPath, err := galleyhome.RepoProfilePaths(root, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(environmentPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "id: env-test\n" +
+		"cwd: " + repo + "\n" +
+		"commands: {}\n" +
+		"constraints:\n" +
+		"  network: approval_required\n" +
+		"  secrets_policy: never_read_env_files\n" +
+		"  destructive_commands: deny\n" +
+		"pr:\n" +
+		"  enabled: false\n" +
+		"  base: " + base + "\n"
+	if err := os.WriteFile(environmentPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 

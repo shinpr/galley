@@ -22,12 +22,12 @@ import (
 
 const progressNoDiffThreshold = 2
 
-func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPath string, loaded *task.Task, prepared workspace.Prepared, runDir, runID string) error {
+func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPath string, loaded *task.Task, prepared workspace.Prepared, profiles profile.Bundle, runDir, runID string) error {
 	fmt.Fprintf(os.Stderr, "galley: task %s running in %s (run_id=%s)\n", loaded.ID, prepared.CWD, runID)
-	profiles, err := loadSupervisorProfiles(opts, loaded, runDir)
-	if err != nil {
-		return taskstate.FailMove(opts.Root, runningPath, loaded, err)
-	}
+	// processClaimedTask resolved profiles before workspace creation and
+	// already wrote runs/<run-id>/profiles.json. Threading the resolved
+	// bundle through this function keeps the supervisor loop from
+	// double-loading the environment profile.
 	effectiveOpts := effectiveOptionsForProfiles(opts, profiles)
 	prompt := task.RenderWorkOrderWithProfiles(executionTask(*loaded, prepared.CWD), profiles)
 	budget := attemptBudget(loaded.ExecutionPolicy.LoopBudget)
@@ -98,20 +98,6 @@ type supervisorAttemptRequest struct {
 	Attempt  int
 	Budget   int
 	Prompt   string
-}
-
-func loadSupervisorProfiles(opts Options, loaded *task.Task, runDir string) (profile.Bundle, error) {
-	resolvedProfiles, profiles, err := loadTaskProfiles(opts, loaded.Scope.CWD)
-	if err != nil {
-		return profile.Bundle{}, err
-	}
-	if err := writeJSON(filepath.Join(runDir, "profiles.json"), struct {
-		Resolved resolvedProfileFiles `json:"resolved"`
-		Bundle   profile.Bundle       `json:"bundle"`
-	}{Resolved: resolvedProfiles, Bundle: profiles}); err != nil {
-		return profile.Bundle{}, err
-	}
-	return profiles, nil
 }
 
 func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) (attemptReview, error) {

@@ -13,6 +13,7 @@ import (
 	"github.com/shinpr/galley/internal/galleyhome"
 	"github.com/shinpr/galley/internal/inputfiles"
 	"github.com/shinpr/galley/internal/jsonio"
+	"github.com/shinpr/galley/internal/profile"
 	"github.com/shinpr/galley/internal/queue"
 	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/task"
@@ -413,11 +414,41 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 		return taskstate.FailMove(opts.Root, runningPath, &loaded, err)
 	}
 
-	prepared, err := prepareClaimedWorkspace(ctx, opts, runningPath, runDir, &loaded)
+	// Profile resolution must happen before workspace.Prepare so that the
+	// resolved environment profile (specifically pr.base) can supply a
+	// start-point ref to the brand-new task branch instead of inheriting
+	// the source repository's current HEAD. The resolved bundle is threaded
+	// into runSupervisorLoop so the supervisor loop never re-loads it.
+	profiles, err := loadAndPersistTaskProfiles(opts, &loaded, runDir)
+	if err != nil {
+		appendFailureAttempt(&loaded, "run_evidence", "run_evidence_failed", err, runDir)
+		return taskstate.FailMove(opts.Root, runningPath, &loaded, err)
+	}
+
+	prepared, err := prepareClaimedWorkspace(ctx, opts, profiles, runningPath, runDir, &loaded)
 	if err != nil {
 		return taskstate.FailMove(opts.Root, runningPath, &loaded, err)
 	}
-	return runSupervisorLoop(ctx, shutdownCtx, opts, runningPath, &loaded, prepared, runDir, runID)
+	return runSupervisorLoop(ctx, shutdownCtx, opts, runningPath, &loaded, prepared, profiles, runDir, runID)
+}
+
+// loadAndPersistTaskProfiles resolves the quality and environment profiles for
+// the claimed task and writes the run evidence file (profiles.json) into the
+// run directory. The same shape that loop.go's loadSupervisorProfiles wrote
+// previously is preserved so existing readers of profiles.json continue to
+// work.
+func loadAndPersistTaskProfiles(opts Options, loaded *task.Task, runDir string) (profile.Bundle, error) {
+	resolved, profiles, err := loadTaskProfiles(opts, loaded.Scope.CWD)
+	if err != nil {
+		return profile.Bundle{}, err
+	}
+	if err := writeJSON(filepath.Join(runDir, "profiles.json"), struct {
+		Resolved resolvedProfileFiles `json:"resolved"`
+		Bundle   profile.Bundle       `json:"bundle"`
+	}{Resolved: resolved, Bundle: profiles}); err != nil {
+		return profile.Bundle{}, err
+	}
+	return profiles, nil
 }
 
 func loadClaimedTask(runningPath string) (task.Task, error) {
@@ -460,8 +491,24 @@ func initializeRunEvidence(root, runningPath string, loaded task.Task, validatio
 	return runID, runDir, nil
 }
 
-func prepareClaimedWorkspace(ctx context.Context, opts Options, runningPath, runDir string, loaded *task.Task) (workspace.Prepared, error) {
-	prepared, err := workspace.Prepare(ctx, loaded.Scope.CWD, loaded.Worktree, workspaceOptions(opts))
+func prepareClaimedWorkspace(ctx context.Context, opts Options, profiles profile.Bundle, runningPath, runDir string, loaded *task.Task) (workspace.Prepared, error) {
+	wsOpts := workspaceOptions(opts)
+	// Resolve the environment profile pr.base into a concrete git ref name and
+	// pass it through workspace.Options.StartPoint so the new task branch is
+	// based on origin/<pr.base> (or the local refs/heads/<pr.base> fallback)
+	// instead of the source repository's current HEAD. When pr.base is empty
+	// the resolved ref is "" and workspace.Prepare preserves today's behavior.
+	prBase := ""
+	if profiles.Environment != nil {
+		prBase = profiles.Environment.PR.Base
+	}
+	startPoint, err := resolveWorktreeStartPoint(ctx, opts, loaded.Scope.CWD, prBase)
+	if err != nil {
+		appendFailureAttempt(loaded, "workspace", "workspace_failed", err, runDir)
+		return workspace.Prepared{}, err
+	}
+	wsOpts.StartPoint = startPoint
+	prepared, err := workspace.Prepare(ctx, loaded.Scope.CWD, loaded.Worktree, wsOpts)
 	if err != nil {
 		appendFailureAttempt(loaded, "workspace", "workspace_failed", err, runDir)
 		return workspace.Prepared{}, err

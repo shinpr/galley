@@ -1,9 +1,13 @@
 package daemon
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/shinpr/galley/internal/fileutil"
 	"github.com/shinpr/galley/internal/galleyhome"
 	"github.com/shinpr/galley/internal/profile"
+	"github.com/shinpr/galley/internal/runner"
 )
 
 type resolvedProfileFiles struct {
@@ -41,6 +45,55 @@ func loadTaskProfiles(opts Options, repoCWD string) (resolvedProfileFiles, profi
 		return resolvedProfileFiles{}, profile.Bundle{}, err
 	}
 	return resolved, bundle, nil
+}
+
+// resolveWorktreeStartPoint resolves the git ref name to pass to
+// `git worktree add` as the start-point for a brand-new task branch. The
+// resolution chain matches the daemon contract documented in the task design:
+//
+//  1. refs/remotes/origin/<base> (matches `gh pr create --base <base>` intent
+//     for AFK runs that ultimately push to origin),
+//  2. refs/heads/<base> (local fallback so origin-less local repos and the
+//     smoke test keep working),
+//  3. if base is non-empty and neither ref exists, the daemon must fail the
+//     claimed task with a descriptive error.
+//
+// When base is empty (environment profile missing or pr.base set to empty
+// string), this returns ("", nil) so the caller passes StartPoint="" to
+// workspace.Prepare and preserves today's HEAD-derived behavior.
+func resolveWorktreeStartPoint(ctx context.Context, opts Options, sourceCWD, base string) (string, error) {
+	if base == "" {
+		return "", nil
+	}
+	candidates := []string{"refs/remotes/origin/" + base, "refs/heads/" + base}
+	for _, ref := range candidates {
+		ok, err := refExists(ctx, opts, sourceCWD, ref)
+		if err != nil {
+			return "", err
+		}
+		if ok {
+			return ref, nil
+		}
+	}
+	return "", fmt.Errorf("resolve pr.base %q: neither %s nor %s exists in source repository %s", base, candidates[0], candidates[1], sourceCWD)
+}
+
+func refExists(ctx context.Context, opts Options, sourceCWD, ref string) (bool, error) {
+	gitBin := opts.GitBin
+	if gitBin == "" {
+		gitBin = "git"
+	}
+	result, err := runner.RunCommand(ctx, runner.Command{
+		WorkDir: "",
+		Argv:    []string{gitBin, "-C", sourceCWD, "show-ref", "--verify", "--quiet", ref},
+	}, runner.RunOptions{TailBytes: -1})
+	if err != nil {
+		if result.ExitCode == 1 {
+			return false, nil
+		}
+		return false, fmt.Errorf("git show-ref %s: %w", ref, err)
+	}
+	return true, nil
 }
 
 func effectiveOptionsForProfiles(opts Options, profiles profile.Bundle) Options {

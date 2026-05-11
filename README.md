@@ -2,13 +2,18 @@
 
 # Galley
 
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-Plugin-purple)](https://claude.ai/code)
+[![Codex CLI](https://img.shields.io/badge/Codex%20CLI-Compatible-10a37f)](https://developers.openai.com/codex/cli)
+[![Agent Skills](https://img.shields.io/badge/Agent%20Skills-Spec%20Compliant-blue)](https://developers.openai.com/codex/skills/)
+[![CI](https://github.com/shinpr/galley/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/shinpr/galley/actions/workflows/ci.yml)
+[![GitHub Release](https://img.shields.io/github/v/release/shinpr/galley)](https://github.com/shinpr/galley/releases)
+[![License: MIT](https://img.shields.io/github/license/shinpr/galley)](LICENSE)
+
 Galley is a local orchestration runtime for supervised Claude Code task execution.
 
 It runs locally, keeps work in git-visible changes, and records evidence for review before each acceptance decision.
 
 Galley is Claude-first today. The executor path targets Claude Code, and supervisor review defaults to Claude. Codex can be selected as an alternate model supervisor.
-
-Status: early preview.
 
 ## Install
 

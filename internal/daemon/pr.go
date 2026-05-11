@@ -108,14 +108,18 @@ func ensureNonCommittedInputsAbsentFromBranch(snapshot workspace.Snapshot, files
 
 // prTitleRuneBudget is the soft visual cap on the number of runes Galley keeps
 // in a generated PR title. Most real goals are ASCII or close to it, so this
-// keeps the title visually short. The hard limit that protects against GitHub
-// rejecting the request is prTitleByteBudget below.
-const prTitleRuneBudget = 72
+// budget sits close to (but below) GitHub's 256-byte hard limit so ordinary
+// long ASCII task goals are preserved without a premature ellipsis. The hard
+// limit that protects against GitHub rejecting the request is
+// prTitleByteBudget below; titles whose UTF-8 encoding still exceeds that
+// byte cap (for example emoji-heavy goals) are trimmed by the byte-budget
+// pass.
+const prTitleRuneBudget = 240
 
 // prTitleByteBudget is the hard byte cap GitHub enforces on PR titles. A
-// 72-rune title can still exceed 256 bytes when every rune is a 4-byte UTF-8
-// character (for example an emoji such as 🎉, which is 4 bytes, so 72*4=288).
-// Any output of prTitle must satisfy len(title) <= prTitleByteBudget.
+// rune-budgeted title can still exceed 256 bytes when every rune is a 4-byte
+// UTF-8 character (for example an emoji such as 🎉, which is 4 bytes, so
+// 240*4=960). Any output of prTitle must satisfy len(title) <= prTitleByteBudget.
 const prTitleByteBudget = 256
 
 // prTitleEllipsis marks that prTitle truncated the original task goal so the

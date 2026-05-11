@@ -101,6 +101,7 @@ func TestPollPRCommentsRequeuesTaskOnce(t *testing.T) {
 	loaded.Status = "pr_opened"
 	loaded.PR.URL = "https://github.com/example/galley/pull/123"
 	loaded.PR.Status = "open"
+	loaded.PR.AuthorLogin = "maintainer"
 	if err := task.Save(donePath, loaded); err != nil {
 		t.Fatal(err)
 	}
@@ -155,6 +156,7 @@ func TestPollPRCommentsPostsReply(t *testing.T) {
 	loaded.Status = "pr_opened"
 	loaded.PR.URL = "https://github.com/example/galley/pull/123"
 	loaded.PR.Status = "open"
+	loaded.PR.AuthorLogin = "owner"
 	if err := task.Save(donePath, loaded); err != nil {
 		t.Fatal(err)
 	}
@@ -209,6 +211,7 @@ func TestPollPRCommentsReplyOmitsReasonAndCommentID(t *testing.T) {
 	loaded.Status = "pr_opened"
 	loaded.PR.URL = "https://github.com/example/galley/pull/123"
 	loaded.PR.Status = "open"
+	loaded.PR.AuthorLogin = "owner"
 	if err := task.Save(donePath, loaded); err != nil {
 		t.Fatal(err)
 	}
@@ -279,6 +282,7 @@ func TestPollPRCommentsReplyForQueuedOrRunningTask(t *testing.T) {
 	loaded.Status = "queued"
 	loaded.PR.URL = "https://github.com/example/galley/pull/123"
 	loaded.PR.Status = "open"
+	loaded.PR.AuthorLogin = "owner"
 	if err := task.Save(queuedPath, loaded); err != nil {
 		t.Fatal(err)
 	}
@@ -377,6 +381,7 @@ func TestPollPRCommentsContinuesAfterReplyFailure(t *testing.T) {
 	loaded.Status = "pr_opened"
 	loaded.PR.URL = "https://github.com/example/galley/pull/123"
 	loaded.PR.Status = "open"
+	loaded.PR.AuthorLogin = "maintainer"
 	if err := task.Save(donePath, loaded); err != nil {
 		t.Fatal(err)
 	}
@@ -431,6 +436,7 @@ func TestPollPRCommentsRecordsFailedRequeueForManualRecovery(t *testing.T) {
 	loaded.Status = "pr_opened"
 	loaded.PR.URL = "https://github.com/example/galley/pull/123"
 	loaded.PR.Status = "open"
+	loaded.PR.AuthorLogin = "collab"
 	if err := task.Save(donePath, loaded); err != nil {
 		t.Fatal(err)
 	}
@@ -510,6 +516,198 @@ fi
 		t.Fatalf("untrusted comment should be marked processed after ignore: %#v", stillDone.PR.ProcessedCommentIDs)
 	}
 	assertGlobCount(t, filepath.Join(root, "tasks", "queued", "*.yaml"), 0)
+}
+
+func TestPollPRCommentsRejectsTrustedNonAuthor(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	if err := queue.EnsureLayout(root); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonEnvironmentProfile(t, root, repo, true, true)
+	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
+	writeDaemonTask(t, donePath, repo)
+	loaded, err := task.Load(donePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Status = "pr_opened"
+	loaded.PR.URL = "https://github.com/example/galley/pull/123"
+	loaded.PR.Status = "open"
+	loaded.PR.AuthorLogin = "pr-author"
+	if err := task.Save(donePath, loaded); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "posted")
+	// COLLABORATOR with a different login than the PR author: trust check
+	// passes, but the PR-author boundary must reject the command.
+	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ] && [ "$3" = "--paginate" ]; then
+echo '[[{"id":501,"body":"/galley rerun please re-run for me","html_url":"https://github.com/example/galley/pull/123#issuecomment-501","author_association":"COLLABORATOR","user":{"login":"other-maintainer"}}]]'
+elif [ "$1" = "api" ]; then
+echo "$*" > `+marker+`
+cat >> `+marker+`
+echo '{"id":502}'
+else
+echo unexpected-gh >&2
+exit 1
+fi
+`)
+	if err := pollPRComments(context.Background(), Options{Root: root, ReplyPRComments: true, GHBin: ghBin}.withDefaults()); err != nil {
+		t.Fatal(err)
+	}
+	stillDone, err := task.Load(donePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stillDone.Status != "pr_opened" {
+		t.Fatalf("status got %q want pr_opened", stillDone.Status)
+	}
+	if !slices.Contains(stillDone.PR.ProcessedCommentIDs, "501") {
+		t.Fatalf("non-author comment should be marked processed: %#v", stillDone.PR.ProcessedCommentIDs)
+	}
+	if hasRevisionRequest(stillDone.RevisionRequests, "pr-comment-501") {
+		t.Fatalf("non-author comment must not produce revision request: %#v", stillDone.RevisionRequests)
+	}
+	assertGlobCount(t, filepath.Join(root, "tasks", "queued", "*.yaml"), 0)
+	data, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(data)
+	if !strings.Contains(body, "only the pull request author can run Galley from PR comments") {
+		t.Fatalf("non-author reply got %q", body)
+	}
+	for _, fragment := range []string{
+		"please re-run for me",
+		"comment 501",
+		"other-maintainer",
+	} {
+		if strings.Contains(body, fragment) {
+			t.Fatalf("non-author reply must not echo %q: %q", fragment, body)
+		}
+	}
+}
+
+func TestPollPRCommentsRejectsWhenPRAuthorLoginEmpty(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	if err := queue.EnsureLayout(root); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonEnvironmentProfile(t, root, repo, true, true)
+	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
+	writeDaemonTask(t, donePath, repo)
+	loaded, err := task.Load(donePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Status = "pr_opened"
+	loaded.PR.URL = "https://github.com/example/galley/pull/123"
+	loaded.PR.Status = "open"
+	// Older task file without persisted PR author: fail closed even for an
+	// OWNER-association comment.
+	if err := task.Save(donePath, loaded); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "posted")
+	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ] && [ "$3" = "--paginate" ]; then
+echo '[[{"id":611,"body":"/galley rerun no author known","html_url":"https://github.com/example/galley/pull/123#issuecomment-611","author_association":"OWNER","user":{"login":"someone"}}]]'
+elif [ "$1" = "api" ]; then
+echo "$*" > `+marker+`
+cat >> `+marker+`
+echo '{"id":612}'
+else
+echo unexpected-gh >&2
+exit 1
+fi
+`)
+	if err := pollPRComments(context.Background(), Options{Root: root, ReplyPRComments: true, GHBin: ghBin}.withDefaults()); err != nil {
+		t.Fatal(err)
+	}
+	stillDone, err := task.Load(donePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(stillDone.PR.ProcessedCommentIDs, "611") {
+		t.Fatalf("unknown-author comment should be marked processed: %#v", stillDone.PR.ProcessedCommentIDs)
+	}
+	if hasRevisionRequest(stillDone.RevisionRequests, "pr-comment-611") {
+		t.Fatalf("unknown-author comment must not produce revision request: %#v", stillDone.RevisionRequests)
+	}
+	data, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(data)
+	if !strings.Contains(body, "only the pull request author can run Galley from PR comments") {
+		t.Fatalf("unknown-author reply got %q", body)
+	}
+}
+
+func TestTrustedPRCommentAuthorAndPRAuthorMatch(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name             string
+		comment          vcs.PRComment
+		prAuthorLogin    string
+		wantTrustedAssoc bool
+		wantAuthorMatch  bool
+	}{
+		{
+			name:             "OWNER comment from PR author is allowed",
+			comment:          vcs.PRComment{AuthorAssociation: "OWNER", User: vcs.PRCommentUser{Login: "author"}},
+			prAuthorLogin:    "author",
+			wantTrustedAssoc: true,
+			wantAuthorMatch:  true,
+		},
+		{
+			name:             "COLLABORATOR comment from PR author is allowed",
+			comment:          vcs.PRComment{AuthorAssociation: "COLLABORATOR", User: vcs.PRCommentUser{Login: "author"}},
+			prAuthorLogin:    "author",
+			wantTrustedAssoc: true,
+			wantAuthorMatch:  true,
+		},
+		{
+			name:             "COLLABORATOR comment from different login is rejected on PR-author match",
+			comment:          vcs.PRComment{AuthorAssociation: "COLLABORATOR", User: vcs.PRCommentUser{Login: "other"}},
+			prAuthorLogin:    "author",
+			wantTrustedAssoc: true,
+			wantAuthorMatch:  false,
+		},
+		{
+			name:             "MEMBER fails trust check regardless of login",
+			comment:          vcs.PRComment{AuthorAssociation: "MEMBER", User: vcs.PRCommentUser{Login: "author"}},
+			prAuthorLogin:    "author",
+			wantTrustedAssoc: false,
+			wantAuthorMatch:  true,
+		},
+		{
+			name:             "empty PR author login fails closed",
+			comment:          vcs.PRComment{AuthorAssociation: "OWNER", User: vcs.PRCommentUser{Login: "author"}},
+			prAuthorLogin:    "",
+			wantTrustedAssoc: true,
+			wantAuthorMatch:  false,
+		},
+		{
+			name:             "login match is case-insensitive",
+			comment:          vcs.PRComment{AuthorAssociation: "OWNER", User: vcs.PRCommentUser{Login: "Author"}},
+			prAuthorLogin:    "author",
+			wantTrustedAssoc: true,
+			wantAuthorMatch:  true,
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := trustedPRCommentAuthor(tc.comment); got != tc.wantTrustedAssoc {
+				t.Fatalf("trusted got %v want %v", got, tc.wantTrustedAssoc)
+			}
+			if got := prCommentMatchesPRAuthor(tc.comment, tc.prAuthorLogin); got != tc.wantAuthorMatch {
+				t.Fatalf("author match got %v want %v", got, tc.wantAuthorMatch)
+			}
+		})
+	}
 }
 
 func writeDaemonEnvironmentProfile(t *testing.T, root, repo string, pollComments, replyComments bool) {

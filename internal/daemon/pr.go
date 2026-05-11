@@ -69,6 +69,23 @@ func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task
 	}
 	loaded.PR.URL = prURL
 	loaded.PR.Status = "open"
+	// Persist the PR author so later PR comment authorization can verify the
+	// commenter is the same user without re-fetching from GitHub. An author
+	// lookup failure is recorded as a risk rather than blocking acceptance:
+	// the PR has been created, and comment polling fails closed when the
+	// stored author is empty.
+	authorLogin, authorErr := vcs.FetchPRAuthorLogin(ctx, vcsBinaries(opts), workDir, prURL)
+	if authorErr != nil {
+		loaded.Risks = append(loaded.Risks, task.Risk{
+			ID:                   "pr-author-lookup-" + strutil.FirstNonEmpty(loaded.ID, "task"),
+			Type:                 "external_dependency",
+			Detail:               fmt.Sprintf("Galley created the PR but could not record its author login: %v", authorErr),
+			Mitigation:           "Re-run `gh api repos/{owner}/{repo}/pulls/{number}` after the GitHub API is reachable and set pr.author_login on the task YAML, or expect Galley to reject /galley PR comments until the author is known.",
+			HumanReviewSuggested: true,
+		})
+		return nil
+	}
+	loaded.PR.AuthorLogin = authorLogin
 	return nil
 }
 

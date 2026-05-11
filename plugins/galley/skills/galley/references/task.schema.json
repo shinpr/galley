@@ -290,6 +290,9 @@
     "pr": {
       "additionalProperties": false,
       "properties": {
+        "author_login": {
+          "type": "string"
+        },
         "processed_comment_ids": {
           "items": {
             "type": "string"

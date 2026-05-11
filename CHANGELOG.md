@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- PR comment commands such as `/galley` are now restricted to the pull request author in addition to the existing GitHub `author_association` trust check. The new trust boundary is `(OWNER || COLLABORATOR) && comment.user.login == pr.author_login`. Galley persists the PR author login on the task YAML (`pr.author_login`) at PR creation time and preserves it across queue, requeue, and task load/save. Comments from another GitHub user — even when their `author_association` is `OWNER` or `COLLABORATOR` — are marked processed without requeueing or mutating revision requests, and when `pr.comments.reply` is enabled Galley posts a concise rejection reply that does not echo the user-supplied request body. Task files written before this change have no persisted PR author; Galley fails closed for those tasks and rejects PR commands until the author is recorded.
+
 ## v0.3.0 - 2026-05-11
 
 ### Added

@@ -262,6 +262,47 @@ func PostPRComment(ctx context.Context, bins Binaries, root, prURL, body string)
 	return nil
 }
 
+// FetchPRAuthorLogin returns the GitHub login of the user who opened the PR.
+// Galley persists the result on the task PR record at PR creation time so
+// later PR comment authorization can verify the comment author matches the
+// PR author without re-fetching from GitHub.
+func FetchPRAuthorLogin(ctx context.Context, bins Binaries, root, prURL string) (string, error) {
+	owner, repo, number, err := ParseGitHubPRURL(prURL)
+	if err != nil {
+		return "", err
+	}
+	apiPath := fmt.Sprintf("repos/%s/%s/pulls/%s", owner, repo, number)
+	stdoutFile, err := os.CreateTemp("", "galley-pr-author-*.json")
+	if err != nil {
+		return "", fmt.Errorf("create PR author temp file: %w", err)
+	}
+	stdoutPath := stdoutFile.Name()
+	if err := stdoutFile.Close(); err != nil {
+		return "", fmt.Errorf("close PR author temp file: %w", err)
+	}
+	defer os.Remove(stdoutPath)
+	_, err = runner.RunCommand(ctx, runner.Command{
+		WorkDir: root,
+		Argv:    []string{bins.gh(), "api", apiPath},
+	}, runner.RunOptions{StdoutPath: stdoutPath})
+	if err != nil {
+		return "", fmt.Errorf("gh api PR author failed: %w", err)
+	}
+	output, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		return "", fmt.Errorf("read PR author response: %w", err)
+	}
+	var payload struct {
+		User struct {
+			Login string `json:"login"`
+		} `json:"user"`
+	}
+	if err := json.Unmarshal(output, &payload); err != nil {
+		return "", fmt.Errorf("decode PR author: %w", err)
+	}
+	return payload.User.Login, nil
+}
+
 // FetchPRState returns the current GitHub PR state via gh api.
 func FetchPRState(ctx context.Context, bins Binaries, root, prURL string) (PullRequestState, error) {
 	owner, repo, number, err := ParseGitHubPRURL(prURL)

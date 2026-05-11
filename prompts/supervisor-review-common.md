@@ -6,6 +6,8 @@ Apply this contract to every Galley supervisor review. Provider-specific instruc
 
 The supervisor receives one JSON object with an `evidence` field. The evidence includes task YAML, executor result, repository diff, verification output, quality profile, environment profile, and retry state.
 
+Task input files are implementation source materials. When they are present, classify and apply them as requirement basis, execution plan, test or quality basis, or context evidence before judging acceptance.
+
 ## Status
 
 Use exactly one status:
@@ -22,6 +24,7 @@ For `needs_revision`, set `next_work_order` to concrete instructions the executo
 - Add `acceptance_evidence` for each satisfied task acceptance criterion.
 - Add `acceptance_evidence` with `ac_id` equal to `revision:<id>` for each satisfied pending revision request.
 - Record concrete problems in `findings`.
+- Record a finding when the task, ACs, source materials, or quality profile require a core mechanism and the implementation substitutes it with a weaker surrogate for cost, simplicity, determinism, or testability.
 - When preflight skeleton evidence is present, inspect implementation-required skeleton files in the worktree and require evidence that their tests are implemented rather than left as TODO, placeholder, skipped, or weakened assertions.
 - Use `residual_risks` for non-blocking uncertainty that remains after review. It is an array of strings; put severity, file, category, and blocking status in `findings`, not in `residual_risks`.
 - Use `discussion_items` only for accepted work, after the verdict is already justified. Discussion items are reviewer-facing notes about acceptance-criteria wording, domain ambiguity, or follow-up product questions. They do not relax acceptance criteria and must not replace `findings`, `acceptance_gaps`, or `next_work_order`. Each item has exactly `topic`, `summary`, and `requires_human_decision`.

@@ -6,6 +6,8 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.3.1 - 2026-05-11
+
 ### Added
 
 - Built-in model supervisor evaluations now recover from a stalled supervisor subprocess. When the supervisor exits because of idle timeout, total timeout, or a forced subprocess kill, Galley retries the same supervisor evaluation up to two additional times inside the same executor attempt before failing the task. The executor attempt is not retried — only the supervisor evaluation is re-run, so the existing executor diff and run evidence are preserved. Each try writes its own evidence under `runs/<run-id>/attempt-N/supervisor-try-<M>/` (`supervisor_error.json` with the classified `kind` for failed tries, `supervisor_verdict.json` on the successful try); the top-level `model_supervisor_verdict.json` is only written when a try succeeds. Exhausted retries record a supervisor-phase error with the classified kind on the attempt and move the task to `tasks/failed/` with status `needs_supervisor_review`. The retry budget is a fixed internal value; no new CLI flag, task YAML field, or profile field is introduced.

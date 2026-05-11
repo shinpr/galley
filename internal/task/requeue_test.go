@@ -65,6 +65,75 @@ func TestRequeueMovesFailedTaskToQueued(t *testing.T) {
 	}
 }
 
+func TestRequeuePreservesPRAuthorLogin(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	failedPath := filepath.Join(root, "tasks", "failed", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(failedPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	taskPath := writeTaskYAML(t, "loop_budget: 3")
+	loaded, err := Load(taskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Status = "needs_supervisor_review"
+	loaded.PR.URL = "https://github.com/example/galley/pull/1"
+	loaded.PR.Status = "open"
+	loaded.PR.AuthorLogin = "pr-author"
+	if err := Save(failedPath, loaded); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Requeue(failedPath, RequeueOptions{Reason: "rerun"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requeued, err := Load(result.To)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requeued.PR.AuthorLogin != "pr-author" {
+		t.Fatalf("PR.AuthorLogin not preserved across requeue: %q", requeued.PR.AuthorLogin)
+	}
+}
+
+func TestLoadAcceptsTaskWithoutPRAuthorLogin(t *testing.T) {
+	t.Parallel()
+	// Older task YAML written before PR.AuthorLogin existed must still
+	// decode cleanly under strict KnownFields parsing.
+	taskPath := writeTaskYAML(t, "loop_budget: 3")
+	loaded, err := Load(taskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.PR.AuthorLogin != "" {
+		t.Fatalf("expected empty PR.AuthorLogin for legacy task, got %q", loaded.PR.AuthorLogin)
+	}
+}
+
+func TestSaveAndLoadRoundTripsPRAuthorLogin(t *testing.T) {
+	t.Parallel()
+	taskPath := writeTaskYAML(t, "loop_budget: 3")
+	loaded, err := Load(taskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.PR.URL = "https://github.com/example/galley/pull/2"
+	loaded.PR.Status = "open"
+	loaded.PR.AuthorLogin = "task-author"
+	if err := Save(taskPath, loaded); err != nil {
+		t.Fatal(err)
+	}
+	roundTripped, err := Load(taskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if roundTripped.PR.AuthorLogin != "task-author" {
+		t.Fatalf("PR.AuthorLogin did not round-trip: %q", roundTripped.PR.AuthorLogin)
+	}
+}
+
 func TestRequeueDoesNotOverwriteQueuedTask(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

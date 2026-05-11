@@ -81,6 +81,67 @@ printf '%s' '{"state":"open","merged":false,"padding":"`+padding+`"}'
 	}
 }
 
+func TestFetchPRAuthorLoginReturnsLoginOnSuccess(t *testing.T) {
+	binDir := t.TempDir()
+	fakeGH := filepath.Join(binDir, "gh")
+	if err := os.WriteFile(fakeGH, []byte(`#!/bin/sh
+printf '%s' '{"user":{"login":"pr-author"}}'
+`), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	login, err := FetchPRAuthorLogin(t.Context(), Binaries{}, t.TempDir(), "https://github.com/example/galley/pull/1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if login != "pr-author" {
+		t.Fatalf("login got %q, want %q", login, "pr-author")
+	}
+}
+
+// TestFetchPRAuthorLoginRejectsEmptyLogin guards the fail-closed behavior for
+// PR comment authorization: if GitHub responds with a payload that has no
+// user.login (missing user, empty login, or null login), FetchPRAuthorLogin
+// must return a non-nil error so callers record the pr-author-lookup risk
+// and downstream /galley PR comment trust checks fall back to rejection
+// instead of silently accepting an empty author.
+func TestFetchPRAuthorLoginRejectsEmptyLogin(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload string
+	}{
+		{name: "empty login", payload: `{"user":{"login":""}}`},
+		{name: "missing login field", payload: `{"user":{}}`},
+		{name: "missing user", payload: `{}`},
+		{name: "null user", payload: `{"user":null}`},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			binDir := t.TempDir()
+			fakeGH := filepath.Join(binDir, "gh")
+			if err := os.WriteFile(fakeGH, []byte(`#!/bin/sh
+printf '%s' '`+tc.payload+`'
+`), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+			login, err := FetchPRAuthorLogin(t.Context(), Binaries{}, t.TempDir(), "https://github.com/example/galley/pull/1")
+			if err == nil {
+				t.Fatalf("expected error for empty login payload %q, got login=%q", tc.payload, login)
+			}
+			if login != "" {
+				t.Fatalf("expected empty login on failure, got %q", login)
+			}
+			if !strings.Contains(err.Error(), "empty user.login") {
+				t.Fatalf("error should mention empty user.login, got %v", err)
+			}
+		})
+	}
+}
+
 func TestExtractFirstHTTPSURLTrimsTrailingPunctuation(t *testing.T) {
 	t.Parallel()
 	got := ExtractFirstHTTPSURL("created (https://github.com/example/galley/pull/123).")

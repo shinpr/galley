@@ -263,6 +263,7 @@ func prSchema() map[string]any {
 		properties(map[string]any{
 			"url":                   stringSchema(),
 			"status":                stringSchema(),
+			"author_login":          stringSchema(),
 			"processed_comment_ids": arraySchema(stringSchema()),
 		}),
 	)

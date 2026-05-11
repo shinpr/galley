@@ -87,6 +87,23 @@ func processTaskPRComments(ctx context.Context, opts Options, path string) error
 			}
 			continue
 		}
+		// PR comment commands run local executor work, so a trusted
+		// author_association alone is not enough: the commenter must also be
+		// the PR author recorded for this task. When the recorded PR author is
+		// empty (unknown), fail closed and reject the command. Replies are
+		// concise and do not echo the user-supplied request body.
+		if !prCommentMatchesPRAuthor(comment, loaded.PR.AuthorLogin) {
+			loaded.PR.ProcessedCommentIDs = append(loaded.PR.ProcessedCommentIDs, command.CommentID)
+			if err := task.Save(path, loaded); err != nil {
+				return err
+			}
+			if effectiveOpts.ReplyPRComments {
+				if err := vcs.PostPRComment(ctx, vcsBinaries(effectiveOpts), effectiveOpts.Root, loaded.PR.URL, "Galley ignored this comment because only the pull request author can run Galley from PR comments."); err != nil {
+					errs = append(errs, err)
+				}
+			}
+			continue
+		}
 		if loaded.Status == "queued" || loaded.Status == "running" {
 			applyPRCommandToLoadedTask(&loaded, command)
 			if err := task.Save(path, loaded); err != nil {
@@ -161,6 +178,22 @@ func trustedPRCommentAuthor(comment vcs.PRComment) bool {
 	default:
 		return false
 	}
+}
+
+// prCommentMatchesPRAuthor reports whether the comment author matches the PR
+// author login recorded for the task. An empty prAuthorLogin means the PR
+// author is unknown for this task; Galley fails closed in that case so an
+// older task file without the persisted author cannot drive a Galley run
+// from PR comments. The comparison is case-insensitive because GitHub login
+// matching is case-insensitive.
+func prCommentMatchesPRAuthor(comment vcs.PRComment, prAuthorLogin string) bool {
+	if prAuthorLogin == "" {
+		return false
+	}
+	if comment.User.Login == "" {
+		return false
+	}
+	return strings.EqualFold(comment.User.Login, prAuthorLogin)
 }
 
 // parsePRCommand recognises Galley PR-comment requests. The full comment body

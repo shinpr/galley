@@ -276,9 +276,17 @@ func yamlStringNode(value string, style yaml.Style) *yaml.Node {
 }
 
 // PR records pull request state for AFK workflows.
+//
+// AuthorLogin is the GitHub login of the user who owns the pull request and
+// is captured at PR creation time. Galley restricts PR comment commands such
+// as `/galley` to comments whose author matches AuthorLogin, in addition to
+// the GitHub author_association trust check. The field is optional so older
+// task YAML files load without breaking; task flows that need the trust
+// check treat an empty AuthorLogin as "unknown" and fail closed.
 type PR struct {
 	URL                 string   `yaml:"url" json:"url"`
 	Status              string   `yaml:"status" json:"status"`
+	AuthorLogin         string   `yaml:"author_login,omitempty" json:"author_login,omitempty"`
 	ProcessedCommentIDs []string `yaml:"processed_comment_ids,omitempty" json:"processed_comment_ids,omitempty"`
 }
 

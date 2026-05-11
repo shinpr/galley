@@ -413,7 +413,7 @@ Galley treats task YAML as trusted local execution input. A user or process that
 
 Runnable quality checks come from profiles and are executed locally through `/bin/sh -c` inside the selected workspace.
 
-PR comments can request requeueing and add instructions, but they do not rewrite profile checks.
+PR comments can request requeueing and add instructions, but they do not rewrite profile checks. A PR comment is accepted as a Galley command only when `(author_association is OWNER or COLLABORATOR) && comment author login == the PR author login recorded on the task`; comments from any other GitHub user — including other trusted collaborators — are ignored and (when `pr.comments.reply` is enabled) receive a concise rejection reply.
 
 Run Galley only for repositories and task authors you trust. Keep secrets out of task-accessible files, and use worktrees plus allowed paths to keep executor changes bounded.
 

@@ -350,6 +350,72 @@ func TestRunOnceOpenPRCommitsPushesAndUpdatesTask(t *testing.T) {
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "gh_pr_create_result.json"), 1)
 }
 
+// TestRunOnceOpenPRPersistsPRAuthorLogin exercises the success path for the
+// PR author capture step that protects later /galley PR comment handling.
+// The fake `gh` differentiates between `gh pr create ...` (returns the new PR
+// URL) and `gh api repos/{owner}/{repo}/pulls/{number}` (returns a JSON
+// payload with the PR author's login). The saved done task must carry the
+// login on PR.AuthorLogin so the PR-author trust check can run later without
+// re-fetching from GitHub.
+func TestRunOnceOpenPRPersistsPRAuthorLogin(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	runDaemonGit(t, t.TempDir(), "init", "--bare", remote)
+	runDaemonGit(t, repo, "remote", "add", "origin", remote)
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	// Branched fake gh: pr create returns the URL; api repos/.../pulls/123
+	// returns the PR author JSON payload that vcs.FetchPRAuthorLogin parses.
+	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
+  echo https://github.com/example/galley/pull/321
+elif [ "$1" = "api" ] && [ "$2" = "repos/example/galley/pulls/321" ]; then
+  printf '%s\n' '{"user":{"login":"pr-author"}}'
+else
+  echo "unexpected gh args: $*" >&2
+  exit 1
+fi
+`)
+	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonTask(t, taskPath, repo)
+
+	err := Run(context.Background(), Options{
+		Root:               root,
+		SystemPromptFile:   promptPath,
+		JSONSchemaFile:     schemaPath,
+		ClaudeBin:          claudeBin,
+		Once:               true,
+		MaxConcurrentTasks: 1,
+		OpenPR:             true,
+		PRBase:             "main",
+		GHBin:              ghBin,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	doneTask, err := task.Load(filepath.Join(root, "tasks", "done", "task.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doneTask.PR.URL != "https://github.com/example/galley/pull/321" || doneTask.PR.Status != "open" {
+		t.Fatalf("pr got %#v", doneTask.PR)
+	}
+	if doneTask.PR.AuthorLogin != "pr-author" {
+		t.Fatalf("pr author login got %q want %q", doneTask.PR.AuthorLogin, "pr-author")
+	}
+	// Success path must not record the author-lookup risk that the failure
+	// branch in finalizeAcceptedChange would otherwise append.
+	for _, risk := range doneTask.Risks {
+		if strings.HasPrefix(risk.ID, "pr-author-lookup-") {
+			t.Fatalf("unexpected pr-author-lookup risk on success path: %#v", risk)
+		}
+	}
+}
+
 func TestRunOnceOpenPRUsesExecutorCommit(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)

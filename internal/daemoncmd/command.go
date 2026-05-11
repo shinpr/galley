@@ -18,6 +18,7 @@ import (
 	"github.com/shinpr/galley/internal/daemon"
 	"github.com/shinpr/galley/internal/daemonctl"
 	"github.com/shinpr/galley/internal/galleyhome"
+	"github.com/shinpr/galley/internal/runner"
 	"github.com/spf13/cobra"
 )
 
@@ -249,6 +250,18 @@ func newStopCommand(opts *daemon.Options, pidFile *string, stopTimeout *time.Dur
 				return err
 			}
 			if !status.Alive {
+				// A stale daemon record means the daemon process is gone, but
+				// it may have left behind executor/supervisor child process
+				// groups it can no longer reap. Force stop must clean those up
+				// before discarding the record; on cleanup failure surface the
+				// surviving PIDs/PGIDs and keep the PID file so a follow-up
+				// action can target the same daemon record (AC-005).
+				if force {
+					if _, err := daemonctl.CleanupRegisteredChildren(runner.ChildRegistryPath(opts.Root), *stopTimeout); err != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "galley daemon force stop pid=%d incomplete: %v\n", status.Meta.PID, err)
+						return err
+					}
+				}
 				if err := daemonctl.RemovePID(paths.PIDFile, status.Meta.PID); err != nil {
 					return err
 				}
@@ -267,6 +280,21 @@ func newStopCommand(opts *daemon.Options, pidFile *string, stopTimeout *time.Dur
 			} else if err := daemonctl.StopVerified(status.Meta, *stopTimeout); err != nil && !errors.Is(err, daemonctl.ErrNotRunning) {
 				return err
 			}
+			// Force stop must clean up the daemon's known active child
+			// process groups before reporting a stopped state or removing the
+			// PID file. The daemon intentionally puts executor and supervisor
+			// subprocesses into their own pgids, so killing only the daemon
+			// PID can orphan them (D2 / AC-004). On child cleanup failure we
+			// surface a visible error that names the surviving PIDs/PGIDs and
+			// intentionally leave the PID file in place (AC-005) so a follow-up
+			// operator action can target the same daemon record instead of
+			// observing a falsely-clean stop.
+			if force {
+				if _, err := daemonctl.CleanupRegisteredChildren(runner.ChildRegistryPath(opts.Root), *stopTimeout); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "galley daemon force stop pid=%d incomplete: %v\n", status.Meta.PID, err)
+					return err
+				}
+			}
 			if err := daemonctl.RemovePID(paths.PIDFile, status.Meta.PID); err != nil {
 				return err
 			}
@@ -278,7 +306,7 @@ func newStopCommand(opts *daemon.Options, pidFile *string, stopTimeout *time.Dur
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&force, "force", false, "After the stop timeout, send a verified SIGKILL if the daemon has not exited")
+	cmd.Flags().BoolVar(&force, "force", false, "After the stop timeout, send a verified SIGKILL to the daemon and to any known active executor or supervisor child process groups")
 	return cmd
 }
 

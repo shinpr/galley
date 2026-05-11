@@ -1,0 +1,152 @@
+package daemon
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/shinpr/galley/internal/supervisor"
+	"github.com/shinpr/galley/internal/task"
+)
+
+// TestSupervisorRetryRecoversAfterStallOnSecondTry exercises AC-001: when the
+// first supervisor evaluation fails with an idle timeout, evaluateSupervisorWithRetry
+// must retry the same evaluation under the same executor attempt directory,
+// write per-try evidence under supervisor-try-N subdirectories, recover when
+// the second try succeeds, and not consume additional executor attempts.
+func TestSupervisorRetryRecoversAfterStallOnSecondTry(t *testing.T) {
+	attemptDir := t.TempDir()
+	originalRunner := supervisorRunner
+	t.Cleanup(func() { supervisorRunner = originalRunner })
+
+	calls := 0
+	supervisorRunner = func(ctx context.Context, opts Options, evidence supervisor.Evidence, tryDir, workDir string) (supervisor.Verdict, error) {
+		calls++
+		// Each invocation must receive a distinct supervisor-try-N directory so
+		// retry evidence does not overwrite prior output (R1).
+		want := filepath.Join(attemptDir, fmt.Sprintf("supervisor-try-%d", calls))
+		if tryDir != want {
+			t.Fatalf("try %d: tryDir got %q want %q", calls, tryDir, want)
+		}
+		if _, err := os.Stat(tryDir); err != nil {
+			t.Fatalf("try %d: tryDir missing: %v", calls, err)
+		}
+		if calls == 1 {
+			return supervisor.Verdict{}, errors.New("command produced no output for 1s (idle timeout)")
+		}
+		return supervisor.Verdict{Status: "accepted", Summary: "ok"}, nil
+	}
+
+	verdict, err := evaluateSupervisorWithRetry(context.Background(), Options{}, supervisor.Evidence{Task: task.Task{ID: "test"}}, attemptDir, attemptDir)
+	if err != nil {
+		t.Fatalf("evaluateSupervisorWithRetry returned error: %v", err)
+	}
+	if verdict.Status != "accepted" {
+		t.Fatalf("verdict.Status got %q, want accepted", verdict.Status)
+	}
+	if calls != 2 {
+		t.Fatalf("supervisor invocations got %d, want 2 (initial + 1 retry)", calls)
+	}
+
+	// AC-001 retry evidence: the first try's error JSON must be inspectable and
+	// the second try's verdict JSON must be present under the same executor
+	// attempt directory.
+	errPath := filepath.Join(attemptDir, "supervisor-try-1", "supervisor_error.json")
+	if _, err := os.Stat(errPath); err != nil {
+		t.Fatalf("supervisor-try-1/supervisor_error.json missing: %v", err)
+	}
+	data, err := os.ReadFile(errPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("decode supervisor_error.json: %v", err)
+	}
+	if payload["kind"] != "idle_timeout" {
+		t.Fatalf("supervisor-try-1 kind got %v, want idle_timeout", payload["kind"])
+	}
+	if _, err := os.Stat(filepath.Join(attemptDir, "supervisor-try-2", "supervisor_verdict.json")); err != nil {
+		t.Fatalf("supervisor-try-2/supervisor_verdict.json missing: %v", err)
+	}
+	// The downstream top-level evidence path that the loop and existing tests
+	// rely on must also be present after a recovered retry.
+	if _, err := os.Stat(filepath.Join(attemptDir, "model_supervisor_verdict.json")); err != nil {
+		t.Fatalf("model_supervisor_verdict.json missing: %v", err)
+	}
+	// supervisor-try-3 must not exist: retries stop at the first success.
+	if _, err := os.Stat(filepath.Join(attemptDir, "supervisor-try-3")); err == nil {
+		t.Fatal("supervisor-try-3 should not exist after retry success")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unexpected stat error: %v", err)
+	}
+}
+
+// TestSupervisorRetryExhaustedReturnsClassifiedFailure exercises AC-002: when
+// the supervisor evaluation keeps stalling, evaluateSupervisorWithRetry must
+// exhaust the fixed retry budget, preserve evidence for each retry under
+// supervisor-try-N, and surface a classified supervisor error. The follow-up
+// appendSupervisorFailureAttempt path is what stamps the attempt-level error
+// phase/kind that runSupervisorLoop persists into the task file before
+// taskstate.FailMove marks the task as failed, so we verify both halves.
+func TestSupervisorRetryExhaustedReturnsClassifiedFailure(t *testing.T) {
+	attemptDir := t.TempDir()
+	originalRunner := supervisorRunner
+	t.Cleanup(func() { supervisorRunner = originalRunner })
+
+	calls := 0
+	supervisorRunner = func(ctx context.Context, opts Options, evidence supervisor.Evidence, tryDir, workDir string) (supervisor.Verdict, error) {
+		calls++
+		return supervisor.Verdict{}, errors.New("command produced no output for 1s (idle timeout)")
+	}
+
+	_, err := evaluateSupervisorWithRetry(context.Background(), Options{}, supervisor.Evidence{Task: task.Task{ID: "test"}}, attemptDir, attemptDir)
+	if err == nil {
+		t.Fatal("expected exhausted retries to return an error")
+	}
+	if !strings.Contains(err.Error(), "after 3 tries") {
+		t.Fatalf("error message got %q, want it to mention the total try count", err.Error())
+	}
+	if calls != supervisorTotalAttempts {
+		t.Fatalf("supervisor invocations got %d, want %d", calls, supervisorTotalAttempts)
+	}
+
+	// Each retry must have its own evidence directory and error JSON (R1).
+	for i := 1; i <= supervisorTotalAttempts; i++ {
+		path := filepath.Join(attemptDir, fmt.Sprintf("supervisor-try-%d", i), "supervisor_error.json")
+		if _, statErr := os.Stat(path); statErr != nil {
+			t.Fatalf("supervisor-try-%d/supervisor_error.json missing: %v", i, statErr)
+		}
+	}
+	// The top-level supervisor verdict should not exist after total exhaustion.
+	if _, statErr := os.Stat(filepath.Join(attemptDir, "model_supervisor_verdict.json")); statErr == nil {
+		t.Fatal("model_supervisor_verdict.json should not be written when supervisor evaluation fails")
+	}
+
+	// appendSupervisorFailureAttempt is the persistence path runSupervisorLoop
+	// calls when evaluateSupervisorWithRetry returns this error. Run it here to
+	// confirm the attempt error phase/kind that downstream readers see.
+	loaded := &task.Task{ID: "test"}
+	appendSupervisorFailureAttempt(loaded, attemptOutcome{}, err, attemptDir)
+	if len(loaded.Attempts) != 1 {
+		t.Fatalf("attempts got %d, want 1", len(loaded.Attempts))
+	}
+	attempt := loaded.Attempts[0]
+	if attempt.Error == nil {
+		t.Fatal("attempt error is nil")
+	}
+	if attempt.Error.Phase != "supervisor" {
+		t.Fatalf("attempt error phase got %q, want supervisor", attempt.Error.Phase)
+	}
+	if attempt.Error.Kind != "idle_timeout" {
+		t.Fatalf("attempt error kind got %q, want idle_timeout", attempt.Error.Kind)
+	}
+	if attempt.Error.ArtifactDir != attemptDir {
+		t.Fatalf("attempt error artifact dir got %q, want %q", attempt.Error.ArtifactDir, attemptDir)
+	}
+}

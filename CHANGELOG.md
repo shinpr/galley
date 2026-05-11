@@ -8,6 +8,7 @@ This project follows semantic versioning.
 
 ### Changed
 
+- Generated PR title rune budget is raised toward GitHub's 256-byte PR title limit so ordinary long ASCII task goals (for example PR 18's goal) are preserved verbatim instead of being prematurely truncated mid-sentence. The 256-byte PR title hard limit, whitespace-preferred word-boundary cut, valid UTF-8 boundary preservation, and trailing `…` marker on actual truncations are unchanged. Task YAML structure is unchanged: no new PR title field, schema property, profile setting, CLI flag, or skill prompt requirement is introduced.
 - PR comment commands such as `/galley` are now restricted to the pull request author in addition to the existing GitHub `author_association` trust check. The new trust boundary is `(OWNER || COLLABORATOR) && comment.user.login == pr.author_login`. Galley persists the PR author login on the task YAML (`pr.author_login`) at PR creation time and preserves it across queue, requeue, and task load/save. Comments from another GitHub user — even when their `author_association` is `OWNER` or `COLLABORATOR` — are marked processed without requeueing or mutating revision requests, and when `pr.comments.reply` is enabled Galley posts a concise rejection reply that does not echo the user-supplied request body. Task files written before this change have no persisted PR author; Galley fails closed for those tasks and rejects PR commands until the author is recorded.
 
 ## v0.3.0 - 2026-05-11

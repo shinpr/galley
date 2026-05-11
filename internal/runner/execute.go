@@ -98,6 +98,28 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 		return RunResult{}, fmt.Errorf("start %s: %w", command.Argv[0], err)
 	}
 
+	// Track the freshly created child process group so galley daemon stop
+	// --force can SIGKILL it if the daemon itself is being torn down.
+	// Registration is best-effort: unregister always runs when Wait returns so
+	// transient registry write errors cannot leak entries.
+	registry := DefaultChildRegistry()
+	if registry != nil && cmd.Process != nil {
+		pgid := cmd.Process.Pid
+		if reportedPGID, perr := processGroupID(cmd); perr == nil && reportedPGID > 0 {
+			pgid = reportedPGID
+		}
+		_ = registry.Register(ChildRecord{
+			PID:     cmd.Process.Pid,
+			PGID:    pgid,
+			Argv0:   command.Argv[0],
+			WorkDir: command.WorkDir,
+		})
+	}
+	registeredPID := 0
+	if cmd.Process != nil {
+		registeredPID = cmd.Process.Pid
+	}
+
 	done := make(chan error, 1)
 	go func() {
 		done <- cmd.Wait()
@@ -160,6 +182,9 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 	var closeErr error
 	if !waitTimedOut {
 		closeErr = errors.Join(stdoutFile.Close(), stderrFile.Close())
+		if registry != nil && registeredPID > 0 {
+			_ = registry.Unregister(registeredPID)
+		}
 	} else {
 		// cmd.Wait owns the stdout/stderr copy goroutines. Closing the capture
 		// files before it returns can race with those writers, so final close is
@@ -170,6 +195,9 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 			<-done
 			_ = stdoutFile.Close()
 			_ = stderrFile.Close()
+			if registry != nil && registeredPID > 0 {
+				_ = registry.Unregister(registeredPID)
+			}
 		}()
 	}
 	if result.IdleTimedOut {

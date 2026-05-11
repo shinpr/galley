@@ -23,6 +23,36 @@ import (
 
 const progressNoDiffThreshold = 2
 
+// supervisorRetryBudget is the internal, fixed number of additional supervisor
+// evaluations Galley runs inside a single executor attempt when the supervisor
+// subprocess exits because of idle timeout, total timeout, or a forced
+// subprocess kill (D1 / AC-001 / AC-003). It is intentionally not exposed as a
+// CLI flag, task YAML field, or profile field; supervisor stalls are treated
+// as transient runtime failures, not user-tunable behavior.
+const supervisorRetryBudget = 2
+
+// supervisorTotalAttempts is the maximum number of supervisor invocations per
+// executor attempt: the initial try plus supervisorRetryBudget retries.
+const supervisorTotalAttempts = supervisorRetryBudget + 1
+
+// supervisorRunner runs one supervisor evaluation against evidence using
+// tryDir as the artifact directory. A package-level function variable keeps
+// the retry orchestration testable without spawning a real codex/claude
+// process.
+var supervisorRunner = defaultSupervisorRunner
+
+func defaultSupervisorRunner(ctx context.Context, opts Options, evidence supervisor.Evidence, tryDir, workDir string) (supervisor.Verdict, error) {
+	return supervisor.RunAdapter(ctx, supervisor.AdapterOptions{
+		Provider:    opts.Supervisor,
+		WorkDir:     workDir,
+		Timeout:     time.Duration(evidence.Task.ExecutionPolicy.TimeoutMS) * time.Millisecond,
+		IdleTimeout: opts.IdleTimeout,
+		ArtifactDir: tryDir,
+		ClaudeBin:   opts.ClaudeBin,
+		CodexBin:    opts.CodexBin,
+	}, evidence)
+}
+
 func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPath string, loaded *task.Task, prepared workspace.Prepared, profiles profile.Bundle, runDir, runID string) error {
 	fmt.Fprintf(os.Stderr, "galley: task %s running in %s (run_id=%s)\n", loaded.ID, prepared.CWD, runID)
 	// processClaimedTask resolved profiles before workspace creation and
@@ -173,7 +203,7 @@ func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) 
 		AttemptsLeft:    attemptsLeft(req.Budget, req.Attempt),
 		PreflightResult: preflightOutputs,
 	}
-	verdict, err := evaluateSupervisor(ctx, req.Opts, evidence, attemptDir, req.Prepared.CWD)
+	verdict, err := evaluateSupervisorWithRetry(ctx, req.Opts, evidence, attemptDir, req.Prepared.CWD)
 	if err != nil {
 		appendSupervisorFailureAttempt(req.Loaded, outcome, err, attemptDir)
 		return attemptReview{}, err
@@ -316,23 +346,83 @@ func executionTask(loaded task.Task, workDir string) task.Task {
 	return loaded
 }
 
-func evaluateSupervisor(ctx context.Context, opts Options, evidence supervisor.Evidence, attemptDir, workDir string) (supervisor.Verdict, error) {
-	verdict, err := supervisor.RunAdapter(ctx, supervisor.AdapterOptions{
-		Provider:    opts.Supervisor,
-		WorkDir:     workDir,
-		Timeout:     time.Duration(evidence.Task.ExecutionPolicy.TimeoutMS) * time.Millisecond,
-		IdleTimeout: opts.IdleTimeout,
-		ArtifactDir: attemptDir,
-		ClaudeBin:   opts.ClaudeBin,
-		CodexBin:    opts.CodexBin,
-	}, evidence)
-	if err != nil {
-		return supervisor.Verdict{}, err
+// evaluateSupervisorWithRetry runs the supervisor evaluation and, when the
+// supervisor subprocess fails because of idle timeout, total timeout, or a
+// forced subprocess kill, retries the same evaluation up to
+// supervisorRetryBudget additional times within the same executor attempt
+// (D1 / AC-001 / AC-002). Each try writes its artifacts under a distinct
+// supervisor-try-N subdirectory so retry evidence does not overwrite
+// previous supervisor output (R1).
+func evaluateSupervisorWithRetry(ctx context.Context, opts Options, evidence supervisor.Evidence, attemptDir, workDir string) (supervisor.Verdict, error) {
+	var lastErr error
+	for try := 1; try <= supervisorTotalAttempts; try++ {
+		tryDir := filepath.Join(attemptDir, fmt.Sprintf("supervisor-try-%d", try))
+		if err := os.MkdirAll(tryDir, 0o700); err != nil {
+			return supervisor.Verdict{}, fmt.Errorf("create supervisor try dir %s: %w", tryDir, err)
+		}
+		verdict, err := supervisorRunner(ctx, opts, evidence, tryDir, workDir)
+		if err == nil {
+			// Per-retry verdict (R1: evidence is inspectable for every try).
+			if writeErr := writeJSON(filepath.Join(tryDir, "supervisor_verdict.json"), verdict); writeErr != nil {
+				return supervisor.Verdict{}, writeErr
+			}
+			// Preserve the top-level evidence path that downstream tools and
+			// existing tests rely on.
+			if writeErr := writeJSON(filepath.Join(attemptDir, "model_supervisor_verdict.json"), verdict); writeErr != nil {
+				return supervisor.Verdict{}, writeErr
+			}
+			if try > 1 {
+				fmt.Fprintf(os.Stderr, "galley: supervisor evaluation recovered on try %d after %d transient failure(s)\n", try, try-1)
+			}
+			return verdict, nil
+		}
+		// Record the error JSON for this try so operators can inspect every
+		// retry, including the kind classification.
+		kind := classifyFailureKind("supervisor_failed", err)
+		_ = writeJSON(filepath.Join(tryDir, "supervisor_error.json"), map[string]any{
+			"try":   try,
+			"kind":  kind,
+			"error": err.Error(),
+		})
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			// Shutdown or task-level cancel: do not consume retry budget.
+			return supervisor.Verdict{}, err
+		}
+		if !isSupervisorStallError(err) {
+			return supervisor.Verdict{}, err
+		}
+		lastErr = err
+		fmt.Fprintf(os.Stderr, "galley: supervisor try %d/%d failed (%s); %d retry budget remaining\n", try, supervisorTotalAttempts, kind, supervisorTotalAttempts-try)
 	}
-	if err := writeJSON(filepath.Join(attemptDir, "model_supervisor_verdict.json"), verdict); err != nil {
-		return supervisor.Verdict{}, err
+	return supervisor.Verdict{}, fmt.Errorf("supervisor evaluation failed after %d tries: %w", supervisorTotalAttempts, lastErr)
+}
+
+// isSupervisorStallError reports whether the supervisor subprocess exited
+// because of idle timeout, total timeout, or a forced subprocess kill — the
+// only failure modes that trigger an in-attempt supervisor retry. Other
+// errors (e.g. a malformed verdict or an unrecognized provider) are treated
+// as permanent so they surface immediately instead of consuming retries.
+func isSupervisorStallError(err error) bool {
+	if err == nil {
+		return false
 	}
-	return verdict, nil
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "idle timeout") {
+		return true
+	}
+	if strings.Contains(msg, "timed out") {
+		return true
+	}
+	if strings.Contains(msg, "did not exit after cancellation") {
+		return true
+	}
+	if strings.Contains(msg, "signal: killed") {
+		return true
+	}
+	return false
 }
 
 type attemptOutcome struct {
@@ -594,14 +684,30 @@ func executorAttemptError(outcome attemptOutcome, attemptDir string) *task.Attem
 }
 
 func appendSupervisorFailureAttempt(loaded *task.Task, outcome attemptOutcome, err error, attemptDir string) {
+	kind := classifyFailureKind("supervisor_failed", err)
 	loaded.Attempts = append(loaded.Attempts, task.Attempt{
 		Number:            len(loaded.Attempts) + 1,
 		StartedAt:         outcome.Started.Format(time.RFC3339Nano),
 		CompletedAt:       time.Now().UTC().Format(time.RFC3339Nano),
 		ClaudeStatus:      claudeStatus(outcome.RunResult, outcome.RunErr),
-		SupervisorVerdict: classifyFailureKind("supervisor_failed", err),
+		SupervisorVerdict: kind,
 		Summary:           err.Error(),
-		Error:             attemptError("supervisor", classifyFailureKind("supervisor_failed", err), err, attemptDir),
+		Error:             attemptError("supervisor", kind, err, attemptDir),
+	})
+	// A supervisor evaluation that fails after exhausting the in-attempt retry
+	// budget (idle timeout, total timeout, or forced kill) is a transient
+	// runtime failure of the supervisor process, not a defect in the task or
+	// the executor's work. Surface it as needs_supervisor_review — consistent
+	// with the loop's other "a human should look at this" outcomes — so the
+	// task moves to failed/ with a status that signals follow-up review rather
+	// than a hard task failure (D1 / AC-001 / AC-002).
+	loaded.Status = "needs_supervisor_review"
+	loaded.Risks = append(loaded.Risks, task.Risk{
+		ID:                   fmt.Sprintf("supervisor-stall-%d", len(loaded.Risks)+1),
+		Type:                 "partial_verification",
+		Detail:               fmt.Sprintf("Supervisor evaluation failed (%s): %s", kind, err.Error()),
+		Mitigation:           "Inspect the supervisor-try-N evidence under the attempt directory and requeue the task once the supervisor backend is healthy.",
+		HumanReviewSuggested: true,
 	})
 }
 

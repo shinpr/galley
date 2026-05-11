@@ -123,6 +123,16 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
+	// Install the active child registry so executor and supervisor subprocess
+	// process groups are tracked for the lifetime of this daemon process.
+	// galley daemon stop --force reads the same file from disk and SIGKILLs
+	// any pgids that are still alive after the daemon exits, so a daemon
+	// teardown does not orphan executor/supervisor children that were
+	// intentionally started in their own process groups.
+	registry := runner.NewChildRegistry(runner.ChildRegistryPath(opts.Root))
+	runner.SetDefaultChildRegistry(registry)
+	defer runner.SetDefaultChildRegistry(nil)
+	defer func() { _ = registry.Clear() }()
 	if err := recoverInterruptedRunningTasks(opts.Root); err != nil {
 		return err
 	}

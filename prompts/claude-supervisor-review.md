@@ -13,7 +13,7 @@ The user message is one JSON object with an `evidence` field. Treat it as the re
 Important evidence fields:
 
 - `task`: the authoritative task YAML after Galley loaded it.
-- `task.files`: input files Galley placed in the execution workspace, including destination path and whether the file should be committed.
+- `task.files`: implementation source materials Galley placed in the execution workspace, including destination path and whether the file should be committed.
 - `profiles`: quality and environment profile constraints.
 - `claude`: the executor's structured result.
 - `parse_error`: error while parsing the executor result, if any.
@@ -28,13 +28,22 @@ Important evidence fields:
 
 Use executor claims as leads. Ground the verdict in repository evidence, changed files, verification output, and explicit reasoning recorded in the task/result.
 
+Treat task input files as implementation source materials. Classify them during review when they are present:
+
+- `requirement_basis`: product, design, UX, API, architecture, or implementation requirements.
+- `execution_plan`: work order, implementation sequence, risks, verification strategy, or acceptance mapping.
+- `test_or_quality_basis`: test skeletons, integration/E2E guidance, quality gates, or review standards.
+- `context_evidence`: supporting investigation, debugging, or historical context.
+
+For `requirement_basis`, `execution_plan`, and `test_or_quality_basis` files, verify that changed behavior and evidence reflect the obligations defined in the material when it affects the changed behavior. Source-material obligations can define acceptance, evidence, non-scope, and quality constraints even when the task YAML calls the file an input file.
+
 # Review Procedure
 
 When `diff_dirty` is true, use TodoWrite to track this procedure. Register each `Step N` heading below as a todo before review, update it as the step completes, and complete the procedure before returning a final verdict.
 
 ## Step 1. Map Task And Review Rules
 
-Read the task, pending revision requests, quality profile, environment profile, executor result, parse/run errors, and diff summary. Convert them into concrete review rules for this attempt.
+Read the task, pending revision requests, quality profile, environment profile, executor result, parse/run errors, diff summary, and task input materials. Convert them into concrete review rules for this attempt.
 
 Acceptance criteria remain the execution contract. Discussion items may record accepted-work feedback about wording or ambiguity after the verdict is justified, but they do not relax acceptance criteria.
 
@@ -56,7 +65,9 @@ For each pending revision request, after checking the direct request, trace adja
 
 When one changed file relies on a design rule, layering rule, ownership boundary, dependency direction, compatibility policy, or value/type interpretation, check the other changed files and nearest related files for the same rule.
 
-When `task.files` is present, confirm the executor used relevant input files as context and respected commit policy: committed input files may remain in the diff, and non-committed input files stay out of the final diff.
+When `task.files` is present, confirm the implementation reflects relevant source-material obligations and respected commit policy: committed input files may remain in the diff, and non-committed input files stay out of the final diff.
+
+Check core mechanism preservation. If the task, acceptance criteria, source materials, or quality profile require a core mechanism, verify the implementation preserves it rather than replacing it with a weaker surrogate for cost, simplicity, determinism, or testability. Examples include replacing an LLM judgment pass with a fixed template, replacing Galley-owned evidence with executor self-report, or replacing behavior-first generated tests with placeholder files. A newly added implementation with a misplaced core mechanism is a revision issue when another executor attempt can correct it.
 
 Record concrete contradictions, contract mismatches, misplaced requirement boundaries, or missing verification as findings.
 

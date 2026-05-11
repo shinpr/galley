@@ -300,6 +300,12 @@ func FetchPRAuthorLogin(ctx context.Context, bins Binaries, root, prURL string) 
 	if err := json.Unmarshal(output, &payload); err != nil {
 		return "", fmt.Errorf("decode PR author: %w", err)
 	}
+	if payload.User.Login == "" {
+		// Treat a missing/empty user.login as a lookup failure so callers can
+		// surface a pr-author-lookup risk and downstream PR comment trust
+		// checks fail closed instead of silently accepting an empty author.
+		return "", fmt.Errorf("PR author lookup returned empty user.login")
+	}
 	return payload.User.Login, nil
 }
 

@@ -358,7 +358,9 @@ Otherwise the task is retried until `execution_policy.loop_budget` is exhausted;
 | Condition | Result |
 | --- | --- |
 | `completed` with diff, satisfied ACs, evidence, and required checks | `tasks/done/` with status `accepted` |
-| `completed` with missing ACs, unsatisfied ACs, or missing required checks | retry, then `tasks/failed/` with status `needs_supervisor_review` |
+| `completed` with executor-actionable implementation, scope, acceptance, or verification blockers | retry, then `tasks/failed/` with status `needs_supervisor_review` if the loop budget is exhausted |
+| `completed` with blockers that require human product, design, business, environment setup, external service, or required-check policy judgment | `tasks/failed/` with status `needs_supervisor_review` |
+| `completed` with an external or unrecoverable blocker that prevents meaningful progress | `tasks/failed/` with status `failed` |
 | `completed_with_risks` | retry, then `tasks/failed/` with status `needs_supervisor_review` |
 | Parse failure or schema validation failure | retry, then `tasks/failed/` with status `needs_supervisor_review` |
 | Two consecutive attempts with no git diff | stop early as a no-progress safeguard |

@@ -162,7 +162,7 @@ Pass policy:
 - Set `blocks_acceptance` to true exactly when the finding severity is included in the active blocking severities.
 - To require low-severity cleanup before acceptance, the quality profile must include `low` in `blocking_severities`.
 
-If any finding blocks acceptance, return `needs_revision` and put only those required fixes in `next_work_order`. If a blocking finding is enough to reject the attempt, continue reviewing the relevant files before returning so the next executor attempt receives the complete set of required fixes.
+A blocking finding prevents `accepted`. Classify the next actor before choosing the status. Use `needs_revision` when another executor attempt can reasonably fix the blocker with a concrete work order. Use `needs_supervisor_review` when the blocker depends on human judgment about product, design, business, environment setup, external services, or required-check policy. Use `hard_stop` when the blocker prevents meaningful progress rather than leaving a human review decision. For `needs_supervisor_review`, set `next_work_order` to an empty string and explain the human decision needed in `summary` and `acceptance_gaps`. Continue reviewing the relevant files before returning so the verdict includes the complete set of blockers.
 
 Non-blocking findings remain in `findings` with `blocks_acceptance=false`. Record concrete problems in `findings` even when their severity is non-blocking under the pass policy.
 

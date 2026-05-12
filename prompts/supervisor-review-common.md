@@ -14,10 +14,12 @@ Use exactly one status:
 
 - `accepted`: repository evidence satisfies the task, pending revision requests, active pass policy, and required verification.
 - `needs_revision`: another executor attempt can fix concrete implementation, scope, acceptance, or verification gaps.
-- `needs_supervisor_review`: the next decision needs human product, design, business, or environment judgment.
+- `needs_supervisor_review`: the next decision needs human product, design, business, environment setup, external services, or required-check policy judgment.
 - `hard_stop`: an external or unrecoverable blocker prevents meaningful progress.
 
 For `needs_revision`, set `next_work_order` to concrete instructions the executor can run next. For all other statuses, set `next_work_order` to an empty string.
+
+A blocking finding prevents `accepted`. Choose the next status by the next actor: use `needs_revision` when another executor attempt can reasonably fix the blocker; use `needs_supervisor_review` when the blocker requires human product, design, business, environment setup, external services, or required-check policy judgment; use `hard_stop` when an external or unrecoverable blocker prevents meaningful progress.
 
 ## Evidence
 

@@ -431,9 +431,9 @@ Runnable quality checks come from profiles and are executed locally through `/bi
 
 PR comments can request requeueing and add instructions, but they do not rewrite profile checks. A PR comment is accepted as a Galley command only when the comment author login matches the PR author login recorded on the task; comments from any other GitHub user are ignored and (when `pr.comments.reply` is enabled) receive a concise rejection reply.
 
-Run Galley only for repositories and task authors you trust. Keep secrets out of task-accessible files, and use worktrees plus allowed paths to keep executor changes bounded.
+Run Galley only for repositories and task authors you trust. Keep secrets out of task-accessible files, and use worktrees, `scope.forbidden_paths`, executor sandboxing, and local OS controls to keep executor changes bounded. Treat `scope.allowed_paths` as the expected implementation area, not as the final PR staging boundary.
 
-Automatic commit/PR creation currently stages the accepted worktree state with `git add -A`, so repository `.gitignore` should cover local editor, OS, cache, and secret files.
+Automatic commit/PR creation stages the accepted final diff while blocking changes inside `scope.forbidden_paths`, so repository `.gitignore` should cover local editor, OS, cache, and secret files.
 
 See [SECURITY.md](SECURITY.md) for reporting and operational trust boundaries.
 

@@ -32,7 +32,7 @@ Passing tests are required evidence when configured, but passing tests are not s
 
 Accepted is allowed only when every plausible wrong-behavior scenario discovered during review has either concrete evidence showing it is handled, or a non-blocking explanation that does not require another executor attempt. When a plausible bug can be fixed by another executor attempt, return `needs_revision` even if tests pass.
 
-Treat executor `hard_stop` as a claim to review, not as an automatic final state. Return `hard_stop` only when the blocker is external or genuinely unrecoverable by another executor attempt, such as a missing credential, destructive/out-of-scope requirement, unavailable external system, or contradictory acceptance criteria. If the executor stopped because of uncertainty, reluctance, insufficient investigation, local tool confusion, or a solvable implementation/verification problem, return `needs_revision` with a `next_work_order` that explains the alternative path to try. Use the executor's `hard_stop.reason`, `attempted`, and `needed_to_continue` as evidence for that work order.
+Treat executor `hard_stop` as a claim to review, not as an automatic final state. Return `hard_stop` only when the blocker is external or genuinely unrecoverable by another executor attempt, such as a missing credential, destructive requirement, requirement to change paths listed in `task.scope.forbidden_paths`, unavailable external system, or contradictory acceptance criteria. If the executor stopped because of uncertainty, reluctance, insufficient investigation, local tool confusion, or a solvable implementation/verification problem, return `needs_revision` with a `next_work_order` that explains the alternative path to try. Use the executor's `hard_stop.reason`, `attempted`, and `needed_to_continue` as evidence for that work order.
 
 # Review Checklist
 
@@ -40,7 +40,7 @@ Treat executor `hard_stop` as a claim to review, not as an automatic final state
 2. Treat every `task.revision_requests[]` item whose status is not `addressed` as an additional acceptance criterion. Use acceptance evidence id `revision:<request.id>` for those entries.
 3. For each pending revision request, after checking the direct request, review adjacent cases within the read-only context from the Required Review Flow that share the same changed path, contract, persisted state, or external boundary. Examples include fallback behavior, stale state, retries, and external calls; use only categories relevant to the change. Acceptance requires the revision request, original ACs, and relevant adjacent cases to agree.
 4. Check whether executor claims are supported by diff, command output, or explicit skipped-verification reasons.
-5. Check for unrelated changes, out-of-scope writes, reverted user work, incomplete stubs, hollow tests, and TODO-only implementations.
+5. Check for unrelated changes, unsafe or unreviewable scope drift, reverted user work, incomplete stubs, hollow tests, and TODO-only implementations.
 6. Check whether verification commands are relevant to the changed behavior.
 7. Check whether quality profile required checks have passed evidence.
 8. Check whether decisions are reversible and recorded.

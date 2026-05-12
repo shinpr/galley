@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -16,10 +17,6 @@ import (
 )
 
 func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task, workDir, baseSHA, runDir string) error {
-	prBodyPath := filepath.Join(runDir, "pr_body.md")
-	if err := os.WriteFile(prBodyPath, []byte(renderPRBody(*loaded)), 0o600); err != nil {
-		return fmt.Errorf("write pr body: %w", err)
-	}
 	if err := inputfiles.CleanupNonCommitted(workDir, loaded.Files); err != nil {
 		return err
 	}
@@ -42,10 +39,19 @@ func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task
 	if err := ensureNonCommittedInputsAbsentFromBranch(snapshot, loaded.Files); err != nil {
 		return err
 	}
+	changedFiles := sortedChangedFiles(snapshot)
+	if forbidden := pathsInsideScope(changedFiles, loaded.Scope.ForbiddenPaths); len(forbidden) > 0 {
+		return fmt.Errorf("accepted diff changes paths inside task.scope.forbidden_paths: %s", strings.Join(forbidden, ", "))
+	}
+	addScopeExpansionDiscussion(loaded, changedFiles)
 
+	prBodyPath := filepath.Join(runDir, "pr_body.md")
+	if err := os.WriteFile(prBodyPath, []byte(renderPRBody(*loaded)), 0o600); err != nil {
+		return fmt.Errorf("write pr body: %w", err)
+	}
 	if snapshot.StatusPorcelain != "" {
 		commitMessage := fmt.Sprintf("galley: %s", strutil.FirstNonEmpty(loaded.ID, "accepted task"))
-		if err := vcs.AddAllowedPaths(ctx, vcsBinaries(opts), workDir, runDir, loaded.Scope.AllowedPaths, loaded.Scope.ForbiddenPaths); err != nil {
+		if err := vcs.AddPaths(ctx, vcsBinaries(opts), workDir, runDir, parsePorcelainPaths(snapshot.StatusPorcelain)); err != nil {
 			return err
 		}
 		if err := vcs.Commit(ctx, vcsBinaries(opts), workDir, runDir, commitMessage); err != nil {
@@ -87,6 +93,63 @@ func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task
 	}
 	loaded.PR.AuthorLogin = authorLogin
 	return nil
+}
+
+func sortedChangedFiles(snapshot workspace.Snapshot) []string {
+	changed := changedFilesFromSnapshot(snapshot)
+	files := make([]string, 0, len(changed))
+	for file := range changed {
+		clean := filepath.ToSlash(filepath.Clean(file))
+		if clean != "" && clean != "." {
+			files = append(files, clean)
+		}
+	}
+	sort.Strings(files)
+	return files
+}
+
+func pathsInsideScope(paths, prefixes []string) []string {
+	var matches []string
+	for _, path := range paths {
+		if pathInsideAnyPrefix(path, prefixes) {
+			matches = append(matches, path)
+		}
+	}
+	return matches
+}
+
+func pathsOutsideScope(paths, prefixes []string) []string {
+	var matches []string
+	for _, path := range paths {
+		if !pathInsideAnyPrefix(path, prefixes) {
+			matches = append(matches, path)
+		}
+	}
+	return matches
+}
+
+func pathInsideAnyPrefix(path string, prefixes []string) bool {
+	cleanPath := filepath.ToSlash(filepath.Clean(path))
+	for _, prefix := range prefixes {
+		cleanPrefix := filepath.ToSlash(filepath.Clean(prefix))
+		if cleanPrefix == "." || cleanPrefix == cleanPath || strings.HasPrefix(cleanPath, cleanPrefix+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func addScopeExpansionDiscussion(loaded *task.Task, changedFiles []string) {
+	outsideAllowed := pathsOutsideScope(changedFiles, loaded.Scope.AllowedPaths)
+	if len(outsideAllowed) == 0 {
+		return
+	}
+	loaded.DiscussionItems = append(loaded.DiscussionItems, task.DiscussionItem{
+		ID:                    fmt.Sprintf("discussion-%d", len(loaded.DiscussionItems)+1),
+		Topic:                 "Scope expansion",
+		Summary:               fmt.Sprintf("Accepted diff includes changes outside task.scope.allowed_paths: %s. Review whether this scope expansion belongs in this PR.", strings.Join(outsideAllowed, ", ")),
+		RequiresHumanDecision: true,
+	})
 }
 
 func ensureNonCommittedInputsAbsentFromBranch(snapshot workspace.Snapshot, files []task.InputFile) error {

@@ -106,7 +106,7 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 
 For AFK implementation tasks, prefer `sandbox-full-access` with an isolated worktree. Use `read-only` for investigation or review tasks.
 
-`scope.permission` is an authority intent passed into the executor workflow. Actual isolation comes from the worktree, allowed paths, the executor CLI sandbox, and local OS or container controls.
+`scope.permission` is an authority intent passed into the executor workflow. Actual isolation comes from the worktree, `scope.forbidden_paths`, the executor CLI sandbox, and local OS or container controls. `scope.allowed_paths` describes the expected implementation area and input-file destinations; supervisor-accepted scope expansion can still be committed when it stays outside `scope.forbidden_paths`.
 
 ## Input Files
 

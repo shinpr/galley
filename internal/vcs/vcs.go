@@ -41,8 +41,6 @@ type Binaries struct {
 	GH  string
 }
 
-var safeEvidenceNamePattern = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
-
 func (b Binaries) git() string {
 	if b.Git != "" {
 		return b.Git
@@ -57,17 +55,20 @@ func (b Binaries) gh() string {
 	return "gh"
 }
 
-// AddAllowedPaths stages only the task allowed paths and unstages forbidden paths.
-func AddAllowedPaths(ctx context.Context, bins Binaries, workDir, runDir string, allowedPaths, forbiddenPaths []string) error {
-	if len(allowedPaths) == 0 {
-		return fmt.Errorf("git add allowed paths is empty")
-	}
-	stagePaths, err := stageablePaths(ctx, bins, workDir, runDir, allowedPaths)
-	if err != nil {
-		return err
+// AddPaths stages the provided worktree-relative paths.
+func AddPaths(ctx context.Context, bins Binaries, workDir, runDir string, paths []string) error {
+	stagePaths := make([]string, 0, len(paths))
+	seen := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		clean := filepath.ToSlash(filepath.Clean(path))
+		if clean == "" || clean == "." || seen[clean] {
+			continue
+		}
+		seen[clean] = true
+		stagePaths = append(stagePaths, clean)
 	}
 	if len(stagePaths) == 0 {
-		return fmt.Errorf("git add allowed paths has no existing or tracked paths")
+		return fmt.Errorf("git add paths is empty")
 	}
 	argv := append([]string{bins.git(), "add", "-A", "--"}, stagePaths...)
 	result, err := runner.RunCommand(ctx, runner.Command{
@@ -84,56 +85,7 @@ func AddAllowedPaths(ctx context.Context, bins Binaries, workDir, runDir string,
 	if writeErr != nil {
 		return writeErr
 	}
-	if len(forbiddenPaths) == 0 {
-		return nil
-	}
-	resetArgv := append([]string{bins.git(), "reset", "-q", "--"}, forbiddenPaths...)
-	resetResult, err := runner.RunCommand(ctx, runner.Command{
-		WorkDir: workDir,
-		Argv:    resetArgv,
-	}, runner.RunOptions{
-		StdoutPath: filepath.Join(runDir, "git_reset_forbidden.stdout.log"),
-		StderrPath: filepath.Join(runDir, "git_reset_forbidden.stderr.log"),
-	})
-	writeErr = writeJSON(filepath.Join(runDir, "git_reset_forbidden_result.json"), resetResult)
-	if err != nil {
-		return errors.Join(fmt.Errorf("git reset forbidden paths failed: %w", err), writeErr)
-	}
-	if writeErr != nil {
-		return writeErr
-	}
 	return nil
-}
-
-func stageablePaths(ctx context.Context, bins Binaries, workDir, runDir string, allowedPaths []string) ([]string, error) {
-	stagePaths := make([]string, 0, len(allowedPaths))
-	for _, path := range allowedPaths {
-		if _, err := os.Stat(filepath.Join(workDir, path)); err == nil {
-			stagePaths = append(stagePaths, path)
-			continue
-		} else if !os.IsNotExist(err) {
-			return nil, fmt.Errorf("stat allowed path %s: %w", path, err)
-		}
-
-		result, err := runner.RunCommand(ctx, runner.Command{
-			WorkDir: workDir,
-			Argv:    []string{bins.git(), "ls-files", "--", path},
-		}, runner.RunOptions{
-			StdoutPath: filepath.Join(runDir, "git_ls_files_"+safeEvidenceName(path)+".stdout.log"),
-			StderrPath: filepath.Join(runDir, "git_ls_files_"+safeEvidenceName(path)+".stderr.log"),
-		})
-		if err != nil {
-			return nil, fmt.Errorf("git ls-files allowed path %s: %w", path, err)
-		}
-		if strings.TrimSpace(result.Stdout) != "" {
-			stagePaths = append(stagePaths, path)
-		}
-	}
-	return stagePaths, nil
-}
-
-func safeEvidenceName(path string) string {
-	return safeEvidenceNamePattern.ReplaceAllString(path, "_")
 }
 
 // Commit creates a git commit and writes command evidence.

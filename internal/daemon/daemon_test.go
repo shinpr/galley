@@ -462,6 +462,58 @@ func TestRunOnceOpenPRUsesExecutorCommit(t *testing.T) {
 	}
 }
 
+func TestRunOnceOpenPRCommitsAcceptedDiffOutsideAllowedPaths(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	runDaemonGit(t, t.TempDir(), "init", "--bare", remote)
+	runDaemonGit(t, repo, "remote", "add", "origin", remote)
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+	claudeBin := writeFakeClaude(t, "echo allowed > daemon-output.txt\necho expanded > scope-extra.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\",\"scope-extra.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	ghBin := writeFakeCommand(t, "gh", "echo https://github.com/example/galley/pull/456\n")
+	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonTask(t, taskPath, repo)
+	loaded, err := task.Load(taskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Scope.AllowedPaths = []string{"daemon-output.txt"}
+	if err := task.Save(taskPath, loaded); err != nil {
+		t.Fatal(err)
+	}
+
+	err = Run(context.Background(), Options{
+		Root:               root,
+		SystemPromptFile:   promptPath,
+		JSONSchemaFile:     schemaPath,
+		ClaudeBin:          claudeBin,
+		Once:               true,
+		MaxConcurrentTasks: 1,
+		OpenPR:             true,
+		PRBase:             "main",
+		GHBin:              ghBin,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	doneTask, err := task.Load(filepath.Join(root, "tasks", "done", "task.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	worktreePath := taskWorktreePath(repo, doneTask.Worktree.Path)
+	if got := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", worktreePath, "show", "HEAD:scope-extra.txt"))); got != "expanded" {
+		t.Fatalf("scope-expanded file was not committed, got %q", got)
+	}
+	body := string(mustReadSingleGlob(t, filepath.Join(root, "runs", "*", "pr_body.md")))
+	if !strings.Contains(body, "Scope expansion") || !strings.Contains(body, "scope-extra.txt") {
+		t.Fatalf("PR body missing scope expansion discussion:\n%s", body)
+	}
+}
+
 func TestRunOnceCopiesInputFileAndRemovesBeforeCommit(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
@@ -1842,4 +1894,20 @@ func assertGlobCount(t *testing.T, pattern string, want int) {
 	if len(matches) != want {
 		t.Fatalf("%s matched %d files, want %d: %#v", pattern, len(matches), want, matches)
 	}
+}
+
+func mustReadSingleGlob(t *testing.T, pattern string) []byte {
+	t.Helper()
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("%s matched %d files, want 1: %#v", pattern, len(matches), matches)
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }

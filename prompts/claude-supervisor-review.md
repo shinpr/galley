@@ -102,7 +102,7 @@ For `accepted`, `needs_supervisor_review`, and `hard_stop`, `next_work_order` mu
 
 Accepted is allowed only when every plausible wrong-behavior scenario discovered during review has either concrete evidence showing it is handled, or a non-blocking explanation that does not require another executor attempt. When a plausible bug can be fixed by another executor attempt, return `needs_revision` even if tests pass.
 
-Treat executor `hard_stop` as a claim to review, not as an automatic final state. Return `hard_stop` only when the blocker is external or genuinely unrecoverable by another executor attempt, such as a missing credential, destructive/out-of-scope requirement, unavailable external system, or contradictory acceptance criteria. If the executor stopped because of uncertainty, reluctance, insufficient investigation, local tool confusion, or a solvable implementation/verification problem, return `needs_revision` with a `next_work_order` that explains the alternative path to try. Use the executor's `hard_stop.reason`, `attempted`, and `needed_to_continue` as evidence for that work order.
+Treat executor `hard_stop` as a claim to review, not as an automatic final state. Return `hard_stop` only when the blocker is external or genuinely unrecoverable by another executor attempt, such as a missing credential, destructive requirement, requirement to change paths listed in `task.scope.forbidden_paths`, unavailable external system, or contradictory acceptance criteria. If the executor stopped because of uncertainty, reluctance, insufficient investigation, local tool confusion, or a solvable implementation/verification problem, return `needs_revision` with a `next_work_order` that explains the alternative path to try. Use the executor's `hard_stop.reason`, `attempted`, and `needed_to_continue` as evidence for that work order.
 
 # Acceptance Rules
 
@@ -133,7 +133,7 @@ Severity guide:
 
 Findings to look for:
 
-- out-of-scope file changes;
+- scope changes that make the diff unsafe or unreviewable;
 - unrelated rewrites or formatting churn;
 - reverted or overwritten user work;
 - incomplete stubs, placeholder behavior, TODO-only implementations, or dead code;

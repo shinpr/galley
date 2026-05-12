@@ -2,6 +2,10 @@
 
 Use this reference when installing Galley, configuring a repository, starting the daemon, selecting a supervisor, or enabling PR automation.
 
+## Setup Intake
+
+Treat setup as a first-time Galley experience. Before asking the user to approve or choose a setup action, present the available options and explain the Galley-specific meaning of each option in plain terms. Use the detailed intake templates from the referenced flow when setup enters profile authoring, daemon startup, PR automation, or queueing decisions.
+
 ## Preflight
 
 Check required commands and repository context:

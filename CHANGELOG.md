@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- Packaged Claude and Codex Galley plugins are now versioned as `0.1.5`: setup guidance treats setup as a first-time Galley experience, presenting available Galley-specific options and their meanings before asking users to approve profile authoring, daemon startup, PR automation, or queueing decisions.
+
 ## v0.3.1 - 2026-05-11
 
 ### Added

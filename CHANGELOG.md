@@ -9,6 +9,7 @@ This project follows semantic versioning.
 ### Changed
 
 - Completed PR worktree cleanup now removes the managed task worktree with `git worktree remove --force` and clears leftover non-Git directories, so ignored or generated files no longer leave repeated daemon cleanup errors after a PR is closed or merged.
+- Supervisor prompts now classify blocking findings by the next actor: executor-actionable blockers request `needs_revision`, human judgment blockers request `needs_supervisor_review`, and external or unrecoverable blockers request `hard_stop`.
 
 ## v0.3.2 - 2026-05-12
 

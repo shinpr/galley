@@ -1218,7 +1218,7 @@ func TestCleanupWorktreesRemovesCleanMergedPRWorktree(t *testing.T) {
 	}
 }
 
-func TestCleanupWorktreesSkipsDirtyClosedPRWorktree(t *testing.T) {
+func TestCleanupWorktreesRemovesDirtyClosedPRWorktree(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	if err := queue.EnsureLayout(root); err != nil {
@@ -1235,8 +1235,8 @@ func TestCleanupWorktreesSkipsDirtyClosedPRWorktree(t *testing.T) {
 	if err := cleanupWorktrees(context.Background(), Options{Root: root, GHBin: ghBin}.withDefaults()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(worktreePath); err != nil {
-		t.Fatalf("dirty worktree should remain: %v", err)
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Fatalf("dirty worktree should be removed, err=%v", err)
 	}
 	reloaded, err := task.Load(taskPath)
 	if err != nil {
@@ -1248,8 +1248,8 @@ func TestCleanupWorktreesSkipsDirtyClosedPRWorktree(t *testing.T) {
 	if reloaded.Status != "closed" {
 		t.Fatalf("task status got %q", reloaded.Status)
 	}
-	if !hasCleanupRisk(reloaded.Risks) {
-		t.Fatalf("cleanup risk missing: %#v", reloaded.Risks)
+	if len(reloaded.Attempts) == 0 || reloaded.Attempts[len(reloaded.Attempts)-1].SupervisorVerdict != "cleanup" {
+		t.Fatalf("cleanup attempt missing: %#v", reloaded.Attempts)
 	}
 }
 

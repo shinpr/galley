@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -57,20 +56,6 @@ func cleanupTaskWorktree(ctx context.Context, opts Options, path string) error {
 	alreadyFinal := loaded.PR.Status == "merged" || loaded.PR.Status == "closed"
 	cleanupResult, err := workspace.Remove(ctx, loaded.Scope.CWD, loaded.Worktree, workspaceOptions(effectiveOpts))
 	if err != nil {
-		if errors.Is(err, workspace.ErrDirtyWorktree) {
-			loaded.Status = finalStatus
-			loaded.PR.Status = finalStatus
-			if !hasCleanupRisk(loaded.Risks) {
-				loaded.Risks = append(loaded.Risks, task.Risk{
-					ID:                   fmt.Sprintf("cleanup-%d", len(loaded.Risks)+1),
-					Type:                 "technical_debt",
-					Detail:               fmt.Sprintf("%s; status=%q", err.Error(), cleanupResult.StatusPorcelain),
-					Mitigation:           "Worktree cleanup skipped because local changes remain.",
-					HumanReviewSuggested: true,
-				})
-			}
-			return task.Save(path, loaded)
-		}
 		return err
 	}
 	if cleanupResult.AlreadyMissing && alreadyFinal {
@@ -96,13 +81,4 @@ func closedPRTaskStatus(state vcs.PullRequestState) string {
 		return "merged"
 	}
 	return "closed"
-}
-
-func hasCleanupRisk(risks []task.Risk) bool {
-	for _, risk := range risks {
-		if strings.HasPrefix(risk.ID, "cleanup-") {
-			return true
-		}
-	}
-	return false
 }

@@ -3,7 +3,6 @@ package workspace
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,9 +11,6 @@ import (
 	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/task"
 )
-
-// ErrDirtyWorktree indicates cleanup was skipped because the worktree has local changes.
-var ErrDirtyWorktree = errors.New("dirty worktree")
 
 // Snapshot records git evidence for a prepared workspace.
 type Snapshot struct {
@@ -65,11 +61,9 @@ func (opts Options) git() string {
 
 // CleanupResult records the result of a worktree cleanup attempt.
 type CleanupResult struct {
-	Path            string `json:"path"`
-	Removed         bool   `json:"removed"`
-	AlreadyMissing  bool   `json:"already_missing,omitempty"`
-	Dirty           bool   `json:"dirty,omitempty"`
-	StatusPorcelain string `json:"status_porcelain,omitempty"`
+	Path           string `json:"path"`
+	Removed        bool   `json:"removed"`
+	AlreadyMissing bool   `json:"already_missing,omitempty"`
 }
 
 // Prepare creates an isolated git worktree when the task requests one.
@@ -277,7 +271,7 @@ func joinDiffs(parts ...string) string {
 	return strings.Join(joined, "\n")
 }
 
-// Remove removes a clean git worktree for a completed task.
+// Remove removes a completed task worktree.
 func Remove(ctx context.Context, sourceCWD string, spec task.Worktree, opts Options) (CleanupResult, error) {
 	if !spec.Enabled || spec.Path == "" {
 		return CleanupResult{}, nil
@@ -294,21 +288,102 @@ func Remove(ctx context.Context, sourceCWD string, spec task.Worktree, opts Opti
 	} else if err != nil {
 		return result, fmt.Errorf("inspect worktree path %s: %w", worktreePath, err)
 	}
-	status, dirty, err := statusPorcelain(ctx, worktreePath, opts)
-	if err != nil {
+	if err := validateCleanupPath(sourceCWD, worktreePath); err != nil {
 		return result, err
 	}
-	result.StatusPorcelain = status
-	result.Dirty = dirty
-	if dirty {
-		return result, fmt.Errorf("%w: %s", ErrDirtyWorktree, worktreePath)
-	}
-	gitResult, err := runGitCommand(ctx, opts, "", "-C", sourceCWD, "worktree", "remove", worktreePath)
+	gitResult, err := runGitCommand(ctx, opts, "", "-C", sourceCWD, "worktree", "remove", "--force", worktreePath)
 	if err != nil {
-		return result, fmt.Errorf("git worktree remove: %w: %s", err, strings.TrimSpace(gitResult.Stderr))
+		inside, insideErr := isGitWorktree(ctx, worktreePath, opts)
+		if insideErr == nil && !inside {
+			if validateErr := validateManagedLeftoverPath(sourceCWD, worktreePath); validateErr != nil {
+				return result, fmt.Errorf("git worktree remove --force: %w: %s; %v", err, strings.TrimSpace(gitResult.Stderr), validateErr)
+			}
+			if removeErr := os.RemoveAll(worktreePath); removeErr != nil {
+				return result, fmt.Errorf("git worktree remove --force: %w: %s; remove leftover path: %v", err, strings.TrimSpace(gitResult.Stderr), removeErr)
+			}
+		} else {
+			return result, fmt.Errorf("git worktree remove --force: %w: %s", err, strings.TrimSpace(gitResult.Stderr))
+		}
+	} else if _, statErr := os.Stat(worktreePath); statErr == nil {
+		if removeErr := os.RemoveAll(worktreePath); removeErr != nil {
+			return result, fmt.Errorf("remove leftover worktree path %s: %w", worktreePath, removeErr)
+		}
+	} else if !os.IsNotExist(statErr) {
+		return result, fmt.Errorf("inspect removed worktree path %s: %w", worktreePath, statErr)
 	}
 	result.Removed = true
 	return result, nil
+}
+
+func isGitWorktree(ctx context.Context, path string, opts Options) (bool, error) {
+	inside, err := gitOutput(ctx, opts, path, "rev-parse", "--is-inside-work-tree")
+	if err != nil {
+		if strings.Contains(err.Error(), "not a git repository") {
+			return false, nil
+		}
+		return false, err
+	}
+	return inside == "true", nil
+}
+
+func validateCleanupPath(sourceCWD, worktreePath string) error {
+	sourcePath, err := canonicalExistingPath(sourceCWD)
+	if err != nil {
+		return fmt.Errorf("resolve source repository path %s: %w", sourceCWD, err)
+	}
+	targetPath, err := canonicalExistingPath(worktreePath)
+	if err != nil {
+		return fmt.Errorf("resolve worktree cleanup path %s: %w", worktreePath, err)
+	}
+	if sourcePath == targetPath || isAncestor(targetPath, sourcePath) {
+		return fmt.Errorf("refusing to remove source repository or ancestor as worktree cleanup target: %s", worktreePath)
+	}
+	return nil
+}
+
+func validateManagedLeftoverPath(sourceCWD, worktreePath string) error {
+	sourcePath, err := canonicalExistingPath(sourceCWD)
+	if err != nil {
+		return fmt.Errorf("resolve source repository path %s: %w", sourceCWD, err)
+	}
+	targetPath, err := canonicalExistingPath(worktreePath)
+	if err != nil {
+		return fmt.Errorf("resolve worktree cleanup path %s: %w", worktreePath, err)
+	}
+	sourceParent := filepath.Dir(sourcePath)
+	rel, err := filepath.Rel(sourceParent, targetPath)
+	if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+		return fmt.Errorf("refusing to remove non-Git leftover outside source sibling worktree root: %s", worktreePath)
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	if len(parts) < 2 || !isManagedWorktreeRoot(parts[0], filepath.Base(sourcePath)) {
+		return fmt.Errorf("refusing to remove non-Git leftover outside source sibling worktree root: %s", worktreePath)
+	}
+	return nil
+}
+
+func isManagedWorktreeRoot(name, sourceBase string) bool {
+	return name == "worktrees" || name == sourceBase+".worktrees"
+}
+
+func canonicalExistingPath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(resolved), nil
+}
+
+func isAncestor(ancestor, child string) bool {
+	rel, err := filepath.Rel(ancestor, child)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
 func runGitCommand(ctx context.Context, opts Options, cwd string, args ...string) (runner.RunResult, error) {

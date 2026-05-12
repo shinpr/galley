@@ -18,11 +18,10 @@ import (
 
 // PRComment is the subset of a GitHub issue comment Galley consumes.
 type PRComment struct {
-	ID                int64         `json:"id"`
-	Body              string        `json:"body"`
-	HTMLURL           string        `json:"html_url"`
-	AuthorAssociation string        `json:"author_association"`
-	User              PRCommentUser `json:"user"`
+	ID      int64         `json:"id"`
+	Body    string        `json:"body"`
+	HTMLURL string        `json:"html_url"`
+	User    PRCommentUser `json:"user"`
 }
 
 // PRCommentUser is the subset of a GitHub comment user Galley records.

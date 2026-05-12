@@ -23,7 +23,7 @@ func TestFetchPRCommentsReadsFullPaginatedResponse(t *testing.T) {
 	fakeGH := filepath.Join(binDir, "gh")
 	longBody := strings.Repeat("x", 70*1024)
 	if err := os.WriteFile(fakeGH, []byte(`#!/bin/sh
-printf '%s' '[[{"id":1,"body":"`+longBody+`","html_url":"https://github.com/example/galley/pull/1#issuecomment-1","author_association":"OWNER","user":{"login":"owner"}}]]'
+printf '%s' '[[{"id":1,"body":"`+longBody+`","html_url":"https://github.com/example/galley/pull/1#issuecomment-1","user":{"login":"owner"}}]]'
 `), 0o700); err != nil {
 		t.Fatal(err)
 	}

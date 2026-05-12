@@ -394,7 +394,7 @@ With `pr.comments.reply: true`, Galley posts a concise acknowledgement comment a
 
 - Successful requeue: ``Galley requeued task `<task-id>` from this comment.``
 - Comment received while the task is queued or running: `Galley noted this comment; task is already <status>.`
-- Comment from an untrusted author: `Galley ignored this comment from @<login> because author_association=<assoc> is not allowed.`
+- Comment from a non-PR author: `Galley ignored this comment because only the pull request author can run Galley from PR comments.`
 
 ## Supervisors
 
@@ -428,7 +428,7 @@ Galley treats task YAML as trusted local execution input. A user or process that
 
 Runnable quality checks come from profiles and are executed locally through `/bin/sh -c` inside the selected workspace.
 
-PR comments can request requeueing and add instructions, but they do not rewrite profile checks. A PR comment is accepted as a Galley command only when `(author_association is OWNER or COLLABORATOR) && comment author login == the PR author login recorded on the task`; comments from any other GitHub user — including other trusted collaborators — are ignored and (when `pr.comments.reply` is enabled) receive a concise rejection reply.
+PR comments can request requeueing and add instructions, but they do not rewrite profile checks. A PR comment is accepted as a Galley command only when the comment author login matches the PR author login recorded on the task; comments from any other GitHub user are ignored and (when `pr.comments.reply` is enabled) receive a concise rejection reply.
 
 Run Galley only for repositories and task authors you trust. Keep secrets out of task-accessible files, and use worktrees plus allowed paths to keep executor changes bounded.
 

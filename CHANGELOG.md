@@ -6,9 +6,12 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.3.2 - 2026-05-12
+
 ### Changed
 
 - Packaged Claude and Codex Galley plugins are now versioned as `0.1.5`: setup guidance treats setup as a first-time Galley experience, presenting available Galley-specific options and their meanings before asking users to approve profile authoring, daemon startup, PR automation, or queueing decisions.
+- PR comment commands such as `/galley` now authorize solely by `comment.user.login == pr.author_login` and no longer read GitHub `author_association`. Comments from any other GitHub user are marked processed without requeueing or mutating revision requests, and task files without a recorded `pr.author_login` still fail closed.
 
 ## v0.3.1 - 2026-05-11
 

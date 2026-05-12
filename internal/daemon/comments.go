@@ -75,23 +75,10 @@ func processTaskPRComments(ctx context.Context, opts Options, path string) error
 		if !ok {
 			continue
 		}
-		if !trustedPRCommentAuthor(comment) {
-			loaded.PR.ProcessedCommentIDs = append(loaded.PR.ProcessedCommentIDs, command.CommentID)
-			if err := task.Save(path, loaded); err != nil {
-				return err
-			}
-			if effectiveOpts.ReplyPRComments {
-				if err := vcs.PostPRComment(ctx, vcsBinaries(effectiveOpts), effectiveOpts.Root, loaded.PR.URL, fmt.Sprintf("Galley ignored this comment from @%s because author_association=%s is not allowed.", comment.User.Login, comment.AuthorAssociation)); err != nil {
-					errs = append(errs, err)
-				}
-			}
-			continue
-		}
-		// PR comment commands run local executor work, so a trusted
-		// author_association alone is not enough: the commenter must also be
-		// the PR author recorded for this task. When the recorded PR author is
-		// empty (unknown), fail closed and reject the command. Replies are
-		// concise and do not echo the user-supplied request body.
+		// PR comment commands run local executor work, so Galley restricts
+		// them to the PR author recorded for this task. When the recorded PR
+		// author is empty (unknown), fail closed and reject the command.
+		// Replies are concise and do not echo the user-supplied request body.
 		if !prCommentMatchesPRAuthor(comment, loaded.PR.AuthorLogin) {
 			loaded.PR.ProcessedCommentIDs = append(loaded.PR.ProcessedCommentIDs, command.CommentID)
 			if err := task.Save(path, loaded); err != nil {
@@ -168,15 +155,6 @@ func applyPRCommandToLoadedTask(loaded *task.Task, command prCommand) {
 	}
 	if !task.ContainsRevisionRequest(loaded.RevisionRequests, request.ID) {
 		loaded.RevisionRequests = append(loaded.RevisionRequests, request)
-	}
-}
-
-func trustedPRCommentAuthor(comment vcs.PRComment) bool {
-	switch comment.AuthorAssociation {
-	case "OWNER", "COLLABORATOR":
-		return true
-	default:
-		return false
 	}
 }
 

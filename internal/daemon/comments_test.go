@@ -106,7 +106,7 @@ func TestPollPRCommentsRequeuesTaskOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ]; then
-	echo '[[{"id":42,"body":"/galley rerun tighten tests","html_url":"https://github.com/example/galley/pull/123#issuecomment-42","author_association":"COLLABORATOR","user":{"login":"maintainer"}}]]'
+	echo '[[{"id":42,"body":"/galley rerun tighten tests","html_url":"https://github.com/example/galley/pull/123#issuecomment-42","user":{"login":"maintainer"}}]]'
 else
 echo unexpected-gh >&2
 exit 1
@@ -140,6 +140,53 @@ fi
 	}
 }
 
+func TestPollPRCommentsRequeuesMemberPRAuthor(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	if err := queue.EnsureLayout(root); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonEnvironmentProfile(t, root, repo, true, false)
+	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
+	writeDaemonTask(t, donePath, repo)
+	loaded, err := task.Load(donePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Status = "pr_opened"
+	loaded.PR.URL = "https://github.com/example/galley/pull/123"
+	loaded.PR.Status = "open"
+	loaded.PR.AuthorLogin = "org-member"
+	if err := task.Save(donePath, loaded); err != nil {
+		t.Fatal(err)
+	}
+	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ]; then
+echo '[[{"id":78,"body":"/galley rerun please run my code","html_url":"https://github.com/example/galley/pull/123#issuecomment-78","user":{"login":"org-member"}}]]'
+else
+echo unexpected-gh >&2
+exit 1
+fi
+`)
+
+	if err := pollPRComments(context.Background(), Options{Root: root, GHBin: ghBin}.withDefaults()); err != nil {
+		t.Fatal(err)
+	}
+	queuedPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	requeued, err := task.Load(queuedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requeued.Status != "queued" {
+		t.Fatalf("status got %q", requeued.Status)
+	}
+	if !slices.Contains(requeued.PR.ProcessedCommentIDs, "78") {
+		t.Fatalf("processed comments got %#v", requeued.PR.ProcessedCommentIDs)
+	}
+	if len(requeued.RevisionRequests) != 1 || requeued.RevisionRequests[0].Text != "please run my code" {
+		t.Fatalf("revision requests got %#v", requeued.RevisionRequests)
+	}
+}
+
 func TestPollPRCommentsPostsReply(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
@@ -162,7 +209,7 @@ func TestPollPRCommentsPostsReply(t *testing.T) {
 	}
 	marker := filepath.Join(t.TempDir(), "posted")
 	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ] && [ "$3" = "--paginate" ]; then
-echo '[[{"id":99,"body":"/galley rerun reply please","html_url":"https://github.com/example/galley/pull/123#issuecomment-99","author_association":"OWNER","user":{"login":"owner"}}]]'
+echo '[[{"id":99,"body":"/galley rerun reply please","html_url":"https://github.com/example/galley/pull/123#issuecomment-99","user":{"login":"owner"}}]]'
 elif [ "$1" = "api" ]; then
 echo "$*" > `+marker+`
 cat >> `+marker+`
@@ -219,7 +266,7 @@ func TestPollPRCommentsReplyOmitsReasonAndCommentID(t *testing.T) {
 	// Free-form request with a long body and special characters that must not leak into the reply.
 	wantReason := `please re-run focusing on the AC3 reply path -- trim reply verbosity & keep <tags> intact.`
 	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ] && [ "$3" = "--paginate" ]; then
-echo '[[{"id":555,"body":"/galley `+wantReason+`","html_url":"https://github.com/example/galley/pull/123#issuecomment-555","author_association":"OWNER","user":{"login":"owner"}}]]'
+echo '[[{"id":555,"body":"/galley `+wantReason+`","html_url":"https://github.com/example/galley/pull/123#issuecomment-555","user":{"login":"owner"}}]]'
 elif [ "$1" = "api" ]; then
 echo "$*" > `+marker+`
 cat >> `+marker+`
@@ -291,7 +338,7 @@ func TestPollPRCommentsReplyForQueuedOrRunningTask(t *testing.T) {
 	// assert the reply template without changing scanned states.
 	marker := filepath.Join(t.TempDir(), "posted")
 	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ] && [ "$3" = "--paginate" ]; then
-echo '[[{"id":808,"body":"/galley please nudge it","html_url":"https://github.com/example/galley/pull/123#issuecomment-808","author_association":"OWNER","user":{"login":"owner"}}]]'
+echo '[[{"id":808,"body":"/galley please nudge it","html_url":"https://github.com/example/galley/pull/123#issuecomment-808","user":{"login":"owner"}}]]'
 elif [ "$1" = "api" ]; then
 echo "$*" > `+marker+`
 cat >> `+marker+`
@@ -318,7 +365,7 @@ fi
 	}
 }
 
-func TestPollPRCommentsReplyForUntrustedAuthor(t *testing.T) {
+func TestPollPRCommentsReplyForNonPRAuthor(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	if err := queue.EnsureLayout(root); err != nil {
@@ -334,12 +381,13 @@ func TestPollPRCommentsReplyForUntrustedAuthor(t *testing.T) {
 	loaded.Status = "pr_opened"
 	loaded.PR.URL = "https://github.com/example/galley/pull/123"
 	loaded.PR.Status = "open"
+	loaded.PR.AuthorLogin = "pr-author"
 	if err := task.Save(donePath, loaded); err != nil {
 		t.Fatal(err)
 	}
 	marker := filepath.Join(t.TempDir(), "posted")
 	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ] && [ "$3" = "--paginate" ]; then
-echo '[[{"id":222,"body":"/galley please run it","html_url":"https://github.com/example/galley/pull/123#issuecomment-222","author_association":"MEMBER","user":{"login":"org-member"}}]]'
+echo '[[{"id":222,"body":"/galley please run it","html_url":"https://github.com/example/galley/pull/123#issuecomment-222","user":{"login":"org-member"}}]]'
 elif [ "$1" = "api" ]; then
 echo "$*" > `+marker+`
 cat >> `+marker+`
@@ -357,11 +405,11 @@ fi
 		t.Fatal(err)
 	}
 	body := string(data)
-	if !strings.Contains(body, "Galley ignored this comment from @org-member because author_association=MEMBER is not allowed.") {
-		t.Fatalf("untrusted reply got %q", body)
+	if !strings.Contains(body, "only the pull request author can run Galley from PR comments") {
+		t.Fatalf("non-author reply got %q", body)
 	}
 	if strings.Contains(body, "please run it") || strings.Contains(body, "comment 222") {
-		t.Fatalf("untrusted reply must not echo reason or comment id: %q", body)
+		t.Fatalf("non-author reply must not echo reason or comment id: %q", body)
 	}
 }
 
@@ -386,7 +434,7 @@ func TestPollPRCommentsContinuesAfterReplyFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ] && [ "$3" = "--paginate" ]; then
-echo '[[{"id":42,"body":"/galley rerun first fix","html_url":"https://github.com/example/galley/pull/123#issuecomment-42","author_association":"COLLABORATOR","user":{"login":"maintainer"}},{"id":43,"body":"/galley rerun second fix","html_url":"https://github.com/example/galley/pull/123#issuecomment-43","author_association":"COLLABORATOR","user":{"login":"maintainer"}}]]'
+echo '[[{"id":42,"body":"/galley rerun first fix","html_url":"https://github.com/example/galley/pull/123#issuecomment-42","user":{"login":"maintainer"}},{"id":43,"body":"/galley rerun second fix","html_url":"https://github.com/example/galley/pull/123#issuecomment-43","user":{"login":"maintainer"}}]]'
 elif [ "$1" = "api" ]; then
 echo reply-failed >&2
 exit 1
@@ -441,7 +489,7 @@ func TestPollPRCommentsRecordsFailedRequeueForManualRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ]; then
-echo '[[{"id":42,"body":"/galley rerun retry after queue clears","html_url":"https://github.com/example/galley/pull/123#issuecomment-42","author_association":"COLLABORATOR","user":{"login":"collab"}}]]'
+echo '[[{"id":42,"body":"/galley rerun retry after queue clears","html_url":"https://github.com/example/galley/pull/123#issuecomment-42","user":{"login":"collab"}}]]'
 else
 echo unexpected-gh >&2
 exit 1
@@ -475,7 +523,7 @@ func hasRevisionRequest(values []task.RevisionRequest, id string) bool {
 	return false
 }
 
-func TestPollPRCommentsIgnoresUntrustedAuthor(t *testing.T) {
+func TestPollPRCommentsIgnoresNonPRAuthor(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	if err := queue.EnsureLayout(root); err != nil {
@@ -491,11 +539,12 @@ func TestPollPRCommentsIgnoresUntrustedAuthor(t *testing.T) {
 	loaded.Status = "pr_opened"
 	loaded.PR.URL = "https://github.com/example/galley/pull/123"
 	loaded.PR.Status = "open"
+	loaded.PR.AuthorLogin = "pr-author"
 	if err := task.Save(donePath, loaded); err != nil {
 		t.Fatal(err)
 	}
 	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ]; then
-echo '[[{"id":77,"body":"/galley rerun please run my code","html_url":"https://github.com/example/galley/pull/123#issuecomment-77","author_association":"MEMBER","user":{"login":"org-member"}}]]'
+echo '[[{"id":77,"body":"/galley rerun please run my code","html_url":"https://github.com/example/galley/pull/123#issuecomment-77","user":{"login":"org-member"}}]]'
 else
 echo unexpected-gh >&2
 exit 1
@@ -513,12 +562,12 @@ fi
 		t.Fatalf("status got %q", stillDone.Status)
 	}
 	if !slices.Contains(stillDone.PR.ProcessedCommentIDs, "77") {
-		t.Fatalf("untrusted comment should be marked processed after ignore: %#v", stillDone.PR.ProcessedCommentIDs)
+		t.Fatalf("non-author comment should be marked processed after ignore: %#v", stillDone.PR.ProcessedCommentIDs)
 	}
 	assertGlobCount(t, filepath.Join(root, "tasks", "queued", "*.yaml"), 0)
 }
 
-func TestPollPRCommentsRejectsTrustedNonAuthor(t *testing.T) {
+func TestPollPRCommentsRejectsNonAuthor(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	if err := queue.EnsureLayout(root); err != nil {
@@ -539,10 +588,8 @@ func TestPollPRCommentsRejectsTrustedNonAuthor(t *testing.T) {
 		t.Fatal(err)
 	}
 	marker := filepath.Join(t.TempDir(), "posted")
-	// COLLABORATOR with a different login than the PR author: trust check
-	// passes, but the PR-author boundary must reject the command.
 	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ] && [ "$3" = "--paginate" ]; then
-echo '[[{"id":501,"body":"/galley rerun please re-run for me","html_url":"https://github.com/example/galley/pull/123#issuecomment-501","author_association":"COLLABORATOR","user":{"login":"other-maintainer"}}]]'
+echo '[[{"id":501,"body":"/galley rerun please re-run for me","html_url":"https://github.com/example/galley/pull/123#issuecomment-501","user":{"login":"other-maintainer"}}]]'
 elif [ "$1" = "api" ]; then
 echo "$*" > `+marker+`
 cat >> `+marker+`
@@ -611,7 +658,7 @@ func TestPollPRCommentsRejectsWhenPRAuthorLoginEmpty(t *testing.T) {
 	}
 	marker := filepath.Join(t.TempDir(), "posted")
 	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ] && [ "$3" = "--paginate" ]; then
-echo '[[{"id":611,"body":"/galley rerun no author known","html_url":"https://github.com/example/galley/pull/123#issuecomment-611","author_association":"OWNER","user":{"login":"someone"}}]]'
+echo '[[{"id":611,"body":"/galley rerun no author known","html_url":"https://github.com/example/galley/pull/123#issuecomment-611","user":{"login":"someone"}}]]'
 elif [ "$1" = "api" ]; then
 echo "$*" > `+marker+`
 cat >> `+marker+`
@@ -644,67 +691,51 @@ fi
 	}
 }
 
-func TestTrustedPRCommentAuthorAndPRAuthorMatch(t *testing.T) {
+func TestPRCommentMatchesPRAuthor(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name             string
-		comment          vcs.PRComment
-		prAuthorLogin    string
-		wantTrustedAssoc bool
-		wantAuthorMatch  bool
+		name          string
+		comment       vcs.PRComment
+		prAuthorLogin string
+		want          bool
 	}{
 		{
-			name:             "OWNER comment from PR author is allowed",
-			comment:          vcs.PRComment{AuthorAssociation: "OWNER", User: vcs.PRCommentUser{Login: "author"}},
-			prAuthorLogin:    "author",
-			wantTrustedAssoc: true,
-			wantAuthorMatch:  true,
+			name:          "matching PR author is allowed",
+			comment:       vcs.PRComment{User: vcs.PRCommentUser{Login: "author"}},
+			prAuthorLogin: "author",
+			want:          true,
 		},
 		{
-			name:             "COLLABORATOR comment from PR author is allowed",
-			comment:          vcs.PRComment{AuthorAssociation: "COLLABORATOR", User: vcs.PRCommentUser{Login: "author"}},
-			prAuthorLogin:    "author",
-			wantTrustedAssoc: true,
-			wantAuthorMatch:  true,
+			name:          "different login is rejected",
+			comment:       vcs.PRComment{User: vcs.PRCommentUser{Login: "other"}},
+			prAuthorLogin: "author",
+			want:          false,
 		},
 		{
-			name:             "COLLABORATOR comment from different login is rejected on PR-author match",
-			comment:          vcs.PRComment{AuthorAssociation: "COLLABORATOR", User: vcs.PRCommentUser{Login: "other"}},
-			prAuthorLogin:    "author",
-			wantTrustedAssoc: true,
-			wantAuthorMatch:  false,
+			name:          "empty comment author login is rejected",
+			comment:       vcs.PRComment{User: vcs.PRCommentUser{Login: ""}},
+			prAuthorLogin: "author",
+			want:          false,
 		},
 		{
-			name:             "MEMBER fails trust check regardless of login",
-			comment:          vcs.PRComment{AuthorAssociation: "MEMBER", User: vcs.PRCommentUser{Login: "author"}},
-			prAuthorLogin:    "author",
-			wantTrustedAssoc: false,
-			wantAuthorMatch:  true,
+			name:          "empty PR author login fails closed",
+			comment:       vcs.PRComment{User: vcs.PRCommentUser{Login: "author"}},
+			prAuthorLogin: "",
+			want:          false,
 		},
 		{
-			name:             "empty PR author login fails closed",
-			comment:          vcs.PRComment{AuthorAssociation: "OWNER", User: vcs.PRCommentUser{Login: "author"}},
-			prAuthorLogin:    "",
-			wantTrustedAssoc: true,
-			wantAuthorMatch:  false,
-		},
-		{
-			name:             "login match is case-insensitive",
-			comment:          vcs.PRComment{AuthorAssociation: "OWNER", User: vcs.PRCommentUser{Login: "Author"}},
-			prAuthorLogin:    "author",
-			wantTrustedAssoc: true,
-			wantAuthorMatch:  true,
+			name:          "login match is case-insensitive",
+			comment:       vcs.PRComment{User: vcs.PRCommentUser{Login: "Author"}},
+			prAuthorLogin: "author",
+			want:          true,
 		},
 	}
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := trustedPRCommentAuthor(tc.comment); got != tc.wantTrustedAssoc {
-				t.Fatalf("trusted got %v want %v", got, tc.wantTrustedAssoc)
-			}
-			if got := prCommentMatchesPRAuthor(tc.comment, tc.prAuthorLogin); got != tc.wantAuthorMatch {
-				t.Fatalf("author match got %v want %v", got, tc.wantAuthorMatch)
+			if got := prCommentMatchesPRAuthor(tc.comment, tc.prAuthorLogin); got != tc.want {
+				t.Fatalf("author match got %v want %v", got, tc.want)
 			}
 		})
 	}

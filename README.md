@@ -405,10 +405,9 @@ Supervisor review defaults to Claude. Use `--supervisor codex` to select Codex i
 With `worktree.cleanup: true`, the daemon scans `tasks/done` PR tasks and checks PR state through `gh api`.
 
 - Open PRs keep their worktree.
-- Closed or merged PRs remove only clean git worktrees.
-- Dirty worktrees are preserved and recorded as task risks for manual review.
+- Closed or merged PRs remove the managed task worktree, including uncommitted or generated files left in that worktree.
 
-This is intentionally conservative. A dirty worktree may contain useful work, failed recovery state, or files that should be inspected before removal.
+Cleanup refuses to remove the source repository itself or one of its ancestor directories.
 
 ## Operational Notes
 
@@ -419,7 +418,7 @@ This is intentionally conservative. A dirty worktree may contain useful work, fa
 - Each claimed running task records the owning daemon. On startup the daemon immediately requeues running tasks whose recorded owner is dead or cannot be verified — without waiting for `--claim-ttl` — while leaving tasks still owned by a verified live daemon untouched. A running task with no recorded owner (claimed by an older Galley, a claim recorded before its owner sidecar was written, or live work from a concurrent daemon that did not record ownership) is left for the mtime-based `--claim-ttl` recovery so freshly claimed live work is never requeued. Restart recovery can reuse an existing task worktree even when context-only input files are still present from a prior run; identical content is refreshed and conflicting content fails the claimed task with clear evidence. The mtime-based `--claim-ttl` recovery still runs each cycle as a backstop.
 - Avoid very short `--claim-ttl` values. Filesystems with coarse mtime resolution can make overly aggressive stale-claim detection noisy.
 - PR comment polling uses `gh api`; choose a polling interval that respects GitHub API rate limits for your account and repository count.
-- Dirty worktrees are not cleaned automatically. Review their recorded task risks before manual cleanup.
+- Closed or merged PR cleanup treats the task worktree as disposable execution state. Keep anything that should survive cleanup outside the task worktree.
 - Executor process failures and infrastructure errors are reported after the current queue is drained.
 
 ## Trust Model

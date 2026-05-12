@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- Completed PR worktree cleanup now removes the managed task worktree with `git worktree remove --force` and clears leftover non-Git directories, so ignored or generated files no longer leave repeated daemon cleanup errors after a PR is closed or merged.
+
 ## v0.3.2 - 2026-05-12
 
 ### Changed

@@ -6,6 +6,8 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.3.4 - 2026-05-12
+
 ### Changed
 
 - Accepted PR finalization now stages the accepted final diff instead of only `task.scope.allowed_paths`, so reviewable scope expansion approved by the supervisor is included in the PR. Changes inside `task.scope.forbidden_paths` still block finalization, and scope expansion is recorded in PR discussion items for reviewer attention.

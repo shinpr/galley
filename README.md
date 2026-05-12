@@ -56,7 +56,13 @@ For Codex:
 codex plugin marketplace add shinpr/galley
 ```
 
-Then invoke the skill with `$galley`.
+Then open the Codex plugin picker and install Galley:
+
+```text
+/plugins
+```
+
+In the plugin list, select `Galley`, press Enter, choose `Install plugin`, then invoke the skill with `$galley`.
 
 Use the CLI directly when checking installation, inspecting status, or operating the daemon:
 
@@ -121,7 +127,9 @@ For local development:
 codex plugin marketplace add .
 ```
 
-The Codex CLI version used during development exposes marketplace `add`, `upgrade`, and `remove`, but no `plugin validate` or separate `plugin install` command. Validate the bundled skill with the local skill validator when available.
+Then run `/plugins` in Codex, select `Galley`, and choose `Install plugin`. Adding a marketplace only makes Galley available in the plugin list; it does not install or enable the plugin by itself.
+
+The Codex CLI version used during development exposes marketplace `add`, `upgrade`, and `remove`, but no documented argument-based plugin install command such as `codex plugin install galley`. Validate the bundled skill with the local skill validator when available.
 
 Invoke the skill from Codex with `$galley`, for example:
 

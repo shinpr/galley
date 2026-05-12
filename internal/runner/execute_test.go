@@ -104,9 +104,32 @@ func TestRunCommandKeepsBoundedTail(t *testing.T) {
 func writeScript(t *testing.T, dir, name, body string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
+	tmp, err := os.CreateTemp(dir, "."+name+".*.tmp")
+	if err != nil {
 		t.Fatal(err)
 	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := tmp.WriteString(body); err != nil {
+		_ = tmp.Close()
+		t.Fatal(err)
+	}
+	if err := tmp.Chmod(0o700); err != nil {
+		_ = tmp.Close()
+		t.Fatal(err)
+	}
+	if err := tmp.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		t.Fatal(err)
+	}
+	cleanup = false
 	return path
 }
 

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/shinpr/galley/internal/retry"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/internal/vcs"
 )
@@ -61,7 +62,20 @@ func processTaskPRComments(ctx context.Context, opts Options, path string) error
 	if loaded.PR.URL == "" {
 		return nil
 	}
-	comments, err := vcs.FetchPRComments(ctx, vcsBinaries(effectiveOpts), effectiveOpts.Root, loaded.PR.URL)
+	// Retry the PR comment listing. `gh api .../comments` is a GET and
+	// idempotent, so absorbing a brief GitHub read flake here avoids losing a
+	// polling cycle. The PostPRComment call sites below are intentionally NOT
+	// wrapped in retry.Do — POSTing a comment is non-idempotent and has no
+	// idempotency key, so retrying could create duplicate PR comments.
+	var comments []vcs.PRComment
+	err = retry.Do(ctx, func(ctx context.Context) error {
+		fetched, fetchErr := vcs.FetchPRComments(ctx, vcsBinaries(effectiveOpts), effectiveOpts.Root, loaded.PR.URL)
+		if fetchErr != nil {
+			return fetchErr
+		}
+		comments = fetched
+		return nil
+	})
 	if err != nil {
 		return err
 	}

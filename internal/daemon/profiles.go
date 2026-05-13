@@ -7,6 +7,7 @@ import (
 	"github.com/shinpr/galley/internal/fileutil"
 	"github.com/shinpr/galley/internal/galleyhome"
 	"github.com/shinpr/galley/internal/profile"
+	"github.com/shinpr/galley/internal/retry"
 	"github.com/shinpr/galley/internal/runner"
 )
 
@@ -144,10 +145,16 @@ func fetchOriginRef(ctx context.Context, opts Options, sourceCWD, base string) e
 	if gitBin == "" {
 		gitBin = "git"
 	}
-	_, err := runner.RunCommand(ctx, runner.Command{
-		WorkDir: "",
-		Argv:    []string{gitBin, "-C", sourceCWD, "fetch", "--no-tags", "--quiet", "origin", base},
-	}, runner.RunOptions{TailBytes: -1})
+	// Retry transient git fetch failures (transport hiccup, brief auth/DNS
+	// flake). The retry helper preserves the original error type so the
+	// fmt.Errorf wrap below surfaces the same value to callers.
+	err := retry.Do(ctx, func(ctx context.Context) error {
+		_, runErr := runner.RunCommand(ctx, runner.Command{
+			WorkDir: "",
+			Argv:    []string{gitBin, "-C", sourceCWD, "fetch", "--no-tags", "--quiet", "origin", base},
+		}, runner.RunOptions{TailBytes: -1})
+		return runErr
+	})
 	if err != nil {
 		return fmt.Errorf("git fetch origin %s: %w", base, err)
 	}

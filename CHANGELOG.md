@@ -6,6 +6,8 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.3.5 - 2026-05-13
+
 ### Fixed
 
 - Daemon finalize no longer drops the first character of the first changed path when staging the accepted diff. `workspace.gitOutput` now strips only the trailing newline of captured git output instead of all surrounding whitespace, preserving the leading space that `git status --porcelain` reserves at column 0.

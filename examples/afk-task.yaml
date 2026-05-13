@@ -35,9 +35,14 @@ executor:
   prompt_profile: "codexized-claude-executor-v1"
   prompt_mode: "replace"
   max_budget_usd: 10
-# Optional, default-disabled. Uncomment to materialize AC-linked test skeletons
-# before the first executor attempt. See docs/task-yaml.md "Acceptance Skeleton Preflight".
-# preflight:
+# The skill-bundled skeleton generator emits this block disabled by default so
+# the AC test skeleton preflight stage is visible in new task YAML. Flip
+# `enabled` to true (and optionally add `required`, `allowed_paths`) to opt in.
+# See docs/task-yaml.md "Acceptance Skeleton Preflight".
+preflight:
+  acceptance_skeleton:
+    enabled: false
+# Example opt-in shape (do not enable in this example task):
 #   acceptance_skeleton:
 #     enabled: true
 #     required: true

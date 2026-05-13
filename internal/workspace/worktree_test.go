@@ -492,6 +492,27 @@ func TestCaptureSnapshotFromBaseDetectsExecutorCommit(t *testing.T) {
 	}
 }
 
+// TestStatusPorcelainPreservesLeadingSpace pins the porcelain byte layout:
+// column 0 must remain a space for an unstaged modification so downstream
+// fixed-offset parsing does not chop the first character of the path.
+func TestStatusPorcelainPreservesLeadingSpace(t *testing.T) {
+	repo := initGitRepo(t)
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("modified\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	status, dirty, err := statusPorcelain(context.Background(), repo, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !dirty {
+		t.Fatal("expected dirty status after modifying README.md")
+	}
+	want := " M README.md"
+	if status != want {
+		t.Fatalf("statusPorcelain = %q, want %q", status, want)
+	}
+}
+
 func initGitRepo(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()

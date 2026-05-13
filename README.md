@@ -15,33 +15,11 @@ It runs locally, keeps work in git-visible changes, and records evidence for rev
 
 Galley is Claude-first today. The executor path targets Claude Code, and supervisor review defaults to Claude. Codex can be selected as an alternate model supervisor.
 
-## Install
+## Quick Start
 
-Galley is intended to run from any repository you are working in, so install the `galley` binary on your `PATH`.
+Use the Galley skill to set up each repository. It walks you through CLI installation when needed, prepares repository profiles, drafts valid task YAML, and queues tasks only after approval.
 
-Install the latest GitHub Release binary:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/shinpr/galley/main/scripts/install.sh | sh
-```
-
-From a cloned checkout:
-
-```sh
-./scripts/install.sh --local
-```
-
-The cloned checkout path lets you inspect the installer before running it. The `curl` form executes the script fetched from GitHub and downloads the matching release asset for your OS and architecture.
-
-Or use Go directly:
-
-```sh
-go install github.com/shinpr/galley/cmd/galley@latest
-```
-
-The installer installs the `galley` CLI. After installation, use the plugin skill for normal setup and task authoring. The skill inspects the repository, creates `quality.yaml` and `environment.yaml`, drafts valid task YAML, explains the execution settings, and queues only after approval.
-
-For Claude Code:
+Install the plugin in Claude Code:
 
 ```text
 /plugin marketplace add shinpr/galley
@@ -50,21 +28,44 @@ For Claude Code:
 /galley:galley Set up Galley for this repository.
 ```
 
-For Codex:
+Or install it in Codex:
 
 ```sh
 codex plugin marketplace add shinpr/galley
 ```
 
-Then open the Codex plugin picker and install Galley:
+Then start or return to Codex, open the plugin picker, install `Galley`, and ask the skill to set up the repository:
 
 ```text
 /plugins
+$galley Set up Galley for this repository.
 ```
 
-In the plugin list, select `Galley`, press Enter, choose `Install plugin`, then invoke the skill with `$galley`.
+For a task, describe the work to the skill:
 
-Use the CLI directly when checking installation, inspecting status, or operating the daemon:
+```text
+/galley:galley Create a Galley task for this feature request and queue it after approval.
+```
+
+## Manual CLI Installation
+
+Most users should start with the skill. Use these commands when installing the binary manually, scripting setup, or debugging the CLI outside the skill workflow. Installing only the binary does not create repository profiles or start the daemon for a project.
+
+Install the latest GitHub Release binary:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/shinpr/galley/main/scripts/install.sh | sh
+```
+
+Or use Go directly:
+
+```sh
+go install github.com/shinpr/galley/cmd/galley@latest
+```
+
+After manual installation, run the setup skill for the repository you want Galley to manage.
+
+Use the CLI directly for status checks and daemon control:
 
 ```sh
 galley --help
@@ -74,67 +75,21 @@ galley daemon stop
 galley daemon run --once
 ```
 
-## Plugin And Skill
+## Skill Capabilities
 
-Galley includes a plugin that packages one Agent Skill for Claude Code and Codex. This is the recommended setup and authoring path: install the plugin, ask the skill to inspect your repository, and let it draft profiles, task YAML, validation steps, queueing commands, and troubleshooting guidance.
+Galley includes a plugin that packages one Agent Skill for Claude Code and Codex. This is the recommended setup and authoring path: install the plugin, ask the skill to inspect your repository, and let it handle profiles, task YAML, validation steps, queueing commands, and troubleshooting guidance.
 
 Profiles are worth setting up early. They tell Galley which commands are available, which quality checks are required, what evidence the supervisor should expect, and which findings should block acceptance. The skill can create these interactively from the target repository.
 
-Plugin files:
-
-```text
-plugins/galley/
-  .claude-plugin/plugin.json
-  .codex-plugin/plugin.json
-  skills/galley/
-    SKILL.md
-    references/
-    scripts/
-```
-
-### Claude Code
-
-After installing the plugin as shown above, invoke the skill:
+- **Task authoring**: clarify the user goal, target repo, scope, input files, acceptance criteria, verification, loop budget, supervisor, and PR behavior; write a draft task YAML, validate it, and queue it only after explicit user approval.
+- **Profile authoring**: interactively create `quality.yaml` and `environment.yaml` for repo-specific quality gates, commands, tools, network policy, secrets policy, PR behavior, and cleanup policy.
+- **Setup**: install `galley`, verify `claude`, `codex`, and `gh` availability, configure workflow roots, and prepare daemon/PR automation commands.
+- **Troubleshooting**: inspect failed runs, stale claims, PR automation state, executor output, and recorded evidence.
 
 ```text
 /galley:galley Create a Galley task for this feature request.
 /galley:galley Create quality and environment profiles for this repository.
 /galley:galley Diagnose this failed Galley run.
-```
-
-For local development, validate the plugin and marketplace from a checkout:
-
-```sh
-claude plugin validate plugins/galley
-claude plugin validate .
-```
-
-You can also add the checkout as a local marketplace for testing:
-
-```text
-/plugin marketplace add .
-/plugin install galley@galley-tools
-/reload-plugins
-```
-
-### Codex
-
-Galley ships a Codex marketplace file at `.agents/plugins/marketplace.json`, which points to `./plugins/galley`.
-
-For local development:
-
-```sh
-codex plugin marketplace add .
-```
-
-Then run `/plugins` in Codex, select `Galley`, and choose `Install plugin`. Adding a marketplace only makes Galley available in the plugin list; it does not install or enable the plugin by itself.
-
-The Codex CLI version used during development exposes marketplace `add`, `upgrade`, and `remove`, but no documented argument-based plugin install command such as `codex plugin install galley`. Validate the bundled skill with the local skill validator when available.
-
-Invoke the skill from Codex with `$galley`, for example:
-
-```text
-$galley Create a validated Galley task and queue it after approval.
 ```
 
 ### Standalone Skill
@@ -147,13 +102,6 @@ plugins/galley/skills/galley/
 
 The standalone skill still expects the `galley` CLI on `PATH`. Some workflows also use `claude`, `codex`, or `gh`; the bundled helper scripts use `python3`.
 
-### Skill Use Cases
-
-- **Task authoring**: clarify the user goal, target repo, scope, input files, acceptance criteria, verification, loop budget, supervisor, and PR behavior; write a draft task YAML, validate it, and queue it only after explicit user approval.
-- **Profile authoring**: interactively create `quality.yaml` and `environment.yaml` for repo-specific quality gates, commands, tools, network policy, secrets policy, PR behavior, and cleanup policy.
-- **Setup**: install `galley`, check `claude`, `codex`, `gh`, configure workflow roots, and prepare daemon/PR automation commands.
-- **Troubleshooting**: inspect failed runs, stale claims, PR automation state, executor output, and recorded evidence.
-
 ## Core Concepts
 
 - **Task YAML**: the trusted local input that defines the goal, acceptance criteria, scope, verification, execution policy, and PR behavior. See [docs/task-yaml.md](docs/task-yaml.md).
@@ -164,7 +112,7 @@ The standalone skill still expects the `galley` CLI on `PATH`. Some workflows al
 - **Loop budget**: `execution_policy.loop_budget` is the maximum number of executor attempts before Galley escalates to supervisor review; `0` means unlimited.
 - **Permission**: `scope.permission` sets the executor authority level for the task.
 - **Input files**: optional `files[]` entries copy user-supplied files into the execution worktree with an explicit destination and commit policy.
-- **Acceptance skeleton preflight**: optional `preflight.acceptance_skeleton` runs before the first executor attempt. With only `enabled: true`, Galley runs its built-in test-creator pass, writes AC-linked skeleton files, records generated `outputs[]` back into the running task, and annotates each AC verification with the skeleton path, what it satisfies, and the integration point. Galley validates returned paths/AC IDs against `preflight.acceptance_skeleton.allowed_paths` (default `scope.allowed_paths`), persists `runs/<run-id>/preflight_result.json`, feeds the runtime obligations to the executor and supervisor, and downgrades an accepted verdict to `needs_supervisor_review` when required quality-check evidence is missing or failed. The section is default-disabled. See [docs/task-yaml.md](docs/task-yaml.md).
+- **Acceptance skeleton preflight**: optional `preflight.acceptance_skeleton` runs before the first executor attempt and writes acceptance-criterion-linked test skeletons into the worktree. Galley records the generated obligations, feeds them to the executor and supervisor, and requires matching quality-check evidence before accepting. See [docs/task-yaml.md](docs/task-yaml.md).
 - **File-backed queue**: queued task copies move through `tasks/queued`, `tasks/running`, `tasks/done`, `tasks/failed`, and `tasks/archived`.
 - **Worktree execution**: AFK tasks execute in a git worktree while `scope.cwd` continues to point at the source repository.
 - **Structured evidence**: every attempt writes command plans, executor output, git status, diffs, and supervisor verdicts under `runs/`.
@@ -249,33 +197,13 @@ Attempt evidence includes:
 
 Galley also records `workspace.json` for the effective execution workspace and writes `profiles.json` when quality or environment profiles are loaded.
 
-## Quick Start
-
-Install the CLI and plugin, then ask the skill to set up the current repository:
-
-```text
-/galley:galley Set up Galley for this repository.
-```
-
-The examples here use the Claude Code slash command. In Codex, use `$galley` with the same request text.
-
-The skill will resolve the profile paths, inspect the repository, propose `quality.yaml` and `environment.yaml`, validate them, and ask whether to start the daemon.
-
-For a task, describe the work to the skill:
-
-```text
-/galley:galley Create a Galley task for this feature request and queue it after approval.
-```
-
-The skill asks for reference files when needed, confirms scope and execution settings, writes a draft task YAML, validates it, and asks before queueing. If the daemon is running, it will pick up queued tasks and move accepted work toward a PR according to `environment.yaml`.
+## Commands
 
 For hand-authored task YAML, use [docs/task-yaml.md](docs/task-yaml.md) as the reference.
 
 The daemon root defaults to `~/.galley`, and `galley task queue` targets the running daemon root when one is available. Use `--root <path>` only for repo-local, test, or advanced multi-root workflows.
 
 For one-shot local checks, use `galley daemon run --once` to drain the current queue and exit.
-
-## Commands
 
 ### Task Files
 
@@ -333,13 +261,24 @@ galley daemon run --once
 
 `galley daemon start` launches the daemon in the background. It writes a PID file and appends stdout/stderr to a log file. By default those files are under `~/.galley`; override them with `--pid-file` and `--log-file`.
 
-`galley daemon stop` reads the PID file, sends `SIGTERM`, waits up to `--stop-timeout`, and removes the PID file when it still points at the stopped process. `galley daemon stop --force` keeps the same graceful-first behavior, then re-verifies process identity and sends `SIGKILL` when the daemon has not exited within `--stop-timeout` — an escape hatch for a stalled daemon. After the daemon is gone, `--force` also sends `SIGKILL` to every registered executor and supervisor child process group recorded under the daemon root, waits up to the same `--stop-timeout` for them to exit, and only then removes the PID file and prints the stopped message. If any registered child process group is still alive after that wait, the command returns a visible error that names the surviving PIDs and PGIDs and intentionally leaves the PID file in place so an operator can target the same daemon record instead of seeing a falsely-clean stop report. A force kill can interrupt an active attempt; the next daemon startup recovers the interrupted running task (see Operational Notes). `galley daemon status` reports whether the PID file points at a live process.
+`galley daemon stop` reads the PID file, sends `SIGTERM`, waits up to `--stop-timeout`, and removes the PID file when it still points at the stopped process. `galley daemon status` reports whether the PID file points at a live process.
+
+`galley daemon stop --force` is an escape hatch for a stalled daemon. It:
+
+1. Tries the normal graceful shutdown first.
+2. Re-verifies process identity and sends `SIGKILL` when the daemon has not exited within `--stop-timeout`.
+3. After the daemon is gone, sends `SIGKILL` to every registered executor and supervisor child process group recorded under the daemon root, waiting up to the same `--stop-timeout`.
+4. If any child process group is still alive after that wait, prints an error naming the surviving PIDs and PGIDs and leaves the PID file in place so the operator can target the same daemon record.
+
+A force kill can interrupt an active attempt; the next daemon startup recovers the interrupted running task (see Operational Notes).
 
 Use the installed `galley` binary for `start`, `status`, and `stop`. PID verification records the executable path, so `go run ./cmd/galley ... daemon start` is not suitable for background daemon control because later `go run` invocations use different temporary binaries.
 
 Foreground and background daemons use the same shutdown path. On `SIGINT` or `SIGTERM`, Galley stops claiming new queued tasks, lets active attempts finish until the shutdown timeout, records evidence, and avoids starting another retry attempt after shutdown is requested.
 
-Each executor run and built-in model supervisor run is guarded by an idle-output watchdog. When a subprocess produces no stdout or stderr for `--idle-timeout` (default 10 minutes), Galley terminates its process group, records a distinct idle-timeout result on the task attempt (`error_kind: idle_timeout`, `claude_status: idle_timed_out`) and in `runs/<run-id>/.../run_result.json` (`idle_timed_out: true`), and lets the loop continue according to the task loop budget instead of hanging on a stalled command. The watchdog is independent of the task's total per-attempt timeout, which still bounds total wall-clock duration. Raise `--idle-timeout` for executors that legitimately stay silent for long stretches while still making progress.
+Each executor run and built-in model supervisor run is guarded by an idle-output watchdog. The default `--idle-timeout` is 10 minutes.
+
+When a subprocess produces no stdout or stderr for that timeout, Galley terminates its process group, records a distinct idle-timeout result on the task attempt (`error_kind: idle_timeout`, `claude_status: idle_timed_out`) and in `runs/<run-id>/.../run_result.json` (`idle_timed_out: true`), and lets the loop continue according to the task loop budget instead of hanging on a stalled command. The watchdog is independent of the task's total per-attempt timeout, which still bounds total wall-clock duration. Raise `--idle-timeout` for executors that legitimately stay silent for long stretches while still making progress.
 
 When the built-in model supervisor subprocess exits because of idle timeout, total timeout, or a forced subprocess kill, Galley retries the same supervisor evaluation up to two additional times inside the same executor attempt before failing the task. The retry budget is a fixed internal value, not a user-configurable knob: no new CLI flag, task YAML field, or profile field is added, and the executor attempt is not retried — only the supervisor evaluation is re-run, so the executor diff and run evidence from this attempt are preserved as-is. Each supervisor try writes its artifacts under `runs/<run-id>/attempt-N/supervisor-try-<M>/`, including `supervisor_error.json` for failed tries (with the classified `kind`) and `supervisor_verdict.json` for the successful try; the top-level `model_supervisor_verdict.json` is only written when one of the tries succeeds. If the retry budget is exhausted, the attempt records a supervisor-phase error with the classified `kind` (`idle_timeout`, `timed_out`, or `supervisor_failed`) under the original executor attempt directory and the task moves to `tasks/failed/` with status `needs_supervisor_review` so the retry evidence remains inspectable.
 

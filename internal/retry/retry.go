@@ -65,6 +65,29 @@ var jitter = func() float64 {
 	return 1 + (rand.Float64()*2-1)*JitterRatio
 }
 
+// SetHooksForTest replaces the package-private sleep and jitter hooks so
+// external-package tests (for example internal/daemon) can disable the real
+// backoff. Both arguments must be non-nil; otherwise SetHooksForTest panics.
+// The returned restore function reinstates the previous hooks and must be
+// called by the caller (typically deferred from TestMain). The retry timing
+// semantics themselves remain covered by the internal/retry tests.
+func SetHooksForTest(
+	sleepFn func(context.Context, time.Duration) error,
+	jitterFn func() float64,
+) func() {
+	if sleepFn == nil || jitterFn == nil {
+		panic("retry.SetHooksForTest: sleep and jitter hooks must be non-nil")
+	}
+	previousSleep := sleep
+	previousJitter := jitter
+	sleep = sleepFn
+	jitter = jitterFn
+	return func() {
+		sleep = previousSleep
+		jitter = previousJitter
+	}
+}
+
 // Do runs fn up to MaxAttempts times. It returns nil as soon as fn succeeds.
 // When fn returns an error, Do sleeps for the next backoff delay (with ±25%
 // jitter) and retries. If ctx is cancelled at any point, Do returns ctx.Err()

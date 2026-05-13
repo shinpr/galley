@@ -168,6 +168,70 @@ func TestBaseDelaysSchedule(t *testing.T) {
 	}
 }
 
+// TestSetHooksForTestPanicsOnNil pins the documented contract: SetHooksForTest
+// requires both hooks to be non-nil, otherwise it panics. This prevents an
+// external-package TestMain from silently disabling only one half of the
+// retry timing surface.
+func TestSetHooksForTestPanicsOnNil(t *testing.T) {
+	cases := []struct {
+		name     string
+		sleepFn  func(context.Context, time.Duration) error
+		jitterFn func() float64
+	}{
+		{name: "sleep nil", sleepFn: nil, jitterFn: func() float64 { return 1 }},
+		{name: "jitter nil", sleepFn: func(context.Context, time.Duration) error { return nil }, jitterFn: nil},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r == nil {
+					t.Fatal("SetHooksForTest did not panic on nil hook")
+				}
+			}()
+			SetHooksForTest(tc.sleepFn, tc.jitterFn)
+		})
+	}
+}
+
+// TestSetHooksForTestOverridesAndRestores exercises the override and the
+// returned restore function. Verified by behavior: while the override is
+// active, the test-supplied counters tick on each Do attempt; after restore
+// the previous overrides are detached and only a freshly installed override
+// receives the calls.
+func TestSetHooksForTestOverridesAndRestores(t *testing.T) {
+	firstSleep := 0
+	firstJitter := 0
+	restoreFirst := SetHooksForTest(
+		func(context.Context, time.Duration) error { firstSleep++; return nil },
+		func() float64 { firstJitter++; return 1.0 },
+	)
+	_ = Do(context.Background(), func(_ context.Context) error { return errors.New("transient") })
+	if firstSleep == 0 || firstJitter == 0 {
+		t.Fatal("override hooks were not invoked while active")
+	}
+
+	restoreFirst()
+
+	secondSleep := 0
+	secondJitter := 0
+	restoreSecond := SetHooksForTest(
+		func(context.Context, time.Duration) error { secondSleep++; return nil },
+		func() float64 { secondJitter++; return 1.0 },
+	)
+	t.Cleanup(restoreSecond)
+
+	firstSleep = 0
+	firstJitter = 0
+	_ = Do(context.Background(), func(_ context.Context) error { return errors.New("transient") })
+	if firstSleep != 0 || firstJitter != 0 {
+		t.Fatal("restored overrides should be detached but were still invoked")
+	}
+	if secondSleep == 0 || secondJitter == 0 {
+		t.Fatal("freshly installed overrides did not engage after restore")
+	}
+}
+
 func TestJitterDefaultStaysInRange(t *testing.T) {
 	// Sanity-check the default (non-overridden) jitter implementation. We do
 	// not depend on a specific value, only on the documented bound.

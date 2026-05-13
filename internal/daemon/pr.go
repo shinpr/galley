@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/shinpr/galley/internal/inputfiles"
+	"github.com/shinpr/galley/internal/retry"
 	"github.com/shinpr/galley/internal/strutil"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/internal/vcs"
@@ -62,16 +63,41 @@ func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task
 		loaded.PR.Status = "not_requested"
 		return nil
 	}
-	if err := vcs.PushCurrentBranch(ctx, vcsBinaries(opts), workDir, runDir); err != nil {
+	// Retry `git push -u origin HEAD`. Pushing the same ref is idempotent in
+	// practice: re-running the push after a transport flake either no-ops if
+	// the remote already has the SHA or surfaces a non-fast-forward error
+	// unchanged for the caller to handle.
+	if err := retry.Do(ctx, func(ctx context.Context) error {
+		return vcs.PushCurrentBranch(ctx, vcsBinaries(opts), workDir, runDir)
+	}); err != nil {
 		return err
 	}
 	if loaded.PR.URL != "" {
 		loaded.PR.Status = "open"
 		return nil
 	}
-	prURL, err := vcs.CreatePullRequest(ctx, vcsBinaries(opts), workDir, runDir, prBodyPath, opts.PRBase, prTitle(*loaded))
+	// Retry `gh pr create`. `gh pr create` itself is non-idempotent: if the
+	// first attempt succeeded server-side but its response was lost, every
+	// retry returns a "PR already exists" error. After the retry budget
+	// exhausts, probe the current branch with `gh pr view` to recover the
+	// URL of the PR that was actually created; the probe is read-only and
+	// returns "" when no PR exists, in which case the original create
+	// failure surfaces unchanged.
+	var prURL string
+	err := retry.Do(ctx, func(ctx context.Context) error {
+		url, createErr := vcs.CreatePullRequest(ctx, vcsBinaries(opts), workDir, runDir, prBodyPath, opts.PRBase, prTitle(*loaded))
+		if createErr != nil {
+			return createErr
+		}
+		prURL = url
+		return nil
+	})
 	if err != nil {
-		return err
+		recovered, viewErr := vcs.FetchPRURLForCurrentBranch(ctx, vcsBinaries(opts), workDir, runDir)
+		if viewErr != nil || recovered == "" {
+			return err
+		}
+		prURL = recovered
 	}
 	loaded.PR.URL = prURL
 	loaded.PR.Status = "open"
@@ -80,7 +106,18 @@ func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task
 	// lookup failure is recorded as a risk rather than blocking acceptance:
 	// the PR has been created, and comment polling fails closed when the
 	// stored author is empty.
-	authorLogin, authorErr := vcs.FetchPRAuthorLogin(ctx, vcsBinaries(opts), workDir, prURL)
+	// Retry `gh api repos/{owner}/{repo}/pulls/{number}` so a transient GitHub
+	// read flake right after PR creation does not lose the recorded author
+	// login. GET is idempotent, so retries are safe.
+	var authorLogin string
+	authorErr := retry.Do(ctx, func(ctx context.Context) error {
+		login, fetchErr := vcs.FetchPRAuthorLogin(ctx, vcsBinaries(opts), workDir, prURL)
+		if fetchErr != nil {
+			return fetchErr
+		}
+		authorLogin = login
+		return nil
+	})
 	if authorErr != nil {
 		loaded.Risks = append(loaded.Risks, task.Risk{
 			ID:                   "pr-author-lookup-" + strutil.FirstNonEmpty(loaded.ID, "task"),

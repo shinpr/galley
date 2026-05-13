@@ -157,6 +157,37 @@ func CreatePullRequest(ctx context.Context, bins Binaries, workDir, runDir, body
 	return prURL, nil
 }
 
+// FetchPRURLForCurrentBranch returns the URL of the open PR for the current
+// branch of workDir, or an empty string when no PR exists for it. The call
+// is read-only and safe to invoke as a recovery probe after a failed
+// CreatePullRequest retry: if the create succeeded server-side but the
+// response was lost, the URL is recovered; if no PR exists, the function
+// returns "" with a nil error so the caller can surface the original
+// create-failure unchanged.
+func FetchPRURLForCurrentBranch(ctx context.Context, bins Binaries, workDir, runDir string) (string, error) {
+	result, err := runner.RunCommand(ctx, runner.Command{
+		WorkDir: workDir,
+		Argv:    []string{bins.gh(), "pr", "view", "--json", "url", "-q", ".url"},
+	}, runner.RunOptions{
+		StdoutPath: filepath.Join(runDir, "gh_pr_view.stdout.log"),
+		StderrPath: filepath.Join(runDir, "gh_pr_view.stderr.log"),
+	})
+	writeErr := writeJSON(filepath.Join(runDir, "gh_pr_view_result.json"), result)
+	if err != nil {
+		if strings.Contains(strings.ToLower(result.Stderr), "no pull requests found") {
+			if writeErr != nil {
+				return "", writeErr
+			}
+			return "", nil
+		}
+		return "", errors.Join(fmt.Errorf("gh pr view failed: %w", err), writeErr)
+	}
+	if writeErr != nil {
+		return "", writeErr
+	}
+	return strings.TrimSpace(result.Stdout), nil
+}
+
 // FetchPRComments returns all PR comments using gh api pagination.
 func FetchPRComments(ctx context.Context, bins Binaries, root, prURL string) ([]PRComment, error) {
 	owner, repo, number, err := ParseGitHubPRURL(prURL)

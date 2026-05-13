@@ -6,6 +6,14 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Fixed
+
+- Daemon finalize no longer drops the first character of the first changed path when staging the accepted diff. `workspace.gitOutput` now strips only the trailing newline of captured git output instead of all surrounding whitespace, preserving the leading space that `git status --porcelain` reserves at column 0.
+
+### Changed
+
+- Daemon git/gh calls at six sites — workspace `git fetch origin <base>`, `git push -u origin HEAD`, `gh pr create`, the post-create `gh api repos/.../pulls/{n}` author lookup, PR state polling for worktree cleanup, and PR comment listing — now retry transient failures up to five times with hardcoded exponential backoff (1s, 2s, 4s, 8s, 16s) and ±25% jitter before propagating the original error to the existing caller. PR comment POSTs (`vcs.PostPRComment`) remain one-shot because POST is non-idempotent and retrying could create duplicate comments. `gh pr create` is non-idempotent as well, so when its retry budget is exhausted Galley probes the current branch with `gh pr view` and, if a PR exists there, recovers its URL — covering the case where the first create succeeded server-side but the response was lost. The retry helper is internal-only and adds no new configurable surface: no new CLI flag, environment variable, task YAML field, profile YAML field, or executor/supervisor JSON schema is introduced. The recovery probe above is the only new shell invocation, and it is read-only.
+
 ## v0.3.4 - 2026-05-12
 
 ### Changed

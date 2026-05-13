@@ -181,7 +181,10 @@ func gitOutput(ctx context.Context, opts Options, cwd string, args ...string) (s
 	if err != nil {
 		return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(result.Stderr))
 	}
-	return string(bytes.TrimSpace([]byte(result.Stdout))), nil
+	// Trim only the trailing newline: `git status --porcelain` reserves
+	// column 0 as part of its byte layout, so leading whitespace must be
+	// preserved.
+	return string(bytes.TrimRight([]byte(result.Stdout), "\n")), nil
 }
 
 func statusPorcelain(ctx context.Context, cwd string, opts Options) (string, bool, error) {

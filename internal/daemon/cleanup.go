@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shinpr/galley/internal/retry"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/internal/vcs"
 	"github.com/shinpr/galley/internal/workspace"
@@ -42,7 +43,18 @@ func cleanupTaskWorktree(ctx context.Context, opts Options, path string) error {
 	if loaded.PR.URL == "" || loaded.Worktree.Path == "" || !loaded.Worktree.Enabled {
 		return nil
 	}
-	state, err := vcs.FetchPRState(ctx, vcsBinaries(effectiveOpts), effectiveOpts.Root, loaded.PR.URL)
+	// Retry the PR state lookup. `gh pr view` is a GET-equivalent and
+	// idempotent, so a brief GitHub read flake should not abort worktree
+	// cleanup. The final error is surfaced unchanged.
+	var state vcs.PullRequestState
+	err = retry.Do(ctx, func(ctx context.Context) error {
+		s, fetchErr := vcs.FetchPRState(ctx, vcsBinaries(effectiveOpts), effectiveOpts.Root, loaded.PR.URL)
+		if fetchErr != nil {
+			return fetchErr
+		}
+		state = s
+		return nil
+	})
 	if err != nil {
 		return err
 	}

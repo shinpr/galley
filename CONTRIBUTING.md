@@ -42,6 +42,20 @@ claude plugin validate plugins/galley
 claude plugin validate .
 ```
 
+Test the checkout as a local marketplace when changing plugin install behavior:
+
+```text
+/plugin marketplace add .
+/plugin install galley@galley-tools
+/reload-plugins
+```
+
+For Codex plugin testing, add the checkout marketplace and install `Galley` from `/plugins`:
+
+```sh
+codex plugin marketplace add .
+```
+
 ## Change Guidelines
 
 - Keep daemon behavior conservative: preserve evidence, avoid silent data loss, and make retry or escalation state visible.

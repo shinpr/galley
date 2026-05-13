@@ -207,7 +207,8 @@
       "properties": {
         "cli": {
           "enum": [
-            "claude"
+            "claude",
+            "codex"
           ],
           "type": "string"
         },

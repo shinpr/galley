@@ -194,7 +194,7 @@ func validateSupervisor(result *ValidationResult, t Task) {
 }
 
 func validateExecutor(result *ValidationResult, t Task) {
-	require(result, t.Executor.CLI == "claude", "executor.cli must be claude for this implementation slice")
+	require(result, slices.Contains(validExecutorCLIs, t.Executor.CLI), "executor.cli must be one of: %s", strings.Join(validExecutorCLIs, ", "))
 	require(result, t.Executor.Model != "", "executor.model is required")
 	require(result, t.Executor.Effort != "", "executor.effort is required")
 	require(result, t.Executor.PromptProfile != "", "executor.prompt_profile is required")

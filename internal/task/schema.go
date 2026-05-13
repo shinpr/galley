@@ -122,7 +122,7 @@ func executorSchema() map[string]any {
 	return object(
 		required("cli", "model", "effort", "prompt_profile", "prompt_mode", "max_budget_usd"),
 		properties(map[string]any{
-			"cli":            enumSchema([]string{"claude"}),
+			"cli":            enumSchema(validExecutorCLIs),
 			"model":          stringSchema("minLength", 1),
 			"effort":         stringSchema("minLength", 1),
 			"prompt_profile": stringSchema("minLength", 1),

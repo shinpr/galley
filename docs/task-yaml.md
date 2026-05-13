@@ -90,11 +90,11 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 - `execution_policy.stop_on_destructive_operation`: stop when the task would require out-of-scope destructive work.
 - `execution_policy.stop_on_missing_secret`: stop when a required secret is unavailable and cannot be replaced by safe local evidence.
 - `execution_policy.stop_on_external_service_unavailable`: stop when a required external service is unavailable and the task cannot proceed with local substitutes.
-- `executor.cli`: currently `claude`.
-- `executor.model` and `executor.effort`: model selection hints for the executor command.
+- `executor.cli`: selects the executor backend. Accepts `claude` (Claude Code) or `codex` (`codex exec`). The daemon dispatches the implementation attempt through the matching binary and persists per-attempt evidence under `runs/<run-id>/attempt-N/` for both. The Codex executor reuses the existing Claude executor prompt content in this iteration; no Codex-tuned executor prompt asset is introduced.
+- `executor.model` and `executor.effort`: model selection hints for the executor command. For `codex`, effort is delivered via `-c model_reasoning_effort=<value>` because `codex exec` does not expose a top-level `--effort` flag.
 - `executor.prompt_profile`: prompt profile name recorded for evidence.
 - `executor.prompt_mode`: `replace` or `append`.
-- `executor.max_budget_usd`: non-negative execution budget hint.
+- `executor.max_budget_usd`: non-negative execution budget hint. Claude honors this hint via its CLI flag; `codex exec` has no equivalent flag, so the value is recorded for audit and the runner surfaces an informational warning. See `examples/afk-task-codex.yaml` for a complete Codex example.
 
 ## Permissions
 

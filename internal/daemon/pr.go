@@ -76,9 +76,13 @@ func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task
 		loaded.PR.Status = "open"
 		return nil
 	}
-	// Retry `gh pr create`. gh CLI fails fast with a clear error when a PR
-	// already exists for the branch, so a duplicate-create retry exhausts the
-	// bounded backoff and surfaces the gh error unchanged.
+	// Retry `gh pr create`. `gh pr create` itself is non-idempotent: if the
+	// first attempt succeeded server-side but its response was lost, every
+	// retry returns a "PR already exists" error. After the retry budget
+	// exhausts, probe the current branch with `gh pr view` to recover the
+	// URL of the PR that was actually created; the probe is read-only and
+	// returns "" when no PR exists, in which case the original create
+	// failure surfaces unchanged.
 	var prURL string
 	err := retry.Do(ctx, func(ctx context.Context) error {
 		url, createErr := vcs.CreatePullRequest(ctx, vcsBinaries(opts), workDir, runDir, prBodyPath, opts.PRBase, prTitle(*loaded))
@@ -89,7 +93,11 @@ func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task
 		return nil
 	})
 	if err != nil {
-		return err
+		recovered, viewErr := vcs.FetchPRURLForCurrentBranch(ctx, vcsBinaries(opts), workDir, runDir)
+		if viewErr != nil || recovered == "" {
+			return err
+		}
+		prURL = recovered
 	}
 	loaded.PR.URL = prURL
 	loaded.PR.Status = "open"

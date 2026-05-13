@@ -61,6 +61,65 @@ cat > `+bodyPath+`
 	}
 }
 
+func TestFetchPRURLForCurrentBranchReturnsURL(t *testing.T) {
+	binDir := t.TempDir()
+	fakeGH := filepath.Join(binDir, "gh")
+	if err := os.WriteFile(fakeGH, []byte(`#!/bin/sh
+printf '%s\n' 'https://github.com/example/galley/pull/42'
+`), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	url, err := FetchPRURLForCurrentBranch(t.Context(), Binaries{}, t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if url != "https://github.com/example/galley/pull/42" {
+		t.Fatalf("url got %q", url)
+	}
+}
+
+// TestFetchPRURLForCurrentBranchReturnsEmptyWhenNoPR pins the recovery
+// contract: when gh exits non-zero because no PR exists for the current
+// branch, the function returns ("", nil) so the caller surfaces the
+// original create-failure rather than the probe error.
+func TestFetchPRURLForCurrentBranchReturnsEmptyWhenNoPR(t *testing.T) {
+	binDir := t.TempDir()
+	fakeGH := filepath.Join(binDir, "gh")
+	if err := os.WriteFile(fakeGH, []byte(`#!/bin/sh
+echo 'no pull requests found for branch "agent/x"' >&2
+exit 1
+`), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	url, err := FetchPRURLForCurrentBranch(t.Context(), Binaries{}, t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatalf("expected nil error for missing PR, got %v", err)
+	}
+	if url != "" {
+		t.Fatalf("url got %q, want empty", url)
+	}
+}
+
+func TestFetchPRURLForCurrentBranchReturnsErrorForOtherFailures(t *testing.T) {
+	binDir := t.TempDir()
+	fakeGH := filepath.Join(binDir, "gh")
+	if err := os.WriteFile(fakeGH, []byte(`#!/bin/sh
+echo 'HTTP 502 bad gateway' >&2
+exit 1
+`), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	if _, err := FetchPRURLForCurrentBranch(t.Context(), Binaries{}, t.TempDir(), t.TempDir()); err == nil {
+		t.Fatal("expected error for non-missing-PR failure")
+	}
+}
+
 func TestFetchPRStateReadsFullResponse(t *testing.T) {
 	binDir := t.TempDir()
 	fakeGH := filepath.Join(binDir, "gh")

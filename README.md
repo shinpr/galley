@@ -3,23 +3,25 @@
 # Galley
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Plugin-purple)](https://claude.ai/code)
-[![Codex CLI](https://img.shields.io/badge/Codex%20CLI-Compatible-10a37f)](https://developers.openai.com/codex/cli)
+[![Codex CLI](https://img.shields.io/badge/Codex%20CLI-Supported-10a37f)](https://developers.openai.com/codex/cli)
 [![Agent Skills](https://img.shields.io/badge/Agent%20Skills-Spec%20Compliant-blue)](https://developers.openai.com/codex/skills/)
 [![CI](https://github.com/shinpr/galley/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/shinpr/galley/actions/workflows/ci.yml)
 [![GitHub Release](https://img.shields.io/github/v/release/shinpr/galley)](https://github.com/shinpr/galley/releases)
 [![License: MIT](https://img.shields.io/github/license/shinpr/galley)](LICENSE)
 
-Galley is a local orchestration runtime for supervised AI agent task execution.
+Galley is a local orchestration runtime for supervised AI-assisted coding task execution.
 
 It runs locally, keeps work in git-visible changes, and records evidence for review before each acceptance decision.
 
-Galley defaults to Claude Code for execution and supervisor review. Task YAML can select Codex as the executor, and the daemon can select Codex as the supervisor.
+Galley supports Claude Code and Codex as first-class executor and supervisor backends. Claude Code is the default; task YAML can select Codex for execution, and the daemon can select Codex for supervisor review.
 
 ## Quick Start
 
 Use the Galley skill to set up each repository. It walks you through CLI installation when needed, prepares repository profiles, drafts valid task YAML, and queues tasks only after approval.
 
-Install the plugin in Claude Code:
+Install the plugin in your client.
+
+Claude Code:
 
 ```text
 /plugin marketplace add shinpr/galley
@@ -28,7 +30,7 @@ Install the plugin in Claude Code:
 /galley:galley Set up Galley for this repository.
 ```
 
-Or install it in Codex:
+Codex:
 
 ```sh
 codex plugin marketplace add shinpr/galley
@@ -41,10 +43,16 @@ Then start or return to Codex, open the plugin picker, install `Galley`, and ask
 $galley Set up Galley for this repository.
 ```
 
-For a task, describe the work to the skill:
+For a task, describe the work to the skill. In Claude Code:
 
 ```text
 /galley:galley Create a Galley task for this feature request and queue it after approval.
+```
+
+In Codex:
+
+```text
+$galley Create a Galley task for this feature request and queue it after approval.
 ```
 
 ## Manual CLI Installation
@@ -107,8 +115,10 @@ The standalone skill still expects the `galley` CLI on `PATH`. Some workflows al
 - **Task YAML**: the trusted local input that defines the goal, acceptance criteria, scope, verification, execution policy, and PR behavior. See [docs/task-yaml.md](docs/task-yaml.md).
 - **Quality profile**: optional repo-specific review gates, required checks, pass policy, and evidence requirements. See [docs/profiles.md](docs/profiles.md).
 - **Environment profile**: optional repo-specific command map and execution constraints for network, secrets, and destructive operations. See [docs/profiles.md](docs/profiles.md).
+- **Executor**: the backend that implements the task in the worktree. Claude Code is the default; Codex can be selected per task.
+- **Supervisor**: the backend that reviews executor work against acceptance criteria, required quality checks, and recorded evidence. Claude is the default; Codex can be selected per daemon.
 - **AFK task**: an unattended task that can run asynchronously inside a managed worktree.
-- **Acceptance criterion ID**: the `acceptance_criteria[].id` value Claude must report back with evidence, for example `AC1`.
+- **Acceptance criterion ID**: the `acceptance_criteria[].id` value the executor must report back with evidence, for example `AC1`.
 - **Loop budget**: `execution_policy.loop_budget` is the maximum number of executor attempts before Galley escalates to supervisor review; `0` means unlimited.
 - **Permission**: `scope.permission` sets the executor authority level for the task.
 - **Input files**: optional `files[]` entries copy user-supplied files into the execution worktree with an explicit destination and commit policy.
@@ -141,7 +151,7 @@ tasks/queued/
         v
 tasks/running/
         |
-        | execute Claude in worktree
+        | execute selected backend in worktree
         v
 supervisor review
         |
@@ -190,7 +200,7 @@ Attempt evidence includes:
 
 - `command_plan.json`
 - `run_result.json`
-- `claude_result.json` when Claude returns valid structured JSON
+- `executor_result.json` when the executor returns valid structured JSON
 - `supervisor_verdict.json`
 - `git_status.json`
 - `diff.patch`
@@ -221,7 +231,7 @@ galley task archive ~/.galley/tasks/done/TASK.yaml
 
 `galley task list` shows task state, status, PR URL, latest verdict, and latest summary across the workflow root.
 
-`galley task show` accepts a task file or task ID and prints the latest attempt, supervisor verdict, risk, and failed verification context. Once a task reaches an accepted terminal status (`accepted`, `pr_opened`, `closed`, or `merged`), the last attempt's claude status and error fields are relabeled under the `prior_attempt_*` prefix so they read as audit history rather than an active failure even after the daemon's PR cleanup loop transitions the task.
+`galley task show` accepts a task file or task ID and prints the latest attempt, supervisor verdict, risk, and failed verification context. Once a task reaches an accepted terminal status (`accepted`, `pr_opened`, `closed`, or `merged`), the last attempt's executor status and error fields are relabeled under the `prior_attempt_*` prefix so they read as audit history rather than an active failure even after the daemon's PR cleanup loop transitions the task.
 
 `galley task requeue` accepts a task ID or task file, returns a reviewed task from `tasks/failed`, `tasks/done`, or `tasks/running` to `tasks/queued`, records an optional reason, and increments `supervisor.review_iterations`.
 
@@ -233,7 +243,7 @@ galley profile validate --kind environment examples/environment-local.yaml
 galley profile resolve --cwd /path/to/repo --mkdir --output json
 ```
 
-Quality and environment profiles are optional repository inputs. By default Galley resolves them from `~/.galley/profiles/<repo-key>/` using task `scope.cwd`. They add checks, constraints, preferred commands, and evidence requirements to the Claude work order.
+Quality and environment profiles are optional repository inputs. By default Galley resolves them from `~/.galley/profiles/<repo-key>/` using task `scope.cwd`. They add checks, constraints, preferred commands, and evidence requirements to the executor work order.
 
 The environment profile also owns repository operation defaults such as PR creation, PR comment handling, base branch, and worktree cleanup. The Galley skill can create profiles interactively by inspecting the repository and asking which checks, tools, network policy, secrets policy, PR behavior, and blocking severities apply.
 
@@ -278,7 +288,7 @@ Foreground and background daemons use the same shutdown path. On `SIGINT` or `SI
 
 Each executor run and built-in model supervisor run is guarded by an idle-output watchdog. The default `--idle-timeout` is 10 minutes.
 
-When a subprocess produces no stdout or stderr for that timeout, Galley terminates its process group, records a distinct idle-timeout result on the task attempt (`error_kind: idle_timeout`, `claude_status: idle_timed_out`) and in `runs/<run-id>/.../run_result.json` (`idle_timed_out: true`), and lets the loop continue according to the task loop budget instead of hanging on a stalled command. The watchdog is independent of the task's total per-attempt timeout, which still bounds total wall-clock duration. Raise `--idle-timeout` for executors that legitimately stay silent for long stretches while still making progress.
+When a subprocess produces no stdout or stderr for that timeout, Galley terminates its process group, records a distinct idle-timeout result on the task attempt (`error_kind: idle_timeout`, executor status `idle_timed_out`) and in `runs/<run-id>/.../run_result.json` (`idle_timed_out: true`), and lets the loop continue according to the task loop budget instead of hanging on a stalled command. The watchdog is independent of the task's total per-attempt timeout, which still bounds total wall-clock duration. Raise `--idle-timeout` for executors that legitimately stay silent for long stretches while still making progress.
 
 When the built-in model supervisor subprocess exits because of idle timeout, total timeout, or a forced subprocess kill, Galley retries the same supervisor evaluation up to two additional times inside the same executor attempt before failing the task. The retry budget is a fixed internal value, not a user-configurable knob: no new CLI flag, task YAML field, or profile field is added, and the executor attempt is not retried — only the supervisor evaluation is re-run, so the executor diff and run evidence from this attempt are preserved as-is. Each supervisor try writes its artifacts under `runs/<run-id>/attempt-N/supervisor-try-<M>/`, including `supervisor_error.json` for failed tries (with the classified `kind`) and `supervisor_verdict.json` for the successful try; the top-level `model_supervisor_verdict.json` is only written when one of the tries succeeds. If the retry budget is exhausted, the attempt records a supervisor-phase error with the classified `kind` (`idle_timeout`, `timed_out`, or `supervisor_failed`) under the original executor attempt directory and the task moves to `tasks/failed/` with status `needs_supervisor_review` so the retry evidence remains inspectable.
 
@@ -311,7 +321,7 @@ For implementation tasks, the supervisor should reject a no-diff result unless t
 
 `completed_with_risks` means the executor believes the implementation is coherent, but verification limits, assumptions, or residual risks still need supervisor attention.
 
-Hard-stop conditions are defined in the Claude executor prompt at `prompts/claude-executor-full.md`. In short, hard stops are reserved for blockers such as missing required secrets, inaccessible required systems, contradictory acceptance criteria, out-of-scope destructive actions, unreadable required files, or runtime failures that leave no useful next step.
+Hard-stop conditions are defined in the executor prompts at `prompts/claude-executor-full.md` and `prompts/codex-executor-full.md`. In short, hard stops are reserved for blockers such as missing required secrets, inaccessible required systems, contradictory acceptance criteria, out-of-scope destructive actions, unreadable required files, or runtime failures that leave no useful next step.
 
 ## PR Automation
 
@@ -337,9 +347,15 @@ With `pr.comments.reply: true`, Galley posts a concise acknowledgement comment a
 - Comment received while the task is queued or running: `Galley noted this comment; task is already <status>.`
 - Comment from a non-PR author: `Galley ignored this comment because only the pull request author can run Galley from PR comments.`
 
+## Executors
+
+Executor backends are selected per task in task YAML. Claude Code is the default; set `executor.cli: codex` to run a task with Codex instead. Acceptance skeleton preflight, structured executor results, run evidence, and supervisor review use the same contracts across both backends.
+
+See [docs/task-yaml.md](docs/task-yaml.md) for the full `executor` block and [examples/afk-task-codex.yaml](examples/afk-task-codex.yaml) for a Codex task example.
+
 ## Supervisors
 
-Supervisor review defaults to Claude. Use `--supervisor codex` to select Codex instead, or `--supervisor claude` to be explicit. Repository-specific PR behavior, comment polling, and worktree cleanup live in the environment profile resolved from `scope.cwd`.
+Supervisor review defaults to Claude. Use `--supervisor codex` to select Codex instead, or `--supervisor claude` to be explicit. Both backends use the same supervisor verdict contract, retry budget, and evidence layout. Repository-specific PR behavior, comment polling, and worktree cleanup live in the environment profile resolved from `scope.cwd`.
 
 ## Worktree Cleanup
 

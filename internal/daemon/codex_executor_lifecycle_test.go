@@ -17,7 +17,7 @@ package daemon
 //       * On success: tasks/done/<id>.yaml status="accepted",
 //         attempts[0].executor_status (claude_status field today) reports
 //         "completed", and runs/<id>/attempt-1/ contains command_plan.json,
-//         run_result.json, an executor result JSON (claude_result.json), a
+//         run_result.json, an executor result JSON (executor_result.json), a
 //         supervisor_verdict.json, git_status.json, and diff.patch — i.e.
 //         parity with the Claude success artifact set.
 //       * On retry: a Codex failure on attempt-1 produces attempt-2 with
@@ -117,7 +117,7 @@ func TestCodexExecutorSuccessProducesParityRunEvidence(t *testing.T) {
 	// exist exactly once under attempt-1/.
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", "command_plan.json"), 1)
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", "run_result.json"), 1)
-	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", "claude_result.json"), 1)
+	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", executorResultFilename), 1)
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", "supervisor_verdict.json"), 1)
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", "git_status.json"), 1)
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", "diff.patch"), 1)

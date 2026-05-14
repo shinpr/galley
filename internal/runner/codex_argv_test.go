@@ -33,14 +33,16 @@ func TestCodexArgvDoesNotEmitUnsupportedFlags(t *testing.T) {
 		}
 	}
 
-	// Reasoning effort must reach the CLI via -c model_reasoning_effort=...
-	// because `codex exec --help` does not list a dedicated --effort flag.
+	// Reasoning effort must reach the CLI via -c model_reasoning_effort="..."
+	// because `codex exec --help` does not list a dedicated --effort flag. Codex
+	// config overrides use TOML values, so string efforts are quoted.
 	var sawEffortOverride bool
 	for i := 0; i < len(plan.Argv)-1; i++ {
 		if plan.Argv[i] == "-c" && strings.HasPrefix(plan.Argv[i+1], "model_reasoning_effort=") {
 			sawEffortOverride = true
-			if !strings.Contains(plan.Argv[i+1], opts.Effort) {
-				t.Fatalf("model_reasoning_effort override missing effort value %q in argv=%v", opts.Effort, plan.Argv)
+			want := `model_reasoning_effort="` + opts.Effort + `"`
+			if plan.Argv[i+1] != want {
+				t.Fatalf("model_reasoning_effort override got %q want %q in argv=%v", plan.Argv[i+1], want, plan.Argv)
 			}
 		}
 	}
@@ -82,6 +84,29 @@ func TestCodexArgvDoesNotEmitUnsupportedFlags(t *testing.T) {
 	}
 	if !sawBudgetWarning {
 		t.Fatalf("expected a max_budget_usd informational warning, got %#v", plan.Warnings)
+	}
+}
+
+func TestCodexArgvWarnsWhenPromptModeAppendIsFlattened(t *testing.T) {
+	t.Parallel()
+	base := minimalCodexTask()
+	base.Executor.PromptMode = "append"
+	opts := CodexFromTask(base)
+	opts.Prompt = "work order body"
+
+	plan, err := CodexCommandPlan(opts)
+	if err != nil {
+		t.Fatalf("CodexCommandPlan: %v", err)
+	}
+	var sawPromptModeWarning bool
+	for _, w := range plan.Warnings {
+		if strings.Contains(w, "prompt_mode=append") && strings.Contains(w, "same effect as replace") {
+			sawPromptModeWarning = true
+			break
+		}
+	}
+	if !sawPromptModeWarning {
+		t.Fatalf("expected prompt_mode append warning, got %#v", plan.Warnings)
 	}
 }
 

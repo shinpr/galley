@@ -32,7 +32,7 @@ executor:
   cli: "codex"
   model: "gpt-5-codex"
   effort: "high"
-  prompt_profile: "codexized-claude-executor-v1"
+  prompt_profile: "codex-executor-v1"
   prompt_mode: "replace"
   max_budget_usd: 10
 decisions: []

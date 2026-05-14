@@ -22,13 +22,17 @@ func writeRunProfiles(t *testing.T, runDir string, checks []profile.RequiredChec
 }
 
 func writeAttemptResult(t *testing.T, runDir string, n int, verifications []runner.ClaudeVerification) {
+	writeAttemptResultFile(t, runDir, n, executorResultFilename, verifications)
+}
+
+func writeAttemptResultFile(t *testing.T, runDir string, n int, filename string, verifications []runner.ClaudeVerification) {
 	t.Helper()
 	dir := filepath.Join(runDir, "attempt-"+strconv.Itoa(n))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	res := runner.ClaudeResult{Status: "completed", Summary: "x", Verification: verifications}
-	if err := writeJSON(filepath.Join(dir, "claude_result.json"), res); err != nil {
+	if err := writeJSON(filepath.Join(dir, filename), res); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -51,6 +55,21 @@ func TestRequiredCheckEvidenceGateFallbackSemantics(t *testing.T) {
 	reason, ok := requiredCheckEvidenceGate(&task.Task{}, runDir)
 	if !ok {
 		t.Fatalf("gate failed unexpectedly: %s", reason)
+	}
+}
+
+func TestRequiredCheckEvidenceGateReadsLegacyClaudeResult(t *testing.T) {
+	t.Parallel()
+	runDir := t.TempDir()
+	writeRunProfiles(t, runDir, []profile.RequiredCheck{
+		{ID: "test", PreferredCommands: []string{"make test"}, Required: true},
+	})
+	writeAttemptResultFile(t, runDir, 1, legacyClaudeResultFilename, []runner.ClaudeVerification{
+		{Command: "make test", Status: "passed", Reason: "ok"},
+	})
+	reason, ok := requiredCheckEvidenceGate(&task.Task{}, runDir)
+	if !ok {
+		t.Fatalf("gate failed for legacy executor result: %s", reason)
 	}
 }
 

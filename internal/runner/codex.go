@@ -25,11 +25,11 @@ const CodexLastMessageFilename = "codex.last-message.txt"
 
 // CodexOptions contains the task-derived settings needed to construct a Codex executor invocation.
 //
-// The Codex executor in this iteration reuses the Claude executor system prompt
-// (prompts.ClaudeExecutorFull()) per AC3/D1: no provider-specific Codex
-// executor prompt asset is introduced. The system prompt is delivered to the
-// `codex exec` CLI via stdin together with the work order prompt because the
-// Codex CLI has no dedicated --system-prompt flag.
+// The Codex executor uses a provider-specific executor prompt that preserves
+// the Claude executor contract while following the shorter Codex supervisor
+// prompt shape. The system prompt is delivered to the `codex exec` CLI via
+// stdin together with the work order prompt because the Codex CLI has no
+// dedicated --system-prompt flag.
 //
 // The argv we build is constrained by the upstream `codex exec` CLI surface:
 //   - reasoning effort is delivered through the generic `-c model_reasoning_effort=...`
@@ -97,12 +97,10 @@ func CodexArgv(opts CodexOptions) ([]string, error) {
 
 // CodexCommandPlan returns the work directory, argv, stdin, and warnings for a Codex executor run.
 //
-// When no system prompt is supplied, the built-in Claude executor prompt is
-// reused (AC3 / D1: the Codex executor shares the Claude executor prompt for
-// now). The Codex CLI does not accept --system-prompt; the system prompt is
+// When no system prompt is supplied, the built-in Codex executor prompt is
+// used. The Codex CLI does not accept --system-prompt; the system prompt is
 // concatenated with the work order prompt and delivered through stdin. The
-// resulting Command.Stdin is the effective combined prompt the CLI sees, so
-// tests can assert prompt parity against prompts.ClaudeExecutorFull().
+// resulting Command.Stdin is the effective combined prompt the CLI sees.
 func CodexCommandPlan(opts CodexOptions) (Command, error) {
 	if opts.Prompt == "" {
 		return Command{}, fmt.Errorf("prompt is required")
@@ -137,9 +135,9 @@ func CodexCommandPlan(opts CodexOptions) (Command, error) {
 
 	switch opts.PromptMode {
 	case "replace", "append":
-		// Codex inlines the system prompt via stdin; "replace" and "append" both
-		// produce the same effective ordering for this iteration. Validation
-		// elsewhere rejects unknown modes.
+		// Codex inlines the system prompt via stdin. The CLI has no distinct
+		// append-system-prompt surface, so append is accepted for task-schema
+		// compatibility and surfaced as a warning below.
 	default:
 		return Command{}, fmt.Errorf("unsupported prompt mode %q", opts.PromptMode)
 	}
@@ -188,12 +186,12 @@ func CodexEffectiveSystemPrompt(opts CodexOptions) (string, error) {
 	if opts.SystemPrompt != "" {
 		return opts.SystemPrompt, nil
 	}
-	return prompts.ClaudeExecutorFull(), nil
+	return prompts.CodexExecutorFull(), nil
 }
 
 func withDefaultEmbeddedCodexOptions(opts CodexOptions) CodexOptions {
 	if opts.SystemPromptFile == "" && opts.SystemPrompt == "" {
-		opts.SystemPrompt = prompts.ClaudeExecutorFull()
+		opts.SystemPrompt = prompts.CodexExecutorFull()
 	}
 	if opts.JSONSchemaFile == "" && opts.JSONSchema == "" {
 		opts.JSONSchema = schemas.ClaudeResult
@@ -267,6 +265,9 @@ func ExtractCodexLastMessageFile(path string) (ClaudeResult, error) {
 
 func codexWarnings(opts CodexOptions) []string {
 	var warnings []string
+	if opts.PromptMode == "append" {
+		warnings = append(warnings, "executor.prompt_mode=append has the same effect as replace for codex exec; system prompt and work order are concatenated through stdin")
+	}
 	if opts.Sandbox == "danger-full-access" {
 		warnings = append(warnings, "Codex sandbox is danger-full-access; use only inside an isolated sandbox/worktree")
 	}

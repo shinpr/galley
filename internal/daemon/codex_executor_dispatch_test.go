@@ -11,7 +11,7 @@ package daemon
 //     executor adapter that matches task.executor.cli and constructs a
 //     command plan that points at the corresponding binary.
 //   - Observable result: when cli="claude" the fake claude binary is invoked
-//     and produces a claude_result.json under runs/<id>/attempt-1/; when
+//     and produces an executor_result.json under runs/<id>/attempt-1/; when
 //     cli="codex" the fake codex executor binary is invoked instead. The
 //     non-selected binary records zero invocations. The task moves to the
 //     expected terminal state for the supervisor verdict path already used by

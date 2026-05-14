@@ -6,7 +6,7 @@ package daemon
 //     --output-last-message paths so the upstream `codex exec` CLI can write
 //     its structured result alongside the rest of the attempt evidence.
 //   - When the fake Codex executor writes a completed final-message file,
-//     claude_result.json must contain the executor's reported status and
+//     executor_result.json must contain the executor's reported status and
 //     summary (parsed from the last-message file, not synthesized).
 //   - When the executor reports hard_stop, the daemon must preserve that
 //     judgment instead of overlaying fallback generated evidence — losing
@@ -235,10 +235,10 @@ printf '%s\n' '{"event":"unrelated"}'
 		t.Fatal(err)
 	}
 
-	data := mustReadSingleGlob(t, filepath.Join(root, "runs", "*", "attempt-1", "claude_result.json"))
+	data := mustReadSingleGlob(t, filepath.Join(root, "runs", "*", "attempt-1", executorResultFilename))
 	var got runner.ClaudeResult
 	if err := json.Unmarshal(data, &got); err != nil {
-		t.Fatalf("decode claude_result.json: %v", err)
+		t.Fatalf("decode executor_result.json: %v", err)
 	}
 	if got.Status != "completed" {
 		t.Fatalf("status got %q, want completed (parsed from last-message file)", got.Status)
@@ -300,10 +300,10 @@ printf '%s\n' '`+hardStopResult+`'
 		t.Fatal(err)
 	}
 
-	data := mustReadSingleGlob(t, filepath.Join(root, "runs", "*", "attempt-1", "claude_result.json"))
+	data := mustReadSingleGlob(t, filepath.Join(root, "runs", "*", "attempt-1", executorResultFilename))
 	var got runner.ClaudeResult
 	if err := json.Unmarshal(data, &got); err != nil {
-		t.Fatalf("decode claude_result.json: %v", err)
+		t.Fatalf("decode executor_result.json: %v", err)
 	}
 	if got.Status != "hard_stop" {
 		t.Fatalf("Codex hard_stop must survive resolveExecutorResult: got status %q", got.Status)

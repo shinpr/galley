@@ -442,6 +442,11 @@ type attemptOutcome struct {
 	DiffSnapshot workspace.Snapshot
 }
 
+const (
+	executorResultFilename     = "executor_result.json"
+	legacyClaudeResultFilename = "claude_result.json"
+)
+
 func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, profiles profile.Bundle, workDir, baseSHA, attemptDir, prompt, taskFile string, preflight *AcceptanceSkeletonResult) (attemptOutcome, error) {
 	attemptCtx := ctx
 	var cancel context.CancelFunc
@@ -453,7 +458,7 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 
 	cli := loaded.Executor.CLI
 	if cli == "" {
-		cli = "claude"
+		return attemptOutcome{}, fmt.Errorf("executor.cli is required")
 	}
 
 	var (
@@ -489,7 +494,7 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 		return attemptOutcome{}, err
 	}
 
-	resultPath := filepath.Join(attemptDir, "claude_result.json")
+	resultPath := filepath.Join(attemptDir, executorResultFilename)
 	lastMessagePath := codexLastMessagePath(cli, attemptDir)
 	claudeResult, parseErr := resolveExecutorResult(attemptCtx, opts, cli, stdoutPath, runResult.Stdout, lastMessagePath, taskFile, resultPath, workDir, profiles)
 	if parseErr == nil {
@@ -569,6 +574,10 @@ func resolveExecutorResult(ctx context.Context, opts Options, cli, stdoutPath, s
 		}
 	}
 
+	// Claude stdout normally carries the structured result. Codex stdout is a
+	// JSON event stream, so this parse is only a best-effort fallback after the
+	// Codex last-message path above; result.Complete provides the normal Codex
+	// fallback when stdout is not an executor result.
 	claudeResult, claudeErr := runner.ExtractClaudeResultFile(stdoutPath)
 	if claudeErr == nil && claudeResult.Status == "hard_stop" {
 		return claudeResult, nil
@@ -726,7 +735,7 @@ func executorVerificationCmd(cli string) string {
 	case "", "claude":
 		return "claude -p"
 	default:
-		return cli
+		return "unknown"
 	}
 }
 
@@ -907,7 +916,7 @@ func requiredCheckEvidenceGate(loaded *task.Task, runDir string) (string, bool) 
 	if len(required) == 0 {
 		return "", true
 	}
-	res, _, err := loadLatestClaudeResult(runDir)
+	res, _, err := loadLatestExecutorResult(runDir)
 	if err != nil || res == nil {
 		return "no executor result is available to verify required quality checks", false
 	}
@@ -975,7 +984,7 @@ func loadRunProfiles(runDir string) (profile.Bundle, error) {
 	return payload.Bundle, nil
 }
 
-func loadLatestClaudeResult(runDir string) (*runner.ClaudeResult, string, error) {
+func loadLatestExecutorResult(runDir string) (*runner.ClaudeResult, string, error) {
 	bestDir, _, err := runlog.LatestAttemptDir(runDir)
 	if err != nil {
 		return nil, "", err
@@ -983,7 +992,7 @@ func loadLatestClaudeResult(runDir string) (*runner.ClaudeResult, string, error)
 	if bestDir == "" {
 		return nil, "", nil
 	}
-	data, err := os.ReadFile(filepath.Join(bestDir, "claude_result.json"))
+	data, err := readExecutorResultFile(bestDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, bestDir, nil
@@ -995,6 +1004,20 @@ func loadLatestClaudeResult(runDir string) (*runner.ClaudeResult, string, error)
 		return nil, bestDir, err
 	}
 	return &res, bestDir, nil
+}
+
+func readExecutorResultFile(attemptDir string) ([]byte, error) {
+	data, err := os.ReadFile(filepath.Join(attemptDir, executorResultFilename))
+	if err == nil {
+		return data, nil
+	}
+	if !os.IsNotExist(err) {
+		return nil, err
+	}
+	// Legacy compatibility: Galley used claude_result.json before executor
+	// results were provider-neutral. Keep this fallback while existing run
+	// evidence may still be read; remove it after the legacy artifact window ends.
+	return os.ReadFile(filepath.Join(attemptDir, legacyClaudeResultFilename))
 }
 
 // appendPreflightObligations adds runtime skeleton paths, AC bindings, kinds,

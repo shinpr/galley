@@ -136,12 +136,16 @@ func TestDaemonDispatchesSelectedExecutorBinary(t *testing.T) {
 			planData := mustReadSingleGlob(t, filepath.Join(root, "runs", "*", "attempt-1", "command_plan.json"))
 			var plan struct {
 				Argv []string `json:"argv"`
+				Env  []string `json:"env,omitempty"`
 			}
 			if err := json.Unmarshal(planData, &plan); err != nil {
 				t.Fatalf("decode command_plan.json: %v", err)
 			}
 			if len(plan.Argv) == 0 {
 				t.Fatal("command_plan.json argv is empty")
+			}
+			if len(plan.Env) != 0 {
+				t.Fatalf("command_plan.json must not persist environment entries: %v", plan.Env)
 			}
 			wantBin := claudeBin
 			if tc.cli == "codex" {

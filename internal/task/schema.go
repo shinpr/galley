@@ -120,7 +120,7 @@ func supervisorSchema() map[string]any {
 
 func executorSchema() map[string]any {
 	return object(
-		required("cli", "model", "effort", "prompt_profile", "prompt_mode", "max_budget_usd"),
+		required("cli", "effort", "prompt_profile", "prompt_mode", "max_budget_usd"),
 		properties(map[string]any{
 			"cli":            enumSchema(validExecutorCLIs),
 			"model":          stringSchema("minLength", 1),
@@ -129,6 +129,36 @@ func executorSchema() map[string]any {
 			"prompt_mode":    enumSchema(validPromptModes),
 			"max_budget_usd": map[string]any{"type": "number", "minimum": 0},
 		}),
+		func(m map[string]any) {
+			m["allOf"] = []any{
+				map[string]any{
+					"if": map[string]any{
+						"properties": map[string]any{
+							"cli": map[string]any{"const": "claude"},
+						},
+						"required": []string{"cli"},
+					},
+					"then": map[string]any{
+						"properties": map[string]any{
+							"effort": enumSchema(validClaudeEfforts),
+						},
+					},
+				},
+				map[string]any{
+					"if": map[string]any{
+						"properties": map[string]any{
+							"cli": map[string]any{"const": "codex"},
+						},
+						"required": []string{"cli"},
+					},
+					"then": map[string]any{
+						"properties": map[string]any{
+							"effort": enumSchema(validCodexEfforts),
+						},
+					},
+				},
+			}
+		},
 	)
 }
 

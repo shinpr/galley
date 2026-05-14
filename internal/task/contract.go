@@ -12,6 +12,8 @@ var (
 	validPermissions            = []string{"read-only", "edit", "sandbox-full-access"}
 	validPromptModes            = []string{"replace", "append"}
 	validExecutorCLIs           = []string{"claude", "codex"}
+	validClaudeEfforts          = []string{"low", "medium", "high", "xhigh", "max"}
+	validCodexEfforts           = []string{"low", "medium", "high"}
 	validAFKDecisionPolicies    = []string{"choose-smallest-reversible"}
 	validPreflightSkeletonModes = []string{"skeleton"}
 	validTaskIDPattern          = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)

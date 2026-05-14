@@ -247,7 +247,6 @@ def main() -> int:
     task["supervisor"] = {"review_iterations": 0}
     task["executor"] = {
         "cli": "claude",
-        "model": "opus",
         "effort": "high",
         "prompt_profile": "codexized-claude-executor-v1",
         "prompt_mode": "replace",

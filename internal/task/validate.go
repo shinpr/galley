@@ -195,8 +195,13 @@ func validateSupervisor(result *ValidationResult, t Task) {
 
 func validateExecutor(result *ValidationResult, t Task) {
 	require(result, slices.Contains(validExecutorCLIs, t.Executor.CLI), "executor.cli must be one of: %s", strings.Join(validExecutorCLIs, ", "))
-	require(result, t.Executor.Model != "", "executor.model is required")
 	require(result, t.Executor.Effort != "", "executor.effort is required")
+	switch t.Executor.CLI {
+	case "claude":
+		require(result, slices.Contains(validClaudeEfforts, t.Executor.Effort), "executor.effort for claude must be one of: %s", strings.Join(validClaudeEfforts, ", "))
+	case "codex":
+		require(result, slices.Contains(validCodexEfforts, t.Executor.Effort), "executor.effort for codex must be one of: %s", strings.Join(validCodexEfforts, ", "))
+	}
 	require(result, t.Executor.PromptProfile != "", "executor.prompt_profile is required")
 	if t.Executor.PromptMode == "" {
 		result.Warnings = append(result.Warnings, "executor.prompt_mode is empty; defaulting to replace")

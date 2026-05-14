@@ -30,7 +30,6 @@ supervisor:
   review_iterations: 0
 executor:
   cli: "codex"
-  model: "gpt-5-codex"
   effort: "high"
   prompt_profile: "codex-executor-v1"
   prompt_mode: "replace"

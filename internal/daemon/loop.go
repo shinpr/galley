@@ -478,7 +478,9 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 	if err != nil {
 		return attemptOutcome{}, err
 	}
-	if err := writeJSON(filepath.Join(attemptDir, "command_plan.json"), commandPlan); err != nil {
+	auditPlan := commandPlan
+	auditPlan.Env = nil
+	if err := writeJSON(filepath.Join(attemptDir, "command_plan.json"), auditPlan); err != nil {
 		return attemptOutcome{}, err
 	}
 

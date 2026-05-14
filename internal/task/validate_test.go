@@ -14,6 +14,17 @@ func TestValidateAcceptsWellFormedAFKTask(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsOmittedExecutorModel(t *testing.T) {
+	t.Parallel()
+	task := validTask(t)
+	task.Executor.Model = ""
+
+	result := Validate(task)
+	if !result.Valid() {
+		t.Fatalf("expected omitted executor.model to use CLI default, got errors: %#v", result.Errors)
+	}
+}
+
 func TestValidateRejectsAbsoluteAllowedPath(t *testing.T) {
 	t.Parallel()
 	task := validTask(t)

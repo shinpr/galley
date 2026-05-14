@@ -16,6 +16,7 @@ INTERESTING = {
     "codex_supervisor_request.json",
     "claude_supervisor_request.json",
     "model_supervisor_verdict.json",
+    "executor_result.json",
     "claude_result.json",
 }
 

@@ -13,6 +13,7 @@ This project follows semantic versioning.
 ### Changed
 
 - Executor attempt evidence now writes structured executor output to `executor_result.json`. Galley still reads legacy `claude_result.json` files for existing run evidence, but new runs no longer write the legacy filename.
+- Task YAML `executor.model` is now optional. When omitted, Galley lets the selected executor CLI use its configured default model; pinned model names remain supported for tasks that need an explicit override.
 - Skill-bundled `scripts/create_task_skeleton.py` now includes the optional acceptance skeleton preflight stage in new task YAML with `enabled: false`. This makes the opt-in preflight setting visible while preserving the existing disabled behavior; enabled-only fields such as `mode`, `required`, `allowed_paths`, and `outputs` remain omitted until an author enables the stage.
 
 ## v0.3.5 - 2026-05-13

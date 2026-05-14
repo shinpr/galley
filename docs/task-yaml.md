@@ -41,7 +41,6 @@ supervisor:
   review_iterations: 0
 executor:
   cli: "claude"
-  model: "opus"
   effort: "high"
   prompt_profile: "codexized-claude-executor-v1"
   prompt_mode: "replace"
@@ -91,7 +90,8 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 - `execution_policy.stop_on_missing_secret`: stop when a required secret is unavailable and cannot be replaced by safe local evidence.
 - `execution_policy.stop_on_external_service_unavailable`: stop when a required external service is unavailable and the task cannot proceed with local substitutes.
 - `executor.cli`: selects the executor backend. Accepts `claude` (Claude Code) or `codex` (`codex exec`). The daemon dispatches the implementation attempt through the matching binary and persists per-attempt evidence under `runs/<run-id>/attempt-N/` for both. The Codex executor uses a Codex-specific executor prompt that preserves the same task/result contract as the Claude executor prompt.
-- `executor.model` and `executor.effort`: model selection hints for the executor command. For `codex`, effort is delivered via `-c model_reasoning_effort="<value>"` because `codex exec` does not expose a top-level `--effort` flag and `-c` expects TOML-style values.
+- `executor.model`: optional model override for the executor command. Omit it to use the selected CLI's configured default model; write it only when you want to pin a model name. Available model names depend on the user's account, provider, CLI configuration, and CLI version, so a pinned value should be smoke-tested when in doubt.
+- `executor.effort`: model effort hint for the executor command. Claude accepts `low`, `medium`, `high`, `xhigh`, or `max`; Codex accepts `low`, `medium`, or `high`. For `codex`, effort is delivered via `-c model_reasoning_effort="<value>"` because `codex exec` does not expose a top-level `--effort` flag and `-c` expects TOML-style values.
 - `executor.prompt_profile`: prompt profile name recorded for evidence.
 - `executor.prompt_mode`: `replace` or `append`. For `codex`, both modes currently produce the same effective prompt ordering because Galley concatenates the system prompt and work order through `codex exec` stdin; `append` is accepted for schema compatibility and recorded as an informational warning.
 - `executor.max_budget_usd`: non-negative execution budget hint. Claude honors this hint via its CLI flag; `codex exec` has no equivalent flag, so the value is recorded for audit and the runner surfaces an informational warning. See `examples/afk-task-codex.yaml` for a complete Codex example.

@@ -95,12 +95,13 @@ Completion gate:
 
 ## Step 4. Investigate Code Context [BLOCKING]
 
-Search for relevant files and symbols, read surrounding context, inspect existing patterns, and identify representative implementations.
+Search for relevant files and symbols, read surrounding context, inspect existing patterns, and identify representative implementations. Also inspect repository setup state: setup docs, environment/profile commands, package or build tool manifests, dependency manifests, lockfiles, local tool availability, and ignored dependency or build artifacts that a fresh worktree will not contain.
 
 Completion gate:
 
 - Files that need edits are identified.
 - Representative local patterns, contracts, consumers, or tests are identified for the changed behavior.
+- Required setup commands or missing setup blockers for implementation and verification are identified.
 
 ## Step 5. Plan The Implementation [BLOCKING]
 
@@ -123,12 +124,14 @@ Completion gate:
 
 ## Step 7. Verify [BLOCKING]
 
-Verify with the highest-value available checks. Start focused, then run broader checks when useful and affordable. Diagnose failed checks and fix code-caused failures.
+Verify with the highest-value available checks. Start focused, then run broader checks when useful and affordable. Diagnose failed checks and fix code-caused failures. When a verification tool or dependency is missing in the worktree, run the repository-declared setup/install command, or the manifest/lockfile-consistent setup/install path when no explicit command is declared, before recording the check as unavailable. Prefer workspace-local caches when they reduce sandbox or home-directory assumptions. Keep ignored dependency and build artifacts out of the final diff. If setup is blocked by task policy, sandbox, network, credentials, or repository constraints, try any allowed repository-consistent alternative that remains before recording the limitation.
 
 Completion gate:
 
 - Every required verification command has passed evidence or a recorded limitation.
 - Verification evidence exercises the changed behavior.
+- Treat missing dependencies as verification limitations only after setup/install was attempted or ruled out by task policy, sandbox, network, credentials, or repository constraints.
+- Setup/install attempts record the command and outcome; failed attempts include the failure mode and concrete unblock requirement.
 - A focused selector that matches zero tests is recorded as skipped evidence rather than passed evidence.
 
 ## Step 8. Run Self Quality Gate And Return Result JSON [BLOCKING]

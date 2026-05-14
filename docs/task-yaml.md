@@ -154,9 +154,9 @@ Example:
 
 ## Acceptance Skeleton Preflight
 
-`preflight.acceptance_skeleton` is an optional, default-disabled stage that runs after input files are prepared and before the first executor attempt. When `enabled: true`, Galley runs the built-in test creator, writes AC-linked test skeletons in the worktree, records `runs/<run-id>/preflight_result.json` as the runtime source of truth, updates the running task with the generated skeleton metadata, and adds a skeleton-obligations section to the executor work order.
+`preflight.acceptance_skeleton` is an optional stage that runs after input files are prepared and before the first executor attempt. When enabled, Galley runs the built-in test creator, writes AC-linked test skeletons in the worktree, records `runs/<run-id>/preflight_result.json` as the runtime source of truth, updates the running task with the generated skeleton metadata, and adds a skeleton-obligations section to the executor work order.
 
-The skill-bundled skeleton generator (`scripts/create_task_skeleton.py`) writes this stage explicitly disabled by default:
+New task skeletons include the stage in its default disabled state:
 
 ```yaml
 preflight:
@@ -164,7 +164,7 @@ preflight:
     enabled: false
 ```
 
-That keeps the runtime gate visible in new task YAML while preserving the disabled default behavior, where the daemon flow is identical to omitting `preflight` entirely. Flip `enabled` to `true` and add the optional fields below when you approve the preflight stage.
+Disabled preflight has the same daemon behavior as omitting `preflight` entirely. Set `enabled` to `true` when the task should create acceptance-criterion-linked skeleton files before the executor starts.
 
 ```yaml
 preflight:

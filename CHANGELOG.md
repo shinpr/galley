@@ -8,7 +8,7 @@ This project follows semantic versioning.
 
 ### Changed
 
-- Skill-bundled `scripts/create_task_skeleton.py` now emits an explicit `preflight.acceptance_skeleton.enabled: false` block by default, so newly generated task YAML shows the disabled runtime gate while preserving the existing disabled-preflight behavior. Only the `enabled` field is written; opt-in fields such as `mode`, `required`, `allowed_paths`, and `outputs` remain omitted until an author flips `enabled` to true. The skill task-authoring reference, `docs/task-yaml.md`, and `examples/afk-task.yaml` are updated to match the new explicit default.
+- Skill-bundled `scripts/create_task_skeleton.py` now includes the optional acceptance skeleton preflight stage in new task YAML with `enabled: false`. This makes the opt-in preflight setting visible while preserving the existing disabled behavior; enabled-only fields such as `mode`, `required`, `allowed_paths`, and `outputs` remain omitted until an author enables the stage.
 
 ## v0.3.5 - 2026-05-13
 

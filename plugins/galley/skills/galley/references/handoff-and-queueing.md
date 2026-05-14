@@ -76,7 +76,7 @@ Advanced roots: pass `--root <path>` only when the user explicitly chose a non-d
 | `files[n].source is required` | Add the source path or remove the file entry. |
 | `files[n].destination is required` | Add the destination path where Galley should copy the input file in the worktree. |
 | `files[n].destination must stay within scope.allowed_paths` | Move the destination under an allowed path or expand `scope.allowed_paths` deliberately. |
-| `executor.cli must be claude` | Use `executor.cli: claude`. |
+| `executor.cli must be one of: claude, codex` | Use `executor.cli: claude` or `executor.cli: codex`. |
 | `execution_policy.loop_budget must be >= 0` | Use an integer greater than or equal to `0`; `0` means unlimited. |
 
 Schema/decode errors such as `field text not found in type task.Decision` mean a nested object has the wrong shape. Use the skill-bundled `references/task.schema.json`. Inspect Galley implementation source only when the task target is Galley itself.

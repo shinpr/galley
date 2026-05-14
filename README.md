@@ -9,11 +9,11 @@
 [![GitHub Release](https://img.shields.io/github/v/release/shinpr/galley)](https://github.com/shinpr/galley/releases)
 [![License: MIT](https://img.shields.io/github/license/shinpr/galley)](LICENSE)
 
-Galley is a local orchestration runtime for supervised Claude Code task execution.
+Galley is a local orchestration runtime for supervised AI agent task execution.
 
 It runs locally, keeps work in git-visible changes, and records evidence for review before each acceptance decision.
 
-Galley is Claude-first today. The executor path targets Claude Code, and supervisor review defaults to Claude. Codex can be selected as an alternate model supervisor.
+Galley defaults to Claude Code for execution and supervisor review. Task YAML can select Codex as the executor, and the daemon can select Codex as the supervisor.
 
 ## Quick Start
 

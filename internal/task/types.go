@@ -173,7 +173,7 @@ type Supervisor struct {
 // Executor configures the implementation worker for a task.
 type Executor struct {
 	CLI           string  `yaml:"cli" json:"cli"`
-	Model         string  `yaml:"model" json:"model"`
+	Model         string  `yaml:"model,omitempty" json:"model,omitempty"`
 	Effort        string  `yaml:"effort" json:"effort"`
 	PromptProfile string  `yaml:"prompt_profile" json:"prompt_profile"`
 	PromptMode    string  `yaml:"prompt_mode" json:"prompt_mode"`

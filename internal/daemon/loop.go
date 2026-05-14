@@ -442,6 +442,11 @@ type attemptOutcome struct {
 	DiffSnapshot workspace.Snapshot
 }
 
+const (
+	executorResultFilename     = "executor_result.json"
+	legacyClaudeResultFilename = "claude_result.json"
+)
+
 func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, profiles profile.Bundle, workDir, baseSHA, attemptDir, prompt, taskFile string, preflight *AcceptanceSkeletonResult) (attemptOutcome, error) {
 	attemptCtx := ctx
 	var cancel context.CancelFunc
@@ -451,51 +456,49 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 		defer cancel()
 	}
 
-	claudeOpts := runner.FromTask(loaded)
-	claudeOpts.Bin = opts.ClaudeBin
-	claudeOpts.WorkDir = workDir
-	claudeOpts.SystemPromptFile = opts.SystemPromptFile
-	claudeOpts.JSONSchemaFile = opts.JSONSchemaFile
-	claudeOpts.Prompt = prompt
-	if !opts.DisableClaudeGuard {
-		guardDir := opts.ClaudeGuardPluginDir
-		if guardDir == "" {
-			guardDir = filepath.Join(opts.Root, "runtime", "claude-guard-plugin")
-		}
-		guardDir, err := claudeguard.Ensure(guardDir)
-		if err != nil {
-			return attemptOutcome{}, err
-		}
-		guardDir, err = filepath.Abs(guardDir)
-		if err != nil {
-			return attemptOutcome{}, fmt.Errorf("resolve Claude guard plugin dir: %w", err)
-		}
-		claudeOpts.PluginDirs = append(claudeOpts.PluginDirs, guardDir)
+	cli := loaded.Executor.CLI
+	if cli == "" {
+		return attemptOutcome{}, fmt.Errorf("executor.cli is required")
 	}
 
-	commandPlan, err := runner.ClaudeCommandPlan(claudeOpts)
+	var (
+		commandPlan runner.Command
+		stdoutPath  string
+		stderrPath  string
+		err         error
+	)
+	switch cli {
+	case "claude":
+		commandPlan, stdoutPath, stderrPath, err = prepareClaudeExecutorPlan(opts, loaded, workDir, prompt, attemptDir)
+	case "codex":
+		commandPlan, stdoutPath, stderrPath, err = prepareCodexExecutorPlan(opts, loaded, workDir, prompt, attemptDir)
+	default:
+		return attemptOutcome{}, fmt.Errorf("unsupported executor.cli %q; must be one of: %s", cli, strings.Join(task.ExecutorCLIEnum(), ", "))
+	}
 	if err != nil {
 		return attemptOutcome{}, err
 	}
-	if err := writeJSON(filepath.Join(attemptDir, "command_plan.json"), commandPlan); err != nil {
+	auditPlan := commandPlan
+	auditPlan.Env = nil
+	if err := writeJSON(filepath.Join(attemptDir, "command_plan.json"), auditPlan); err != nil {
 		return attemptOutcome{}, err
 	}
 
 	started := time.Now().UTC()
-	stdoutPath := filepath.Join(attemptDir, "claude.stdout.jsonl")
 	runResult, runErr := runner.RunCommand(attemptCtx, commandPlan, runner.RunOptions{
 		Timeout:     attemptTimeout,
 		IdleTimeout: opts.IdleTimeout,
 		StdoutPath:  stdoutPath,
-		StderrPath:  filepath.Join(attemptDir, "claude.stderr.log"),
+		StderrPath:  stderrPath,
 	})
 	completed := time.Now().UTC()
 	if err := writeJSON(filepath.Join(attemptDir, "run_result.json"), runResult); err != nil {
 		return attemptOutcome{}, err
 	}
 
-	resultPath := filepath.Join(attemptDir, "claude_result.json")
-	claudeResult, parseErr := resolveClaudeResult(attemptCtx, opts, stdoutPath, runResult.Stdout, taskFile, resultPath, workDir, profiles)
+	resultPath := filepath.Join(attemptDir, executorResultFilename)
+	lastMessagePath := codexLastMessagePath(cli, attemptDir)
+	claudeResult, parseErr := resolveExecutorResult(attemptCtx, opts, cli, stdoutPath, runResult.Stdout, lastMessagePath, taskFile, resultPath, workDir, profiles)
 	if parseErr == nil {
 		if err := writeJSON(resultPath, claudeResult); err != nil {
 			return attemptOutcome{}, err
@@ -530,7 +533,53 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 	}, nil
 }
 
-func resolveClaudeResult(ctx context.Context, opts Options, stdoutPath, stdoutTail, taskFile, resultPath, workDir string, profiles profile.Bundle) (runner.ClaudeResult, error) {
+// codexLastMessagePath returns the attempt-scoped `--output-last-message`
+// capture path Galley requests for Codex executor runs (empty for Claude
+// because Claude streams its result directly to stdout JSONL).
+func codexLastMessagePath(cli, attemptDir string) string {
+	if cli != "codex" || attemptDir == "" {
+		return ""
+	}
+	return filepath.Join(attemptDir, runner.CodexLastMessageFilename)
+}
+
+// resolveExecutorResult resolves the structured executor result for one
+// attempt. For Claude executor runs the result lives in the JSONL stdout
+// stream; for Codex executor runs the canonical surface is the final message
+// captured by `codex exec --output-last-message`, with the JSONL stdout
+// stream as a fallback. The function intentionally returns the executor's
+// own report when it is a valid hard_stop so the daemon does not overwrite a
+// hard_stop executor judgment with fallback generated evidence — that would
+// erase the unblock instructions the supervisor needs (R2 / AC4).
+func resolveExecutorResult(ctx context.Context, opts Options, cli, stdoutPath, stdoutTail, lastMessagePath, taskFile, resultPath, workDir string, profiles profile.Bundle) (runner.ClaudeResult, error) {
+	// Codex executor: parse the captured final-message file first so completed,
+	// completed_with_risks, and hard_stop results survive when the JSONL stream
+	// is truncated or empty. A hard_stop result is preserved verbatim — the
+	// same invariant the Claude path enforces below.
+	if cli == "codex" && lastMessagePath != "" {
+		if lastResult, lastErr := runner.ExtractCodexLastMessageFile(lastMessagePath); lastErr == nil {
+			if lastResult.Status == "hard_stop" {
+				return lastResult, nil
+			}
+			generated, generatedErr := result.Complete(ctx, result.CompleteOptions{
+				TaskFile: taskFile,
+				Output:   resultPath,
+				WorkDir:  workDir,
+				Summary:  "Task implementation completed and verification evidence was recorded by Galley.",
+				Profiles: profiles,
+				GitBin:   opts.GitBin,
+			})
+			if generatedErr == nil {
+				return mergeExecutorJudgment(generated, lastResult), nil
+			}
+			return lastResult, nil
+		}
+	}
+
+	// Claude stdout normally carries the structured result. Codex stdout is a
+	// JSON event stream, so this parse is only a best-effort fallback after the
+	// Codex last-message path above; result.Complete provides the normal Codex
+	// fallback when stdout is not an executor result.
 	claudeResult, claudeErr := runner.ExtractClaudeResultFile(stdoutPath)
 	if claudeErr == nil && claudeResult.Status == "hard_stop" {
 		return claudeResult, nil
@@ -600,7 +649,7 @@ func mergeAttemptEvidence(loaded *task.Task, outcome attemptOutcome, runID, work
 		Error:             executorAttemptError(outcome, attemptDir),
 	})
 	loaded.Verification.Commands = append(loaded.Verification.Commands, task.VerificationCommand{
-		Cmd:           "claude -p",
+		Cmd:           executorVerificationCmd(loaded.Executor.CLI),
 		Status:        verificationStatus(outcome.RunErr),
 		OutputExcerpt: fmt.Sprintf("executor stdout/stderr captured under %s; run_result.json contains bounded tails", attemptDir),
 	})
@@ -673,6 +722,22 @@ func mergeAttemptEvidence(loaded *task.Task, outcome attemptOutcome, runID, work
 			Mitigation:           strings.Join(outcome.ClaudeResult.HardStop.NeededToContinue, "; "),
 			HumanReviewSuggested: true,
 		})
+	}
+}
+
+// executorVerificationCmd returns a stable command label that identifies the
+// executor CLI used for an attempt. It is the value Galley records in
+// task.verification.commands so reviewers can tell whether the run was driven
+// by Claude or Codex from the saved task file alone. The Claude label stays
+// "claude -p" for backward compatibility with previously saved evidence.
+func executorVerificationCmd(cli string) string {
+	switch cli {
+	case "codex":
+		return "codex exec"
+	case "", "claude":
+		return "claude -p"
+	default:
+		return "unknown"
 	}
 }
 
@@ -853,7 +918,7 @@ func requiredCheckEvidenceGate(loaded *task.Task, runDir string) (string, bool) 
 	if len(required) == 0 {
 		return "", true
 	}
-	res, _, err := loadLatestClaudeResult(runDir)
+	res, _, err := loadLatestExecutorResult(runDir)
 	if err != nil || res == nil {
 		return "no executor result is available to verify required quality checks", false
 	}
@@ -921,7 +986,7 @@ func loadRunProfiles(runDir string) (profile.Bundle, error) {
 	return payload.Bundle, nil
 }
 
-func loadLatestClaudeResult(runDir string) (*runner.ClaudeResult, string, error) {
+func loadLatestExecutorResult(runDir string) (*runner.ClaudeResult, string, error) {
 	bestDir, _, err := runlog.LatestAttemptDir(runDir)
 	if err != nil {
 		return nil, "", err
@@ -929,7 +994,7 @@ func loadLatestClaudeResult(runDir string) (*runner.ClaudeResult, string, error)
 	if bestDir == "" {
 		return nil, "", nil
 	}
-	data, err := os.ReadFile(filepath.Join(bestDir, "claude_result.json"))
+	data, err := readExecutorResultFile(bestDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, bestDir, nil
@@ -941,6 +1006,20 @@ func loadLatestClaudeResult(runDir string) (*runner.ClaudeResult, string, error)
 		return nil, bestDir, err
 	}
 	return &res, bestDir, nil
+}
+
+func readExecutorResultFile(attemptDir string) ([]byte, error) {
+	data, err := os.ReadFile(filepath.Join(attemptDir, executorResultFilename))
+	if err == nil {
+		return data, nil
+	}
+	if !os.IsNotExist(err) {
+		return nil, err
+	}
+	// Legacy compatibility: Galley used claude_result.json before executor
+	// results were provider-neutral. Keep this fallback while existing run
+	// evidence may still be read; remove it after the legacy artifact window ends.
+	return os.ReadFile(filepath.Join(attemptDir, legacyClaudeResultFilename))
 }
 
 // appendPreflightObligations adds runtime skeleton paths, AC bindings, kinds,
@@ -987,6 +1066,62 @@ func preflightFailureMessage(res *AcceptanceSkeletonResult) string {
 		return res.Error.Message
 	}
 	return res.Error.Phase
+}
+
+// prepareClaudeExecutorPlan builds the Claude executor command plan and the
+// stdout/stderr capture paths used by runExecutorAttempt.
+func prepareClaudeExecutorPlan(opts Options, loaded task.Task, workDir, prompt, attemptDir string) (runner.Command, string, string, error) {
+	claudeOpts := runner.FromTask(loaded)
+	claudeOpts.Bin = opts.ClaudeBin
+	claudeOpts.WorkDir = workDir
+	claudeOpts.SystemPromptFile = opts.SystemPromptFile
+	claudeOpts.JSONSchemaFile = opts.JSONSchemaFile
+	claudeOpts.Prompt = prompt
+	if !opts.DisableClaudeGuard {
+		guardDir := opts.ClaudeGuardPluginDir
+		if guardDir == "" {
+			guardDir = filepath.Join(opts.Root, "runtime", "claude-guard-plugin")
+		}
+		guardDir, err := claudeguard.Ensure(guardDir)
+		if err != nil {
+			return runner.Command{}, "", "", err
+		}
+		guardDir, err = filepath.Abs(guardDir)
+		if err != nil {
+			return runner.Command{}, "", "", fmt.Errorf("resolve Claude guard plugin dir: %w", err)
+		}
+		claudeOpts.PluginDirs = append(claudeOpts.PluginDirs, guardDir)
+	}
+	plan, err := runner.ClaudeCommandPlan(claudeOpts)
+	if err != nil {
+		return runner.Command{}, "", "", err
+	}
+	return plan, filepath.Join(attemptDir, "claude.stdout.jsonl"), filepath.Join(attemptDir, "claude.stderr.log"), nil
+}
+
+// prepareCodexExecutorPlan builds the Codex executor command plan and the
+// stdout/stderr capture paths used by runExecutorAttempt. The stdout file is
+// named codex.stdout.jsonl to mirror the claude.stdout.jsonl convention.
+//
+// AttemptDir is threaded through to the runner so JSONSchemaFile/JSONSchema is
+// mapped onto a real `codex exec --output-schema <file>` path and the daemon
+// also requests `--output-last-message <file>` under the same attempt
+// directory. The Codex CLI writes the final assistant message to that file,
+// which resolveCodexResult then parses to preserve completed,
+// completed_with_risks, and hard_stop executor results for supervisor handoff.
+func prepareCodexExecutorPlan(opts Options, loaded task.Task, workDir, prompt, attemptDir string) (runner.Command, string, string, error) {
+	codexOpts := runner.CodexFromTask(loaded)
+	codexOpts.Bin = opts.CodexBin
+	codexOpts.WorkDir = workDir
+	codexOpts.SystemPromptFile = opts.SystemPromptFile
+	codexOpts.JSONSchemaFile = opts.JSONSchemaFile
+	codexOpts.AttemptDir = attemptDir
+	codexOpts.Prompt = prompt
+	plan, err := runner.CodexCommandPlan(codexOpts)
+	if err != nil {
+		return runner.Command{}, "", "", err
+	}
+	return plan, filepath.Join(attemptDir, "codex.stdout.jsonl"), filepath.Join(attemptDir, "codex.stderr.log"), nil
 }
 
 func attemptBudget(b task.LoopBudget) int {

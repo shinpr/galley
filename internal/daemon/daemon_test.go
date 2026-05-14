@@ -68,7 +68,7 @@ func TestRunOnceMovesTaskToDoneAndWritesRunEvidence(t *testing.T) {
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "task.effective.yaml"), 1)
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", "command_plan.json"), 1)
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", "run_result.json"), 1)
-	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", "claude_result.json"), 1)
+	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", executorResultFilename), 1)
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", "supervisor_verdict.json"), 1)
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", "git_status.json"), 1)
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", "diff.patch"), 1)

@@ -14,12 +14,20 @@ var claudeSupervisorReview string
 //go:embed claude-executor-full.md
 var claudeExecutorFull string
 
+//go:embed codex-executor-full.md
+var codexExecutorFull string
+
 //go:embed acceptance-skeleton-creator.md
 var acceptanceSkeletonCreator string
 
 // ClaudeExecutorFull returns the built-in Claude executor system prompt.
 func ClaudeExecutorFull() string {
 	return claudeExecutorFull
+}
+
+// CodexExecutorFull returns the built-in Codex executor system prompt.
+func CodexExecutorFull() string {
+	return codexExecutorFull
 }
 
 // AcceptanceSkeletonCreator returns the built-in test-skeleton creator prompt.

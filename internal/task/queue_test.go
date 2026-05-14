@@ -67,6 +67,41 @@ func TestQueueDefaultsLoopBudget(t *testing.T) {
 	}
 }
 
+func TestQueuePreservesOmittedExecutorModel(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	draftPath := filepath.Join(root, "tasks", "draft", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(draftPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := writeTaskYAML(t, "loop_budget: 3")
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Status = "draft"
+	loaded.Executor.Model = ""
+	if err := Save(draftPath, loaded); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Queue(draftPath, QueueOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Task.Executor.Model != "" {
+		t.Fatalf("queued task model got %q, want omitted/default", result.Task.Executor.Model)
+	}
+	queuedPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	data, err := os.ReadFile(queuedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "model:") {
+		t.Fatalf("queued task should omit empty executor.model, got:\n%s", string(data))
+	}
+}
+
 func TestQueueCopiesExternalDraftIntoRoot(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

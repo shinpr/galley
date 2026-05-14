@@ -204,10 +204,63 @@
     },
     "executor": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "cli": {
+                "const": "claude"
+              }
+            },
+            "required": [
+              "cli"
+            ]
+          },
+          "then": {
+            "properties": {
+              "effort": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ],
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "cli": {
+                "const": "codex"
+              }
+            },
+            "required": [
+              "cli"
+            ]
+          },
+          "then": {
+            "properties": {
+              "effort": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ],
+                "type": "string"
+              }
+            }
+          }
+        }
+      ],
       "properties": {
         "cli": {
           "enum": [
-            "claude"
+            "claude",
+            "codex"
           ],
           "type": "string"
         },
@@ -237,7 +290,6 @@
       },
       "required": [
         "cli",
-        "model",
         "effort",
         "prompt_profile",
         "prompt_mode",

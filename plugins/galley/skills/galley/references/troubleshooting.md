@@ -33,7 +33,7 @@ Inspect the latest attempt directory:
 | --- | --- |
 | `work_order.md` | Prompt and task context passed to executor |
 | `input_files.json` | Input files copied into the worktree and their commit policy |
-| `claude_result.json` or executor result | Structured executor output |
+| `executor_result.json` | Structured executor output |
 | `supervisor_verdict.json` | Model supervisor decision |
 | `diff.patch` | Code changes reviewed by the supervisor |
 | `command_plan.json` | Claude executor invocation plan |

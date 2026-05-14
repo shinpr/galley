@@ -27,6 +27,7 @@ ROOT_ORDER = [
     "worktree",
     "supervisor",
     "executor",
+    "preflight",
     "decisions",
     "risks",
     "discussion_items",
@@ -252,6 +253,11 @@ def main() -> int:
         "prompt_mode": "replace",
         "max_budget_usd": 4,
     }
+    # Emit the AC test skeleton preflight stage explicitly disabled by default so
+    # the generated YAML shows the runtime gate. Only `enabled` is written; any
+    # enabled-only fields (mode, required, allowed_paths, outputs) stay omitted
+    # until the author opts in by flipping enabled to true.
+    task["preflight"] = {"acceptance_skeleton": {"enabled": False}}
     task["decisions"] = []
     task["risks"] = []
     task["attempts"] = []

@@ -35,9 +35,14 @@ executor:
   prompt_profile: "codexized-claude-executor-v1"
   prompt_mode: "replace"
   max_budget_usd: 10
-# Optional, default-disabled. Uncomment to materialize AC-linked test skeletons
-# before the first executor attempt. See docs/task-yaml.md "Acceptance Skeleton Preflight".
-# preflight:
+# Optional acceptance skeleton preflight. When enabled, Galley creates
+# AC-linked test skeletons before the executor starts. It is disabled by
+# default; set `enabled` to true and optionally add `required` or
+# `allowed_paths` to opt in. See docs/task-yaml.md.
+preflight:
+  acceptance_skeleton:
+    enabled: false
+# Example opt-in shape:
 #   acceptance_skeleton:
 #     enabled: true
 #     required: true

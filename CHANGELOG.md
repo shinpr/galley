@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- Skill-bundled `scripts/create_task_skeleton.py` now includes the optional acceptance skeleton preflight stage in new task YAML with `enabled: false`. This makes the opt-in preflight setting visible while preserving the existing disabled behavior; enabled-only fields such as `mode`, `required`, `allowed_paths`, and `outputs` remain omitted until an author enables the stage.
+
 ## v0.3.5 - 2026-05-13
 
 ### Fixed

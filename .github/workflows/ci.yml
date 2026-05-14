@@ -46,6 +46,9 @@ jobs:
           go run ./cmd/galley profile validate --kind environment examples/environment-local.yaml
           go run ./cmd/galley schema check
 
+      - name: Validate skill scripts
+        run: python3 plugins/galley/skills/galley/scripts/test_create_task_skeleton.py
+
       - name: Validate JSON files
         run: |
           python3 -m json.tool schemas/claude-result.schema.json >/dev/null

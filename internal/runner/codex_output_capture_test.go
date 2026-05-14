@@ -7,12 +7,11 @@ package runner
 // hard_stop executor judgments survive supervisor handoff.
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/shinpr/galley/schemas"
 )
 
 func TestCodexCommandPlanMaterializesEmbeddedSchemaWhenOnlyContentAvailable(t *testing.T) {
@@ -42,8 +41,44 @@ func TestCodexCommandPlanMaterializesEmbeddedSchemaWhenOnlyContentAvailable(t *t
 	if err != nil {
 		t.Fatalf("read materialized schema: %v", err)
 	}
-	if string(body) != schemas.ClaudeResult {
-		t.Fatalf("materialized schema content drift: got %d bytes, want %d", len(body), len(schemas.ClaudeResult))
+	if strings.Contains(string(body), `"allOf"`) {
+		t.Fatalf("Codex output schema must not contain allOf; schema=%s", string(body))
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(body, &doc); err != nil {
+		t.Fatalf("materialized schema is not valid JSON: %v", err)
+	}
+	if got := doc["title"]; got != "Galley Claude Executor Result" {
+		t.Fatalf("materialized schema title drift: %#v", got)
+	}
+	props, ok := doc["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("materialized schema missing properties object: %#v", doc["properties"])
+	}
+	required, ok := doc["required"].([]any)
+	if !ok {
+		t.Fatalf("materialized schema missing required array: %#v", doc["required"])
+	}
+	requiredSet := make(map[string]bool, len(required))
+	for _, value := range required {
+		name, ok := value.(string)
+		if !ok {
+			t.Fatalf("required entry is not a string: %#v", value)
+		}
+		requiredSet[name] = true
+	}
+	for name := range props {
+		if !requiredSet[name] {
+			t.Fatalf("Codex output schema must require property %q", name)
+		}
+	}
+	hardStop, ok := props["hard_stop"].(map[string]any)
+	if !ok {
+		t.Fatalf("materialized schema missing hard_stop object: %#v", props["hard_stop"])
+	}
+	types, ok := hardStop["type"].([]any)
+	if !ok || len(types) != 2 || types[0] != "object" || types[1] != "null" {
+		t.Fatalf("hard_stop must be nullable for Codex strict schema: %#v", hardStop["type"])
 	}
 
 	lastMsgFlag := flagValue(t, plan.Argv, "--output-last-message")

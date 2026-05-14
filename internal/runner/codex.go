@@ -1,9 +1,11 @@
 package runner
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/prompts"
@@ -194,9 +196,45 @@ func withDefaultEmbeddedCodexOptions(opts CodexOptions) CodexOptions {
 		opts.SystemPrompt = prompts.CodexExecutorFull()
 	}
 	if opts.JSONSchemaFile == "" && opts.JSONSchema == "" {
-		opts.JSONSchema = schemas.ClaudeResult
+		opts.JSONSchema = CodexExecutorResultSchema()
 	}
 	return opts
+}
+
+// CodexExecutorResultSchema returns the executor result schema shape accepted
+// by `codex exec --output-schema`. Codex currently rejects JSON Schema
+// conditionals such as allOf/if/then/else in response_format schemas and
+// requires every top-level property to be listed in required. The runner
+// converts hard_stop into a required nullable field before invoking Codex.
+// Galley still validates the parsed result with ClaudeResult.Validate(), which
+// preserves the hard_stop semantic requirement after the model responds.
+func CodexExecutorResultSchema() string {
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(schemas.ClaudeResult), &doc); err != nil {
+		return schemas.ClaudeResult
+	}
+	delete(doc, "allOf")
+	props, _ := doc["properties"].(map[string]any)
+	if hardStop, _ := props["hard_stop"].(map[string]any); hardStop != nil {
+		hardStop["type"] = []any{"object", "null"}
+	}
+	if props != nil {
+		names := make([]string, 0, len(props))
+		for name := range props {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		required := make([]any, 0, len(names))
+		for _, name := range names {
+			required = append(required, name)
+		}
+		doc["required"] = required
+	}
+	out, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return schemas.ClaudeResult
+	}
+	return string(out) + "\n"
 }
 
 func combinePromptForCodex(systemPrompt, workOrder string) string {

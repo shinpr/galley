@@ -136,7 +136,8 @@ Use this shape for successful or risk-bearing completion:
     }
   ],
   "decisions": [],
-  "risks": []
+  "risks": [],
+  "hard_stop": null
 }
 ```
 
@@ -200,7 +201,8 @@ Example:
       "mitigation": "Rerun the integration command after starting the service.",
       "needs_human_review": false
     }
-  ]
+  ],
+  "hard_stop": null
 }
 ```
 
@@ -212,4 +214,4 @@ Use exactly these enum values:
 - `decisions[].reversibility`: `high`, `medium`, or `low`
 - `risks[].type`: `ambiguous_requirement`, `partial_verification`, `external_dependency`, `technical_debt`, or `other`
 
-Return empty arrays for `decisions` and `risks` when none exist.
+Return empty arrays for `decisions` and `risks` when none exist. Return `"hard_stop": null` for `completed` and `completed_with_risks`.

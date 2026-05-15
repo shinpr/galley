@@ -13,7 +13,9 @@ Galley is a local orchestration runtime for supervised AI-assisted coding task e
 
 It runs locally, keeps work in git-visible changes, and records evidence for review before each acceptance decision.
 
-Galley supports Claude Code and Codex as first-class executor and supervisor backends. Claude Code is the default; task YAML can select Codex for execution, and the daemon can select Codex for supervisor review.
+Galley can use Claude Code or Codex for implementation, and either backend can review the result as supervisor.
+
+When a new task is authored, Galley uses the repository executor default from `environment.yaml` when one is configured; otherwise it defaults to Codex. The generated task records that choice in `executor.cli`, and that task-level setting remains authoritative. Supervisor selection is separate and is controlled by daemon startup.
 
 ## Quick Start
 
@@ -90,8 +92,8 @@ Galley includes a plugin that packages one Agent Skill for Claude Code and Codex
 Profiles are worth setting up early. They tell Galley which commands are available, which quality checks are required, what evidence the supervisor should expect, and which findings should block acceptance. The skill can create these interactively from the target repository.
 
 - **Task authoring**: clarify the user goal, target repo, scope, input files, acceptance criteria, verification, loop budget, supervisor, and PR behavior; write a draft task YAML, validate it, and queue it only after explicit user approval.
-- **Profile authoring**: interactively create `quality.yaml` and `environment.yaml` for repo-specific quality gates, commands, tools, network policy, secrets policy, PR behavior, and cleanup policy.
-- **Setup**: install `galley`, verify `claude`, `codex`, and `gh` availability, configure workflow roots, and prepare daemon/PR automation commands.
+- **Profile authoring**: interactively create `quality.yaml` and `environment.yaml` for repo-specific quality gates, command names, executor defaults, network and secrets policy, PR behavior, and cleanup policy.
+- **Setup**: install `galley`, verify the selected provider CLIs and `gh` when they are needed, configure workflow roots, and prepare daemon/PR automation commands.
 - **Troubleshooting**: inspect failed runs, stale claims, PR automation state, executor output, and recorded evidence.
 
 ```text
@@ -114,9 +116,9 @@ The standalone skill still expects the `galley` CLI on `PATH`. Some workflows al
 
 - **Task YAML**: the trusted local input that defines the goal, acceptance criteria, scope, verification, execution policy, and PR behavior. See [docs/task-yaml.md](docs/task-yaml.md).
 - **Quality profile**: optional repo-specific review gates, required checks, pass policy, and evidence requirements. See [docs/profiles.md](docs/profiles.md).
-- **Environment profile**: optional repo-specific command map and execution constraints for network, secrets, and destructive operations. See [docs/profiles.md](docs/profiles.md).
-- **Executor**: the backend that implements the task in the worktree. Claude Code is the default; Codex can be selected per task.
-- **Supervisor**: the backend that reviews executor work against acceptance criteria, required quality checks, and recorded evidence. Claude is the default; Codex can be selected per daemon.
+- **Environment profile**: optional repo-specific profile for command names, executor defaults, network and secrets policy, destructive-operation constraints, PR behavior, and cleanup policy. See [docs/profiles.md](docs/profiles.md).
+- **Executor**: the backend that implements the task in the worktree. Newly authored tasks use `environment.yaml` `executor.default_cli` when it is set, otherwise Codex. An explicit task `executor.cli` selects the backend for that task.
+- **Supervisor**: the backend that reviews executor work against acceptance criteria, required quality checks, and recorded evidence. Supervisor selection is controlled by daemon startup; Claude is the default unless Codex is selected.
 - **AFK task**: an unattended task that can run asynchronously inside a managed worktree.
 - **Acceptance criterion ID**: the `acceptance_criteria[].id` value the executor must report back with evidence, for example `AC1`.
 - **Loop budget**: `execution_policy.loop_budget` is the maximum number of executor attempts before Galley escalates to supervisor review; `0` means unlimited.
@@ -349,7 +351,13 @@ With `pr.comments.reply: true`, Galley posts a concise acknowledgement comment a
 
 ## Executors
 
-Executor backends are selected per task in task YAML. Claude Code is the default; set `executor.cli: codex` to run a task with Codex instead. Acceptance skeleton preflight, structured executor results, run evidence, and supervisor review use the same contracts across both backends.
+For newly authored tasks, Galley resolves the executor in this order:
+
+1. an explicit executor choice during task authoring
+2. `environment.yaml` `executor.default_cli`
+3. Codex
+
+The generated task records the selected backend in `executor.cli`. After that, the task YAML is authoritative: existing tasks keep their configured executor unless the task file is edited. Acceptance skeleton preflight, structured executor results, run evidence, and supervisor review use the same contracts across both backends.
 
 See [docs/task-yaml.md](docs/task-yaml.md) for the full `executor` block and [examples/afk-task-codex.yaml](examples/afk-task-codex.yaml) for a Codex task example.
 

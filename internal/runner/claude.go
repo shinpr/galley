@@ -59,7 +59,7 @@ func FromTask(t task.Task) ClaudeOptions {
 		Model:          t.Executor.Model,
 		Effort:         t.Executor.Effort,
 		PromptMode:     promptMode,
-		MaxBudgetUSD:   t.Executor.MaxBudgetUSD,
+		MaxBudgetUSD:   t.Executor.MaxBudgetUSDValue(),
 		PermissionMode: permissionMode,
 		WorkDir:        t.Scope.CWD,
 	}

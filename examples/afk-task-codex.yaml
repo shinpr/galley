@@ -33,7 +33,6 @@ executor:
   effort: "high"
   prompt_profile: "codex-executor-v1"
   prompt_mode: "replace"
-  max_budget_usd: 10
 decisions: []
 risks: []
 attempts: []

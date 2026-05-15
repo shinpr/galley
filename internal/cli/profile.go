@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/shinpr/galley/internal/fileutil"
 	"github.com/shinpr/galley/internal/galleyhome"
@@ -18,6 +19,7 @@ func newProfileCommand() *cobra.Command {
 	}
 	cmd.AddCommand(newProfileValidateCommand())
 	cmd.AddCommand(newProfileResolveCommand())
+	cmd.AddCommand(newProfileExecutorDefaultCommand())
 	return cmd
 }
 
@@ -119,6 +121,40 @@ func newProfileValidateCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&kind, "kind", "", "Profile kind: quality or environment; inferred from fields when omitted")
+	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text or json")
+	return cmd
+}
+
+func newProfileExecutorDefaultCommand() *cobra.Command {
+	var output string
+	cmd := &cobra.Command{
+		Use:    "executor-default ENVIRONMENT.yaml",
+		Short:  "Print the implementation executor default from an environment profile",
+		Hidden: true,
+		Args:   cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			env, err := profile.LoadEnvironment(args[0])
+			if err != nil {
+				return err
+			}
+			result := profile.ValidateEnvironment(env)
+			if !result.Valid() {
+				return fmt.Errorf("invalid environment profile %s: %s", args[0], strings.Join(result.Errors, "; "))
+			}
+			payload := struct {
+				DefaultCLI string `json:"default_cli,omitempty"`
+			}{}
+			if env.Executor != nil {
+				payload.DefaultCLI = env.Executor.DefaultCLI
+			}
+			return renderOutput(cmd, output, payload, func() error {
+				if payload.DefaultCLI != "" {
+					fmt.Fprintln(cmd.OutOrStdout(), payload.DefaultCLI)
+				}
+				return nil
+			})
+		},
+	}
 	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text or json")
 	return cmd
 }

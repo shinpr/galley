@@ -292,8 +292,7 @@
         "cli",
         "effort",
         "prompt_profile",
-        "prompt_mode",
-        "max_budget_usd"
+        "prompt_mode"
       ],
       "type": "object"
     },

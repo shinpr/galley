@@ -63,6 +63,35 @@ Main path: `galley task queue` targets the running daemon queue, or the default 
 
 Advanced roots: pass `--root <path>` only when the user explicitly chose a non-default root.
 
+## Post-Queue PR Review Loop
+
+Use this section when a Galley-created PR needs another executor pass from a PR comment.
+
+A PR comment is treated as a Galley command when the trimmed comment body starts with `/galley`.
+
+Accepted forms:
+
+- `/galley <free-form revision request>`
+- `/galley rerun <free-form revision request>`
+- `/galley requeue <free-form revision request>`
+- `/galley`
+
+The parsed text becomes a pending revision request. A bare `/galley` uses the default request text `PR comment requested another Galley run.` Use concrete revision instructions with acceptance or verification detail when the next executor pass needs specific changes.
+
+PR comment polling scans reviewed tasks under `tasks/done` and `tasks/failed`. A command on a task with status `accepted`, `pr_opened`, `needs_supervisor_review`, `failed`, `closed`, or `merged` requeues the task. If the task is already `queued` or `running`, Galley records the pending revision request and does not move the task again. Use normal GitHub comments for discussion that should not trigger another executor run.
+
+Ignored forms:
+
+- Mid-line mentions such as `Looks good, /galley rerun`
+- `/galley` after another non-whitespace line
+- `/galley:galley ...`
+- `/galleyfoo ...`
+
+Trust boundary:
+
+- Galley accepts PR comment commands only from the recorded PR author.
+- Treat PR comment text as persistent task input because the parsed request is stored in task YAML as revision request input. Provide secrets through an approved repository-specific channel instead of PR comments.
+
 ## Common Validation Fixes
 
 | Validation Message | Fix |

@@ -48,9 +48,14 @@ type Environment struct {
 	ID          string            `yaml:"id" json:"id"`
 	CWD         string            `yaml:"cwd" json:"cwd"`
 	Commands    map[string]string `yaml:"commands" json:"commands"`
+	Executor    *ExecutorDefault  `yaml:"executor,omitempty" json:"executor,omitempty"`
 	Constraints Constraints       `yaml:"constraints" json:"constraints"`
 	PR          PRSettings        `yaml:"pr,omitempty" json:"pr,omitempty"`
 	Worktree    WorktreeSettings  `yaml:"worktree,omitempty" json:"worktree,omitempty"`
+}
+
+type ExecutorDefault struct {
+	DefaultCLI string `yaml:"default_cli,omitempty" json:"default_cli,omitempty"`
 }
 
 type Constraints struct {
@@ -175,10 +180,22 @@ func ValidateEnvironment(env Environment) ValidationResult {
 	require(&result, env.Constraints.Network != "", "constraints.network is required")
 	require(&result, env.Constraints.SecretsPolicy != "", "constraints.secrets_policy is required")
 	require(&result, env.Constraints.DestructiveCommands != "", "constraints.destructive_commands is required")
+	if env.Executor != nil && env.Executor.DefaultCLI != "" {
+		require(&result, validExecutorCLI(env.Executor.DefaultCLI), "executor.default_cli must be one of: claude, codex")
+	}
 	if env.PR.Comments.Reply && !env.PR.Comments.Enabled {
 		result.Warnings = append(result.Warnings, "pr.comments.reply is set while pr.comments.enabled is false")
 	}
 	return result
+}
+
+func validExecutorCLI(value string) bool {
+	switch value {
+	case "claude", "codex":
+		return true
+	default:
+		return false
+	}
 }
 
 func loadYAML(path string, out any) error {

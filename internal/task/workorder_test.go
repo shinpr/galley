@@ -24,6 +24,7 @@ func TestRenderWorkOrderWithProfiles(t *testing.T) {
 			ID:       "local",
 			CWD:      loaded.Scope.CWD,
 			Commands: map[string]string{"build": "go build ./cmd/galley"},
+			Executor: &profile.ExecutorDefault{DefaultCLI: "codex"},
 			Constraints: profile.Constraints{
 				Network:             "approval_required",
 				SecretsPolicy:       "never_read_env_files",
@@ -31,7 +32,7 @@ func TestRenderWorkOrderWithProfiles(t *testing.T) {
 			},
 		},
 	})
-	for _, want := range []string{"## Quality Profile", "go test ./...", "## Environment Profile", "never_read_env_files"} {
+	for _, want := range []string{"## Quality Profile", "go test ./...", "## Environment Profile", "executor default: `codex`", "never_read_env_files"} {
 		if !strings.Contains(workOrder, want) {
 			t.Fatalf("work order missing %q:\n%s", want, workOrder)
 		}

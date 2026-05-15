@@ -82,7 +82,7 @@ func CodexFromTask(t task.Task) CodexOptions {
 		Model:        t.Executor.Model,
 		Effort:       t.Executor.Effort,
 		PromptMode:   promptMode,
-		MaxBudgetUSD: t.Executor.MaxBudgetUSD,
+		MaxBudgetUSD: t.Executor.MaxBudgetUSDValue(),
 		Sandbox:      sandbox,
 		WorkDir:      t.Scope.CWD,
 	}

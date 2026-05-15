@@ -5,16 +5,22 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
+import os
 import pathlib
 import re
 import secrets
+import shutil
+import subprocess
 import sys
 from typing import Any
 
 
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 SCHEMA_PATH = SCRIPT_DIR.parent / "references" / "task.schema.json"
+PROFILE_LOADER_DIR = SCRIPT_DIR / "profile_loader"
+VALID_EXECUTOR_CLIS = {"claude", "codex"}
 ROOT_ORDER = [
     "id",
     "mode",
@@ -48,6 +54,274 @@ def task_id_for(title: str) -> str:
     timestamp = dt.datetime.now(dt.UTC).strftime("%Y%m%d%H%M%S")
     random_suffix = secrets.token_hex(3)
     return f"task-{timestamp}-{random_suffix}-{slugify(title)}"
+
+
+def repo_key_for(cwd: pathlib.Path) -> str:
+    absolute = cwd.expanduser().resolve(strict=False)
+    try:
+        absolute = absolute.resolve(strict=True)
+    except FileNotFoundError:
+        pass
+    base = re.sub(r"[^A-Za-z0-9._-]+", "-", absolute.name).strip("-._") or "repo"
+    digest = hashlib.sha256(str(absolute).encode("utf-8")).hexdigest()[:8]
+    return f"{base}-{digest}"
+
+
+def default_galley_root() -> pathlib.Path:
+    return pathlib.Path(os.environ.get("GALLEY_ROOT", pathlib.Path.home() / ".galley")).expanduser()
+
+
+def environment_profile_path(root: pathlib.Path, cwd: pathlib.Path) -> pathlib.Path:
+    return root / "profiles" / repo_key_for(cwd) / "environment.yaml"
+
+
+def repository_root() -> pathlib.Path | None:
+    for candidate in [SCRIPT_DIR, *SCRIPT_DIR.parents]:
+        go_mod = candidate / "go.mod"
+        # This repo-local helper is only authoritative inside the upstream
+        # Galley module; forks or module renames should fall back to the
+        # installed CLI or the small Python parser below.
+        if go_mod.is_file() and 'module github.com/shinpr/galley' in go_mod.read_text(encoding="utf-8"):
+            return candidate
+    return None
+
+
+def parse_executor_default_payload(stdout: str, path: pathlib.Path) -> str | None:
+    try:
+        payload = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"profile loader returned invalid JSON: {exc}") from exc
+    parsed = str(payload.get("default_cli") or "").strip()
+    if parsed and parsed not in VALID_EXECUTOR_CLIS:
+        raise ValueError(f"{path}: executor.default_cli must be one of: claude, codex")
+    return parsed or None
+
+
+def galley_binary() -> str | None:
+    configured = os.environ.get("GALLEY_BIN", "").strip()
+    if configured:
+        return configured
+    return shutil.which("galley")
+
+
+def executor_default_from_profile_command(path: pathlib.Path) -> str | None:
+    binary = galley_binary()
+    if not binary:
+        return None
+    absolute_path = path.expanduser().resolve(strict=False)
+    try:
+        proc = subprocess.run(
+            [binary, "profile", "executor-default", "--output", "json", str(absolute_path)],
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        return None
+    if proc.returncode != 0:
+        message = proc.stderr.strip() or proc.stdout.strip() or "profile executor-default failed"
+        if "unknown command" in message:
+            return None
+        if "executor.default_cli" in message:
+            raise ValueError(message)
+        return None
+    return parse_executor_default_payload(proc.stdout, path)
+
+
+def executor_default_from_profile_loader(path: pathlib.Path) -> str | None:
+    if shutil.which("go") is None or not PROFILE_LOADER_DIR.is_dir():
+        return None
+    root = repository_root()
+    if root is None:
+        return None
+    absolute_path = path.expanduser().resolve(strict=False)
+    proc = subprocess.run(
+        ["go", "run", "./plugins/galley/skills/galley/scripts/profile_loader", str(absolute_path)],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        message = proc.stderr.strip() or proc.stdout.strip() or "profile loader failed"
+        if "executor.default_cli" in message:
+            raise ValueError(message)
+        return None
+    return parse_executor_default_payload(proc.stdout, path)
+
+
+def strip_yaml_comment(value: str) -> str:
+    quote: str | None = None
+    escaped = False
+    for i, char in enumerate(value):
+        if quote == '"':
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            continue
+        if quote == "'":
+            if char == quote:
+                if i + 1 < len(value) and value[i + 1] == quote:
+                    continue
+                quote = None
+            continue
+        if char in {"'", '"'}:
+            quote = char
+        elif char == "#" and (i == 0 or value[i - 1].isspace()):
+            return value[:i].rstrip()
+    return value.strip()
+
+
+def unquote_yaml_scalar(value: str) -> str:
+    value = strip_yaml_comment(value).strip()
+    if not value:
+        return ""
+    if value[0] in {"'", '"'} and value[-1:] == value[0]:
+        try:
+            return json.loads(value) if value[0] == '"' else value[1:-1].replace("''", "'")
+        except json.JSONDecodeError:
+            return value[1:-1]
+    return value.strip()
+
+
+def split_yaml_key_value(value: str) -> tuple[str, str, str]:
+    quote: str | None = None
+    escaped = False
+    for i, char in enumerate(value):
+        if quote == '"':
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            continue
+        if quote == "'":
+            if char == quote:
+                if i + 1 < len(value) and value[i + 1] == quote:
+                    continue
+                quote = None
+            continue
+        if char in {"'", '"'}:
+            quote = char
+        elif char == ":":
+            return value[:i].strip(), ":", value[i + 1 :].strip()
+    return value, "", ""
+
+
+def parse_executor_flow_mapping(value: str, path: pathlib.Path) -> str | None:
+    value = strip_yaml_comment(value)
+    anchor_match = re.match(r"^&[A-Za-z0-9_.-]+\s+(.*)$", value)
+    if anchor_match:
+        value = anchor_match.group(1).strip()
+    if value in {"", "{}", "null", "~"}:
+        return None
+    if not (value.startswith("{") and value.endswith("}")):
+        return None
+    body = value[1:-1].strip()
+    if not body:
+        return None
+    parts: list[str] = []
+    start = 0
+    quote: str | None = None
+    escaped = False
+    for i, char in enumerate(body):
+        if quote == '"':
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            continue
+        if quote == "'":
+            if char == quote:
+                if i + 1 < len(body) and body[i + 1] == quote:
+                    continue
+                quote = None
+            continue
+        if char in {"'", '"'}:
+            quote = char
+        elif char == ",":
+            parts.append(body[start:i].strip())
+            start = i + 1
+    parts.append(body[start:].strip())
+    for part in parts:
+        key, sep, raw_value = split_yaml_key_value(part)
+        if sep and unquote_yaml_scalar(key) == "default_cli":
+            parsed = unquote_yaml_scalar(raw_value)
+            if parsed in VALID_EXECUTOR_CLIS:
+                return parsed
+            raise ValueError(f"{path}: executor.default_cli must be one of: claude, codex")
+    return None
+
+
+def executor_default_from_environment(path: pathlib.Path) -> str | None:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+
+    for loader in (executor_default_from_profile_command, executor_default_from_profile_loader):
+        try:
+            loaded = loader(path)
+        except ValueError as exc:
+            if "executor.default_cli" in str(exc):
+                raise
+            loaded = None
+        if loaded:
+            return loaded
+
+    in_executor = False
+    executor_indent = 0
+    for raw in text.splitlines():
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip(" "))
+        stripped = raw.strip()
+        if not raw.startswith(" "):
+            key, sep, value = split_yaml_key_value(stripped)
+            if sep and unquote_yaml_scalar(key) == "executor":
+                flow_value = parse_executor_flow_mapping(value, path)
+                if flow_value:
+                    return flow_value
+                in_executor = strip_yaml_comment(value) == ""
+                executor_indent = indent
+                continue
+        if in_executor and indent <= executor_indent:
+            in_executor = False
+        if in_executor:
+            key, sep, value = split_yaml_key_value(stripped)
+            if sep and unquote_yaml_scalar(key) == "default_cli":
+                parsed = unquote_yaml_scalar(value)
+                if parsed in VALID_EXECUTOR_CLIS:
+                    return parsed
+                raise ValueError(f"{path}: executor.default_cli must be one of: claude, codex")
+    return None
+
+
+def resolved_executor_cli(explicit_cli: str | None, root: pathlib.Path, cwd: pathlib.Path) -> str:
+    if explicit_cli:
+        return explicit_cli
+    return executor_default_from_environment(environment_profile_path(root, cwd)) or "codex"
+
+
+def executor_defaults(cli: str) -> dict[str, Any]:
+    if cli == "codex":
+        return {
+            "cli": "codex",
+            "effort": "high",
+            "prompt_profile": "codex-executor-v1",
+            "prompt_mode": "replace",
+        }
+    return {
+        "cli": "claude",
+        "effort": "high",
+        "prompt_profile": "codexized-claude-executor-v1",
+        "prompt_mode": "replace",
+        "max_budget_usd": 4,
+    }
 
 
 def parse_file_mapping(value: str) -> tuple[str, str]:
@@ -166,6 +440,11 @@ def main() -> int:
     parser.add_argument("--cwd", required=True, help="Absolute target repository path.")
     parser.add_argument("--output-dir", default=".", help="Directory for the draft task YAML.")
     parser.add_argument("--root", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--executor-cli",
+        choices=sorted(VALID_EXECUTOR_CLIS),
+        help="Implementation executor backend for this task. Defaults to environment.executor.default_cli, then codex.",
+    )
     parser.add_argument("--loop-budget", default=10, type=parse_nonnegative_int, help="Integer >= 0; 0 means unlimited.")
     parser.add_argument("--allowed-path", action="append", default=None, help="Relative path allowed for edits. Repeatable.")
     parser.add_argument(
@@ -200,8 +479,9 @@ def main() -> int:
         return 2
 
     task_id = task_id_for(args.title)
+    root = pathlib.Path(args.root).expanduser() if args.root else default_galley_root()
     if args.root:
-        output_dir = pathlib.Path(args.root).expanduser() / "tasks" / "draft"
+        output_dir = root / "tasks" / "draft"
     else:
         output_dir = pathlib.Path(args.output_dir).expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -245,13 +525,11 @@ def main() -> int:
         "path": f"../{cwd.name}.worktrees/{task_id}",
     }
     task["supervisor"] = {"review_iterations": 0}
-    task["executor"] = {
-        "cli": "claude",
-        "effort": "high",
-        "prompt_profile": "codexized-claude-executor-v1",
-        "prompt_mode": "replace",
-        "max_budget_usd": 4,
-    }
+    try:
+        task["executor"] = executor_defaults(resolved_executor_cli(args.executor_cli, root, cwd))
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     # Emit the AC test skeleton preflight stage explicitly disabled by default so
     # the generated YAML shows the runtime gate. Only `enabled` is written; any
     # enabled-only fields (mode, required, allowed_paths, outputs) stay omitted

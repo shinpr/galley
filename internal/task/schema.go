@@ -120,7 +120,7 @@ func supervisorSchema() map[string]any {
 
 func executorSchema() map[string]any {
 	return object(
-		required("cli", "effort", "prompt_profile", "prompt_mode", "max_budget_usd"),
+		required("cli", "effort", "prompt_profile", "prompt_mode"),
 		properties(map[string]any{
 			"cli":            enumSchema(validExecutorCLIs),
 			"model":          stringSchema("minLength", 1),

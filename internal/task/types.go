@@ -172,12 +172,21 @@ type Supervisor struct {
 
 // Executor configures the implementation worker for a task.
 type Executor struct {
-	CLI           string  `yaml:"cli" json:"cli"`
-	Model         string  `yaml:"model,omitempty" json:"model,omitempty"`
-	Effort        string  `yaml:"effort" json:"effort"`
-	PromptProfile string  `yaml:"prompt_profile" json:"prompt_profile"`
-	PromptMode    string  `yaml:"prompt_mode" json:"prompt_mode"`
-	MaxBudgetUSD  float64 `yaml:"max_budget_usd" json:"max_budget_usd"`
+	CLI           string   `yaml:"cli" json:"cli"`
+	Model         string   `yaml:"model,omitempty" json:"model,omitempty"`
+	Effort        string   `yaml:"effort" json:"effort"`
+	PromptProfile string   `yaml:"prompt_profile" json:"prompt_profile"`
+	PromptMode    string   `yaml:"prompt_mode" json:"prompt_mode"`
+	MaxBudgetUSD  *float64 `yaml:"max_budget_usd,omitempty" json:"max_budget_usd,omitempty"`
+}
+
+// MaxBudgetUSDValue returns the configured executor budget or zero when the
+// task omitted executor.max_budget_usd.
+func (e Executor) MaxBudgetUSDValue() float64 {
+	if e.MaxBudgetUSD == nil {
+		return 0
+	}
+	return *e.MaxBudgetUSD
 }
 
 // Decision records an ambiguity resolved during execution.

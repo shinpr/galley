@@ -107,6 +107,39 @@ func TestClaudeCommandPlanUsesEmbeddedPromptAndSchemaByDefault(t *testing.T) {
 	}
 }
 
+func TestClaudeFromTaskUsesExplicitExecutorBudget(t *testing.T) {
+	t.Parallel()
+	budget := 6.25
+	tk := task.Task{
+		Scope: task.Scope{
+			CWD:        "/tmp/project",
+			Permission: "edit",
+		},
+		Executor: task.Executor{
+			CLI:           "claude",
+			Effort:        "high",
+			PromptProfile: "codexized-claude-executor-v1",
+			PromptMode:    "replace",
+			MaxBudgetUSD:  &budget,
+		},
+	}
+	opts := FromTask(tk)
+	opts.SystemPrompt = "system"
+	opts.JSONSchema = `{"type":"object"}`
+	opts.Prompt = "do the work"
+
+	argv, err := ClaudeArgv(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < len(argv)-1; i++ {
+		if argv[i] == "--max-budget-usd" && argv[i+1] == "6.25" {
+			return
+		}
+	}
+	t.Fatalf("explicit task budget did not reach Claude argv: %#v", argv)
+}
+
 func TestClaudeArgvRejectsUnknownPromptMode(t *testing.T) {
 	t.Parallel()
 	promptPath, _ := writePromptFixtures(t)

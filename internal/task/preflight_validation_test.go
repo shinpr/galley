@@ -42,7 +42,7 @@ func baseValidPreflightTask() Task {
 			Effort:        "high",
 			PromptProfile: "p",
 			PromptMode:    "replace",
-			MaxBudgetUSD:  1,
+			MaxBudgetUSD:  float64Ptr(1),
 		},
 	}
 }

@@ -108,7 +108,7 @@ func buildBuiltinCreatorCommandPlan(opts AcceptanceSkeletonPreflightOptions, pay
 		JSONSchema:     schemas.AcceptanceSkeletonManifest,
 		PromptMode:     "replace",
 		PermissionMode: "bypassPermissions",
-		MaxBudgetUSD:   opts.Task.Executor.MaxBudgetUSD,
+		MaxBudgetUSD:   opts.Task.Executor.MaxBudgetUSDValue(),
 		PluginDirs:     []string{guardDir},
 	})
 	if err != nil {

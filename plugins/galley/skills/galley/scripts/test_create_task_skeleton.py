@@ -15,26 +15,23 @@ regressed and the message names the missing or unexpected field.
 
 from __future__ import annotations
 
-import hashlib
+import importlib.util
 import pathlib
 import re
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 
 
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 GENERATOR = SCRIPT_DIR / "create_task_skeleton.py"
 
-
-def repo_key_for(cwd: pathlib.Path) -> str:
-    absolute = cwd.resolve(strict=False)
-    try:
-        absolute = absolute.resolve(strict=True)
-    except FileNotFoundError:
-        pass
-    base = re.sub(r"[^A-Za-z0-9._-]+", "-", absolute.name).strip("-._") or "repo"
-    return f"{base}-{hashlib.sha256(str(absolute).encode('utf-8')).hexdigest()[:8]}"
+spec = importlib.util.spec_from_file_location("create_task_skeleton", GENERATOR)
+if spec is None or spec.loader is None:
+    raise RuntimeError(f"unable to load {GENERATOR}")
+create_task_skeleton = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(create_task_skeleton)
 
 
 def generate_skeleton(tmpdir: pathlib.Path, *extra_args: str, root: pathlib.Path | None = None) -> str:
@@ -65,7 +62,9 @@ def generate_skeleton(tmpdir: pathlib.Path, *extra_args: str, root: pathlib.Path
 
 
 def write_environment_default(root: pathlib.Path, cwd: pathlib.Path, cli: str, *, inline_executor: bool = False) -> None:
-    env_dir = root / "profiles" / repo_key_for(cwd)
+    # Share the production repo-key helper so these tests fail if skeleton
+    # resolution drifts from the Galley home profile directory contract.
+    env_dir = root / "profiles" / create_task_skeleton.repo_key_for(cwd)
     env_dir.mkdir(parents=True, exist_ok=True)
     executor_lines = [f"executor: {{default_cli: {cli}}}"] if inline_executor else ["executor:", f'  default_cli: "{cli}"']
     (env_dir / "environment.yaml").write_text(
@@ -109,6 +108,89 @@ def assert_not_matches(yaml_text: str, pattern: str, description: str) -> None:
         )
 
 
+def assert_fallback_parser_executor_default(body: str, want: str) -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "environment.yaml"
+        path.write_text(body, encoding="utf-8")
+
+        original_command: Callable[[pathlib.Path], str | None] = create_task_skeleton.executor_default_from_profile_command
+        original_loader: Callable[[pathlib.Path], str | None] = create_task_skeleton.executor_default_from_profile_loader
+        create_task_skeleton.executor_default_from_profile_command = lambda _path: None
+        create_task_skeleton.executor_default_from_profile_loader = lambda _path: None
+        try:
+            got = create_task_skeleton.executor_default_from_environment(path)
+        finally:
+            create_task_skeleton.executor_default_from_profile_command = original_command
+            create_task_skeleton.executor_default_from_profile_loader = original_loader
+
+    if got != want:
+        raise SystemExit(f"regression: fallback parser got {got!r}, want {want!r}")
+
+
+def assert_loader_failure_falls_back_to_parser(body: str, want: str) -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "environment.yaml"
+        path.write_text(body, encoding="utf-8")
+
+        original_command: Callable[[pathlib.Path], str | None] = create_task_skeleton.executor_default_from_profile_command
+        original_loader: Callable[[pathlib.Path], str | None] = create_task_skeleton.executor_default_from_profile_loader
+        create_task_skeleton.executor_default_from_profile_command = lambda _path: None
+
+        def failing_loader(_path: pathlib.Path) -> str | None:
+            raise ValueError("go run profile loader failed before emitting JSON")
+
+        create_task_skeleton.executor_default_from_profile_loader = failing_loader
+        try:
+            got = create_task_skeleton.executor_default_from_environment(path)
+        finally:
+            create_task_skeleton.executor_default_from_profile_command = original_command
+            create_task_skeleton.executor_default_from_profile_loader = original_loader
+
+    if got != want:
+        raise SystemExit(f"regression: loader infrastructure failure fallback got {got!r}, want {want!r}")
+
+
+def assert_profile_command_precedes_source_loader() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "environment.yaml"
+        path.write_text("executor:\n  default_cli: codex\n", encoding="utf-8")
+
+        original_command: Callable[[pathlib.Path], str | None] = create_task_skeleton.executor_default_from_profile_command
+        original_loader: Callable[[pathlib.Path], str | None] = create_task_skeleton.executor_default_from_profile_loader
+        create_task_skeleton.executor_default_from_profile_command = lambda _path: "claude"
+        create_task_skeleton.executor_default_from_profile_loader = lambda _path: "codex"
+        try:
+            got = create_task_skeleton.executor_default_from_environment(path)
+        finally:
+            create_task_skeleton.executor_default_from_profile_command = original_command
+            create_task_skeleton.executor_default_from_profile_loader = original_loader
+
+    if got != "claude":
+        raise SystemExit(f"regression: installed galley command should precede source loader, got {got!r}")
+
+
+def assert_invalid_executor_default_is_not_masked() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "environment.yaml"
+        path.write_text("executor:\n  default_cli: other\n", encoding="utf-8")
+
+        original_command: Callable[[pathlib.Path], str | None] = create_task_skeleton.executor_default_from_profile_command
+        original_loader: Callable[[pathlib.Path], str | None] = create_task_skeleton.executor_default_from_profile_loader
+        create_task_skeleton.executor_default_from_profile_command = lambda _path: None
+        create_task_skeleton.executor_default_from_profile_loader = lambda _path: None
+        try:
+            try:
+                create_task_skeleton.executor_default_from_environment(path)
+            except ValueError as exc:
+                if "executor.default_cli" in str(exc):
+                    return
+                raise
+            raise SystemExit("regression: invalid executor.default_cli should fail instead of falling back")
+        finally:
+            create_task_skeleton.executor_default_from_profile_command = original_command
+            create_task_skeleton.executor_default_from_profile_loader = original_loader
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         tmpdir = pathlib.Path(tmp)
@@ -128,6 +210,7 @@ def main() -> int:
     assert_not_matches(yaml_text, r"^    mode:", "mode in default skeleton")
     if generated_executor_cli(yaml_text) != "codex":
         raise SystemExit("regression: unset environment executor default should generate executor.cli: codex")
+    assert_not_matches(yaml_text, r"^  max_budget_usd:", "max_budget_usd for Codex skeletons")
 
     with tempfile.TemporaryDirectory() as tmp:
         tmpdir = pathlib.Path(tmp)
@@ -158,6 +241,21 @@ def main() -> int:
         yaml_text = generate_skeleton(tmpdir, "--executor-cli", "codex", root=root)
     if generated_executor_cli(yaml_text) != "codex":
         raise SystemExit("regression: explicit --executor-cli should override environment default")
+
+    assert_fallback_parser_executor_default(
+        'id: "test"\ncwd: "/tmp/repo"\ncommands: {}\nexecutor:\n  default_cli: "claude"\n',
+        "claude",
+    )
+    assert_fallback_parser_executor_default(
+        'id: "test"\ncwd: "/tmp/repo"\ncommands: {}\nexecutor: {default_cli: claude}\n',
+        "claude",
+    )
+    assert_loader_failure_falls_back_to_parser(
+        'id: "test"\ncwd: "/tmp/repo"\ncommands: {}\nexecutor:\n  default_cli: "claude"\n',
+        "claude",
+    )
+    assert_profile_command_precedes_source_loader()
+    assert_invalid_executor_default_is_not_masked()
 
     print("create_task_skeleton.py preflight and executor default contracts hold")
     return 0

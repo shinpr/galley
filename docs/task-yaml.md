@@ -44,7 +44,6 @@ executor:
   effort: "high"
   prompt_profile: "codex-executor-v1"
   prompt_mode: "replace"
-  max_budget_usd: 4
 decisions: []
 risks: []
 attempts: []
@@ -94,7 +93,7 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 - `executor.effort`: model effort hint for the executor command. Claude accepts `low`, `medium`, `high`, `xhigh`, or `max`; Codex accepts `low`, `medium`, or `high`. For `codex`, effort is delivered via `-c model_reasoning_effort="<value>"` because `codex exec` does not expose a top-level `--effort` flag and `-c` expects TOML-style values.
 - `executor.prompt_profile`: prompt profile name recorded for evidence.
 - `executor.prompt_mode`: `replace` or `append`. For `codex`, both modes currently produce the same effective prompt ordering because Galley concatenates the system prompt and work order through `codex exec` stdin; `append` is accepted for schema compatibility and recorded as an informational warning.
-- `executor.max_budget_usd`: non-negative execution budget hint. Claude honors this hint via its CLI flag; `codex exec` has no equivalent flag, so the value is recorded for audit and the runner surfaces an informational warning. See `examples/afk-task-codex.yaml` for a complete Codex example.
+- `executor.max_budget_usd`: optional non-negative execution budget hint. Claude honors this hint via its CLI flag, so explicit Claude tasks may set it when a per-run ceiling is useful. `codex exec` has no equivalent flag; Codex tasks may still carry an explicit value for audit, but new Codex skeletons omit it to avoid implying an enforced cost limit.
 
 ## Permissions
 

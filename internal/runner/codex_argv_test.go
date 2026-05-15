@@ -14,7 +14,8 @@ import (
 func TestCodexArgvDoesNotEmitUnsupportedFlags(t *testing.T) {
 	t.Parallel()
 	base := minimalCodexTask()
-	base.Executor.MaxBudgetUSD = 4
+	budget := 4.0
+	base.Executor.MaxBudgetUSD = &budget
 	opts := CodexFromTask(base)
 	opts.Bin = "/usr/local/bin/codex"
 	opts.WorkDir = "/tmp/codex-argv"

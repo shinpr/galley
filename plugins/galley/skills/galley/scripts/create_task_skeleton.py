@@ -78,6 +78,9 @@ def environment_profile_path(root: pathlib.Path, cwd: pathlib.Path) -> pathlib.P
 def repository_root() -> pathlib.Path | None:
     for candidate in [SCRIPT_DIR, *SCRIPT_DIR.parents]:
         go_mod = candidate / "go.mod"
+        # This repo-local helper is only authoritative inside the upstream
+        # Galley module; forks or module renames should fall back to the
+        # installed CLI or the small Python parser below.
         if go_mod.is_file() and 'module github.com/shinpr/galley' in go_mod.read_text(encoding="utf-8"):
             return candidate
     return None
@@ -118,7 +121,9 @@ def executor_default_from_profile_command(path: pathlib.Path) -> str | None:
         message = proc.stderr.strip() or proc.stdout.strip() or "profile executor-default failed"
         if "unknown command" in message:
             return None
-        raise ValueError(message)
+        if "executor.default_cli" in message:
+            raise ValueError(message)
+        return None
     return parse_executor_default_payload(proc.stdout, path)
 
 
@@ -137,7 +142,9 @@ def executor_default_from_profile_loader(path: pathlib.Path) -> str | None:
     )
     if proc.returncode != 0:
         message = proc.stderr.strip() or proc.stdout.strip() or "profile loader failed"
-        raise ValueError(message)
+        if "executor.default_cli" in message:
+            raise ValueError(message)
+        return None
     return parse_executor_default_payload(proc.stdout, path)
 
 
@@ -256,9 +263,15 @@ def executor_default_from_environment(path: pathlib.Path) -> str | None:
     except FileNotFoundError:
         return None
 
-    loaded = executor_default_from_profile_loader(path) or executor_default_from_profile_command(path)
-    if loaded:
-        return loaded
+    for loader in (executor_default_from_profile_command, executor_default_from_profile_loader):
+        try:
+            loaded = loader(path)
+        except ValueError as exc:
+            if "executor.default_cli" in str(exc):
+                raise
+            loaded = None
+        if loaded:
+            return loaded
 
     in_executor = False
     executor_indent = 0
@@ -301,7 +314,6 @@ def executor_defaults(cli: str) -> dict[str, Any]:
             "effort": "high",
             "prompt_profile": "codex-executor-v1",
             "prompt_mode": "replace",
-            "max_budget_usd": 4,
         }
     return {
         "cli": "claude",

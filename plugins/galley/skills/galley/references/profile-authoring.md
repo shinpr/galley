@@ -15,6 +15,11 @@ Use `references/authoring-quality.md` to decide when to use existing repo standa
 
 The daemon resolves repository profiles from `scope.cwd` and the Galley root.
 
+Backend defaults are intentionally separate:
+
+- Implementation executor default: stored in `environment.yaml` as `executor.default_cli`; unset resolves to Codex when a new task is authored.
+- Review supervisor default: daemon startup state, not an environment profile field; unset resolves to Claude when the daemon starts.
+
 Use the bundled schemas as the profile field contract:
 
 - `references/quality.schema.json`
@@ -36,7 +41,7 @@ galley profile validate --kind environment <profile.yaml>
    - `environment.yaml` defines the repository cwd, runnable commands, implementation executor default, network/secrets policy, services, destructive-operation constraints, PR behavior, and worktree cleanup.
 2. Read `references/quality.schema.json` and `references/environment.schema.json` to establish fields, defaults, and valid shapes.
 3. Ask the user to choose review strictness before repository inspection. This is an operating policy, not repository evidence.
-4. Ask for the implementation executor choice before repository inspection. Ask for a review supervisor choice only when profile authoring is part of setup or daemon startup planning. Each can be `claude` or `codex`; an unset executor resolves to Codex during new task authoring, and an unset supervisor resolves to the daemon's Claude default.
+4. Ask for the implementation executor choice before repository inspection. Ask for a review supervisor choice only when profile authoring is part of setup or daemon startup planning. Use the backend default rule above for unset values.
 5. Ask to inspect the repository for profile candidates. Mention the concrete sources you plan to read, such as README, CI, package scripts, Makefiles, justfiles, test docs, and existing local guidance.
 6. Inspect the approved sources and draft candidate values from discovered evidence plus schema defaults and the chosen review strictness.
 7. Present the proposed profile before writing files: required checks, optional checks, review dimensions, blocking severities, implementation executor default, environment constraints, PR/base/comment/cleanup settings, and the evidence behind each choice. If a supervisor was chosen, present it separately as daemon startup state rather than as an `environment.yaml` field.
@@ -75,7 +80,7 @@ Use this sequence:
 
 1. Read the profile schemas.
 2. Ask one question for review strictness.
-3. Ask the implementation executor choice. Ask the review supervisor choice only when this profile work is part of setup or daemon startup planning. Each can be `claude` or `codex`; if unset, new task authoring resolves the executor to Codex and daemon startup resolves the supervisor to Claude.
+3. Ask the implementation executor choice. Ask the review supervisor choice only when this profile work is part of setup or daemon startup planning. Use the backend default rule above for unset values.
 4. Ask one question for repository inspection approval. Keep PR automation, base branch, and cleanup out of this question.
 5. After inspection, present a single profile proposal using schema defaults, chosen review strictness, executor choice, and discovered repo evidence. Present any supervisor choice outside the profile proposal as daemon startup state.
 6. Ask for profile approval and additional repository-specific standards.

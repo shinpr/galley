@@ -10,6 +10,7 @@ This project follows semantic versioning.
 
 - Repository `environment.yaml` profiles now support an optional `executor.default_cli` for new task authoring. The task skeleton generator uses that repository default when present and now falls back to Codex when it is unset, while explicit task YAML `executor.cli` remains authoritative for existing tasks. Setup and task-authoring guidance now make the implementation executor choice explicit because Claude Code print-mode usage moved to Agent SDK billing, which changes the cost profile of the previous Claude-oriented default.
 - Task YAML `executor.max_budget_usd` is now optional in the schema, and new Codex task skeletons omit it because `codex exec` does not expose a matching budget flag. Explicit values remain valid for existing tasks and continue to drive the Claude CLI budget flag.
+- Packaged Claude and Codex Galley plugins are now versioned as `0.1.7`: setup, profile-authoring, task-authoring, and queueing guidance now distinguish implementation executor defaults from daemon supervisor selection, resolve repository executor defaults from `environment.yaml`, and document `/galley` PR comment requeue behavior.
 
 ## v0.4.0 - 2026-05-14
 

@@ -90,6 +90,19 @@ Setup includes repository profiles. After resolving the profile paths:
 - Ask for approval and additional repository-specific standards before writing profiles.
 - Validate both profiles before reporting setup complete.
 
+When setup needs to ask for both backend choices, use this shape during profile intake:
+
+```markdown
+Galley can use `claude` or `codex` separately for implementation and review.
+
+- Implementation executor: writes the task changes in the worktree and is stored in `environment.yaml` as `executor.default_cli` for new task authoring.
+- Review supervisor: reviews completed attempts and is applied when starting or restarting the daemon.
+
+Which implementation executor should new tasks use? Which review supervisor should the daemon use?
+
+If the executor is left unset, new task authoring uses Codex. If the supervisor is left unset, the daemon uses Claude.
+```
+
 ```bash
 <galley-bin> profile validate --kind quality <quality-profile-file>
 <galley-bin> profile validate --kind environment <environment-profile-file>
@@ -126,16 +139,3 @@ Explicit Claude supervisor:
 For a single queue drain, use the same command shape with `run --once` instead of `start`.
 
 Repository profiles under the Galley root are loaded automatically from `scope.cwd`.
-
-When setup needs to ask for both backend choices, use this shape:
-
-```markdown
-Galley can use `claude` or `codex` separately for implementation and review.
-
-- Implementation executor: writes the task changes in the worktree and is stored in `environment.yaml` as `executor.default_cli` for new task authoring.
-- Review supervisor: reviews completed attempts and is applied when starting or restarting the daemon.
-
-Which implementation executor should new tasks use? Which review supervisor should the daemon use?
-
-If the executor is left unset, new task authoring uses Codex. If the supervisor is left unset, the daemon uses Claude.
-```

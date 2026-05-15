@@ -83,6 +83,8 @@ galley profile resolve --cwd <absolute-target-repo> --output json
 
 Use the same absolute target repository path for `galley profile resolve --cwd` and task `scope.cwd`. If the resolved `quality.yaml` or `environment.yaml` does not exist, create profiles with `references/profile-authoring.md` before task drafting continues.
 
+Before Step 4, resolve the repository executor default:
+
 When `environment_exists` is true, inspect the returned `environment_profile_file` before Step 5. Use the profile's `executor.default_cli` value as the repository executor default when present. If the current `galley` binary supports it, the focused lookup is:
 
 ```bash

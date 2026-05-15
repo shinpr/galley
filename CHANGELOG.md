@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- Repository `environment.yaml` profiles now support an optional `executor.default_cli` for new task authoring. The task skeleton generator uses that repository default when present and now falls back to Codex when it is unset, while explicit task YAML `executor.cli` remains authoritative for existing tasks. Setup and task-authoring guidance now make the implementation executor choice explicit because Claude Code print-mode usage moved to Agent SDK billing, which changes the cost profile of the previous Claude-oriented default.
+
 ## v0.4.0 - 2026-05-14
 
 ### Added

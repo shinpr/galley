@@ -87,6 +87,8 @@ cwd: "/path/to/repo"
 commands:
   test_unit: "go test ./..."
   build: "go build ./cmd/galley"
+executor:
+  default_cli: "codex"
 constraints:
   network: "approval_required"
   secrets_policy: "never_read_env_files"
@@ -106,6 +108,7 @@ Supported fields:
 - `id`: profile identifier.
 - `cwd`: absolute path to the repository this profile describes.
 - `commands`: named local commands the executor and supervisor can reference.
+- `executor.default_cli`: optional implementation executor default for new task authoring. Values are `claude` and `codex`. When it is unset, new task authoring uses Codex unless the author explicitly chooses another backend. An explicit task YAML `executor.cli` remains authoritative for that task.
 - `constraints.network`: local network policy.
 - `constraints.secrets_policy`: secret handling policy.
 - `constraints.destructive_commands`: destructive command policy.

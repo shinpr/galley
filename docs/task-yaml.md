@@ -40,11 +40,11 @@ worktree:
 supervisor:
   review_iterations: 0
 executor:
-  cli: "claude"
+  cli: "codex"
   effort: "high"
-  prompt_profile: "codexized-claude-executor-v1"
+  prompt_profile: "codex-executor-v1"
   prompt_mode: "replace"
-  max_budget_usd: 10
+  max_budget_usd: 4
 decisions: []
 risks: []
 attempts: []
@@ -89,7 +89,7 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 - `execution_policy.stop_on_destructive_operation`: stop when the task would require out-of-scope destructive work.
 - `execution_policy.stop_on_missing_secret`: stop when a required secret is unavailable and cannot be replaced by safe local evidence.
 - `execution_policy.stop_on_external_service_unavailable`: stop when a required external service is unavailable and the task cannot proceed with local substitutes.
-- `executor.cli`: selects the executor backend. Accepts `claude` (Claude Code) or `codex` (`codex exec`). The daemon dispatches the implementation attempt through the matching binary and persists per-attempt evidence under `runs/<run-id>/attempt-N/` for both. The Codex executor uses a Codex-specific executor prompt that preserves the same task/result contract as the Claude executor prompt.
+- `executor.cli`: selects the executor backend. Accepts `claude` (Claude Code) or `codex` (`codex exec`). The daemon dispatches the implementation attempt through the matching binary and persists per-attempt evidence under `runs/<run-id>/attempt-N/` for both. New task authoring resolves this value from `environment.yaml` `executor.default_cli` when present and uses Codex when no environment default is configured; an explicit task YAML value is still authoritative for that task. The Codex executor uses a Codex-specific executor prompt that preserves the same task/result contract as the Claude executor prompt.
 - `executor.model`: optional model override for the executor command. Omit it to use the selected CLI's configured default model; write it only when you want to pin a model name. Available model names depend on the user's account, provider, CLI configuration, and CLI version, so a pinned value should be smoke-tested when in doubt.
 - `executor.effort`: model effort hint for the executor command. Claude accepts `low`, `medium`, `high`, `xhigh`, or `max`; Codex accepts `low`, `medium`, or `high`. For `codex`, effort is delivered via `-c model_reasoning_effort="<value>"` because `codex exec` does not expose a top-level `--effort` flag and `-c` expects TOML-style values.
 - `executor.prompt_profile`: prompt profile name recorded for evidence.

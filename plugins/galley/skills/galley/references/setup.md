@@ -42,7 +42,7 @@ Use `galley` for later commands when it works on `PATH`; otherwise use the verif
 
 The installer installs the `galley` binary. By default it downloads a prebuilt GitHub Release asset; `--local` builds from the current checkout. Daemon operations are available under `<galley-bin> daemon ...`.
 
-Check `gh auth status` when the accepted profile proposal enables PR automation. Check `codex --version` when the user selects Codex as the daemon supervisor.
+Check `gh auth status` when the accepted profile proposal enables PR automation. Check `codex --version` when the user selects Codex as the implementation executor or daemon supervisor.
 
 ## Repository Layout
 
@@ -83,8 +83,8 @@ Setup includes repository profiles. After resolving the profile paths:
 - If `quality.yaml` or `environment.yaml` is missing, explain profiles and create them from this flow. Use `references/profile-authoring.md` and `references/authoring-quality.md` for deeper guidance when available.
 - Profile creation starts by reading `references/quality.schema.json` and `references/environment.schema.json`; use schema defaults as the proposed values unless repo evidence or user choices point elsewhere.
 - `quality.yaml` proposal includes required checks, review dimensions, evidence requirements, and blocking severities.
-- `environment.yaml` proposal includes cwd, commands, network/secrets/destructive-command constraints, PR creation, PR comment handling, base branch, and worktree cleanup.
-- The profile intake order is schema review, review strictness, then repository inspection approval. Supervisor selection and PR automation are profile proposal or daemon-start decisions.
+- `environment.yaml` proposal includes cwd, commands, implementation executor default, network/secrets/destructive-command constraints, PR creation, PR comment handling, base branch, and worktree cleanup.
+- The profile intake order is schema review, review strictness, implementation executor and review supervisor choices, then repository inspection approval. PR automation is a profile proposal decision; daemon supervisor changes are applied at daemon start.
 - Profile creation requires repository inspection approval and profile approval before writing files.
 - Inspect the repository after approval, then draft candidate profiles from discovered commands, CI, README, config, and existing local guidance.
 - Present one combined profile proposal after inspection. Include the evidence behind each required check and each environment setting.
@@ -100,7 +100,8 @@ Setup includes repository profiles. After resolving the profile paths:
 
 Choose daemon settings before startup. Explain the defaults and ask for changes when the user has not already chosen:
 
-- supervisor: Claude is the default; Codex can be selected for Codex review.
+- implementation executor: use `environment.yaml` `executor.default_cli` for new task authoring when it is set; if it is unset, task authoring resolves to Codex. Claude and Codex are both supported.
+- supervisor: Claude is the daemon default when unset; Codex can be selected for Codex review. Claude and Codex are both supported.
 - PR automation, PR comment handling, base branch, and worktree cleanup: use the resolved `environment.yaml`.
 - run mode: `daemon start` keeps working in the background; `daemon run --once` drains the current queue once.
 - concurrency: keep defaults unless the user asks for parallel task execution.

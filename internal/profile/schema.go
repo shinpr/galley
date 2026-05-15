@@ -62,6 +62,11 @@ func EnvironmentJSONSchema() ([]byte, error) {
 			"id":       stringSchema("minLength", 1, "description", "Repository environment profile identifier."),
 			"cwd":      stringSchema("minLength", 1, "description", "Absolute path to the target repository."),
 			"commands": map[string]any{"type": "object", "additionalProperties": stringSchema("minLength", 1)},
+			"executor": object(
+				properties(map[string]any{
+					"default_cli": enumSchema([]string{"claude", "codex"}),
+				}),
+			),
 			"constraints": object(
 				required("network", "secrets_policy", "destructive_commands"),
 				properties(map[string]any{

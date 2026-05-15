@@ -41,6 +41,9 @@ func TestLoadAndValidateEnvironmentExample(t *testing.T) {
 	if env.Commands["test_unit"] == "" {
 		t.Fatalf("commands got %#v", env.Commands)
 	}
+	if env.Executor == nil || env.Executor.DefaultCLI != "codex" {
+		t.Fatalf("executor default got %#v", env.Executor)
+	}
 }
 
 func TestLoadBundleRejectsInvalidQuality(t *testing.T) {
@@ -101,5 +104,26 @@ constraints:
 	}
 	if !strings.Contains(err.Error(), "constraints.network") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateEnvironmentRejectsInvalidExecutorDefault(t *testing.T) {
+	env := Environment{
+		ID:       "local",
+		CWD:      "/tmp/repo",
+		Commands: map[string]string{"test": "go test ./..."},
+		Executor: &ExecutorDefault{DefaultCLI: "other"},
+		Constraints: Constraints{
+			Network:             "approval_required",
+			SecretsPolicy:       "never_read_env_files",
+			DestructiveCommands: "deny",
+		},
+	}
+	result := ValidateEnvironment(env)
+	if result.Valid() {
+		t.Fatal("expected invalid executor default")
+	}
+	if !strings.Contains(strings.Join(result.Errors, "\n"), "executor.default_cli") {
+		t.Fatalf("errors missing executor.default_cli: %#v", result.Errors)
 	}
 }

@@ -175,6 +175,9 @@ func renderProfileContext(b *strings.Builder, profiles profile.Bundle) {
 		for name, command := range profiles.Environment.Commands {
 			fmt.Fprintf(b, "- command `%s`: `%s`\n", name, command)
 		}
+		if profiles.Environment.Executor != nil && profiles.Environment.Executor.DefaultCLI != "" {
+			fmt.Fprintf(b, "- executor default: `%s`\n", profiles.Environment.Executor.DefaultCLI)
+		}
 		fmt.Fprintf(b, "- network: `%s`\n", profiles.Environment.Constraints.Network)
 		fmt.Fprintf(b, "- secrets policy: `%s`\n", profiles.Environment.Constraints.SecretsPolicy)
 		fmt.Fprintf(b, "- destructive commands: `%s`\n", profiles.Environment.Constraints.DestructiveCommands)

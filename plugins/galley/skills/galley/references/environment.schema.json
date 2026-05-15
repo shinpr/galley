@@ -40,6 +40,19 @@
       "minLength": 1,
       "type": "string"
     },
+    "executor": {
+      "additionalProperties": false,
+      "properties": {
+        "default_cli": {
+          "enum": [
+            "claude",
+            "codex"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "id": {
       "description": "Repository environment profile identifier.",
       "minLength": 1,

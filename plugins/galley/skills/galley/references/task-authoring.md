@@ -128,6 +128,7 @@ Interpret daemon-dependent settings before asking:
 
 - If a verified daemon is already running, use its current daemon settings as the execution condition. Present supervisor, concurrency, polling interval, claim TTL, heartbeat interval, and shutdown timeout as current daemon state, not user-selectable task options.
 - Repository operation settings come from `environment.yaml`: PR creation, PR base branch, PR comment polling/replies, and worktree cleanup.
+- Repository executor defaults also come from `environment.yaml`: when `executor.default_cli` is set, confirm that the task will run with that backend and ask for an override only when the user wants a different model/backend. When no executor default is set, ask for both the implementation executor (`claude` or `codex`) and the review supervisor (`claude` or `codex`); if the user leaves the executor unset, new task authoring resolves to Codex.
 - If no daemon is running, ask the user to approve the planned daemon startup settings because they will be applied when starting the daemon.
 - If daemon status is unclear, report that uncertainty and ask whether to inspect or start a fresh daemon before queueing.
 
@@ -137,7 +138,7 @@ Execution-setting content requirements:
 
 - Task YAML settings: executor backend, optional executor model override, edit authority, retry budget, per-attempt timeout, AC test skeleton preflight, and blocking severity policy.
 - Environment profile operation settings: PR behavior, PR base branch, PR comments, and worktree cleanup from the current `environment.yaml`; create missing profiles through `references/profile-authoring.md` before queueing ordinary implementation work.
-- Executor backend (`executor.cli`): include it as one Task YAML execution setting. Recommend `claude` by default; offer `codex` when the user wants Codex to perform the implementation work. Explain that this controls the implementation executor for this task and is separate from the daemon supervisor.
+- Executor backend (`executor.cli`): include it as one Task YAML execution setting. Use `environment.yaml` `executor.default_cli` when present; if it is absent, ask for `claude` or `codex` and use Codex when the user leaves the setting unset. Explain that this controls the implementation executor for this task and is separate from the daemon supervisor.
 - Executor model override (`executor.model`): omit it by default so the selected CLI uses its configured default model. If the user names a model, record that exact value. If the user is unsure or the model name was inferred, do not guess; offer a small runtime smoke check before queueing because available model names depend on the user's account, provider, CLI configuration, and CLI version.
 - Supervisor: present the planned or current supervisor. Use `claude` as the default review gate and offer `codex` when the user wants Codex review.
 - Daemon concurrency: present planned or current `max_concurrent_tasks` and `max_concurrent_per_repo`. Explain that default or low concurrency fits a single heavy task, while higher values are available for parallel execution.
@@ -167,6 +168,8 @@ python3 <this-skill-directory>/scripts/create_task_skeleton.py "<short task titl
   --permission sandbox-full-access \
   --loop-budget 10
 ```
+
+The skeleton script resolves `executor.cli` from the explicit `--executor-cli` argument first, then `environment.yaml` `executor.default_cli`, then Codex when no environment setting exists.
 
 With a context-only specification, work plan, log, screenshot note, issue export, or review note supplied by the user:
 
@@ -225,7 +228,7 @@ Use `decisions: []`, `risks: []`, and `verification.commands: []` when those ent
 - `status`: write new tasks as `draft`; `galley task queue` writes the queued copy with `status: queued`.
 - `scope.permission`: prefer broad operations inside the isolated worktree (`sandbox-full-access`) for AFK implementation tasks; use investigation only (`read-only`) for review tasks; use normal edits (`edit`) when broad sandbox authority is unnecessary or unavailable.
 - `allowed_paths`: choose the narrowest paths that cover approved edits and any reference-file destinations.
-- `executor.cli`: use `claude` by default. Use `codex` when the user selects Codex as the implementation executor. This is a task YAML setting and is separate from the daemon supervisor.
+- `executor.cli`: use the resolved environment executor default when `environment.yaml` has `executor.default_cli`; otherwise use Codex when no environment default or explicit user choice exists. Preserve an explicit `executor.cli` already present in existing task YAML. This is a task YAML setting and is separate from the daemon supervisor.
 - `executor.model`: omit by default. Write it only when the user explicitly selects a model name or asks to pin one; otherwise the executor CLI default is used. Do not invent likely model names. When a model is pinned and the user wants confidence before queueing, run a minimal smoke check with that CLI/model and record the result or limitation.
 - `executor.effort`: set the approved effort for the selected executor. Claude accepts `low`, `medium`, `high`, `xhigh`, or `max`; Codex accepts `low`, `medium`, or `high`. Use `high` for ordinary implementation work unless the user asks for lower cost or higher Claude-only effort.
 - `execution_policy.timeout_ms`: set the approved per-attempt timeout in milliseconds. Use `30min` (`1800000`) as the ordinary-task baseline and increase it for broader, slower, or more uncertain tasks.

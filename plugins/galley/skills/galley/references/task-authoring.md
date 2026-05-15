@@ -83,6 +83,14 @@ galley profile resolve --cwd <absolute-target-repo> --output json
 
 Use the same absolute target repository path for `galley profile resolve --cwd` and task `scope.cwd`. If the resolved `quality.yaml` or `environment.yaml` does not exist, create profiles with `references/profile-authoring.md` before task drafting continues.
 
+When `environment_exists` is true, inspect the returned `environment_profile_file` before Step 5. Use the profile's `executor.default_cli` value as the repository executor default when present. If the current `galley` binary supports it, the focused lookup is:
+
+```bash
+galley profile executor-default --output json <environment-profile-file>
+```
+
+If that command is unavailable, read the profile YAML directly and use only the top-level `executor.default_cli` value. Treat an absent value as unset.
+
 ## Step 4: Confirm Task Direction
 
 Before discussing Galley runtime settings or writing task YAML, present the proposed task direction and ask for approval. Include:
@@ -128,7 +136,8 @@ Interpret daemon-dependent settings before asking:
 
 - If a verified daemon is already running, use its current daemon settings as the execution condition. Present supervisor, concurrency, polling interval, claim TTL, heartbeat interval, and shutdown timeout as current daemon state, not user-selectable task options.
 - Repository operation settings come from `environment.yaml`: PR creation, PR base branch, PR comment polling/replies, and worktree cleanup.
-- Repository executor defaults also come from `environment.yaml`: when `executor.default_cli` is set, confirm that the task will run with that backend and ask for an override only when the user wants a different model/backend. When no executor default is set, ask for both the implementation executor (`claude` or `codex`) and the review supervisor (`claude` or `codex`); if the user leaves the executor unset, new task authoring resolves to Codex.
+- Repository executor defaults also come from `environment.yaml`: when `executor.default_cli` is set, confirm that the task will run with that backend and ask for an override only when the user wants a different model/backend. When no executor default is set, ask for the implementation executor (`claude` or `codex`); if the user leaves the executor unset, new task authoring resolves to Codex.
+- Ask for the review supervisor (`claude` or `codex`) only when no verified daemon is running or when the user wants to stop/restart the daemon before queueing. A running verified daemon's supervisor is current state, not a task setting.
 - If no daemon is running, ask the user to approve the planned daemon startup settings because they will be applied when starting the daemon.
 - If daemon status is unclear, report that uncertainty and ask whether to inspect or start a fresh daemon before queueing.
 
@@ -140,7 +149,7 @@ Execution-setting content requirements:
 - Environment profile operation settings: PR behavior, PR base branch, PR comments, and worktree cleanup from the current `environment.yaml`; create missing profiles through `references/profile-authoring.md` before queueing ordinary implementation work.
 - Executor backend (`executor.cli`): include it as one Task YAML execution setting. Use `environment.yaml` `executor.default_cli` when present; if it is absent, ask for `claude` or `codex` and use Codex when the user leaves the setting unset. Explain that this controls the implementation executor for this task and is separate from the daemon supervisor.
 - Executor model override (`executor.model`): omit it by default so the selected CLI uses its configured default model. If the user names a model, record that exact value. If the user is unsure or the model name was inferred, do not guess; offer a small runtime smoke check before queueing because available model names depend on the user's account, provider, CLI configuration, and CLI version.
-- Supervisor: present the planned or current supervisor. Use `claude` as the default review gate and offer `codex` when the user wants Codex review.
+- Supervisor: present the current daemon supervisor when a verified daemon is running. When no verified daemon is running, present the planned supervisor; the daemon default is `claude`, and `codex` can be selected for Codex review.
 - Daemon concurrency: present planned or current `max_concurrent_tasks` and `max_concurrent_per_repo`. Explain that default or low concurrency fits a single heavy task, while higher values are available for parallel execution.
 - AC test skeleton preflight (`preflight.acceptance_skeleton.enabled`): include it as one Task YAML execution setting with only `enabled` or `disabled`; recommend `enabled` when AC complexity, regression risk, or task size makes pre-created test skeletons worth the preflight cost, and recommend `disabled` for small, local, low-risk tasks where existing verification commands are enough. Let the skeleton creator derive test kind, path, and content.
 - For each user-changeable setting, include the recommended or current value, why it fits the current task, and practical alternatives.

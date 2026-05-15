@@ -12,7 +12,6 @@ Check required commands and repository context:
 
 ```bash
 galley --help
-claude --version
 git status --short
 ```
 
@@ -42,7 +41,7 @@ Use `galley` for later commands when it works on `PATH`; otherwise use the verif
 
 The installer installs the `galley` binary. By default it downloads a prebuilt GitHub Release asset; `--local` builds from the current checkout. Daemon operations are available under `<galley-bin> daemon ...`.
 
-Check `gh auth status` when the accepted profile proposal enables PR automation. Check `codex --version` when the user selects Codex as the implementation executor or daemon supervisor.
+Check provider CLIs after the user chooses execution backends: run `claude --version` when Claude is selected as implementation executor or daemon supervisor, and `codex --version` when Codex is selected as implementation executor or daemon supervisor. Check `gh auth status` when the accepted profile proposal enables PR automation.
 
 ## Repository Layout
 
@@ -84,7 +83,7 @@ Setup includes repository profiles. After resolving the profile paths:
 - Profile creation starts by reading `references/quality.schema.json` and `references/environment.schema.json`; use schema defaults as the proposed values unless repo evidence or user choices point elsewhere.
 - `quality.yaml` proposal includes required checks, review dimensions, evidence requirements, and blocking severities.
 - `environment.yaml` proposal includes cwd, commands, implementation executor default, network/secrets/destructive-command constraints, PR creation, PR comment handling, base branch, and worktree cleanup.
-- The profile intake order is schema review, review strictness, implementation executor and review supervisor choices, then repository inspection approval. PR automation is a profile proposal decision; daemon supervisor changes are applied at daemon start.
+- The profile intake order is schema review, review strictness, implementation executor choice, optional daemon supervisor choice, then repository inspection approval. Store the implementation executor choice in `environment.yaml` as `executor.default_cli`; carry the supervisor choice into the daemon startup plan only, because it is not an environment profile field. PR automation is a profile proposal decision; daemon supervisor changes are applied at daemon start.
 - Profile creation requires repository inspection approval and profile approval before writing files.
 - Inspect the repository after approval, then draft candidate profiles from discovered commands, CI, README, config, and existing local guidance.
 - Present one combined profile proposal after inspection. Include the evidence behind each required check and each environment setting.
@@ -127,3 +126,16 @@ Explicit Claude supervisor:
 For a single queue drain, use the same command shape with `run --once` instead of `start`.
 
 Repository profiles under the Galley root are loaded automatically from `scope.cwd`.
+
+When setup needs to ask for both backend choices, use this shape:
+
+```markdown
+Galley can use `claude` or `codex` separately for implementation and review.
+
+- Implementation executor: writes the task changes in the worktree and is stored in `environment.yaml` as `executor.default_cli` for new task authoring.
+- Review supervisor: reviews completed attempts and is applied when starting or restarting the daemon.
+
+Which implementation executor should new tasks use? Which review supervisor should the daemon use?
+
+If the executor is left unset, new task authoring uses Codex. If the supervisor is left unset, the daemon uses Claude.
+```

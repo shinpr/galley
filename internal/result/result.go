@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -182,7 +183,7 @@ func runVerification(ctx context.Context, workDir, command string) verificationR
 	// bounding behave like the rest of Galley's subprocesses.
 	result, err := runner.RunCommand(ctx, runner.Command{
 		WorkDir: workDir,
-		Argv:    []string{"/bin/sh", "-c", command},
+		Argv:    shellArgv(command),
 	}, runner.RunOptions{TailBytes: 2048})
 	return verificationRun{
 		command: command,
@@ -190,6 +191,13 @@ func runVerification(ctx context.Context, workDir, command string) verificationR
 		stderr:  result.Stderr,
 		err:     err,
 	}
+}
+
+func shellArgv(command string) []string {
+	if runtime.GOOS == "windows" {
+		return []string{"cmd.exe", "/C", command}
+	}
+	return []string{"/bin/sh", "-c", command}
 }
 
 func (r verificationRun) status() string {

@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1649,7 +1651,7 @@ func writeRepoEnvironmentProfile(t *testing.T, root, repo, base string) {
 		t.Fatal(err)
 	}
 	body := "id: env-test\n" +
-		"cwd: " + repo + "\n" +
+		"cwd: " + strconv.Quote(repo) + "\n" +
 		"commands: {}\n" +
 		"constraints:\n" +
 		"  network: approval_required\n" +
@@ -1710,6 +1712,9 @@ func prepareDonePRTask(t *testing.T, taskPath, repo, prStatus string) (task.Task
 
 func writeFakeCommand(t *testing.T, name, body string) string {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses POSIX shell fake executor binaries")
+	}
 	binDir := t.TempDir()
 	commandPath := filepath.Join(binDir, name)
 	if err := os.WriteFile(commandPath, []byte("#!/bin/sh\n"+body), 0o700); err != nil {
@@ -1814,7 +1819,7 @@ acceptance_criteria:
     verification: "test -f daemon-output.txt"
     status: "pending"
 scope:
-  cwd: "` + repo + `"
+  cwd: ` + strconv.Quote(repo) + `
   allowed_paths:
     - "."
   forbidden_paths: []
@@ -1829,7 +1834,7 @@ execution_policy:
 worktree:
   enabled: true
   branch: "agent/` + name + `"
-  path: "` + worktreePath + `"
+  path: ` + strconv.Quote(worktreePath) + `
 supervisor:
   review_iterations: 0
 executor:

@@ -3,6 +3,7 @@ package task
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -253,7 +254,7 @@ acceptance_criteria:
     verification: "go test ./..."
     status: "pending"
 scope:
-  cwd: "` + dir + `"
+  cwd: ` + strconv.Quote(dir) + `
   allowed_paths:
     - "internal/task"
   forbidden_paths: []

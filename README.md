@@ -164,6 +164,8 @@ See [SECURITY.md](SECURITY.md) for reporting and operational trust boundaries.
 
 ## Development
 
+Galley is tested on Linux, macOS, and Windows in CI. The Windows daemon path supports start, stop, and status, with process termination using Windows' immediate process-kill semantics rather than Unix signals.
+
 The `examples/` directory is for Galley checkout development and CI validation. Normal users should prefer `~/.galley` tasks created by the plugin skill.
 
 ```sh

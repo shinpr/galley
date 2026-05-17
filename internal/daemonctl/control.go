@@ -265,49 +265,12 @@ func sanitizeArgv(argv []string) []string {
 	return out
 }
 
-// Alive reports whether pid exists.
-func Alive(pid int) (bool, error) {
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return false, err
-	}
-	err = process.Signal(syscall.Signal(0))
-	if err == nil {
-		if Zombie(pid) {
-			return false, nil
-		}
-		return true, nil
-	}
-	if errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ESRCH) {
-		return false, nil
-	}
-	if errors.Is(err, syscall.EPERM) {
-		return true, nil
-	}
-	return false, err
-}
-
 // StopVerified sends SIGTERM only to a process verified against its PID metadata.
 func StopVerified(meta PIDFile, timeout time.Duration) error {
 	if !Verify(meta, meta.Root, meta.Executable) {
 		return ErrUnverifiedProcess
 	}
 	return Stop(meta.PID, timeout)
-}
-
-// Stop sends SIGTERM and waits for process exit until timeout.
-func Stop(pid int, timeout time.Duration) error {
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return err
-	}
-	if err := process.Signal(syscall.SIGTERM); err != nil {
-		if errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ESRCH) {
-			return ErrNotRunning
-		}
-		return err
-	}
-	return waitExit(pid, timeout, "stop")
 }
 
 // ForceStop requests graceful shutdown and, if the process is still alive after

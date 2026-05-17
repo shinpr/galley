@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -130,6 +131,18 @@ func TestSchemaGenerateAndCheck(t *testing.T) {
 		if !strings.Contains(stdout, name) {
 			t.Fatalf("stdout missing %s: %q", name, stdout)
 		}
+	}
+
+	taskSchema := filepath.Join(output, "task.schema.json")
+	data, err := os.ReadFile(taskSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(taskSchema, []byte(strings.ReplaceAll(string(data), "\n", "\r\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := executeCommand("schema", "check", "--path", output); err != nil {
+		t.Fatalf("schema check should ignore JSON formatting differences: %v", err)
 	}
 }
 
@@ -713,7 +726,7 @@ func TestClaudeArgsShell(t *testing.T) {
 	if stderr != "" {
 		t.Fatalf("stderr got %q", stderr)
 	}
-	if !strings.HasPrefix(stdout, "cd ") || !strings.Contains(stdout, `"$(cat /`) {
+	if !strings.HasPrefix(stdout, "cd ") || !strings.Contains(stdout, `--system-prompt "$(cat `) || !strings.Contains(stdout, `--json-schema "$(cat `) {
 		t.Fatalf("unexpected shell preview: %q", stdout)
 	}
 }
@@ -743,7 +756,7 @@ acceptance_criteria:
     verification: "go test ./..."
     status: "pending"
 scope:
-  cwd: "` + dir + `"
+  cwd: ` + strconv.Quote(dir) + `
   allowed_paths:
     - "internal/task"
   forbidden_paths: []

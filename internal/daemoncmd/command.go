@@ -215,11 +215,21 @@ func newStartCommand(opts *daemon.Options, pidFile, logFile *string, readinessTi
 			}
 			meta := daemonctl.NewPIDFile(child.Process.Pid, exe, opts.Root, append([]string{exe}, childArgs...)).WithToken(token)
 			if err := daemonctl.WritePID(paths.PIDFile, meta); err != nil {
-				_ = child.Process.Signal(syscall.SIGTERM)
+				// Cross-platform start cleanup: the previous SIGTERM call
+				// was a no-op on Windows (the runtime returned "signal not
+				// supported by windows") and left a stranded background
+				// daemon after WritePID failures. The build-tagged helper
+				// uses SIGTERM on Unix and TerminateProcess on Windows.
+				_ = daemonctl.TerminateChildProcess(child.Process)
 				return err
 			}
 			if err := waitReady(paths.PIDFile, opts.Root, exe, *readinessTimeout); err != nil {
-				_ = child.Process.Signal(syscall.SIGTERM)
+				// Same cross-platform start cleanup boundary as above: a
+				// readiness timeout must actually terminate the child on
+				// every OS, otherwise a slow-to-start daemon survives an
+				// aborted `galley daemon start` and races a subsequent
+				// retry against a stale process.
+				_ = daemonctl.TerminateChildProcess(child.Process)
 				_ = daemonctl.RemovePID(paths.PIDFile, child.Process.Pid)
 				return fmt.Errorf("%w; see log file %s", err, paths.LogFile)
 			}

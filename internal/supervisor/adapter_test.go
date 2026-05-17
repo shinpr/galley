@@ -4,11 +4,13 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestRunAdapterPayloadCodexUsesEmbeddedPromptAndSchema(t *testing.T) {
+	skipPOSIXFakeSupervisorOnWindows(t)
 	binDir := t.TempDir()
 	fakeCodex := filepath.Join(binDir, "codex")
 	capturePath := filepath.Join(t.TempDir(), "codex.args")
@@ -70,6 +72,7 @@ printf '%s\n' '{"event":"done"}'
 }
 
 func TestRunAdapterPayloadClaudeUsesEmbeddedPromptAndSchema(t *testing.T) {
+	skipPOSIXFakeSupervisorOnWindows(t)
 	binDir := t.TempDir()
 	capturePath := filepath.Join(t.TempDir(), "claude.args")
 	envPath := filepath.Join(t.TempDir(), "claude.env")
@@ -119,6 +122,7 @@ printf '%s\n' '{"status":"accepted","summary":"ok","acceptance_gaps":[],"reviewe
 }
 
 func TestRunAdapterPayloadClaudeReadsFullStdoutVerdict(t *testing.T) {
+	skipPOSIXFakeSupervisorOnWindows(t)
 	binDir := t.TempDir()
 	fakeClaude := filepath.Join(binDir, "claude")
 	longSummary := strings.Repeat("x", 70*1024)
@@ -140,5 +144,12 @@ printf '%s' '{"status":"accepted","summary":"`+longSummary+`","acceptance_gaps":
 	}
 	if !strings.Contains(string(output), longSummary) {
 		t.Fatal("large supervisor verdict was truncated")
+	}
+}
+
+func skipPOSIXFakeSupervisorOnWindows(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses POSIX shell fake supervisor binaries")
 	}
 }

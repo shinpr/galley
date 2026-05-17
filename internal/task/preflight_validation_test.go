@@ -7,7 +7,8 @@ import (
 
 // baseValidPreflightTask returns a task that passes ValidateStructural so
 // individual cases can mutate only the preflight section.
-func baseValidPreflightTask() Task {
+func baseValidPreflightTask(t *testing.T) Task {
+	t.Helper()
 	return Task{
 		ID:     "task-preflight-001",
 		Mode:   "afk",
@@ -20,7 +21,7 @@ func baseValidPreflightTask() Task {
 			Status:       "pending",
 		}},
 		Scope: Scope{
-			CWD:            "/tmp/repo",
+			CWD:            t.TempDir(),
 			AllowedPaths:   []string{"internal", "tests"},
 			ForbiddenPaths: []string{".env"},
 			Permission:     "edit",
@@ -48,7 +49,7 @@ func baseValidPreflightTask() Task {
 }
 
 func TestPreflightValidationAbsentIsValid(t *testing.T) {
-	tk := baseValidPreflightTask()
+	tk := baseValidPreflightTask(t)
 	res := ValidateStructural(tk)
 	if !res.Valid() {
 		t.Fatalf("expected valid task without preflight, got errors %v", res.Errors)
@@ -56,7 +57,7 @@ func TestPreflightValidationAbsentIsValid(t *testing.T) {
 }
 
 func TestPreflightValidationModeRejectsUnknown(t *testing.T) {
-	tk := baseValidPreflightTask()
+	tk := baseValidPreflightTask(t)
 	tk.Preflight = &Preflight{AcceptanceSkeleton: &AcceptanceSkeletonConfig{
 		Enabled: true,
 		Mode:    "deadbeef",
@@ -71,7 +72,7 @@ func TestPreflightValidationModeRejectsUnknown(t *testing.T) {
 }
 
 func TestPreflightValidationAllowedPathOutsideScopeIsRejected(t *testing.T) {
-	tk := baseValidPreflightTask()
+	tk := baseValidPreflightTask(t)
 	tk.Preflight = &Preflight{AcceptanceSkeleton: &AcceptanceSkeletonConfig{
 		Enabled:      true,
 		Mode:         "skeleton",
@@ -87,7 +88,7 @@ func TestPreflightValidationAllowedPathOutsideScopeIsRejected(t *testing.T) {
 }
 
 func TestPreflightValidationAllowedPathForbiddenIsRejected(t *testing.T) {
-	tk := baseValidPreflightTask()
+	tk := baseValidPreflightTask(t)
 	tk.Scope.AllowedPaths = []string{"."}
 	tk.Preflight = &Preflight{AcceptanceSkeleton: &AcceptanceSkeletonConfig{
 		Enabled:      true,
@@ -104,7 +105,7 @@ func TestPreflightValidationAllowedPathForbiddenIsRejected(t *testing.T) {
 }
 
 func TestPreflightValidationAllowedSubsetAccepted(t *testing.T) {
-	tk := baseValidPreflightTask()
+	tk := baseValidPreflightTask(t)
 	tk.Preflight = &Preflight{AcceptanceSkeleton: &AcceptanceSkeletonConfig{
 		Enabled:      true,
 		Mode:         "skeleton",

@@ -12,10 +12,10 @@ import (
 func TestResolvePathsDefaultsUnderRoot(t *testing.T) {
 	t.Parallel()
 	paths := ResolvePaths("/tmp/galley", "", "")
-	if paths.PIDFile != "/tmp/galley/galley-daemon.pid" {
+	if paths.PIDFile != filepath.Join("/tmp/galley", "galley-daemon.pid") {
 		t.Fatalf("pid file got %q", paths.PIDFile)
 	}
-	if paths.LogFile != "/tmp/galley/galley-daemon.log" {
+	if paths.LogFile != filepath.Join("/tmp/galley", "galley-daemon.log") {
 		t.Fatalf("log file got %q", paths.LogFile)
 	}
 }

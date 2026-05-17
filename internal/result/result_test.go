@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"testing"
 	"time"
 
@@ -32,7 +34,7 @@ acceptance_criteria:
     verification: "Inspect proof.txt or run a focused proof check."
     status: "pending"
 scope:
-  cwd: "`+repo+`"
+  cwd: `+strconv.Quote(repo)+`
   allowed_paths:
     - "proof.txt"
   forbidden_paths: []
@@ -147,7 +149,7 @@ func TestCompleteRunsRequiredQualityChecks(t *testing.T) {
 		Output:   output,
 		Summary:  "done",
 		Profiles: profile.Bundle{Quality: &profile.Quality{RequiredChecks: []profile.RequiredCheck{
-			{ID: "quality-proof", PreferredCommands: []string{"grep -F ok proof.txt"}, Required: true},
+			{ID: "quality-proof", PreferredCommands: []string{readProofCommand()}, Required: true},
 		}}},
 	})
 	if err != nil {
@@ -155,7 +157,7 @@ func TestCompleteRunsRequiredQualityChecks(t *testing.T) {
 	}
 	found := false
 	for _, verification := range generated.Verification {
-		if verification.Command == "grep -F ok proof.txt" && verification.Status == "passed" {
+		if verification.Command == readProofCommand() && verification.Status == "passed" {
 			found = true
 		}
 	}
@@ -170,15 +172,15 @@ func TestCompleteUsesCallerDeadlineInsteadOfStartingAnotherTaskTimeout(t *testin
 	runGit(t, repo, "init")
 	taskFile := writeResultTask(t, repo, "test -d .")
 	output := filepath.Join(t.TempDir(), "result.json")
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Millisecond))
 	defer cancel()
 	start := time.Now()
-	_, err := Complete(ctx, CompleteOptions{
+	generated, err := Complete(ctx, CompleteOptions{
 		TaskFile: taskFile,
 		Output:   output,
 		Summary:  "done",
 		Profiles: profile.Bundle{Quality: &profile.Quality{RequiredChecks: []profile.RequiredCheck{
-			{ID: "slow", PreferredCommands: []string{"sleep 2"}, Required: true},
+			{ID: "deadline", PreferredCommands: []string{readProofCommand()}, Required: true},
 		}}},
 	})
 	if err != nil {
@@ -186,6 +188,9 @@ func TestCompleteUsesCallerDeadlineInsteadOfStartingAnotherTaskTimeout(t *testin
 	}
 	if elapsed := time.Since(start); elapsed > time.Second {
 		t.Fatalf("Complete ignored caller deadline, elapsed=%s", elapsed)
+	}
+	if len(generated.Verification) != 1 || generated.Verification[0].Status != "failed" {
+		t.Fatalf("caller deadline should fail verification quickly: %#v", generated.Verification)
 	}
 }
 
@@ -202,7 +207,7 @@ acceptance_criteria:
     verification: "`+verification+`"
     status: "pending"
 scope:
-  cwd: "`+repo+`"
+  cwd: `+strconv.Quote(repo)+`
   allowed_paths:
     - "."
   forbidden_paths: []
@@ -239,6 +244,20 @@ pr:
 		t.Fatal(err)
 	}
 	return taskFile
+}
+
+func readProofCommand() string {
+	if runtime.GOOS == "windows" {
+		return "findstr /C:ok proof.txt"
+	}
+	return "grep -F ok proof.txt"
+}
+
+func slowCommand() string {
+	if runtime.GOOS == "windows" {
+		return "ping -n 3 127.0.0.1 > NUL"
+	}
+	return "sleep 2"
 }
 
 func runGit(t *testing.T, dir string, args ...string) {

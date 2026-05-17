@@ -3,6 +3,7 @@ package vcs
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -19,6 +20,7 @@ func TestDecodePRCommentsSlurpPages(t *testing.T) {
 }
 
 func TestFetchPRCommentsReadsFullPaginatedResponse(t *testing.T) {
+	skipPOSIXFakeGHOnWindows(t)
 	binDir := t.TempDir()
 	fakeGH := filepath.Join(binDir, "gh")
 	longBody := strings.Repeat("x", 70*1024)
@@ -39,6 +41,7 @@ printf '%s' '[[{"id":1,"body":"`+longBody+`","html_url":"https://github.com/exam
 }
 
 func TestPostPRCommentSendsJSONBodyOnStdin(t *testing.T) {
+	skipPOSIXFakeGHOnWindows(t)
 	binDir := t.TempDir()
 	bodyPath := filepath.Join(t.TempDir(), "body.json")
 	fakeGH := filepath.Join(binDir, "gh")
@@ -62,6 +65,7 @@ cat > `+bodyPath+`
 }
 
 func TestFetchPRURLForCurrentBranchReturnsURL(t *testing.T) {
+	skipPOSIXFakeGHOnWindows(t)
 	binDir := t.TempDir()
 	fakeGH := filepath.Join(binDir, "gh")
 	if err := os.WriteFile(fakeGH, []byte(`#!/bin/sh
@@ -85,6 +89,7 @@ printf '%s\n' 'https://github.com/example/galley/pull/42'
 // branch, the function returns ("", nil) so the caller surfaces the
 // original create-failure rather than the probe error.
 func TestFetchPRURLForCurrentBranchReturnsEmptyWhenNoPR(t *testing.T) {
+	skipPOSIXFakeGHOnWindows(t)
 	binDir := t.TempDir()
 	fakeGH := filepath.Join(binDir, "gh")
 	if err := os.WriteFile(fakeGH, []byte(`#!/bin/sh
@@ -105,6 +110,7 @@ exit 1
 }
 
 func TestFetchPRURLForCurrentBranchReturnsErrorForOtherFailures(t *testing.T) {
+	skipPOSIXFakeGHOnWindows(t)
 	binDir := t.TempDir()
 	fakeGH := filepath.Join(binDir, "gh")
 	if err := os.WriteFile(fakeGH, []byte(`#!/bin/sh
@@ -121,6 +127,7 @@ exit 1
 }
 
 func TestFetchPRStateReadsFullResponse(t *testing.T) {
+	skipPOSIXFakeGHOnWindows(t)
 	binDir := t.TempDir()
 	fakeGH := filepath.Join(binDir, "gh")
 	padding := strings.Repeat(" ", 70*1024)
@@ -141,6 +148,7 @@ printf '%s' '{"state":"open","merged":false,"padding":"`+padding+`"}'
 }
 
 func TestFetchPRAuthorLoginReturnsLoginOnSuccess(t *testing.T) {
+	skipPOSIXFakeGHOnWindows(t)
 	binDir := t.TempDir()
 	fakeGH := filepath.Join(binDir, "gh")
 	if err := os.WriteFile(fakeGH, []byte(`#!/bin/sh
@@ -166,6 +174,7 @@ printf '%s' '{"user":{"login":"pr-author"}}'
 // and downstream /galley PR comment trust checks fall back to rejection
 // instead of silently accepting an empty author.
 func TestFetchPRAuthorLoginRejectsEmptyLogin(t *testing.T) {
+	skipPOSIXFakeGHOnWindows(t)
 	cases := []struct {
 		name    string
 		payload string
@@ -198,6 +207,13 @@ printf '%s' '`+tc.payload+`'
 				t.Fatalf("error should mention empty user.login, got %v", err)
 			}
 		})
+	}
+}
+
+func skipPOSIXFakeGHOnWindows(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses a POSIX shell fake gh executable")
 	}
 }
 

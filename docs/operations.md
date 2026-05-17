@@ -96,7 +96,18 @@ galley daemon run --once
 
 Use the installed `galley` binary for `start`, `status`, and `stop`. PID verification records the executable path, so `go run ./cmd/galley ... daemon start` is not suitable for background daemon control because later `go run` invocations use different temporary binaries.
 
-Foreground and background daemons use the same shutdown path. On `SIGINT` or `SIGTERM`, Galley stops claiming new queued tasks, lets active attempts finish until the shutdown timeout, records evidence, and avoids starting another retry attempt after shutdown is requested.
+`--supervisor` is a daemon startup flag (accepted on `galley daemon run` and inherited by `daemon start`) and selects the built-in supervisor adapter (`claude` or `codex`). It is not a repository `environment.yaml` field: supervisor selection is daemon startup state, not a per-repo profile setting.
+
+On Unix, foreground and background daemons use the same shutdown path. On `SIGINT` or `SIGTERM`, Galley stops claiming new queued tasks, lets active attempts finish until the shutdown timeout, records evidence, and avoids starting another retry attempt after shutdown is requested.
+
+### Windows
+
+Windows has no SIGTERM equivalent that can be delivered to a console-less background process, so background `galley daemon start`/`stop` performs an immediate `TerminateProcess` rather than a graceful shutdown:
+
+- `galley daemon status` uses `OpenProcess` + `GetExitCodeProcess` to verify the recorded PID instead of the Unix `signal(0)` probe. `STILL_ACTIVE` (Windows exit code 259) reports alive; any other exit code reports stopped.
+- `galley daemon stop` terminates the daemon PID directly. Active executor/supervisor attempts running under that daemon do not get a chance to record graceful-shutdown evidence on Windows; the next daemon startup recovers any interrupted running task.
+- `galley daemon stop --force` still re-verifies process identity and terminates the daemon plus every recorded executor/supervisor child. On Windows the child-cleanup loop degrades to PID-level termination because Galley only creates Unix process groups via `Setpgid`; a child PID that has already spawned its own descendants will not have those descendants killed by the daemon cleanup path. Operators that rely on grandchild cleanup should use a Windows job object or the OS task manager.
+- For a graceful shutdown on Windows, run `galley daemon run` in the foreground and stop it with `Ctrl+C`. The foreground daemon shutdown path is the same on every OS: it stops claiming new tasks, lets active attempts finish until `--shutdown-timeout`, and records evidence.
 
 ## Force Stop
 
@@ -122,6 +133,7 @@ When the built-in model supervisor subprocess exits because of idle timeout, tot
 ### Filesystems
 
 - Galley is intended for trusted local repositories and local filesystems. Queue claims rely on no-overwrite file creation plus atomic rename behavior on the same filesystem.
+- No-overwrite queue/task moves (`task queue`, `task requeue`, archive, and daemon claim/requeue) use `O_CREATE|O_EXCL` rather than `os.Link`, so they no longer require the destination filesystem to implement hardlinks. Duplicate destinations are still rejected on every supported OS.
 - Shared network filesystems may not provide the same rename and mtime behavior as a local disk.
 - Avoid very short `--claim-ttl` values. Filesystems with coarse mtime resolution can make overly aggressive stale-claim detection noisy.
 

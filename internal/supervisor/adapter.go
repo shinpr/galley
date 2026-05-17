@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/shinpr/galley/internal/profile"
@@ -15,6 +16,11 @@ import (
 	"github.com/shinpr/galley/prompts"
 	"github.com/shinpr/galley/schemas"
 )
+
+// ClaudeSupervisorSystemPromptFilename is the artifact-dir-scoped filename
+// Galley uses to materialize the Claude supervisor system prompt on Windows
+// so the prompt body never reaches argv.
+const ClaudeSupervisorSystemPromptFilename = "claude_supervisor_system_prompt.md"
 
 // AdapterOptions configures a built-in model supervisor adapter.
 type AdapterOptions struct {
@@ -158,6 +164,16 @@ func runCodexAdapter(ctx context.Context, opts AdapterOptions, request []byte) (
 }
 
 func runClaudeAdapter(ctx context.Context, opts AdapterOptions, request []byte) ([]byte, error) {
+	return runClaudeAdapterForOS(ctx, opts, request, runtime.GOOS)
+}
+
+// runClaudeAdapterForOS is the OS-aware Claude supervisor adapter. On Windows
+// the supervisor system prompt is delivered through --system-prompt-file and
+// the JSON schema body is intentionally not passed on argv; the supervisor
+// verdict validators in ValidateVerdictForEvidence and the Claude guard hook
+// reject malformed final output. On macOS/Linux the existing argv shape is
+// preserved.
+func runClaudeAdapterForOS(ctx context.Context, opts AdapterOptions, request []byte, goos string) ([]byte, error) {
 	dir, cleanup, err := supervisorArtifactDir(opts.ArtifactDir, "galley-claude-supervisor-*")
 	if err != nil {
 		return nil, err
@@ -182,10 +198,22 @@ func runClaudeAdapter(ctx context.Context, opts AdapterOptions, request []byte) 
 		"--tools", "default",
 		"--disallowedTools", "Write,Edit,MultiEdit,NotebookEdit",
 		"--output-format", "text",
-		"--system-prompt", prompts.ClaudeSupervisor(),
-		"--json-schema", schemas.SupervisorVerdict,
-		"--plugin-dir", guardDir,
 	}
+	if goos == "windows" {
+		systemPromptPath := filepath.Join(dir, ClaudeSupervisorSystemPromptFilename)
+		if err := writeSupervisorFile(systemPromptPath, []byte(prompts.ClaudeSupervisor())); err != nil {
+			return nil, err
+		}
+		args = append(args, "--system-prompt-file", systemPromptPath)
+		// JSON schema is intentionally not passed on argv on Windows; verdict
+		// validators in ValidateVerdictForEvidence reject malformed output.
+	} else {
+		args = append(args,
+			"--system-prompt", prompts.ClaudeSupervisor(),
+			"--json-schema", schemas.SupervisorVerdict,
+		)
+	}
+	args = append(args, "--plugin-dir", guardDir)
 	if opts.ArtifactDir != "" {
 		args = append(args, "--debug-file", debugPath)
 	}

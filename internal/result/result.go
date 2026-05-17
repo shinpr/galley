@@ -181,9 +181,16 @@ func runVerification(ctx context.Context, workDir, command string) verificationR
 	// Profile commands are trusted operator-authored shell commands. Run them
 	// through the shared runner so cancellation, process cleanup, and output
 	// bounding behave like the rest of Galley's subprocesses.
+	argv, cleanup, err := shellArgvForOS(runtime.GOOS, command, "")
+	if err != nil {
+		return verificationRun{command: command, err: err}
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
 	result, err := runner.RunCommand(ctx, runner.Command{
 		WorkDir: workDir,
-		Argv:    shellArgv(command),
+		Argv:    argv,
 	}, runner.RunOptions{TailBytes: 2048})
 	return verificationRun{
 		command: command,
@@ -193,11 +200,42 @@ func runVerification(ctx context.Context, workDir, command string) verificationR
 	}
 }
 
-func shellArgv(command string) []string {
-	if runtime.GOOS == "windows" {
-		return []string{"cmd.exe", "/C", command}
+// windowsShellArgvLengthThreshold is the conservative argv-byte threshold above
+// which Galley materializes the verification command into a temporary .cmd
+// script. cmd.exe enforces an 8191-character command line limit; staying well
+// below it leaves room for cmd.exe's own argv overhead.
+const windowsShellArgvLengthThreshold = 7000
+
+// shellArgvForOS returns the argv that runVerification should hand to the
+// shared runner, plus an optional cleanup function for materialized script
+// files. When goos is "windows" and the command is too long to safely pass on
+// argv, the command body is written to a .cmd file under scratchDir (or a temp
+// directory when scratchDir is empty) and cmd.exe is invoked with the script
+// path so the command body never reaches argv.
+func shellArgvForOS(goos, command, scratchDir string) ([]string, func(), error) {
+	if goos != "windows" {
+		return []string{"/bin/sh", "-c", command}, nil, nil
 	}
-	return []string{"/bin/sh", "-c", command}
+	if len(command) < windowsShellArgvLengthThreshold {
+		return []string{"cmd.exe", "/C", command}, nil, nil
+	}
+	dir := scratchDir
+	cleanup := func() {}
+	if dir == "" {
+		tmp, err := os.MkdirTemp("", "galley-windows-check-*")
+		if err != nil {
+			return nil, nil, fmt.Errorf("create windows verification script dir: %w", err)
+		}
+		dir = tmp
+		cleanup = func() { _ = os.RemoveAll(tmp) }
+	}
+	scriptPath := filepath.Join(dir, "galley-verification.cmd")
+	body := []byte("@echo off\r\n" + command + "\r\n")
+	if err := os.WriteFile(scriptPath, body, 0o600); err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("write windows verification script %s: %w", scriptPath, err)
+	}
+	return []string{"cmd.exe", "/C", scriptPath}, cleanup, nil
 }
 
 func (r verificationRun) status() string {

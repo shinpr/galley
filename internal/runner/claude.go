@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -11,6 +12,13 @@ import (
 	"github.com/shinpr/galley/prompts"
 	"github.com/shinpr/galley/schemas"
 )
+
+// ClaudeSystemPromptFilename is the filename Galley uses when it materializes
+// an embedded Claude system prompt onto disk for the Windows command-line
+// length workaround. The file lives under the caller-supplied AttemptDir when
+// provided so per-attempt evidence is preserved alongside the other run
+// artifacts.
+const ClaudeSystemPromptFilename = "claude_system_prompt.md"
 
 // ClaudeOptions contains the task-derived settings needed to construct a Claude Code invocation.
 type ClaudeOptions struct {
@@ -29,6 +37,10 @@ type ClaudeOptions struct {
 	Prompt            string
 	IncludeHookEvents bool
 	PluginDirs        []string
+	// AttemptDir, when set, lets ClaudeCommandPlan materialize the Windows
+	// system prompt file under a stable per-attempt directory. When empty the
+	// runner falls back to an os.MkdirTemp directory for the prompt file.
+	AttemptDir string
 }
 
 // Command is an execution plan suitable for exec.Command plus cmd.Dir.
@@ -67,8 +79,10 @@ func FromTask(t task.Task) ClaudeOptions {
 
 // ClaudeArgv returns the executable argv for Claude Code.
 //
-// Prompt and schema files are read by Go and embedded as argument values. Shell
-// substitutions are intentionally not used in this path.
+// Prompt and schema files are read by Go and embedded as argument values on
+// macOS and Linux. On Windows the work order prompt is delivered through
+// stdin and the system prompt through --system-prompt-file, so the returned
+// argv intentionally omits the work order and JSON schema bodies.
 func ClaudeArgv(opts ClaudeOptions) ([]string, error) {
 	command, err := ClaudeCommandPlan(opts)
 	if err != nil {
@@ -77,12 +91,24 @@ func ClaudeArgv(opts ClaudeOptions) ([]string, error) {
 	return command.Argv, nil
 }
 
-// ClaudeCommandPlan returns the work directory, argv, and warnings for a Claude Code run.
+// ClaudeCommandPlan returns the work directory, argv, stdin, and warnings for
+// a Claude Code run on the current host OS.
 //
-// When no prompt or schema path/content is supplied, the built-in Galley
-// executor prompt and result schema are embedded into argv. Caller-supplied
-// prompt and schema file paths are read before execution.
+// macOS and Linux preserve the historical argv shape, where the system prompt,
+// JSON schema, and work order prompt are passed as argv values. Windows moves
+// the system prompt to --system-prompt-file (or --append-system-prompt-file)
+// and delivers the work order prompt through stdin to avoid the
+// CommandLineToArgvW length limit. The JSON schema body is intentionally not
+// passed on argv on Windows; Galley relies on the Claude guard hook and the
+// executor result validators to reject malformed output.
 func ClaudeCommandPlan(opts ClaudeOptions) (Command, error) {
+	return ClaudeCommandPlanForOS(opts, runtime.GOOS)
+}
+
+// ClaudeCommandPlanForOS builds a Claude Code command plan for the requested
+// target OS. It is exported so tests can construct Windows-shaped plans
+// regardless of the host OS.
+func ClaudeCommandPlanForOS(opts ClaudeOptions, goos string) (Command, error) {
 	if opts.Prompt == "" {
 		return Command{}, fmt.Errorf("prompt is required")
 	}
@@ -92,6 +118,14 @@ func ClaudeCommandPlan(opts ClaudeOptions) (Command, error) {
 	opts = withDefaultEmbeddedOptions(opts)
 
 	warnings := claudeWarnings(opts)
+	if goos == "windows" {
+		argv, stdin, extraWarnings, err := buildClaudeArgvWindows(opts)
+		if err != nil {
+			return Command{}, err
+		}
+		warnings = append(warnings, extraWarnings...)
+		return Command{WorkDir: opts.WorkDir, Argv: argv, Stdin: stdin, Warnings: warnings}, nil
+	}
 	argv, err := buildClaudeArgv(opts, func(label, path string) (string, error) {
 		return readOptionFile(label, path)
 	})
@@ -104,7 +138,9 @@ func ClaudeCommandPlan(opts ClaudeOptions) (Command, error) {
 // ClaudeShellPreview returns a human-oriented shell preview of a Claude Code run.
 //
 // The preview uses absolute prompt and schema paths so the command still works
-// after changing into the task cwd.
+// after changing into the task cwd. The preview keeps the POSIX shell shape
+// even when the actual run on Windows takes a different routing path; the
+// Windows runtime behavior is documented in CHANGELOG.md.
 func ClaudeShellPreview(opts ClaudeOptions) (string, []string, error) {
 	if opts.Prompt == "" {
 		return "", nil, fmt.Errorf("prompt is required")
@@ -191,6 +227,95 @@ func buildClaudeArgv(opts ClaudeOptions, fileValue func(label, path string) (str
 	}
 	argv = append(argv, opts.Prompt)
 	return argv, nil
+}
+
+// buildClaudeArgvWindows builds the Windows-only Claude argv. It keeps
+// Galley-generated long values (system prompt, work order prompt, JSON schema)
+// off argv: the system prompt is delivered through --system-prompt-file or
+// --append-system-prompt-file, the work order prompt is delivered through
+// stdin (Claude Code reads stdin in -p/non-interactive mode without the Codex
+// `-` marker), and the JSON schema body is intentionally not passed on argv.
+// The Galley Claude guard hook and the executor result validators reject
+// malformed final output, preserving the structured-output contract.
+func buildClaudeArgvWindows(opts ClaudeOptions) ([]string, string, []string, error) {
+	bin := opts.Bin
+	if bin == "" {
+		bin = "claude"
+	}
+	argv := []string{bin, "-p", "--output-format", "stream-json", "--verbose"}
+	if opts.Model != "" {
+		argv = append(argv, "--model", opts.Model)
+	}
+	if opts.Effort != "" {
+		argv = append(argv, "--effort", opts.Effort)
+	}
+	if opts.PermissionMode != "" {
+		argv = append(argv, "--permission-mode", opts.PermissionMode)
+	}
+	var warnings []string
+	if opts.SystemPromptFile != "" || opts.SystemPrompt != "" {
+		path, err := resolveWindowsClaudeSystemPromptFile(opts)
+		if err != nil {
+			return nil, "", nil, err
+		}
+		switch opts.PromptMode {
+		case "replace":
+			argv = append(argv, "--system-prompt-file", path)
+		case "append":
+			argv = append(argv, "--append-system-prompt-file", path)
+		default:
+			return nil, "", nil, fmt.Errorf("unsupported prompt mode %q", opts.PromptMode)
+		}
+	}
+	if opts.JSONSchemaFile != "" || opts.JSONSchema != "" {
+		warnings = append(warnings, "Windows runner does not pass --json-schema on argv; Galley relies on the Claude guard hook and the executor result validators to reject malformed final output")
+	}
+	if opts.SettingsFile != "" {
+		argv = append(argv, "--settings", opts.SettingsFile)
+	}
+	for _, dir := range opts.PluginDirs {
+		if dir != "" {
+			argv = append(argv, "--plugin-dir", dir)
+		}
+	}
+	if opts.IncludeHookEvents {
+		argv = append(argv, "--include-hook-events")
+	}
+	if opts.MaxBudgetUSD > 0 {
+		argv = append(argv, "--max-budget-usd", strconv.FormatFloat(opts.MaxBudgetUSD, 'f', -1, 64))
+	}
+	// The work order prompt is delivered through stdin so Galley-generated
+	// long content does not reach argv on Windows.
+	return argv, opts.Prompt, warnings, nil
+}
+
+// resolveWindowsClaudeSystemPromptFile returns a real on-disk path that the
+// Windows Claude command plan can pass to --system-prompt-file. When the
+// caller already supplied a real file path the function returns it unchanged;
+// when only embedded SystemPrompt content is available the function writes it
+// to opts.AttemptDir (preferred for per-attempt evidence) or to a temp
+// directory (when no AttemptDir is set).
+func resolveWindowsClaudeSystemPromptFile(opts ClaudeOptions) (string, error) {
+	if opts.SystemPromptFile != "" {
+		return opts.SystemPromptFile, nil
+	}
+	dir := opts.AttemptDir
+	if dir == "" {
+		tmp, err := os.MkdirTemp("", "galley-claude-prompt-*")
+		if err != nil {
+			return "", fmt.Errorf("create claude system prompt dir: %w", err)
+		}
+		dir = tmp
+	} else {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return "", fmt.Errorf("create claude system prompt dir %s: %w", dir, err)
+		}
+	}
+	path := filepath.Join(dir, ClaudeSystemPromptFilename)
+	if err := os.WriteFile(path, []byte(opts.SystemPrompt), 0o600); err != nil {
+		return "", fmt.Errorf("write claude system prompt file %s: %w", path, err)
+	}
+	return path, nil
 }
 
 func withDefaultEmbeddedOptions(opts ClaudeOptions) ClaudeOptions {

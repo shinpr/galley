@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -56,7 +57,17 @@ func (b Binaries) gh() string {
 }
 
 // AddPaths stages the provided worktree-relative paths.
+//
+// On Windows the pathspec list is delivered through stdin via
+// --pathspec-from-file=- so a long list of changed files cannot push the
+// CreateProcess command line past the Windows limit. macOS and Linux continue
+// to pass the pathspecs on argv to preserve the existing behavior covered by
+// AddPaths regression tests.
 func AddPaths(ctx context.Context, bins Binaries, workDir, runDir string, paths []string) error {
+	return addPathsForOS(ctx, bins, workDir, runDir, paths, runtime.GOOS)
+}
+
+func addPathsForOS(ctx context.Context, bins Binaries, workDir, runDir string, paths []string, goos string) error {
 	stagePaths := make([]string, 0, len(paths))
 	seen := make(map[string]bool, len(paths))
 	for _, path := range paths {
@@ -70,11 +81,18 @@ func AddPaths(ctx context.Context, bins Binaries, workDir, runDir string, paths 
 	if len(stagePaths) == 0 {
 		return fmt.Errorf("git add paths is empty")
 	}
-	argv := append([]string{bins.git(), "add", "-A", "--"}, stagePaths...)
-	result, err := runner.RunCommand(ctx, runner.Command{
-		WorkDir: workDir,
-		Argv:    argv,
-	}, runner.RunOptions{
+	cmd := runner.Command{WorkDir: workDir}
+	if goos == "windows" {
+		// git add --pathspec-from-file=- --pathspec-file-nul reads pathspecs
+		// from stdin so a long list of changed files never reaches argv. The
+		// NUL separator avoids any ambiguity with paths that contain LF or
+		// other whitespace characters.
+		cmd.Argv = []string{bins.git(), "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"}
+		cmd.Stdin = strings.Join(stagePaths, "\x00")
+	} else {
+		cmd.Argv = append([]string{bins.git(), "add", "-A", "--"}, stagePaths...)
+	}
+	result, err := runner.RunCommand(ctx, cmd, runner.RunOptions{
 		StdoutPath: filepath.Join(runDir, "git_add.stdout.log"),
 		StderrPath: filepath.Join(runDir, "git_add.stderr.log"),
 	})

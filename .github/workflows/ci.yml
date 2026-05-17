@@ -37,6 +37,7 @@ jobs:
           cache-dependency-path: go.sum
 
       - name: Check formatting
+        if: runner.os == 'Linux'
         run: |
           test -z "$(gofmt -l $(git ls-files '*.go'))"
 

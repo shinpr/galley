@@ -714,7 +714,7 @@ func TestClaudeArgsShell(t *testing.T) {
 	if stderr != "" {
 		t.Fatalf("stderr got %q", stderr)
 	}
-	if !strings.HasPrefix(stdout, "cd ") || !strings.Contains(stdout, `"$(cat /`) {
+	if !strings.HasPrefix(stdout, "cd ") || !strings.Contains(stdout, `--system-prompt "$(cat `) || !strings.Contains(stdout, `--json-schema "$(cat `) {
 		t.Fatalf("unexpected shell preview: %q", stdout)
 	}
 }

@@ -1834,7 +1834,7 @@ execution_policy:
 worktree:
   enabled: true
   branch: "agent/` + name + `"
-  path: "` + worktreePath + `"
+  path: ` + strconv.Quote(worktreePath) + `
 supervisor:
   review_iterations: 0
 executor:

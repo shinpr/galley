@@ -6,6 +6,14 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Fixed
+
+- Windows compatibility regressions reported in GitHub issue #41. Task path validation now compares logical (slash) cleaned forms across `worktree.path`, `scope.allowed_paths`, `scope.forbidden_paths`, `files[].source`, `files[].destination`, and `preflight.acceptance_skeleton` outputs, so YAML authored with `/` separators no longer silently passes parent-traversal checks on Windows (where `filepath.Clean` rewrites to `\`) and same-root sibling matches such as `internal-task` against `internal` no longer leak through containment. Task queueing file moves no longer rely on `os.Link` (which surfaced as a raw "not supported by windows" error on filesystems without hardlink support); the no-overwrite write path now uses `O_CREATE|O_EXCL` and the overwrite path keeps the temp-file-plus-rename atomic semantics on every supported OS. Duplicate-destination protection in `task queue`, `task requeue`, archive, and daemon claim/requeue is preserved.
+
+### Changed
+
+- Background daemon control now has an explicit Windows implementation path. `Alive` uses `OpenProcess` + `GetExitCodeProcess` instead of `signal(0)` (which is not supported on Windows), and `Stop` uses `TerminateProcess` because Windows has no SIGTERM equivalent that can be delivered to a console-less background daemon. The Windows `daemon start`/`stop` path is therefore an immediate termination rather than a graceful shutdown; operators that need a graceful stop on Windows should run `galley daemon run` in the foreground and use Ctrl+C. Foreground daemon run behavior is unchanged on every OS. Child process-group cleanup falls back to PID-level termination on Windows because the runner only creates Unix process groups via `Setpgid`. No new CLI flag, task YAML field, or environment profile field is introduced; in particular, `supervisor` remains daemon startup state (the `--supervisor` flag on `galley daemon run`/`start`) and is not added to `environment.yaml`.
+
 ## v0.5.0 - 2026-05-15
 
 ### Changed

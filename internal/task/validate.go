@@ -3,11 +3,76 @@ package task
 import (
 	"fmt"
 	"os"
+	slashpath "path"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
 )
+
+// normalizeLogicalPath converts a YAML-authored logical path to a slash-based
+// cleaned form. Task YAML paths are documented as forward-slash relative paths,
+// but authors and the daemon may receive native Windows separators. Comparing
+// after slash normalization lets the same validator accept both `../foo/bar`
+// and `..\foo\bar` and report parent traversal consistently on every OS. The
+// validator does not consult the local filesystem, so logical normalization
+// here is safe for `filepath.IsAbs`-rejected absolute paths handled earlier.
+func normalizeLogicalPath(p string) string {
+	if p == "" {
+		return ""
+	}
+	// `filepath.ToSlash` is a no-op on non-Windows builds, so it cannot make
+	// the validator platform-agnostic on its own. Replace backslashes with
+	// forward slashes explicitly so YAML authored on Windows is normalized
+	// the same way whether validation runs on Unix or Windows. Task YAML
+	// paths are documented as logical (slash) relative paths, so collapsing
+	// `\` to `/` is the intended canonical form rather than a lossy rewrite.
+	return slashpath.Clean(strings.ReplaceAll(p, "\\", "/"))
+}
+
+// logicalPathEscapes reports whether a slash-cleaned logical path is `..` or
+// starts with `../`. This is the separator-independent equivalent of the
+// previous `filepath.Clean` + `strings.HasPrefix(..., "../")` checks, which
+// silently passed on Windows because cleaned paths used `\` separators.
+func logicalPathEscapes(clean string) bool {
+	return clean == ".." || strings.HasPrefix(clean, "../")
+}
+
+// isLogicalAbsolutePath reports whether a logical (YAML-authored) task path
+// should be treated as absolute on any OS. `filepath.IsAbs` is OS-specific:
+// on a Unix host it does not recognize Windows drive-qualified paths such as
+// `C:\foo` or `C:/foo`, nor does it always recognize backslash-rooted Windows
+// forms like `\foo`. To keep validation platform-independent we additionally
+// reject:
+//   - slash-rooted paths after replacing backslashes — covers Unix `/foo`,
+//     Windows `\foo`, and UNC `\\server\share` (which normalizes to
+//     `//server/share`);
+//   - Windows drive-qualified paths such as `C:\foo` or `C:/foo`. A separator
+//     after the drive colon is required so plain identifiers like `id:val`
+//     are not misclassified as absolute paths.
+//
+// Task YAML paths are documented as logical (slash) relative paths, so these
+// forms always indicate a host-foreign absolute that the author should not be
+// able to smuggle past the validator regardless of which OS runs it.
+func isLogicalAbsolutePath(p string) bool {
+	if p == "" {
+		return false
+	}
+	if filepath.IsAbs(p) {
+		return true
+	}
+	slash := strings.ReplaceAll(p, "\\", "/")
+	if strings.HasPrefix(slash, "/") {
+		return true
+	}
+	if len(p) >= 3 && p[1] == ':' && (p[2] == '\\' || p[2] == '/') {
+		c := p[0]
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') {
+			return true
+		}
+	}
+	return false
+}
 
 // Validate runs structural and environment validation for a task.
 func Validate(t Task) ValidationResult {
@@ -151,7 +216,12 @@ func validateWorktree(result *ValidationResult, t Task) {
 		require(result, validGitBranchName(t.Worktree.Branch), "worktree.branch must be a valid git branch name")
 	}
 	require(result, t.Worktree.Path != "", "worktree.path is required for AFK tasks")
-	if t.Worktree.Path != "" && filepath.IsAbs(t.Worktree.Path) {
+	// Use isLogicalAbsolutePath so Windows-authored absolute worktree paths
+	// (`C:\repo.worktrees`, `\\share\worktrees`, `\foo`) are rejected even on
+	// non-Windows hosts. `filepath.IsAbs` is OS-specific and used to let those
+	// forms slip through to validateWorktreePath, which then reported a
+	// misleading sibling-path error.
+	if t.Worktree.Path != "" && isLogicalAbsolutePath(t.Worktree.Path) {
 		result.Errors = append(result.Errors, "worktree.path must be relative")
 	} else if t.Worktree.Path != "" {
 		validateWorktreePath(result, t.Worktree.Path)
@@ -159,7 +229,12 @@ func validateWorktree(result *ValidationResult, t Task) {
 }
 
 func validateWorktreePath(result *ValidationResult, path string) {
-	clean := filepath.Clean(path)
+	// Worktree paths are authored as logical (slash) relative paths. Cleaning
+	// natively on Windows produced backslash-prefixed strings, so the
+	// `"../"`/`"../../"` literal checks below never matched and rejected every
+	// otherwise valid sibling. Normalize to slash form first so the rule
+	// behaves the same on every OS.
+	clean := normalizeLogicalPath(path)
 	if clean == ".." || strings.HasPrefix(clean, "../../") {
 		result.Errors = append(result.Errors, fmt.Sprintf("worktree.path contains parent traversal path %q", path))
 		return
@@ -238,8 +313,8 @@ func validatePreflight(result *ValidationResult, t Task) {
 		if filepath.IsAbs(p) {
 			continue
 		}
-		clean := filepath.Clean(p)
-		if clean == ".." || strings.HasPrefix(clean, "../") {
+		clean := normalizeLogicalPath(p)
+		if logicalPathEscapes(clean) {
 			continue
 		}
 		if !pathAllowedByScope(p, t.Scope.AllowedPaths) {
@@ -280,8 +355,8 @@ func validatePreflightOutputs(result *ValidationResult, t Task, cfg *AcceptanceS
 		if out.Path != "" {
 			validateRelativePath(result, field+".path", out.Path)
 			if !filepath.IsAbs(out.Path) {
-				clean := filepath.Clean(out.Path)
-				if clean != ".." && !strings.HasPrefix(clean, "../") {
+				clean := normalizeLogicalPath(out.Path)
+				if !logicalPathEscapes(clean) {
 					if !pathAllowedByScope(out.Path, effectiveAllowed) {
 						result.Errors = append(result.Errors, fmt.Sprintf("%s.path %q must be inside the effective preflight allowed paths", field, out.Path))
 					}
@@ -290,10 +365,14 @@ func validatePreflightOutputs(result *ValidationResult, t Task, cfg *AcceptanceS
 					}
 				}
 			}
-			if prev, ok := seenPaths[filepath.Clean(out.Path)]; ok {
+			// Deduplicate by slash-normalized form so `foo/bar` and `foo\bar`
+			// (or repeated entries that differ only in separator) collapse to
+			// the same key on every platform.
+			key := normalizeLogicalPath(out.Path)
+			if prev, ok := seenPaths[key]; ok {
 				result.Errors = append(result.Errors, fmt.Sprintf("%s.path %q is duplicated (also at outputs[%d])", field, out.Path, prev))
 			} else {
-				seenPaths[filepath.Clean(out.Path)] = i
+				seenPaths[key] = i
 			}
 		}
 	}
@@ -303,13 +382,17 @@ func pathAllowedByScope(path string, allowed []string) bool {
 	if path == "" {
 		return false
 	}
-	cleanPath := filepath.Clean(path)
+	// Compare in slash form so allowed entries authored as `internal/task` in
+	// YAML match descendants regardless of whether the input arrives with `/`
+	// or `\` separators. Containment uses a `/`-terminated boundary so
+	// same-root strings such as `internal-task` do not match `internal`.
+	cleanPath := normalizeLogicalPath(path)
 	for _, allowedPath := range allowed {
-		cleanAllowed := filepath.Clean(allowedPath)
+		cleanAllowed := normalizeLogicalPath(allowedPath)
 		if cleanAllowed == "." {
 			return true
 		}
-		if cleanPath == cleanAllowed || strings.HasPrefix(cleanPath, cleanAllowed+string(filepath.Separator)) {
+		if cleanPath == cleanAllowed || strings.HasPrefix(cleanPath, cleanAllowed+"/") {
 			return true
 		}
 	}
@@ -320,13 +403,13 @@ func pathForbiddenByScope(path string, forbidden []string) bool {
 	if path == "" {
 		return false
 	}
-	cleanPath := filepath.Clean(path)
+	cleanPath := normalizeLogicalPath(path)
 	for _, forbiddenPath := range forbidden {
-		cleanForbidden := filepath.Clean(forbiddenPath)
+		cleanForbidden := normalizeLogicalPath(forbiddenPath)
 		if cleanForbidden == "." {
 			return true
 		}
-		if cleanPath == cleanForbidden || strings.HasPrefix(cleanPath, cleanForbidden+string(filepath.Separator)) {
+		if cleanPath == cleanForbidden || strings.HasPrefix(cleanPath, cleanForbidden+"/") {
 			return true
 		}
 	}
@@ -338,11 +421,19 @@ func validateRelativePath(result *ValidationResult, field, p string) {
 		result.Errors = append(result.Errors, fmt.Sprintf("%s contains an empty path", field))
 		return
 	}
-	if filepath.IsAbs(p) {
+	// Reject every host-foreign absolute form (Unix `/x`, Windows `\x`,
+	// drive-qualified `C:\x`/`C:/x`, and UNC `\\srv`) the same way on every
+	// OS so YAML authored on one platform cannot smuggle absolute paths past
+	// validation on another. See isLogicalAbsolutePath for the recognized
+	// forms; `filepath.IsAbs` alone is OS-specific and misses Windows
+	// absolutes on Unix hosts.
+	if isLogicalAbsolutePath(p) {
 		result.Errors = append(result.Errors, fmt.Sprintf("%s contains absolute path %q", field, p))
 	}
-	clean := filepath.Clean(p)
-	if clean == ".." || strings.HasPrefix(clean, "../") {
+	// Slash-normalize before checking parent traversal so backslash-cleaned
+	// strings on Windows do not silently pass the literal `"../"` prefix test.
+	clean := normalizeLogicalPath(p)
+	if logicalPathEscapes(clean) {
 		result.Errors = append(result.Errors, fmt.Sprintf("%s contains parent traversal path %q", field, p))
 	}
 }

@@ -10,10 +10,19 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: Test
-    runs-on: ubuntu-latest
+  test-matrix:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Checkout
@@ -29,37 +38,68 @@ jobs:
 
       - name: Check formatting
         run: |
-          test -z "$(find . -name '*.go' -not -path './.git/*' -print | xargs gofmt -l)"
+          test -z "$(gofmt -l $(git ls-files '*.go'))"
 
       - name: Test packages
         run: go test ./...
 
       - name: Build binaries
-        run: go build -o /tmp/galley ./cmd/galley
+        run: |
+          suffix=""
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            suffix=".exe"
+          fi
+          go build -o "$RUNNER_TEMP/galley${suffix}" ./cmd/galley
 
       - name: Validate examples
         run: |
+          repo_cwd="$(pwd)"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            repo_cwd="$(pwd -W)"
+          fi
           tmp_task="$(mktemp)"
-          sed "s#/Users/shinpr/Projects/galley#$(pwd)#" examples/afk-task.yaml > "$tmp_task"
+          sed "s#/Users/shinpr/Projects/galley#${repo_cwd}#" examples/afk-task.yaml > "$tmp_task"
           go run ./cmd/galley task validate "$tmp_task"
           go run ./cmd/galley profile validate --kind quality examples/quality-default.yaml
           go run ./cmd/galley profile validate --kind environment examples/environment-local.yaml
           go run ./cmd/galley schema check
 
       - name: Validate skill scripts
-        run: python3 plugins/galley/skills/galley/scripts/test_create_task_skeleton.py
+        run: |
+          python_bin="python3"
+          if ! command -v "$python_bin" >/dev/null 2>&1; then
+            python_bin="python"
+          fi
+          "$python_bin" plugins/galley/skills/galley/scripts/test_create_task_skeleton.py
 
       - name: Validate JSON files
         run: |
-          python3 -m json.tool schemas/claude-result.schema.json >/dev/null
-          python3 -m json.tool schemas/supervisor-verdict.schema.json >/dev/null
-          python3 -m json.tool plugins/galley/skills/galley/references/task.schema.json >/dev/null
-          python3 -m json.tool plugins/galley/skills/galley/references/quality.schema.json >/dev/null
-          python3 -m json.tool plugins/galley/skills/galley/references/environment.schema.json >/dev/null
-          python3 -m json.tool plugins/galley/.claude-plugin/plugin.json >/dev/null
-          python3 -m json.tool plugins/galley/.codex-plugin/plugin.json >/dev/null
-          python3 -m json.tool .claude-plugin/marketplace.json >/dev/null
-          python3 -m json.tool .agents/plugins/marketplace.json >/dev/null
+          python_bin="python3"
+          if ! command -v "$python_bin" >/dev/null 2>&1; then
+            python_bin="python"
+          fi
+          "$python_bin" -m json.tool schemas/claude-result.schema.json >/dev/null
+          "$python_bin" -m json.tool schemas/supervisor-verdict.schema.json >/dev/null
+          "$python_bin" -m json.tool plugins/galley/skills/galley/references/task.schema.json >/dev/null
+          "$python_bin" -m json.tool plugins/galley/skills/galley/references/quality.schema.json >/dev/null
+          "$python_bin" -m json.tool plugins/galley/skills/galley/references/environment.schema.json >/dev/null
+          "$python_bin" -m json.tool plugins/galley/.claude-plugin/plugin.json >/dev/null
+          "$python_bin" -m json.tool plugins/galley/.codex-plugin/plugin.json >/dev/null
+          "$python_bin" -m json.tool .claude-plugin/marketplace.json >/dev/null
+          "$python_bin" -m json.tool .agents/plugins/marketplace.json >/dev/null
 
       - name: Smoke test
+        if: runner.os != 'Windows'
         run: ./scripts/smoke-local.sh
+
+  test:
+    name: Test
+    needs: test-matrix
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Verify OS test matrix succeeded
+        if: needs.test-matrix.result != 'success'
+        run: exit 1

@@ -2,9 +2,11 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 
 	"github.com/shinpr/galley/internal/profile"
@@ -71,7 +73,11 @@ func newSchemaCheckCommand() *cobra.Command {
 				if err != nil {
 					return fmt.Errorf("read schema: %w", err)
 				}
-				if !bytes.Equal(current, generated) {
+				equal, err := schemasEqual(current, generated)
+				if err != nil {
+					return err
+				}
+				if !equal {
 					return fmt.Errorf("%s is out of date; run `galley schema generate`", target.Path)
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "schema up to date: %s\n", target.Path)
@@ -81,6 +87,21 @@ func newSchemaCheckCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&path, "path", "", "Schema directory to check; defaults to the Galley plugin references directory")
 	return cmd
+}
+
+func schemasEqual(current, generated []byte) (bool, error) {
+	if bytes.Equal(current, generated) {
+		return true, nil
+	}
+	var currentJSON any
+	if err := json.Unmarshal(current, &currentJSON); err != nil {
+		return false, fmt.Errorf("parse current schema: %w", err)
+	}
+	var generatedJSON any
+	if err := json.Unmarshal(generated, &generatedJSON); err != nil {
+		return false, fmt.Errorf("parse generated schema: %w", err)
+	}
+	return reflect.DeepEqual(currentJSON, generatedJSON), nil
 }
 
 type schemaTarget struct {

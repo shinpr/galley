@@ -6,6 +6,8 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.5.1 - 2026-05-17
+
 ### Fixed
 
 - Windows compatibility regressions reported in GitHub issue #41. Task path validation now compares logical (slash) cleaned forms across `worktree.path`, `scope.allowed_paths`, `scope.forbidden_paths`, `files[].source`, `files[].destination`, and `preflight.acceptance_skeleton` outputs, so YAML authored with `/` separators no longer silently passes parent-traversal checks on Windows (where `filepath.Clean` rewrites to `\`) and same-root sibling matches such as `internal-task` against `internal` no longer leak through containment. Task queueing file moves no longer rely on `os.Link` (which surfaced as a raw "not supported by windows" error on filesystems without hardlink support); the no-overwrite write path now publishes through a reservation lock plus same-directory temp-file-and-rename, so the final task YAML appears to a concurrently polling daemon only after its contents are fully written and synced. Duplicate-destination protection in `task queue`, `task requeue`, archive, and daemon claim/requeue is preserved.

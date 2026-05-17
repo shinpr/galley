@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 )
 
@@ -92,6 +94,9 @@ func TestWriteFileNoOverwriteAtomicPublicationIsAtomic(t *testing.T) {
 					return
 				}
 				if !errors.Is(err, os.ErrNotExist) {
+					if isTransientPublicationReadError(err) {
+						continue
+					}
 					readResult <- fmt.Errorf("unexpected read error: %w", err)
 					return
 				}
@@ -117,4 +122,14 @@ func TestWriteFileNoOverwriteAtomicPublicationIsAtomic(t *testing.T) {
 			t.Fatalf("iter %d: reservation lock leaked: stat err=%v", i, err)
 		}
 	}
+}
+
+func isTransientPublicationReadError(err error) bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	// During same-directory rename, Windows can briefly report sharing or lock
+	// violations to a racing reader. That still preserves the publication
+	// contract: the reader has not observed partial YAML bytes.
+	return errors.Is(err, syscall.Errno(32)) || errors.Is(err, syscall.Errno(33))
 }

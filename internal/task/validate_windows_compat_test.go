@@ -1,6 +1,7 @@
 package task
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -161,6 +162,9 @@ var windowsAbsoluteForms = []string{
 // letter forms slipped past entirely on Unix.
 func TestValidateRelativePathRejectsWindowsAbsoluteFormsOnNonWindowsHost(t *testing.T) {
 	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows-native absolute files[].source values are allowed; this regression test is for host-foreign Windows paths on non-Windows hosts")
+	}
 
 	type mutator struct {
 		name    string

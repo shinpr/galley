@@ -172,15 +172,15 @@ func TestCompleteUsesCallerDeadlineInsteadOfStartingAnotherTaskTimeout(t *testin
 	runGit(t, repo, "init")
 	taskFile := writeResultTask(t, repo, "test -d .")
 	output := filepath.Join(t.TempDir(), "result.json")
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Millisecond))
 	defer cancel()
 	start := time.Now()
-	_, err := Complete(ctx, CompleteOptions{
+	generated, err := Complete(ctx, CompleteOptions{
 		TaskFile: taskFile,
 		Output:   output,
 		Summary:  "done",
 		Profiles: profile.Bundle{Quality: &profile.Quality{RequiredChecks: []profile.RequiredCheck{
-			{ID: "slow", PreferredCommands: []string{slowCommand()}, Required: true},
+			{ID: "deadline", PreferredCommands: []string{readProofCommand()}, Required: true},
 		}}},
 	})
 	if err != nil {
@@ -188,6 +188,9 @@ func TestCompleteUsesCallerDeadlineInsteadOfStartingAnotherTaskTimeout(t *testin
 	}
 	if elapsed := time.Since(start); elapsed > time.Second {
 		t.Fatalf("Complete ignored caller deadline, elapsed=%s", elapsed)
+	}
+	if len(generated.Verification) != 1 || generated.Verification[0].Status != "failed" {
+		t.Fatalf("caller deadline should fail verification quickly: %#v", generated.Verification)
 	}
 }
 

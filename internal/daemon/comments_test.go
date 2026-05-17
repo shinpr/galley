@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -751,7 +752,7 @@ func writeDaemonEnvironmentProfile(t *testing.T, root, repo string, pollComments
 		t.Fatal(err)
 	}
 	body := `id: "test-env"
-cwd: "` + repo + `"
+cwd: ` + strconv.Quote(repo) + `
 commands:
   test: "true"
 constraints:

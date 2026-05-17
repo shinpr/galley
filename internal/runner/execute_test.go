@@ -100,8 +100,10 @@ func TestRunCommandKeepsBoundedTail(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	body := "#!/bin/sh\nprintf 1234567890\n"
+	want := "7890"
 	if runtime.GOOS == "windows" {
-		body = "@echo off\r\n<nul set /p =1234567890\r\n"
+		body = "@echo off\r\necho 1234567890\r\n"
+		want = "90\r\n"
 	}
 	script := writeScript(t, dir, "output", body)
 
@@ -112,7 +114,7 @@ func TestRunCommandKeepsBoundedTail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Stdout != "7890" {
+	if result.Stdout != want {
 		t.Fatalf("stdout got %q", result.Stdout)
 	}
 }

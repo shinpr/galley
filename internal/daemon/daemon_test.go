@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1650,7 +1651,7 @@ func writeRepoEnvironmentProfile(t *testing.T, root, repo, base string) {
 		t.Fatal(err)
 	}
 	body := "id: env-test\n" +
-		"cwd: " + repo + "\n" +
+		"cwd: " + strconv.Quote(repo) + "\n" +
 		"commands: {}\n" +
 		"constraints:\n" +
 		"  network: approval_required\n" +
@@ -1818,7 +1819,7 @@ acceptance_criteria:
     verification: "test -f daemon-output.txt"
     status: "pending"
 scope:
-  cwd: "` + repo + `"
+  cwd: ` + strconv.Quote(repo) + `
   allowed_paths:
     - "."
   forbidden_paths: []

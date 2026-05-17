@@ -36,6 +36,7 @@ func loadExampleTask(t *testing.T, rel string) Task {
 func TestExampleAFKTaskClaudeStillValid(t *testing.T) {
 	t.Parallel()
 	loaded := loadExampleTask(t, "examples/afk-task.yaml")
+	loaded.Scope.CWD = repoRootFromTestFile(t)
 	result := ValidateStructural(loaded)
 	if !result.Valid() {
 		t.Fatalf("examples/afk-task.yaml structural validation failed: %#v", result.Errors)
@@ -48,6 +49,7 @@ func TestExampleAFKTaskClaudeStillValid(t *testing.T) {
 func TestExampleAFKTaskCodexValidates(t *testing.T) {
 	t.Parallel()
 	loaded := loadExampleTask(t, "examples/afk-task-codex.yaml")
+	loaded.Scope.CWD = repoRootFromTestFile(t)
 	result := ValidateStructural(loaded)
 	if !result.Valid() {
 		t.Fatalf("examples/afk-task-codex.yaml structural validation failed: %#v", result.Errors)

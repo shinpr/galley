@@ -61,6 +61,13 @@ func Alive(pid int) (bool, error) {
 // `galley daemon start`/`stop`. This limitation is documented in
 // CHANGELOG.md and docs/operations.md.
 func Stop(pid int, timeout time.Duration) error {
+	alive, err := Alive(pid)
+	if err != nil {
+		return err
+	}
+	if !alive {
+		return ErrNotRunning
+	}
 	process, err := os.FindProcess(pid)
 	if err != nil {
 		return err

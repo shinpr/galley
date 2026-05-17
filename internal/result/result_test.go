@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"testing"
 	"time"
 
@@ -32,7 +34,7 @@ acceptance_criteria:
     verification: "Inspect proof.txt or run a focused proof check."
     status: "pending"
 scope:
-  cwd: "`+repo+`"
+  cwd: `+strconv.Quote(repo)+`
   allowed_paths:
     - "proof.txt"
   forbidden_paths: []
@@ -147,7 +149,7 @@ func TestCompleteRunsRequiredQualityChecks(t *testing.T) {
 		Output:   output,
 		Summary:  "done",
 		Profiles: profile.Bundle{Quality: &profile.Quality{RequiredChecks: []profile.RequiredCheck{
-			{ID: "quality-proof", PreferredCommands: []string{"grep -F ok proof.txt"}, Required: true},
+			{ID: "quality-proof", PreferredCommands: []string{readProofCommand()}, Required: true},
 		}}},
 	})
 	if err != nil {
@@ -155,7 +157,7 @@ func TestCompleteRunsRequiredQualityChecks(t *testing.T) {
 	}
 	found := false
 	for _, verification := range generated.Verification {
-		if verification.Command == "grep -F ok proof.txt" && verification.Status == "passed" {
+		if verification.Command == readProofCommand() && verification.Status == "passed" {
 			found = true
 		}
 	}
@@ -178,7 +180,7 @@ func TestCompleteUsesCallerDeadlineInsteadOfStartingAnotherTaskTimeout(t *testin
 		Output:   output,
 		Summary:  "done",
 		Profiles: profile.Bundle{Quality: &profile.Quality{RequiredChecks: []profile.RequiredCheck{
-			{ID: "slow", PreferredCommands: []string{"sleep 2"}, Required: true},
+			{ID: "slow", PreferredCommands: []string{slowCommand()}, Required: true},
 		}}},
 	})
 	if err != nil {
@@ -202,7 +204,7 @@ acceptance_criteria:
     verification: "`+verification+`"
     status: "pending"
 scope:
-  cwd: "`+repo+`"
+  cwd: `+strconv.Quote(repo)+`
   allowed_paths:
     - "."
   forbidden_paths: []
@@ -239,6 +241,20 @@ pr:
 		t.Fatal(err)
 	}
 	return taskFile
+}
+
+func readProofCommand() string {
+	if runtime.GOOS == "windows" {
+		return "findstr /C:ok proof.txt"
+	}
+	return "grep -F ok proof.txt"
+}
+
+func slowCommand() string {
+	if runtime.GOOS == "windows" {
+		return "ping -n 3 127.0.0.1 > NUL"
+	}
+	return "sleep 2"
 }
 
 func runGit(t *testing.T, dir string, args ...string) {

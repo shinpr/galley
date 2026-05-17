@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -12,7 +13,11 @@ import (
 func TestRunCommandCapturesOutputAndFiles(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	script := writeScript(t, dir, "fake", "#!/bin/sh\npwd\necho err >&2\n")
+	body := "#!/bin/sh\npwd\necho err >&2\n"
+	if runtime.GOOS == "windows" {
+		body = "@echo off\r\ncd\r\necho err 1>&2\r\n"
+	}
+	script := writeScript(t, dir, "fake", body)
 	stdoutPath := filepath.Join(dir, "stdout.log")
 	stderrPath := filepath.Join(dir, "stderr.log")
 
@@ -43,7 +48,11 @@ func TestRunCommandCapturesOutputAndFiles(t *testing.T) {
 func TestRunCommandReturnsExitError(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	script := writeScript(t, dir, "fail", "#!/bin/sh\necho nope >&2\nexit 7\n")
+	body := "#!/bin/sh\necho nope >&2\nexit 7\n"
+	if runtime.GOOS == "windows" {
+		body = "@echo off\r\necho nope 1>&2\r\nexit /b 7\r\n"
+	}
+	script := writeScript(t, dir, "fail", body)
 
 	result, err := RunCommand(context.Background(), Command{Argv: []string{script}}, RunOptions{Timeout: 5 * time.Second})
 	if err == nil {
@@ -59,6 +68,9 @@ func TestRunCommandReturnsExitError(t *testing.T) {
 
 func TestRunCommandKillsProcessGroup(t *testing.T) {
 	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("process-group termination is Unix-specific")
+	}
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "child-finished")
 	script := writeScript(t, dir, "spawn", "#!/bin/sh\n(sleep 1; touch "+marker+") &\nsleep 5\n")
@@ -87,7 +99,11 @@ func TestRunCommandKillsProcessGroup(t *testing.T) {
 func TestRunCommandKeepsBoundedTail(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	script := writeScript(t, dir, "output", "#!/bin/sh\nprintf 1234567890\n")
+	body := "#!/bin/sh\nprintf 1234567890\n"
+	if runtime.GOOS == "windows" {
+		body = "@echo off\r\n<nul set /p =1234567890\r\n"
+	}
+	script := writeScript(t, dir, "output", body)
 
 	result, err := RunCommand(context.Background(), Command{Argv: []string{script}}, RunOptions{
 		Timeout:   5 * time.Second,
@@ -103,6 +119,9 @@ func TestRunCommandKeepsBoundedTail(t *testing.T) {
 
 func writeScript(t *testing.T, dir, name, body string) string {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		name += ".bat"
+	}
 	path := filepath.Join(dir, name)
 	tmp, err := os.CreateTemp(dir, "."+name+".*.tmp")
 	if err != nil {

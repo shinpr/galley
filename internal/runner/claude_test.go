@@ -179,7 +179,7 @@ func TestClaudeShellPreviewUsesCatAndCd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := `cd /tmp/project && claude -p --output-format stream-json --verbose --system-prompt "$(cat ` + promptPath + `)" --json-schema "$(cat ` + schemaPath + `)" 'do the work'`
+	want := `cd /tmp/project && claude -p --output-format stream-json --verbose --system-prompt "$(cat ` + shellToken(promptPath) + `)" --json-schema "$(cat ` + shellToken(schemaPath) + `)" 'do the work'`
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}

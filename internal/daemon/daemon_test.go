@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -1710,6 +1711,9 @@ func prepareDonePRTask(t *testing.T, taskPath, repo, prStatus string) (task.Task
 
 func writeFakeCommand(t *testing.T, name, body string) string {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses POSIX shell fake executor binaries")
+	}
 	binDir := t.TempDir()
 	commandPath := filepath.Join(binDir, name)
 	if err := os.WriteFile(commandPath, []byte("#!/bin/sh\n"+body), 0o700); err != nil {

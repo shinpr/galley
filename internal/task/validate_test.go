@@ -1,6 +1,7 @@
 package task
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -50,7 +51,7 @@ func TestValidateRequiresAFKWorktree(t *testing.T) {
 func TestValidateStructuralDoesNotStatCWD(t *testing.T) {
 	t.Parallel()
 	task := validTask(t)
-	task.Scope.CWD = "/definitely/missing/galley"
+	task.Scope.CWD = filepath.Join(t.TempDir(), "missing")
 
 	result := ValidateStructural(task)
 	if !result.Valid() {

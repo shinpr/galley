@@ -18,7 +18,8 @@ func TestRestrictedEnvUnixDefaults(t *testing.T) {
 		"LC_TIME=POSIX",
 		"FOO=bar",            // unrelated
 		"AWS_SECRET_KEY=xxx", // unrelated
-		"=novalue",           // malformed entry without key
+		"=novalue",           // empty key
+		"NOVAR",              // malformed entry without "="
 	}
 	got := restrictedEnvFromOS("linux", parent, "EXTRA=value", "GALLEY_GUARD=on")
 	want := []string{

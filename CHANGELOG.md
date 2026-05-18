@@ -6,11 +6,23 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.5.2 - 2026-05-18
+
 ### Fixed
 
 - Windows required quality checks now choose a more useful shell for Galley-owned verification. Repository `environment.yaml` profiles can set `required_checks.shell` to `auto`, `sh`, `bash`, `cmd`, `powershell`, or `pwsh`; when unset or `auto`, Windows uses Git Bash when `bash.exe` is discoverable and falls back to `cmd.exe`, while macOS/Linux keep `/bin/sh`. Verification evidence records the resolved shell and cmd.exe failures that look like POSIX-tool mismatches now point operators to `environment.required_checks.shell`.
 - Windows RestrictedEnv inheritance for Codex executor, Codex supervisor, Claude supervisor, and acceptance skeleton creator subprocesses. The restricted environment used by these model subprocesses now preserves the Windows process environment keys that cmd.exe, `.cmd` shims, user-local tool discovery, temp files, and executable resolution require (`SYSTEMROOT`, `WINDIR`, `COMSPEC`, `PATHEXT`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `TEMP`, `TMP`), and matches Windows env keys case-insensitively so parent environments using casings such as `Path`, `SystemRoot`, or `ComSpec` are preserved correctly. macOS and Linux RestrictedEnv behavior is unchanged: the existing Unix-oriented allowlist, `LC_*` preservation, and caller-supplied extra entries continue to work without inheriting unrelated parent environment variables. Claude executor full parent-env inheritance is unchanged. No task YAML, profile, or CLI surface changed.
 - Windows command-line length failures in Claude executor/supervisor runs, acceptance skeleton creation, `git add` staging, and required quality checks. On Windows, Galley now routes generated prompts, pathspec lists, and verification command bodies through files or stdin instead of argv. macOS and Linux keep their existing command shapes. No task YAML, profile, or CLI surface changed.
+
+### Changed
+
+- Windows manual CLI installation now includes a native PowerShell installer, and Windows CI smokes both the PowerShell release installer and the Git Bash local installer path.
+- Packaged Claude and Codex Galley plugins are now versioned as `0.1.8`: setup, profile-authoring, task-authoring, and queueing guidance now covers Windows required-check shell selection and native Windows installation while keeping Windows-specific guidance in the routed Windows reference.
+
+## v0.5.1 - 2026-05-17
+
+### Fixed
+
 - Windows compatibility regressions reported in GitHub issue #41. Task path validation now compares logical (slash) cleaned forms across `worktree.path`, `scope.allowed_paths`, `scope.forbidden_paths`, `files[].source`, `files[].destination`, and `preflight.acceptance_skeleton` outputs, so YAML authored with `/` separators no longer silently passes parent-traversal checks on Windows (where `filepath.Clean` rewrites to `\`) and same-root sibling matches such as `internal-task` against `internal` no longer leak through containment. Task queueing file moves no longer rely on `os.Link` (which surfaced as a raw "not supported by windows" error on filesystems without hardlink support); the no-overwrite write path now publishes through a reservation lock plus same-directory temp-file-and-rename, so the final task YAML appears to a concurrently polling daemon only after its contents are fully written and synced. Duplicate-destination protection in `task queue`, `task requeue`, archive, and daemon claim/requeue is preserved.
 
 ### Changed

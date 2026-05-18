@@ -2,6 +2,7 @@ package result
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -94,7 +95,7 @@ func TestShellArgvForOSWindowsCreatesScratchDir(t *testing.T) {
 	if _, err := os.Stat(argv[2]); err != nil {
 		t.Fatalf("Windows .cmd script should be written under caller scratch dir: %v", err)
 	}
-	if !strings.HasPrefix(argv[2], scratch) {
+	if filepath.Clean(filepath.Dir(argv[2])) != filepath.Clean(scratch) {
 		t.Fatalf("Windows .cmd script got %q, want under %q", argv[2], scratch)
 	}
 }

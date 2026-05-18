@@ -37,9 +37,9 @@ type ClaudeOptions struct {
 	Prompt            string
 	IncludeHookEvents bool
 	PluginDirs        []string
-	// AttemptDir, when set, lets ClaudeCommandPlan materialize the Windows
-	// system prompt file under a stable per-attempt directory. When empty the
-	// runner falls back to an os.MkdirTemp directory for the prompt file.
+	// AttemptDir lets ClaudeCommandPlan materialize the Windows system prompt
+	// file under a stable per-attempt directory. It is required on Windows when
+	// SystemPrompt content must be written to disk.
 	AttemptDir string
 }
 

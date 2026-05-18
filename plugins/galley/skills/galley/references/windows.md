@@ -2,6 +2,23 @@
 
 Use this reference with the active flow when Galley runs `quality.required_checks` on a Windows host.
 
+## Installation
+
+For native Windows PowerShell installation, use `scripts/install.ps1`. For Git Bash, MSYS, Cygwin, or WSL, use `scripts/install.sh`.
+
+PowerShell release install:
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/shinpr/galley/main/scripts/install.ps1 -OutFile install.ps1 -UseBasicParsing
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+Git Bash/MSYS/Cygwin release install:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/shinpr/galley/main/scripts/install.sh | sh
+```
+
 ## Required-Check Shell
 
 Galley runs `quality.required_checks` itself after executor attempts. Choose the required-check command text and `environment.required_checks.shell` together for the Windows host that executes those checks.

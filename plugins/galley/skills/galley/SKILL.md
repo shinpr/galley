@@ -26,6 +26,12 @@ Use this table to choose the active flow. Load every required file for that flow
 | Troubleshooting | User asks why a task or run failed, stalled, became stale, or looks confusing. | `references/troubleshooting.md` | Diagnose from task state and run evidence before suggesting requeue; distinguish task failure from daemon or process failure. |
 | Codex daemon/eval | Galley is being run from Codex CLI, especially sandboxed daemon execution or evals. | `references/codex.md` plus the active flow files. | Account for Codex sandbox and writable-root limits when starting daemons or creating sibling worktrees. |
 
+Supplemental references:
+
+| Condition | Add file | Purpose |
+| --- | --- | --- |
+| Galley required-check execution host is Windows | `references/windows.md` | Select `environment.required_checks.shell` and align required-check command syntax with that shell. |
+
 ## Global Invariants
 
 - Prefer the skill-led path: keep ordinary authoring conversational and keep daemon options profile-owned.
@@ -42,6 +48,7 @@ Use this table to choose the active flow. Load every required file for that flow
 - `references/profile-authoring.md`
 - `references/handoff-and-queueing.md`
 - `references/setup.md`
+- `references/windows.md`
 - `references/codex.md`
 - `references/troubleshooting.md`
 - `references/task.schema.json`

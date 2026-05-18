@@ -5,6 +5,8 @@ commands:
   build: "go build ./cmd/galley"
 executor:
   default_cli: "codex"
+required_checks:
+  shell: "auto"
 constraints:
   network: "approval_required"
   secrets_policy: "never_read_env_files"

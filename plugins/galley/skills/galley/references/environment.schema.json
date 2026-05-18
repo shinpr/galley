@@ -94,6 +94,23 @@
       },
       "type": "object"
     },
+    "required_checks": {
+      "additionalProperties": false,
+      "properties": {
+        "shell": {
+          "enum": [
+            "auto",
+            "sh",
+            "bash",
+            "cmd",
+            "powershell",
+            "pwsh"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "worktree": {
       "additionalProperties": false,
       "default": {

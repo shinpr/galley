@@ -8,6 +8,7 @@ This project follows semantic versioning.
 
 ### Fixed
 
+- Windows required quality checks now choose a more useful shell for Galley-owned verification. Repository `environment.yaml` profiles can set `required_checks.shell` to `auto`, `sh`, `bash`, `cmd`, `powershell`, or `pwsh`; when unset or `auto`, Windows uses Git Bash when `bash.exe` is discoverable and falls back to `cmd.exe`, while macOS/Linux keep `/bin/sh`. Verification evidence records the resolved shell and cmd.exe failures that look like POSIX-tool mismatches now point operators to `environment.required_checks.shell`.
 - Windows command-line length failures in Claude executor/supervisor runs, acceptance skeleton creation, `git add` staging, and required quality checks. On Windows, Galley now routes generated prompts, pathspec lists, and verification command bodies through files or stdin instead of argv. macOS and Linux keep their existing command shapes. No task YAML, profile, or CLI surface changed.
 
 ### Fixed

@@ -57,8 +57,8 @@ pass_policy:
 Supported fields:
 
 - `id`: profile identifier.
-- `required_checks[]`: named checks the executor should prefer and the supervisor should expect.
-- `required_checks[].preferred_commands[]`: commands suitable for that check in this repository.
+- `required_checks[]`: named checks Galley runs after an executor attempt, records as verification evidence, and asks the supervisor to evaluate.
+- `required_checks[].preferred_commands[]`: ordered fallback commands suitable for that check in this repository and execution environment. Galley runs them with the shell selected by `environment.required_checks.shell` and records the first passing command, or the last failure when all commands fail.
 - `required_checks[].required`: whether missing evidence should count against acceptance.
 - `review_dimensions[]`: repository-specific review dimensions such as acceptance, regression, security, or UI behavior.
 - `review_dimensions[].weight`: non-negative relative weight for reporting.
@@ -89,6 +89,8 @@ commands:
   build: "go build ./cmd/galley"
 executor:
   default_cli: "codex"
+required_checks:
+  shell: "auto"
 constraints:
   network: "approval_required"
   secrets_policy: "never_read_env_files"
@@ -109,6 +111,7 @@ Supported fields:
 - `cwd`: absolute path to the repository this profile describes.
 - `commands`: named local commands the executor and supervisor can reference.
 - `executor.default_cli`: optional implementation executor default for new task authoring. Values are `claude` and `codex`. When it is unset, new task authoring uses Codex unless the author explicitly chooses another backend. An explicit task YAML `executor.cli` remains authoritative for that task.
+- `required_checks.shell`: optional shell for Galley-owned `quality.required_checks` execution. Values are `auto`, `sh`, `bash`, `cmd`, `powershell`, and `pwsh`. When unset or `auto`, macOS/Linux use `/bin/sh`; Windows uses Git Bash when `bash.exe` is discoverable and falls back to `cmd.exe`. Galley records the resolved shell in verification evidence. Use `bash` for checks that rely on POSIX tools or syntax such as `grep`, `find`, `xargs`, `test`, `$()`, or single-quoted shell strings. Use `cmd`, `powershell`, or `pwsh` when the profile commands are intentionally Windows-native.
 - `constraints.network`: local network policy.
 - `constraints.secrets_policy`: secret handling policy.
 - `constraints.destructive_commands`: destructive command policy.

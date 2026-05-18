@@ -14,7 +14,7 @@ func TestClaudeArgvReplacePrompt(t *testing.T) {
 	t.Parallel()
 	promptPath, schemaPath := writePromptFixtures(t)
 
-	argv, err := ClaudeArgv(ClaudeOptions{
+	command, err := ClaudeCommandPlanForOS(ClaudeOptions{
 		Model:            "opus",
 		Effort:           "high",
 		PromptMode:       "replace",
@@ -24,10 +24,11 @@ func TestClaudeArgvReplacePrompt(t *testing.T) {
 		MaxBudgetUSD:     5,
 		PluginDirs:       []string{"/tmp/galley-guard"},
 		Prompt:           "do the work",
-	})
+	}, "linux")
 	if err != nil {
 		t.Fatal(err)
 	}
+	argv := command.Argv
 
 	want := []string{
 		"claude", "-p", "--output-format", "stream-json", "--verbose",
@@ -49,15 +50,16 @@ func TestClaudeArgvAppendPrompt(t *testing.T) {
 	t.Parallel()
 	promptPath, _ := writePromptFixtures(t)
 
-	argv, err := ClaudeArgv(ClaudeOptions{
+	command, err := ClaudeCommandPlanForOS(ClaudeOptions{
 		PromptMode:       "append",
 		SystemPromptFile: promptPath,
 		JSONSchema:       `{"type":"object"}`,
 		Prompt:           "do the work",
-	})
+	}, "linux")
 	if err != nil {
 		t.Fatal(err)
 	}
+	argv := command.Argv
 
 	want := []string{
 		"claude", "-p", "--output-format", "stream-json", "--verbose",
@@ -73,11 +75,11 @@ func TestClaudeArgvAppendPrompt(t *testing.T) {
 func TestClaudeCommandPlanIncludesWorkDirAndWarnings(t *testing.T) {
 	t.Parallel()
 
-	command, err := ClaudeCommandPlan(ClaudeOptions{
+	command, err := ClaudeCommandPlanForOS(ClaudeOptions{
 		WorkDir:        "/tmp/project",
 		PermissionMode: "bypassPermissions",
 		Prompt:         "do the work",
-	})
+	}, "linux")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,9 +95,9 @@ func TestClaudeCommandPlanIncludesWorkDirAndWarnings(t *testing.T) {
 func TestClaudeCommandPlanUsesEmbeddedPromptAndSchemaByDefault(t *testing.T) {
 	t.Parallel()
 
-	command, err := ClaudeCommandPlan(ClaudeOptions{
+	command, err := ClaudeCommandPlanForOS(ClaudeOptions{
 		Prompt: "do the work",
-	})
+	}, "linux")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,10 +130,11 @@ func TestClaudeFromTaskUsesExplicitExecutorBudget(t *testing.T) {
 	opts.JSONSchema = `{"type":"object"}`
 	opts.Prompt = "do the work"
 
-	argv, err := ClaudeArgv(opts)
+	command, err := ClaudeCommandPlanForOS(opts, "linux")
 	if err != nil {
 		t.Fatal(err)
 	}
+	argv := command.Argv
 	for i := 0; i < len(argv)-1; i++ {
 		if argv[i] == "--max-budget-usd" && argv[i+1] == "6.25" {
 			return
@@ -144,11 +147,11 @@ func TestClaudeArgvRejectsUnknownPromptMode(t *testing.T) {
 	t.Parallel()
 	promptPath, _ := writePromptFixtures(t)
 
-	_, err := ClaudeArgv(ClaudeOptions{
+	_, err := ClaudeCommandPlanForOS(ClaudeOptions{
 		PromptMode:       "bad",
 		SystemPromptFile: promptPath,
 		Prompt:           "do the work",
-	})
+	}, "linux")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -327,6 +330,51 @@ func TestClaudeCommandPlanWindowsAppendModeUsesAppendSystemPromptFile(t *testing
 	}
 }
 
+func TestClaudeCommandPlanWindowsResolvesSystemPromptFileBeforeSubprocessCWD(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "prompt.md"), []byte("system prompt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	command, err := ClaudeCommandPlanForOS(ClaudeOptions{
+		Bin:              "claude",
+		PromptMode:       "replace",
+		SystemPromptFile: "prompt.md",
+		JSONSchema:       `{"type":"object"}`,
+		Prompt:           "do the work",
+		WorkDir:          filepath.Join(dir, "child-workdir"),
+	}, "windows")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	path := argAfter(t, command.Argv, "--system-prompt-file")
+	if !filepath.IsAbs(path) {
+		t.Fatalf("Windows system prompt file path must be absolute, got %q", path)
+	}
+	if path != filepath.Join(dir, "prompt.md") {
+		t.Fatalf("Windows system prompt file path got %q, want %q", path, filepath.Join(dir, "prompt.md"))
+	}
+}
+
+func TestClaudeCommandPlanWindowsRequiresAttemptDirForEmbeddedSystemPrompt(t *testing.T) {
+	t.Parallel()
+	_, err := ClaudeCommandPlanForOS(ClaudeOptions{
+		Bin:          "claude",
+		PromptMode:   "replace",
+		SystemPrompt: "embedded system prompt",
+		JSONSchema:   `{"type":"object"}`,
+		Prompt:       "do the work",
+	}, "windows")
+	if err == nil {
+		t.Fatal("expected an error when Windows embedded system prompt has no AttemptDir")
+	}
+	if !strings.Contains(err.Error(), "attempt dir is required") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 // TestClaudeCommandPlanNonWindowsPreservesArgvShape pins AC4: on macOS/Linux
 // the Claude command plan keeps the historical argv shape so existing field
 // evidence continues to apply.
@@ -364,6 +412,17 @@ func containsArg(argv []string, flag string) bool {
 		}
 	}
 	return false
+}
+
+func argAfter(t *testing.T, argv []string, flag string) string {
+	t.Helper()
+	for i := 0; i < len(argv)-1; i++ {
+		if argv[i] == flag {
+			return argv[i+1]
+		}
+	}
+	t.Fatalf("argv missing %s: %#v", flag, argv)
+	return ""
 }
 
 func writePromptFixtures(t *testing.T) (string, string) {

@@ -290,26 +290,25 @@ func buildClaudeArgvWindows(opts ClaudeOptions) ([]string, string, []string, err
 }
 
 // resolveWindowsClaudeSystemPromptFile returns a real on-disk path that the
-// Windows Claude command plan can pass to --system-prompt-file. When the
-// caller already supplied a real file path the function returns it unchanged;
-// when only embedded SystemPrompt content is available the function writes it
-// to opts.AttemptDir (preferred for per-attempt evidence) or to a temp
-// directory (when no AttemptDir is set).
+// Windows Claude command plan can pass to --system-prompt-file. Caller-supplied
+// file paths are resolved by the parent process so their meaning does not
+// change when the child process runs with opts.WorkDir. Embedded prompt content
+// is materialized under opts.AttemptDir so the command plan does not leak
+// anonymous temp directories and the per-attempt prompt evidence is preserved.
 func resolveWindowsClaudeSystemPromptFile(opts ClaudeOptions) (string, error) {
 	if opts.SystemPromptFile != "" {
-		return opts.SystemPromptFile, nil
+		path, err := filepath.Abs(opts.SystemPromptFile)
+		if err != nil {
+			return "", fmt.Errorf("resolve claude system prompt file %s: %w", opts.SystemPromptFile, err)
+		}
+		return path, nil
 	}
 	dir := opts.AttemptDir
 	if dir == "" {
-		tmp, err := os.MkdirTemp("", "galley-claude-prompt-*")
-		if err != nil {
-			return "", fmt.Errorf("create claude system prompt dir: %w", err)
-		}
-		dir = tmp
-	} else {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return "", fmt.Errorf("create claude system prompt dir %s: %w", dir, err)
-		}
+		return "", fmt.Errorf("attempt dir is required to materialize the Windows Claude system prompt")
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("create claude system prompt dir %s: %w", dir, err)
 	}
 	path := filepath.Join(dir, ClaudeSystemPromptFilename)
 	if err := os.WriteFile(path, []byte(opts.SystemPrompt), 0o600); err != nil {

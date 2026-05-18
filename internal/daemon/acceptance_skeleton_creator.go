@@ -110,6 +110,7 @@ func buildBuiltinCreatorCommandPlan(opts AcceptanceSkeletonPreflightOptions, pay
 		PermissionMode: "bypassPermissions",
 		MaxBudgetUSD:   opts.Task.Executor.MaxBudgetUSDValue(),
 		PluginDirs:     []string{guardDir},
+		AttemptDir:     opts.RunDir,
 	})
 	if err != nil {
 		return runner.Command{}, creatorErr("plan built-in creator: %v", err)

@@ -1076,6 +1076,7 @@ func prepareClaudeExecutorPlan(opts Options, loaded task.Task, workDir, prompt, 
 	claudeOpts.WorkDir = workDir
 	claudeOpts.SystemPromptFile = opts.SystemPromptFile
 	claudeOpts.JSONSchemaFile = opts.JSONSchemaFile
+	claudeOpts.AttemptDir = attemptDir
 	claudeOpts.Prompt = prompt
 	if !opts.DisableClaudeGuard {
 		guardDir := opts.ClaudeGuardPluginDir

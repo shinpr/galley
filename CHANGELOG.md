@@ -6,7 +6,9 @@ This project follows semantic versioning.
 
 ## Unreleased
 
-## v0.5.1 - 2026-05-17
+### Fixed
+
+- Windows command-line length failures in Claude executor/supervisor runs, acceptance skeleton creation, `git add` staging, and required quality checks. On Windows, Galley now routes generated prompts, pathspec lists, and verification command bodies through files or stdin instead of argv. macOS and Linux keep their existing command shapes. No task YAML, profile, or CLI surface changed.
 
 ### Fixed
 

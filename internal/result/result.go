@@ -76,8 +76,9 @@ func Complete(ctx context.Context, opts CompleteOptions) (runner.ClaudeResult, e
 			Notes:    fmt.Sprintf("Acceptance verification guidance: %s", ac.Verification),
 		})
 	}
+	artifactDir := filepath.Dir(opts.Output)
 	for _, check := range requiredChecks(opts.Profiles) {
-		checkResult := runRequiredCheck(runCtx, workDir, check)
+		checkResult := runRequiredCheck(runCtx, workDir, artifactDir, check)
 		if checkResult.err != nil {
 			status = "completed_with_risks"
 			risks = append(risks, runner.ClaudeRisk{
@@ -150,7 +151,7 @@ func requiredChecks(profiles profile.Bundle) []profile.RequiredCheck {
 	return checks
 }
 
-func runRequiredCheck(ctx context.Context, workDir string, check profile.RequiredCheck) verificationRun {
+func runRequiredCheck(ctx context.Context, workDir, scratchDir string, check profile.RequiredCheck) verificationRun {
 	if len(check.PreferredCommands) == 0 {
 		return verificationRun{command: check.ID, err: fmt.Errorf("required check has no preferred commands")}
 	}
@@ -159,7 +160,7 @@ func runRequiredCheck(ctx context.Context, workDir string, check profile.Require
 		if strings.TrimSpace(command) == "" {
 			continue
 		}
-		last = runVerification(ctx, workDir, command)
+		last = runVerification(ctx, workDir, scratchDir, command)
 		if last.err == nil {
 			return last
 		}
@@ -177,13 +178,20 @@ type verificationRun struct {
 	err     error
 }
 
-func runVerification(ctx context.Context, workDir, command string) verificationRun {
+func runVerification(ctx context.Context, workDir, scratchDir, command string) verificationRun {
 	// Profile commands are trusted operator-authored shell commands. Run them
 	// through the shared runner so cancellation, process cleanup, and output
 	// bounding behave like the rest of Galley's subprocesses.
+	argv, cleanup, err := shellArgvForOS(runtime.GOOS, command, scratchDir)
+	if err != nil {
+		return verificationRun{command: command, err: err}
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
 	result, err := runner.RunCommand(ctx, runner.Command{
 		WorkDir: workDir,
-		Argv:    shellArgv(command),
+		Argv:    argv,
 	}, runner.RunOptions{TailBytes: 2048})
 	return verificationRun{
 		command: command,
@@ -193,11 +201,35 @@ func runVerification(ctx context.Context, workDir, command string) verificationR
 	}
 }
 
-func shellArgv(command string) []string {
-	if runtime.GOOS == "windows" {
-		return []string{"cmd.exe", "/C", command}
+// shellArgvForOS returns the argv that runVerification should hand to the
+// shared runner, plus an optional cleanup function for materialized script
+// files. On Windows the command body is always written to a .cmd file under
+// scratchDir (or a temp directory when scratchDir is empty) and cmd.exe is
+// invoked with the script path, giving Windows verification commands one
+// consistent execution shape while keeping the command body off argv.
+func shellArgvForOS(goos, command, scratchDir string) ([]string, func(), error) {
+	if goos != "windows" {
+		return []string{"/bin/sh", "-c", command}, nil, nil
 	}
-	return []string{"/bin/sh", "-c", command}
+	dir := scratchDir
+	cleanup := func() {}
+	if dir == "" {
+		tmp, err := os.MkdirTemp("", "galley-windows-check-*")
+		if err != nil {
+			return nil, nil, fmt.Errorf("create windows verification script dir: %w", err)
+		}
+		dir = tmp
+		cleanup = func() { _ = os.RemoveAll(tmp) }
+	} else if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, nil, fmt.Errorf("create windows verification script dir %s: %w", dir, err)
+	}
+	scriptPath := filepath.Join(dir, "galley-verification.cmd")
+	body := []byte("@echo off\r\n" + command + "\r\n")
+	if err := os.WriteFile(scriptPath, body, 0o600); err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("write windows verification script %s: %w", scriptPath, err)
+	}
+	return []string{"cmd.exe", "/C", scriptPath}, cleanup, nil
 }
 
 func (r verificationRun) status() string {

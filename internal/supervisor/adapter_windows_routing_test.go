@@ -32,9 +32,18 @@ func TestRunClaudeAdapterWindowsRoutesSystemPromptToFile(t *testing.T) {
 	artifactDir := t.TempDir()
 	capturePath := filepath.Join(t.TempDir(), "claude.args")
 	stdinPath := filepath.Join(t.TempDir(), "claude.stdin")
+	systemPromptCapturePath := filepath.Join(t.TempDir(), "claude.system-prompt")
 	fakeClaude := filepath.Join(binDir, "claude")
 	if err := os.WriteFile(fakeClaude, []byte(`#!/bin/sh
 printf '%s\n' "$*" > `+capturePath+`
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--system-prompt-file" ]; then
+    shift
+    cat "$1" > `+systemPromptCapturePath+`
+    break
+  fi
+  shift
+done
 cat > `+stdinPath+`
 printf '%s\n' '{"status":"accepted","summary":"ok","acceptance_gaps":[],"reviewed_files":["README.md"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["checked"]}],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"medium","next_work_order":""}'
 `), 0o700); err != nil {
@@ -74,6 +83,13 @@ printf '%s\n' '{"status":"accepted","summary":"ok","acceptance_gaps":[],"reviewe
 	// other artifacts so per-attempt evidence is preserved.
 	if _, err := os.Stat(filepath.Join(artifactDir, ClaudeSupervisorSystemPromptFilename)); err != nil {
 		t.Fatalf("Windows supervisor system prompt file missing: %v", err)
+	}
+	systemPrompt, err := os.ReadFile(systemPromptCapturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(systemPrompt), "Galley Supervisor Contract") {
+		t.Fatalf("fake Claude did not receive readable supervisor system prompt content: %q", systemPrompt)
 	}
 
 	// The serialized request must still be delivered via stdin.

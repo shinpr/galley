@@ -150,7 +150,7 @@ func TestCompleteRunsRequiredQualityChecks(t *testing.T) {
 		Summary:  "done",
 		Profiles: profile.Bundle{Quality: &profile.Quality{RequiredChecks: []profile.RequiredCheck{
 			{ID: "quality-proof", PreferredCommands: []string{readProofCommand()}, Required: true},
-		}}},
+		}}, Environment: requiredCheckEnvironment()},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -181,7 +181,7 @@ func TestCompleteUsesCallerDeadlineInsteadOfStartingAnotherTaskTimeout(t *testin
 		Summary:  "done",
 		Profiles: profile.Bundle{Quality: &profile.Quality{RequiredChecks: []profile.RequiredCheck{
 			{ID: "deadline", PreferredCommands: []string{readProofCommand()}, Required: true},
-		}}},
+		}}, Environment: requiredCheckEnvironment()},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -251,6 +251,13 @@ func readProofCommand() string {
 		return "findstr /C:ok proof.txt"
 	}
 	return "grep -F ok proof.txt"
+}
+
+func requiredCheckEnvironment() *profile.Environment {
+	if runtime.GOOS == "windows" {
+		return &profile.Environment{RequiredChecks: profile.RequiredCheckEnvironment{Shell: "cmd"}}
+	}
+	return nil
 }
 
 func slowCommand() string {

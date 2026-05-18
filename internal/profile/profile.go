@@ -45,17 +45,22 @@ type PassPolicy struct {
 
 // Environment describes local execution capabilities and constraints.
 type Environment struct {
-	ID          string            `yaml:"id" json:"id"`
-	CWD         string            `yaml:"cwd" json:"cwd"`
-	Commands    map[string]string `yaml:"commands" json:"commands"`
-	Executor    *ExecutorDefault  `yaml:"executor,omitempty" json:"executor,omitempty"`
-	Constraints Constraints       `yaml:"constraints" json:"constraints"`
-	PR          PRSettings        `yaml:"pr,omitempty" json:"pr,omitempty"`
-	Worktree    WorktreeSettings  `yaml:"worktree,omitempty" json:"worktree,omitempty"`
+	ID             string                   `yaml:"id" json:"id"`
+	CWD            string                   `yaml:"cwd" json:"cwd"`
+	Commands       map[string]string        `yaml:"commands" json:"commands"`
+	Executor       *ExecutorDefault         `yaml:"executor,omitempty" json:"executor,omitempty"`
+	RequiredChecks RequiredCheckEnvironment `yaml:"required_checks,omitempty" json:"required_checks,omitempty"`
+	Constraints    Constraints              `yaml:"constraints" json:"constraints"`
+	PR             PRSettings               `yaml:"pr,omitempty" json:"pr,omitempty"`
+	Worktree       WorktreeSettings         `yaml:"worktree,omitempty" json:"worktree,omitempty"`
 }
 
 type ExecutorDefault struct {
 	DefaultCLI string `yaml:"default_cli,omitempty" json:"default_cli,omitempty"`
+}
+
+type RequiredCheckEnvironment struct {
+	Shell string `yaml:"shell,omitempty" json:"shell,omitempty"`
 }
 
 type Constraints struct {
@@ -183,6 +188,9 @@ func ValidateEnvironment(env Environment) ValidationResult {
 	if env.Executor != nil && env.Executor.DefaultCLI != "" {
 		require(&result, validExecutorCLI(env.Executor.DefaultCLI), "executor.default_cli must be one of: claude, codex")
 	}
+	if env.RequiredChecks.Shell != "" {
+		require(&result, validRequiredCheckShell(env.RequiredChecks.Shell), "required_checks.shell must be one of: auto, sh, bash, cmd, powershell, pwsh")
+	}
 	if env.PR.Comments.Reply && !env.PR.Comments.Enabled {
 		result.Warnings = append(result.Warnings, "pr.comments.reply is set while pr.comments.enabled is false")
 	}
@@ -192,6 +200,15 @@ func ValidateEnvironment(env Environment) ValidationResult {
 func validExecutorCLI(value string) bool {
 	switch value {
 	case "claude", "codex":
+		return true
+	default:
+		return false
+	}
+}
+
+func validRequiredCheckShell(value string) bool {
+	switch value {
+	case "auto", "sh", "bash", "cmd", "powershell", "pwsh":
 		return true
 	default:
 		return false

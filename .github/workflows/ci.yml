@@ -52,6 +52,21 @@ jobs:
           fi
           go build -o "$RUNNER_TEMP/galley${suffix}" ./cmd/galley
 
+      - name: Smoke install script on Windows Git Bash
+        if: runner.os == 'Windows'
+        run: |
+          bin_dir="$(mktemp -d)"
+          sh scripts/install.sh --local --bin-dir "$bin_dir"
+          "$bin_dir/galley.exe" --help >/dev/null
+
+      - name: Smoke install script on Windows PowerShell
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $binDir = Join-Path $env:RUNNER_TEMP "galley-ps-bin"
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -BinDir $binDir
+          & (Join-Path $binDir "galley.exe") --help | Out-Null
+
       - name: Validate examples
         run: |
           repo_cwd="$(pwd)"

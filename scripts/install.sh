@@ -112,6 +112,14 @@ detect_arch() {
   esac
 }
 
+galley_bin_name() {
+  if [ "$(detect_os)" = "windows" ]; then
+    echo "galley.exe"
+  else
+    echo "galley"
+  fi
+}
+
 resolve_latest_version() {
   require_cmd curl
   curl -fsSL "https://api.github.com/repos/$OWNER/$REPO/releases/latest" |
@@ -177,10 +185,7 @@ install_release() {
   curl -fL "$url" -o "$archive"
   tar -xzf "$archive" -C "$tmp_dir"
 
-  bin_name="galley"
-  if [ "$os" = "windows" ]; then
-    bin_name="galley.exe"
-  fi
+  bin_name="$(galley_bin_name)"
   src="$tmp_dir/$bin_name"
   if [ ! -f "$src" ]; then
     src="$(find "$tmp_dir" -type f -name "$bin_name" | head -n 1)"
@@ -199,7 +204,7 @@ install_release() {
 
 install_local() {
   require_cmd go
-  GALLEY_BIN="$BIN_DIR/galley"
+  GALLEY_BIN="$BIN_DIR/$(galley_bin_name)"
   stop_existing_daemon "$GALLEY_BIN"
   echo "Installing galley from local checkout into $BIN_DIR"
   GOBIN="$BIN_DIR" go install ./cmd/galley
@@ -207,7 +212,7 @@ install_local() {
 
 install_go() {
   require_cmd go
-  GALLEY_BIN="$BIN_DIR/galley"
+  GALLEY_BIN="$BIN_DIR/$(galley_bin_name)"
   stop_existing_daemon "$GALLEY_BIN"
   echo "Installing galley@$VERSION into $BIN_DIR"
   GOBIN="$BIN_DIR" go install "$MODULE@$VERSION"

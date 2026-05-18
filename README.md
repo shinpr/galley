@@ -126,8 +126,17 @@ run evidence + git diff
 
 Most users should start with the skill. Install the binary manually when scripting setup or debugging the CLI outside the skill workflow.
 
+macOS and Linux:
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/shinpr/galley/main/scripts/install.sh | sh
+```
+
+Windows PowerShell:
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/shinpr/galley/main/scripts/install.ps1 -OutFile install.ps1 -UseBasicParsing
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
 Or use Go directly:
@@ -164,7 +173,7 @@ See [SECURITY.md](SECURITY.md) for reporting and operational trust boundaries.
 
 ## Development
 
-Galley is tested on Linux, macOS, and Windows in CI. The Windows daemon path supports start, stop, and status, with process termination using Windows' immediate process-kill semantics rather than Unix signals.
+Galley is tested on Linux, macOS, and Windows in CI. Windows support is CI-covered, including daemon start, stop, and status paths; validate full local operation in your own Windows environment before relying on it for unattended work.
 
 The `examples/` directory is for Galley checkout development and CI validation. Normal users should prefer `~/.galley` tasks created by the plugin skill.
 

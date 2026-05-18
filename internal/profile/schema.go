@@ -67,6 +67,11 @@ func EnvironmentJSONSchema() ([]byte, error) {
 					"default_cli": enumSchema([]string{"claude", "codex"}),
 				}),
 			),
+			"required_checks": object(
+				properties(map[string]any{
+					"shell": enumSchema([]string{"auto", "sh", "bash", "cmd", "powershell", "pwsh"}),
+				}),
+			),
 			"constraints": object(
 				required("network", "secrets_policy", "destructive_commands"),
 				properties(map[string]any{

@@ -212,6 +212,8 @@ CLI/library:
 
 Prefer commands already used by CI, README, package scripts, Makefile, justfile, or existing test docs. Use generic commands only when repo evidence is absent and the command is clearly supported by the toolchain.
 
+Required checks are Galley-owned commands, not merely executor guidance. Set `environment.required_checks.shell` explicitly when repository checks require a specific shell; otherwise omit it and use Galley's default shell resolution. On non-Windows hosts, omit this field unless a repository check requires a specific shell.
+
 For each required check, record why it is required:
 
 ```markdown
@@ -253,6 +255,7 @@ Blocking severities:
 
 Environment constraints:
 - executor default: <claude|codex|unset>
+- required check shell: <auto|sh|bash|cmd|powershell|pwsh>
 - daemon supervisor plan: <claude|codex|unset|not part of profile>
 - network: <value>
 - secrets: <value>

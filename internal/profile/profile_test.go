@@ -127,3 +127,37 @@ func TestValidateEnvironmentRejectsInvalidExecutorDefault(t *testing.T) {
 		t.Fatalf("errors missing executor.default_cli: %#v", result.Errors)
 	}
 }
+
+func TestValidateEnvironmentAcceptsRequiredCheckShell(t *testing.T) {
+	env := validEnvironmentForTest()
+	env.RequiredChecks.Shell = "bash"
+	result := ValidateEnvironment(env)
+	if !result.Valid() {
+		t.Fatalf("errors got %#v", result.Errors)
+	}
+}
+
+func TestValidateEnvironmentRejectsInvalidRequiredCheckShell(t *testing.T) {
+	env := validEnvironmentForTest()
+	env.RequiredChecks.Shell = "fish"
+	result := ValidateEnvironment(env)
+	if result.Valid() {
+		t.Fatal("expected invalid required check shell")
+	}
+	if !strings.Contains(strings.Join(result.Errors, "\n"), "required_checks.shell") {
+		t.Fatalf("errors missing required_checks.shell: %#v", result.Errors)
+	}
+}
+
+func validEnvironmentForTest() Environment {
+	return Environment{
+		ID:       "local",
+		CWD:      "/tmp/repo",
+		Commands: map[string]string{"test": "go test ./..."},
+		Constraints: Constraints{
+			Network:             "approval_required",
+			SecretsPolicy:       "never_read_env_files",
+			DestructiveCommands: "deny",
+		},
+	}
+}

@@ -138,6 +138,7 @@ Interpret daemon-dependent settings before asking:
 
 - If a verified daemon is already running, use its current daemon settings as the execution condition. Present supervisor, concurrency, polling interval, claim TTL, heartbeat interval, and shutdown timeout as current daemon state, not user-selectable task options.
 - Repository operation settings come from `environment.yaml`: PR creation, PR base branch, PR comment polling/replies, and worktree cleanup.
+- Galley-owned required-check execution settings also come from `environment.yaml`: `required_checks.shell` controls the shell Galley uses when it runs `quality.required_checks` after an executor attempt.
 - Repository executor defaults also come from `environment.yaml`: when `executor.default_cli` is set, confirm that the task will run with that backend and ask for an override only when the user wants a different model/backend. When no executor default is set, ask for the implementation executor (`claude` or `codex`); if the user leaves the executor unset, new task authoring resolves to Codex.
 - Ask for the review supervisor (`claude` or `codex`) only when no verified daemon is running or when the user wants to stop/restart the daemon before queueing. A running verified daemon's supervisor is current state, not a task setting.
 - If no daemon is running, ask the user to approve the planned daemon startup settings because they will be applied when starting the daemon.
@@ -148,7 +149,7 @@ Then propose execution settings with user-facing explanations and choices. Treat
 Execution-setting content requirements:
 
 - Task YAML settings: executor backend, optional executor model override, edit authority, retry budget, per-attempt timeout, AC test skeleton preflight, and blocking severity policy.
-- Environment profile operation settings: PR behavior, PR base branch, PR comments, and worktree cleanup from the current `environment.yaml`; create missing profiles through `references/profile-authoring.md` before queueing ordinary implementation work.
+- Environment profile settings: PR behavior, PR base branch, PR comments, worktree cleanup, and required-check shell from the current `environment.yaml`; create missing profiles through `references/profile-authoring.md` before queueing ordinary implementation work. Required-check shell controls Galley's own `quality.required_checks` execution, not executor/supervisor-internal commands or daemon startup flags.
 - Executor backend (`executor.cli`): include it as one Task YAML execution setting. Use `environment.yaml` `executor.default_cli` when present; if it is absent, ask for `claude` or `codex` and use Codex when the user leaves the setting unset. Explain that this controls the implementation executor for this task and is separate from the daemon supervisor.
 - Executor model override (`executor.model`): omit it by default so the selected CLI uses its configured default model. If the user names a model, record that exact value. If the user is unsure or the model name was inferred, do not guess; offer a small runtime smoke check before queueing because available model names depend on the user's account, provider, CLI configuration, and CLI version.
 - Supervisor: present the current daemon supervisor when a verified daemon is running. When no verified daemon is running, present the planned supervisor; the daemon default is `claude`, and `codex` can be selected for Codex review.
@@ -301,6 +302,7 @@ Please confirm these decisions before queueing:
 | Retry budget | `<execution_policy.loop_budget>` | <why this budget fits the task> | smaller value, larger value, `0` unlimited |
 | Per-attempt timeout | <minutes> | <why this fits the repo checks> | shorter or longer timeout |
 | Blocking severity policy | <current quality profile blocking severities> | <which finding severities the profile treats as blocking> | change through quality profile authoring before queueing |
+| Required-check shell | <required_checks.shell from environment.yaml, or unset/default> | <shell Galley uses for its own quality.required_checks execution> | change through environment profile authoring before queueing |
 | Human-review items | <decisions/risks that need explicit confirmation, or none> | <why user confirmation is useful> | approve, change, move to follow-up |
 
 Daemon status:

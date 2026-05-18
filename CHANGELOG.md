@@ -8,6 +8,8 @@ This project follows semantic versioning.
 
 ### Fixed
 
+- Windows RestrictedEnv inheritance for Codex executor, Codex supervisor, Claude supervisor, and acceptance skeleton creator subprocesses. The restricted environment used by these model subprocesses now preserves the Windows process environment keys that cmd.exe, `.cmd` shims, user-local tool discovery, temp files, and executable resolution require (`SYSTEMROOT`, `WINDIR`, `COMSPEC`, `PATHEXT`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `TEMP`, `TMP`), and matches Windows env keys case-insensitively so parent environments using casings such as `Path`, `SystemRoot`, or `ComSpec` are preserved correctly. macOS and Linux RestrictedEnv behavior is unchanged: the existing Unix-oriented allowlist, `LC_*` preservation, and caller-supplied extra entries continue to work without inheriting unrelated parent environment variables. Claude executor full parent-env inheritance is unchanged. No task YAML, profile, or CLI surface changed.
+
 - Windows command-line length failures in Claude executor/supervisor runs, acceptance skeleton creation, `git add` staging, and required quality checks. On Windows, Galley now routes generated prompts, pathspec lists, and verification command bodies through files or stdin instead of argv. macOS and Linux keep their existing command shapes. No task YAML, profile, or CLI surface changed.
 
 ### Fixed

@@ -1,12 +1,16 @@
 package vcs
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 )
+
+// These tests compile on every OS and pass an explicit goos value into
+// addPathsForOS; tests that execute POSIX fake binaries skip on Windows.
 
 // TestAddPathsForOSWindowsRoutesPathspecsThroughStdin pins AC5 for git add:
 // on Windows the staged pathspec list must be delivered through
@@ -35,7 +39,7 @@ cat > `+stdinPath+`
 	}
 	// Use distinct paths so the dedupe-aware addPathsForOS keeps a long list.
 	for i := range paths {
-		paths[i] = paths[i] + filepath.ToSlash("/idx_"+padInt(i, 6))
+		paths[i] = paths[i] + filepath.ToSlash("/idx_"+fmt.Sprintf("%06d", i))
 	}
 
 	if err := addPathsForOS(t.Context(), Binaries{Git: fakeGit}, workDir, runDir, paths, "windows"); err != nil {
@@ -68,12 +72,18 @@ cat > `+stdinPath+`
 	if !strings.Contains(string(stdin), "\x00") {
 		t.Fatal("Windows git add stdin must separate pathspecs with NUL bytes")
 	}
+	if !strings.HasSuffix(string(stdin), "\x00") {
+		t.Fatal("Windows git add stdin must terminate the final NUL-separated pathspec")
+	}
 }
 
 // TestAddPathsForOSNonWindowsKeepsArgvPathspecs pins AC4 for git add: the
 // historical argv shape is preserved on macOS and Linux so existing field
 // behavior continues to apply.
 func TestAddPathsForOSNonWindowsKeepsArgvPathspecs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses a POSIX shell fake git binary")
+	}
 	binDir := t.TempDir()
 	runDir := t.TempDir()
 	workDir := t.TempDir()
@@ -100,13 +110,4 @@ printf '%s\n' "$*" > `+capturePath+`
 	if !strings.Contains(argsStr, "internal/foo.go") || !strings.Contains(argsStr, "internal/bar.go") {
 		t.Fatalf("non-Windows git add argv must keep pathspecs on argv: %s", argsStr)
 	}
-}
-
-func padInt(n, width int) string {
-	s := ""
-	for i := 0; i < width; i++ {
-		s = string('0'+byte(n%10)) + s
-		n /= 10
-	}
-	return s
 }

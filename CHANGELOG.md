@@ -8,9 +8,7 @@ This project follows semantic versioning.
 
 ### Fixed
 
-- Windows command-line length failures for Claude executor, Claude supervisor, acceptance-skeleton-creator, `git add` of many changed files, and long required quality-profile checks. Galley-generated variable-length content (system prompt body, work order prompt, JSON schema, pathspec lists, shell command bodies) is now routed off argv on Windows so the CreateProcess and `cmd.exe` command-line limits cannot truncate or reject Galley subprocess invocations. Windows-specific routing: Claude commands deliver the system prompt through `--system-prompt-file` (or `--append-system-prompt-file` for append mode) and the work order prompt through stdin, omitting the `--json-schema` argv (the Claude guard hook and the executor result/supervisor verdict validators continue to reject malformed final output); `git add` uses `--pathspec-from-file=- --pathspec-file-nul` with NUL-separated pathspecs on stdin; required verification commands longer than 7000 bytes are materialized into a per-run `.cmd` script invoked through `cmd.exe /C <script>`. macOS and Linux preserve their existing Claude argv shape, the existing `git add -A -- <paths>` shape, and the existing `/bin/sh -c <command>` verification shape. No new CLI flag, task YAML field, profile field, or environment-profile field is introduced.
-
-
+- Windows command-line length failures in Claude executor/supervisor runs, acceptance skeleton creation, `git add` staging, and required quality checks. On Windows, Galley now routes generated prompts, pathspec lists, and verification command bodies through files or stdin instead of argv. macOS and Linux keep their existing command shapes. No task YAML, profile, or CLI surface changed.
 
 ### Fixed
 

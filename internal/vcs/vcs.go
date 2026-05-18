@@ -88,7 +88,7 @@ func addPathsForOS(ctx context.Context, bins Binaries, workDir, runDir string, p
 		// NUL separator avoids any ambiguity with paths that contain LF or
 		// other whitespace characters.
 		cmd.Argv = []string{bins.git(), "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"}
-		cmd.Stdin = strings.Join(stagePaths, "\x00")
+		cmd.Stdin = strings.Join(stagePaths, "\x00") + "\x00"
 	} else {
 		cmd.Argv = append([]string{bins.git(), "add", "-A", "--"}, stagePaths...)
 	}

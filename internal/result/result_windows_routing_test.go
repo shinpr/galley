@@ -6,19 +6,18 @@ import (
 	"testing"
 )
 
-// TestShellArgvForOSWindowsLongCommandUsesScriptFile pins AC5 for required
-// quality-profile checks: when a Windows verification command is long enough
-// to risk the 8191-character cmd.exe limit, Galley materializes the command
-// body into a .cmd script and invokes cmd.exe with the script path so the
-// command body never reaches argv.
-func TestShellArgvForOSWindowsLongCommandUsesScriptFile(t *testing.T) {
-	scratch := t.TempDir()
-	long := strings.Repeat("echo placeholder && ", windowsShellArgvLengthThreshold/20+10) + "echo done"
-	if len(long) < windowsShellArgvLengthThreshold {
-		t.Fatalf("test fixture is too short: %d", len(long))
-	}
+// This test file compiles on every OS and passes an explicit goos value into
+// shellArgvForOS.
 
-	argv, cleanup, err := shellArgvForOS("windows", long, scratch)
+// TestShellArgvForOSWindowsUsesScriptFile pins AC5 for required quality-profile
+// checks: Windows verification commands use a single .cmd script execution
+// shape regardless of command length, so the command body never reaches argv
+// and short/long commands do not diverge into different cmd.exe contexts.
+func TestShellArgvForOSWindowsUsesScriptFile(t *testing.T) {
+	scratch := t.TempDir()
+	command := strings.Repeat("echo placeholder && ", 400) + "echo done"
+
+	argv, cleanup, err := shellArgvForOS("windows", command, scratch)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,20 +56,46 @@ func TestShellArgvForOSWindowsLongCommandUsesScriptFile(t *testing.T) {
 	}
 }
 
-// TestShellArgvForOSWindowsShortCommandStaysInline pins the non-regression
-// behavior: short Windows verification commands continue to use the existing
-// cmd.exe /C <command> shape so we do not introduce unnecessary script
-// materialization or extra cleanup.
-func TestShellArgvForOSWindowsShortCommandStaysInline(t *testing.T) {
-	argv, cleanup, err := shellArgvForOS("windows", "go test ./...", "")
+// TestShellArgvForOSWindowsShortCommandAlsoUsesScriptFile ensures the Windows
+// execution shape is independent of command length.
+func TestShellArgvForOSWindowsShortCommandAlsoUsesScriptFile(t *testing.T) {
+	scratch := t.TempDir()
+	argv, cleanup, err := shellArgvForOS("windows", "go test ./...", scratch)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cleanup != nil {
-		t.Fatal("short Windows commands must not produce a cleanup function")
+		defer cleanup()
 	}
-	if len(argv) != 3 || argv[0] != "cmd.exe" || argv[1] != "/C" || argv[2] != "go test ./..." {
-		t.Fatalf("short Windows shellArgv mismatch, got %#v", argv)
+	if len(argv) != 3 || argv[0] != "cmd.exe" || argv[1] != "/C" {
+		t.Fatalf("short Windows shellArgv must invoke cmd.exe /C <path>, got %#v", argv)
+	}
+	if argv[2] == "go test ./..." || !strings.HasSuffix(argv[2], ".cmd") {
+		t.Fatalf("short Windows shellArgv must reference a .cmd script path, got %#v", argv)
+	}
+	body, err := os.ReadFile(argv[2])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "go test ./...") {
+		t.Fatalf("short Windows .cmd script must contain the command body, got %q", body)
+	}
+}
+
+func TestShellArgvForOSWindowsCreatesScratchDir(t *testing.T) {
+	scratch := t.TempDir() + "/nested/checks"
+	argv, cleanup, err := shellArgvForOS("windows", "go test ./...", scratch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if _, err := os.Stat(argv[2]); err != nil {
+		t.Fatalf("Windows .cmd script should be written under caller scratch dir: %v", err)
+	}
+	if !strings.HasPrefix(argv[2], scratch) {
+		t.Fatalf("Windows .cmd script got %q, want under %q", argv[2], scratch)
 	}
 }
 

@@ -9,6 +9,9 @@ import (
 	"testing"
 )
 
+// This test file compiles on every OS and passes an explicit goos value into
+// runClaudeAdapterForOS; tests that execute POSIX fake binaries skip on Windows.
+
 // TestRunClaudeAdapterWindowsRoutesSystemPromptToFile pins the Windows
 // supervisor command shape for AC1, AC2, and AC3:
 //   - The supervisor system prompt body is materialized into a real file

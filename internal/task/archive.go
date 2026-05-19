@@ -41,8 +41,8 @@ type ArchiveResult struct {
 //     audit attempt, and writes the updated YAML at the archived path.
 //  2. When strict loading fails because of unknown fields but the file still
 //     parses as a YAML mapping, archive falls back to a yaml.Node round-trip
-//     that only updates the top-level `status` field. Unknown fields and
-//     comments are preserved verbatim; no attempt is appended because the
+//     that only updates the top-level `status` field. Unknown fields are
+//     retained instead of being dropped; no attempt is appended because the
 //     append would require re-marshalling the full Task struct and could
 //     silently drop fields the current schema does not know about.
 //  3. When even safe status editing is unsafe (the YAML cannot be parsed as a
@@ -151,8 +151,8 @@ func archiveLegacy(path string, opts ArchiveOptions, strictErr error) (ArchiveRe
 
 // editTopLevelStatus updates (or inserts) the top-level `status` mapping
 // entry in raw task YAML bytes and returns the re-serialized bytes. It uses
-// yaml.Node so the rest of the document — including fields the current Task
-// struct does not declare — round-trips verbatim.
+// yaml.Node so fields the current Task struct does not declare are retained,
+// although YAML formatting may be normalized by reserialization.
 //
 // Returns (updated, true, nil) when the edit succeeded; (nil, false, nil)
 // when the document could not be parsed at all (so the caller can fall back
@@ -224,7 +224,7 @@ func lenientHeader(data []byte) (Task, error) {
 
 // moveYAMLNoOverwrite writes data to dst through the queue's no-overwrite
 // atomic primitive and removes src on success. It is the legacy-archive
-// counterpart of WriteMovedTask: the bytes are passed through verbatim
+// counterpart of WriteMovedTask: the bytes are passed through unchanged
 // rather than re-marshalled through the Task struct, so unknown fields are
 // preserved.
 func moveYAMLNoOverwrite(src, dst string, data []byte) error {

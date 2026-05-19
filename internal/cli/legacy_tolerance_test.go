@@ -252,3 +252,31 @@ func TestTaskArchiveJSONExposesModeAndWarning(t *testing.T) {
 		t.Fatalf("warning missing: %q", payload.Warning)
 	}
 }
+
+// TestTaskArchiveUnreadableFallbackUsesPathLabel covers the text fallback for
+// files that cannot yield a task ID. The command should still print a useful
+// archive label instead of `archived: ` with an empty identifier.
+func TestTaskArchiveUnreadableFallbackUsesPathLabel(t *testing.T) {
+	root := t.TempDir()
+	failedDir := filepath.Join(root, "tasks", "failed")
+	if err := os.MkdirAll(failedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	unreadablePath := filepath.Join(failedDir, "unreadable.yaml")
+	writeUnreadableTaskYAML(t, unreadablePath)
+
+	stdout, stderr, err := executeCommand("task", "archive", "--reason", "unreadable cleanup", unreadablePath)
+	if err != nil {
+		t.Fatalf("archive must succeed for unreadable task: %v", err)
+	}
+	archivedPath := filepath.Join(root, "tasks", "archived", "unreadable.yaml")
+	if !strings.Contains(stdout, "archived: "+archivedPath) {
+		t.Fatalf("text output should fall back to archived path when ID is unavailable: stdout=%q", stdout)
+	}
+	if !strings.Contains(stdout, "mode: legacy_move_unchanged") {
+		t.Fatalf("text output must surface unchanged legacy archive mode: stdout=%q", stdout)
+	}
+	if !strings.Contains(stderr, "warning:") || !strings.Contains(stderr, "archived unchanged") {
+		t.Fatalf("text output must surface ArchiveResult.Warning on stderr: stderr=%q", stderr)
+	}
+}

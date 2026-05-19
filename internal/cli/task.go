@@ -47,7 +47,11 @@ func newTaskArchiveCommand() *cobra.Command {
 				return err
 			}
 			return renderOutput(cmd, output, result, func() error {
-				fmt.Fprintf(cmd.OutOrStdout(), "archived: %s\n", result.Task.ID)
+				archivedLabel := result.Task.ID
+				if archivedLabel == "" {
+					archivedLabel = result.To
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "archived: %s\n", archivedLabel)
 				if result.From != result.To {
 					fmt.Fprintf(cmd.OutOrStdout(), "moved: %s -> %s\n", result.From, result.To)
 				}

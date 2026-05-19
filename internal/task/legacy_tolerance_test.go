@@ -135,7 +135,7 @@ func TestLoadLenientDecodesLegacyUnknownNestedField(t *testing.T) {
 }
 
 // TestArchiveLegacyUnknownFieldUsesStatusEdit covers AC6 path 2: editable
-// top-level status, unknown fields preserved verbatim.
+// top-level status, unknown fields retained across YAML reserialization.
 func TestArchiveLegacyUnknownFieldUsesStatusEdit(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -160,7 +160,7 @@ func TestArchiveLegacyUnknownFieldUsesStatusEdit(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := string(data)
-	// Verify the unknown field "provider" was preserved verbatim by checking
+	// Verify the unknown field "provider" was retained by checking
 	// the value appears under a "provider:" key. Exact YAML lexical
 	// formatting (quoting style, indentation) is not asserted: yaml.Node
 	// round-tripping may normalize scalar style and indentation, but the

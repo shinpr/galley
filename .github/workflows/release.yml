@@ -40,3 +40,21 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  windows-installer-smoke:
+    name: Windows installer smoke
+    needs: goreleaser
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        # actions/checkout@v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+
+      - name: Smoke PowerShell installer
+        shell: powershell
+        run: |
+          $binDir = Join-Path $env:RUNNER_TEMP "galley-ps-bin"
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Version "${{ github.event.release.tag_name }}" -BinDir $binDir
+          & (Join-Path $binDir "galley.exe") --help | Out-Null

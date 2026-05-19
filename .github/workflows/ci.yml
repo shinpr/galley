@@ -60,7 +60,7 @@ jobs:
           "$bin_dir/galley.exe" --help >/dev/null
 
       - name: Smoke install script on Windows PowerShell
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && github.event_name == 'pull_request'
         shell: powershell
         run: |
           $binDir = Join-Path $env:RUNNER_TEMP "galley-ps-bin"

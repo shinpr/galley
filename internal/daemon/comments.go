@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -49,7 +50,14 @@ func tasksWithPR(root string) ([]string, error) {
 func processTaskPRComments(ctx context.Context, opts Options, path string) error {
 	loaded, err := task.Load(path)
 	if err != nil {
-		return err
+		// PR comment processing requires modifying the task YAML (Save,
+		// Requeue). Re-marshalling a lenient-loaded legacy task would
+		// strip fields the current schema does not know about, which
+		// would silently mutate audit history. Skip the task with an
+		// operator-visible warning rather than aborting the whole
+		// polling cycle for the remaining readable tasks.
+		fmt.Fprintf(os.Stderr, "galley: skipping PR comment scan for unreadable task %s: %v\n", path, err)
+		return nil
 	}
 	_, profiles, err := loadTaskProfiles(opts, loaded.Scope.CWD)
 	if err != nil {

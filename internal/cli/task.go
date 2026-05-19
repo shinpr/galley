@@ -51,6 +51,19 @@ func newTaskArchiveCommand() *cobra.Command {
 				if result.From != result.To {
 					fmt.Fprintf(cmd.OutOrStdout(), "moved: %s -> %s\n", result.From, result.To)
 				}
+				// Surface legacy-fallback context so operators see that the
+				// archived file kept its pre-current-schema bytes. The JSON
+				// output already exposes Mode and Warning through
+				// ArchiveResult, so the text branch is the only place that
+				// must echo them explicitly. Modes "legacy_status_edit" and
+				// "legacy_move_unchanged" both carry a non-empty Warning;
+				// the current-schema path leaves both empty.
+				if result.Mode != "" && result.Mode != "current_schema" {
+					fmt.Fprintf(cmd.OutOrStdout(), "mode: %s\n", result.Mode)
+				}
+				if result.Warning != "" {
+					fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", result.Warning)
+				}
 				return nil
 			})
 		},
@@ -68,6 +81,13 @@ type taskListItem struct {
 	PRURL         string `json:"pr_url,omitempty"`
 	LatestVerdict string `json:"latest_verdict,omitempty"`
 	LatestSummary string `json:"latest_summary,omitempty"`
+	// DecodeError is set on entries that could not be decoded under the
+	// current task schema. Tolerant scans (`galley task list`, `task show`'s
+	// ID lookup, daemon helper sweeps) surface these legacy or unreadable
+	// task files as non-fatal entries instead of failing the whole command.
+	// Active task intake (validate/queue/requeue/daemon execution) still
+	// rejects unknown fields through the strict loader.
+	DecodeError string `json:"decode_error,omitempty"`
 }
 
 func newTaskListCommand() *cobra.Command {
@@ -85,6 +105,17 @@ func newTaskListCommand() *cobra.Command {
 			}
 			return renderOutput(cmd, output, items, func() error {
 				for _, item := range items {
+					if item.DecodeError != "" {
+						// Legacy/unreadable historical task files surface as
+						// non-fatal entries so the rest of the list still
+						// renders. The "decode_error" sentinel in the
+						// status column lets shell pipelines filter these
+						// entries explicitly. The file path is the third
+						// column (matching the readable layout) and the
+						// decode error message follows.
+						fmt.Fprintf(cmd.OutOrStdout(), "%s\tdecode_error\t%s\t%s\n", item.State, item.File, item.DecodeError)
+						continue
+					}
 					fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s", item.State, item.Status, item.ID)
 					if item.PRURL != "" {
 						fmt.Fprintf(cmd.OutOrStdout(), "\t%s", item.PRURL)
@@ -221,9 +252,20 @@ func listTaskItems(root, state string) ([]taskListItem, error) {
 			return nil, err
 		}
 		for _, path := range paths {
-			loaded, err := task.Load(path)
+			// Tolerant scan: legacy task files with unknown fields that
+			// pre-date the current schema still render as best-effort
+			// entries. Truly unreadable files surface as decode-error
+			// entries instead of failing the whole command. Active task
+			// intake paths (validate/queue/requeue/daemon execution) still
+			// use the strict Load.
+			loaded, err := task.LoadLenient(path)
 			if err != nil {
-				return nil, err
+				items = append(items, taskListItem{
+					State:       currentState,
+					File:        path,
+					DecodeError: err.Error(),
+				})
+				continue
 			}
 			items = append(items, taskSummary(path, loaded))
 		}
@@ -247,6 +289,12 @@ func findTaskByID(root, id string) (string, error) {
 	}
 	var matches []string
 	for _, item := range items {
+		// Skip decode-error entries: tolerant scans surface unreadable
+		// historical/legacy task files but they cannot drive an ID lookup
+		// because their ID could not be decoded.
+		if item.DecodeError != "" {
+			continue
+		}
 		if item.ID == id {
 			matches = append(matches, item.File)
 		}

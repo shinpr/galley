@@ -12,6 +12,14 @@ import (
 )
 
 // Load reads a task YAML file and decodes it with strict field checking.
+//
+// Load is the strict path used by active task intake and execution: `galley
+// task validate`, `galley task queue`, `galley task requeue`, archive's
+// current-schema path, and daemon execution of a queued task. Unknown fields
+// or type mismatches surface as decode errors so a malformed active task is
+// rejected before it reaches the executor. Read-only inspection of legacy or
+// historical task files that may contain fields from previous schema
+// revisions must use LoadLenient instead.
 func Load(path string) (Task, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -21,6 +29,37 @@ func Load(path string) (Task, error) {
 	var task Task
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
+	if err := decoder.Decode(&task); err != nil {
+		return Task{}, fmt.Errorf("decode %s: %w", path, err)
+	}
+
+	return task, nil
+}
+
+// LoadLenient reads a task YAML file with unknown fields tolerated. It is
+// intended for read-only inspection of legacy or historical task files such
+// as `galley task list` and `galley task show` scans, daemon helper sweeps
+// over `tasks/done` and `tasks/failed`, and archive's safe-status fallback.
+// Callers must not use a lenient-loaded Task to overwrite the file through
+// task.Save or task.Requeue: re-marshalling the struct strips fields the
+// current schema does not know about, which would silently mutate audit
+// history. Active task intake and execution must continue to call Load.
+//
+// LoadLenient still surfaces type-mismatch errors (for example a
+// loop_budget value that is not an integer) because the matching custom
+// UnmarshalYAML implementations validate value shape regardless of the
+// KnownFields setting. Callers should treat a returned error as a non-fatal
+// "this file is unreadable" signal and continue processing the rest of the
+// scan rather than aborting the whole command.
+func LoadLenient(path string) (Task, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Task{}, fmt.Errorf("read %s: %w", path, err)
+	}
+
+	var task Task
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(false)
 	if err := decoder.Decode(&task); err != nil {
 		return Task{}, fmt.Errorf("decode %s: %w", path, err)
 	}

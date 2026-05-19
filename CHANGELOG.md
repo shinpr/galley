@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Fixed
+
+- Legacy or historical task YAML files are no longer fatal for read-only inspection. `galley task list` and `galley task show <ID>` now scan task files through a lenient loader that tolerates unknown fields left over from earlier task schema revisions; an unreadable file surfaces as a non-fatal entry with `status: decode_error` (text) or `decode_error` (JSON) instead of aborting the whole command. The daemon's PR comment polling and worktree cleanup sweeps skip unreadable historical tasks with an operator-visible "skipping ... unreadable task" warning to stderr and continue processing the remaining readable tasks. `galley task archive` can now archive a legacy task file: when strict load fails because of unknown fields but the document still parses as a YAML mapping, archive performs a `yaml.Node` round-trip that only updates the top-level `status` field and preserves unknown fields verbatim; when even safe status editing is unsafe, archive moves the file unchanged. Both fallback paths return a populated `ArchiveResult.Mode` (`legacy_status_edit` or `legacy_move_unchanged`) plus an explanatory `ArchiveResult.Warning`, and the `galley task archive` text output now echoes both so operators see why the legacy file was archived through the fallback path. Active task intake (`galley task validate`, `galley task queue`, `galley task requeue`) and daemon execution of a queued task continue to require current-schema task YAML through the strict loader.
+
 ## v0.5.2 - 2026-05-18
 
 ### Fixed

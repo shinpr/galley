@@ -217,3 +217,12 @@ galley task requeue TASK_ID --reason "retry after transient failure"
 ```
 
 Requeue is useful for transient failures such as usage limits or temporary service errors.
+
+## Legacy Task YAML Tolerance
+
+Galley distinguishes read-only inspection from active intake when handling task YAML left over from earlier schema revisions:
+
+- Read-only helpers tolerate legacy files. `galley task list`, `galley task show <ID>`, the daemon's PR comment polling sweep, and the daemon's worktree cleanup sweep all scan task YAML through a lenient loader that accepts unknown fields. An unreadable file surfaces as a non-fatal entry with `status: decode_error` (text output) or a `decode_error` field (JSON output); daemon helper sweeps log a `galley: skipping ... unreadable task <path>: <reason>` warning to stderr and keep processing the remaining readable tasks. Active task intake and execution still use the strict loader: `galley task validate`, `galley task queue`, `galley task requeue`, and daemon execution of a queued task continue to reject unknown fields or type mismatches so a malformed active task cannot reach the executor.
+- `galley task archive` archives legacy files without rewriting them. When strict load succeeds, archive keeps its historical behavior: status is set to `archived`, an audit attempt is appended, and the result is rewritten through the current schema. When strict load fails because of unknown fields but the document still parses as a YAML mapping, archive falls back to a `yaml.Node` round-trip that only updates the top-level `status` field and preserves unknown fields verbatim; the `ArchiveResult.Mode` is `legacy_status_edit`. When even safe status editing is unsafe (for example a top-level sequence), archive moves the file unchanged so it leaves normal scans; the `ArchiveResult.Mode` is `legacy_move_unchanged`. Both fallback modes return a populated `ArchiveResult.Warning`, and the `galley task archive` text output echoes the mode on stdout and the warning on stderr so operators can see why the legacy file was archived through the fallback path.
+
+Legacy files are therefore non-fatal for the list/show/helper scans and archive, while validate/queue/requeue/daemon execution still require current-schema task YAML.

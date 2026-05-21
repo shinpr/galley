@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- Supervisor reviews now check that behavior-changing implementations and verification evidence match the requirement scope, including full collections, retry history, state transitions, permission sets, validation boundaries, and policy decisions, with mixed-state or negative evidence when a requirement spans multiple states, attempts, or inputs.
+
 ## v0.5.3 - 2026-05-19
 
 ### Fixed

@@ -171,6 +171,50 @@ func TestSupervisorRetryExhaustedReturnsClassifiedFailure(t *testing.T) {
 	}
 }
 
+func TestSupervisorRetryMixedStallsDoNotReportSupervisorIdleTimeout(t *testing.T) {
+	attemptDir := t.TempDir()
+	originalRunner := supervisorRunner
+	t.Cleanup(func() { supervisorRunner = originalRunner })
+
+	stalls := []error{
+		context.DeadlineExceeded,
+		errors.New("supervisor process did not exit after cancellation"),
+		errors.New("command produced no output for 1s (idle timeout)"),
+	}
+	calls := 0
+	supervisorRunner = func(ctx context.Context, opts Options, evidence supervisor.Evidence, tryDir, workDir string) (supervisor.Verdict, error) {
+		calls++
+		return supervisor.Verdict{}, stalls[calls-1]
+	}
+
+	_, err := evaluateSupervisorWithRetry(context.Background(), Options{}, supervisor.Evidence{Task: task.Task{ID: "test"}}, attemptDir, attemptDir)
+	if err == nil {
+		t.Fatal("expected exhausted mixed stalls to return an error")
+	}
+	if calls != supervisorTotalAttempts {
+		t.Fatalf("supervisor invocations got %d, want %d", calls, supervisorTotalAttempts)
+	}
+	if _, ok := asSupervisorIdleTimeout(err); ok {
+		t.Fatalf("mixed stall causes must not be reported as supervisor_idle_timeout: %v", err)
+	}
+
+	loaded := &task.Task{ID: "test"}
+	appendSupervisorFailureAttempt(loaded, attemptOutcome{}, err, attemptDir)
+	if len(loaded.Attempts) != 1 {
+		t.Fatalf("attempts got %d, want 1", len(loaded.Attempts))
+	}
+	attempt := loaded.Attempts[0]
+	if attempt.Error == nil {
+		t.Fatal("attempt error is nil")
+	}
+	if attempt.Error.Kind == supervisorIdleTimeoutKind {
+		t.Fatalf("attempt error kind got %q, want generic stall classification for mixed causes", attempt.Error.Kind)
+	}
+	if strings.Contains(attempt.Error.Message, "killed on every try") {
+		t.Fatalf("mixed stall error message must not claim every try was killed by idle timeout: %q", attempt.Error.Message)
+	}
+}
+
 // TestSupervisorIdleTimeoutErrorReporting exercises AC2/AC3/AC4: the typed
 // supervisorIdleTimeoutError produces a self-describing attempt-error message
 // and the exact one-line daemon log shape, and never describes the failure as

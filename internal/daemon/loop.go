@@ -361,6 +361,7 @@ func executionTask(loaded task.Task, workDir string) task.Task {
 // previous supervisor output (R1).
 func evaluateSupervisorWithRetry(ctx context.Context, opts Options, evidence supervisor.Evidence, attemptDir, workDir string) (supervisor.Verdict, error) {
 	var lastErr error
+	idleTimeoutFailures := 0
 	for try := 1; try <= supervisorTotalAttempts; try++ {
 		tryDir := filepath.Join(attemptDir, fmt.Sprintf("supervisor-try-%d", try))
 		if err := os.MkdirAll(tryDir, 0o700); err != nil {
@@ -397,6 +398,9 @@ func evaluateSupervisorWithRetry(ctx context.Context, opts Options, evidence sup
 		if !isSupervisorStallError(err) {
 			return supervisor.Verdict{}, err
 		}
+		if isIdleTimeoutError(err) {
+			idleTimeoutFailures++
+		}
 		lastErr = err
 		fmt.Fprintf(os.Stderr, "galley: supervisor try %d/%d failed (%s); %d retry budget remaining\n", try, supervisorTotalAttempts, kind, supervisorTotalAttempts-try)
 	}
@@ -405,8 +409,10 @@ func evaluateSupervisorWithRetry(ctx context.Context, opts Options, evidence sup
 	// (AC2/AC3/AC4). Wrap it in a typed error so appendSupervisorFailureAttempt
 	// and runSupervisorLoop can stamp the distinct supervisor_idle_timeout kind
 	// and log line. Total timeout and forced-kill exhaustion keep the existing
-	// generic wrapped error.
-	if isIdleTimeoutError(lastErr) {
+	// generic wrapped error. Mixed stall causes also keep the generic path
+	// because supervisor_idle_timeout specifically means every try was killed
+	// by the idle-output watchdog.
+	if idleTimeoutFailures == supervisorTotalAttempts {
 		return supervisor.Verdict{}, &supervisorIdleTimeoutError{
 			Supervisor:  opts.Supervisor,
 			IdleTimeout: opts.IdleTimeout,

@@ -86,12 +86,20 @@ type AcceptanceSkeletonError struct {
 }
 
 // AcceptanceSkeletonPreflightOptions configures one preflight invocation.
+//
+// ClaudeBin and CodexBin carry the resolved executor binaries. The acceptance
+// skeleton creator selects which one to use from the task implementation
+// executor backend (task.executor.cli) so creator runs and implementation
+// runs share the task's executor backend configuration. The daemon supervisor
+// backend is intentionally not threaded here: supervisor selection is
+// independent from acceptance skeleton creator provider selection.
 type AcceptanceSkeletonPreflightOptions struct {
 	Task      task.Task
 	WorkDir   string
 	RunDir    string
 	Profiles  profile.Bundle
 	ClaudeBin string
+	CodexBin  string
 }
 
 // AcceptanceSkeletonPreflight runs the skeleton creator stage in the prepared

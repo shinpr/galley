@@ -20,6 +20,9 @@ var codexExecutorFull string
 //go:embed acceptance-skeleton-creator.md
 var acceptanceSkeletonCreator string
 
+//go:embed acceptance-skeleton-creator-codex.md
+var acceptanceSkeletonCreatorCodex string
+
 // ClaudeExecutorFull returns the built-in Claude executor system prompt.
 func ClaudeExecutorFull() string {
 	return claudeExecutorFull
@@ -30,9 +33,19 @@ func CodexExecutorFull() string {
 	return codexExecutorFull
 }
 
-// AcceptanceSkeletonCreator returns the built-in test-skeleton creator prompt.
+// AcceptanceSkeletonCreator returns the built-in test-skeleton creator prompt
+// used when the task implementation executor backend is Claude.
 func AcceptanceSkeletonCreator() string {
 	return acceptanceSkeletonCreator
+}
+
+// AcceptanceSkeletonCreatorCodex returns the Codex provider variant of the
+// built-in test-skeleton creator prompt. It is used when the task
+// implementation executor backend (task.executor.cli) is Codex. The output
+// contract and quality bar match AcceptanceSkeletonCreator; only the runtime
+// framing and tool guidance follow Codex conventions.
+func AcceptanceSkeletonCreatorCodex() string {
+	return acceptanceSkeletonCreatorCodex
 }
 
 // CodexSupervisor returns the built-in Codex supervisor prompt.

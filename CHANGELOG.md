@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- Acceptance skeleton preflight now follows the task implementation executor backend. When `preflight.acceptance_skeleton.enabled: true`, the built-in skeleton creator selects its provider from `executor.cli`: `executor.cli: codex` tasks run the creator through `codex exec` with the acceptance skeleton prompt, the acceptance skeleton manifest schema wired through `--output-schema`, and the manifest captured from the attempt-scoped `--output-last-message` file, while `executor.cli: claude` tasks keep the existing Claude creator path (JSON guard plugin, stdout manifest capture, secret-free persisted command plans). The creator also propagates the task `executor.model` and `executor.effort` settings so creator runs and implementation runs share the task's executor backend configuration. Codex creator runs ship a Codex-tuned skeleton creator prompt (`prompts/acceptance-skeleton-creator-codex.md`) with the same output contract as the Claude prompt. Daemon supervisor selection (`--supervisor`) is unchanged and remains independent from acceptance skeleton creator provider selection. Persisted preflight evidence (`preflight_creator_command_plan.json`, `preflight_creator_manifest.json`, `preflight_result.json`) is unchanged in shape for both providers. No task YAML, profile, or CLI surface changed.
+
 ## v0.5.3 - 2026-05-19
 
 ### Fixed

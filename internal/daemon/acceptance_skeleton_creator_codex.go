@@ -1,0 +1,99 @@
+// Package daemon — Codex provider integration for the acceptance skeleton
+// creator.
+//
+// This file owns the Codex-specific creator concerns kept separate from the
+// Claude creator path so provider routing, runner integration, and Codex
+// manifest capture can be reviewed independently of the shared creator
+// orchestration in acceptance_skeleton_creator.go.
+//
+// The Codex creator runs through the same Codex command planner the
+// implementation executor uses (runner.CodexCommandPlan): the acceptance
+// skeleton prompt is delivered as the system prompt, the acceptance skeleton
+// manifest schema is wired through `codex exec --output-schema`, and the
+// structured manifest is captured from the attempt-scoped
+// `codex exec --output-last-message` file rather than stdout (R2, AC2).
+package daemon
+
+import (
+	"os"
+	"strings"
+
+	"github.com/shinpr/galley/internal/runner"
+	"github.com/shinpr/galley/prompts"
+	"github.com/shinpr/galley/schemas"
+)
+
+// buildCodexCreatorCommandPlan builds the Codex provider creator command plan.
+//
+// runner.CodexFromTask carries the task implementation executor backend
+// configuration (model, effort, sandbox, prompt mode, budget) so the creator
+// run and the implementation attempt share the same backend settings (AC4).
+// The acceptance skeleton creator prompt and manifest schema are supplied
+// explicitly, and RunDir is used as the attempt directory so the Codex runner
+// materializes the `--output-schema` file and requests the
+// `--output-last-message` capture file alongside the other preflight creator
+// evidence (AC2).
+func buildCodexCreatorCommandPlan(opts AcceptanceSkeletonPreflightOptions, payload []byte) (runner.Command, *preflightErr) {
+	codexOpts := runner.CodexFromTask(opts.Task)
+	codexOpts.Bin = opts.CodexBin
+	if codexOpts.Bin == "" {
+		codexOpts.Bin = "codex"
+	}
+	codexOpts.WorkDir = opts.WorkDir
+	codexOpts.Prompt = string(payload)
+	codexOpts.SystemPrompt = prompts.AcceptanceSkeletonCreatorCodex()
+	codexOpts.JSONSchema = schemas.AcceptanceSkeletonManifest
+	codexOpts.AttemptDir = opts.RunDir
+
+	commandPlan, err := runner.CodexCommandPlan(codexOpts)
+	if err != nil {
+		return runner.Command{}, creatorErr("plan built-in creator: %v", err)
+	}
+	return commandPlan, nil
+}
+
+// extractCodexCreatorManifest resolves the creator manifest for a Codex creator
+// run. The Codex CLI writes the final assistant message verbatim to the
+// attempt-scoped `--output-last-message` capture file, so that file is the
+// canonical surface: a successful Codex creator run produces a manifest JSON
+// object there even when the JSONL stdout stream is truncated or empty. The
+// JSON event stream is only a best-effort fallback.
+func extractCodexCreatorManifest(lastMessagePath, stdoutTail, stdoutPath string) (creatorManifest, error) {
+	if data, err := os.ReadFile(lastMessagePath); err == nil {
+		if manifest, ok := parseCodexCreatorManifestData(string(data)); ok {
+			return manifest, nil
+		}
+	}
+	// Fallback: scan the Codex JSON event stream when the capture file is
+	// missing or did not contain a manifest.
+	manifest, err := extractCreatorManifest(stdoutTail)
+	if err != nil {
+		if data, readErr := os.ReadFile(stdoutPath); readErr == nil {
+			manifest, err = extractCreatorManifest(string(data))
+		}
+	}
+	return manifest, err
+}
+
+// parseCodexCreatorManifestData parses the manifest from a Codex
+// `--output-last-message` capture file. The captured final message is normally
+// a single JSON object, but it is also scanned line by line so a multi-event
+// or prose-wrapped capture still resolves to a manifest.
+func parseCodexCreatorManifestData(data string) (creatorManifest, bool) {
+	if manifest, ok := parseCreatorManifestText(data); ok {
+		return manifest, true
+	}
+	if manifest, err := extractCreatorManifest(data); err == nil {
+		return manifest, true
+	}
+	for _, line := range strings.Split(strings.TrimSpace(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if manifest, ok := parseCreatorManifestText(line); ok {
+			return manifest, true
+		}
+	}
+	return creatorManifest{}, false
+}

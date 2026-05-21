@@ -14,6 +14,8 @@ The generated task records the selected backend in `executor.cli`. After that, t
 
 Galley supports Claude Code and Codex as executor backends. Acceptance skeleton preflight, structured executor results, run evidence, and supervisor review use the same contracts across both backends.
 
+The executor backend in `executor.cli` also drives acceptance skeleton preflight: when `preflight.acceptance_skeleton.enabled` is true, the built-in skeleton creator runs through the same backend (and the same `executor.model`/`executor.effort` settings) as the implementation attempt. A Codex task creates skeletons with Codex; a Claude task creates them with Claude Code.
+
 See [task-yaml.md](task-yaml.md) for the full `executor` block and [../examples/afk-task-codex.yaml](../examples/afk-task-codex.yaml) for a Codex task example.
 
 ## Supervisors
@@ -21,6 +23,8 @@ See [task-yaml.md](task-yaml.md) for the full `executor` block and [../examples/
 Supervisor review defaults to Claude. Use `--supervisor codex` to select Codex instead, or `--supervisor claude` to be explicit.
 
 Both supervisor backends use the same verdict contract, retry budget, and evidence layout. Repository-specific PR behavior, comment polling, and worktree cleanup live in the environment profile resolved from `scope.cwd`.
+
+Supervisor selection controls only review. It is independent from the executor backend in `executor.cli`, which drives the implementation attempt and acceptance skeleton preflight. A task can run a Codex executor and acceptance skeleton creator while a Claude supervisor reviews the result, or the reverse.
 
 ## Acceptance Requirements
 

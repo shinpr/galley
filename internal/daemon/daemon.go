@@ -203,7 +203,7 @@ func (opts Options) withDefaults() Options {
 		opts.Root = galleyhome.DefaultRoot()
 	}
 	if opts.Supervisor == "" {
-		opts.Supervisor = "claude"
+		opts.Supervisor = "codex"
 	}
 	if opts.MaxConcurrentTasks <= 0 {
 		opts.MaxConcurrentTasks = 1

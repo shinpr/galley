@@ -80,8 +80,23 @@ func TestStatusRuntimeRestoresDaemonArgs(t *testing.T) {
 func TestStatusRuntimeDefaultsSupervisorForDaemonWithoutFlag(t *testing.T) {
 	t.Parallel()
 	runtime := statusRuntime{}.withArgv([]string{"/bin/galley", "daemon"})
-	if runtime.Supervisor != "claude" {
+	if runtime.Supervisor != "codex" {
 		t.Fatalf("supervisor got %q", runtime.Supervisor)
+	}
+}
+
+func TestDaemonHelpReportsCodexSupervisorDefault(t *testing.T) {
+	t.Parallel()
+	cmd := NewCommand("daemon")
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"--help"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "defaults to codex") {
+		t.Fatalf("help output missing codex supervisor default: %q", stdout.String())
 	}
 }
 

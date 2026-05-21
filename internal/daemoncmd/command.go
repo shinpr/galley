@@ -113,7 +113,7 @@ func NewCommand(use string) *cobra.Command {
 	flags.DurationVar(&opts.HeartbeatInterval, "heartbeat-interval", 0, "Running task heartbeat interval; defaults to min(claim-ttl/4, 1m)")
 	flags.DurationVar(&opts.ShutdownTimeout, "shutdown-timeout", 5*time.Minute, "After SIGINT/SIGTERM, let active attempts finish for this duration before canceling them")
 	flags.DurationVar(&opts.IdleTimeout, "idle-timeout", 10*time.Minute, "Kill an executor or built-in supervisor subprocess that produces no stdout/stderr output for this duration")
-	flags.StringVar(&supervisorProvider, "supervisor", "", "Built-in supervisor adapter: claude or codex; defaults to claude")
+	flags.StringVar(&supervisorProvider, "supervisor", "", "Built-in supervisor adapter: claude or codex; defaults to codex")
 	flags.StringVar(&pidFile, "pid-file", "", "PID file path for start, stop, and status; defaults to ROOT/galley-daemon.pid")
 	flags.StringVar(&logFile, "log-file", "", "Log file path for start; defaults to ROOT/galley-daemon.log")
 	flags.DurationVar(&stopTimeout, "stop-timeout", 30*time.Second, "How long stop waits after sending SIGTERM")
@@ -423,7 +423,7 @@ func (runtime statusRuntime) withArgv(argv []string) statusRuntime {
 	if value, ok := flagValue(argv, "--supervisor"); ok {
 		runtime.Supervisor = value
 	} else if runtime.Supervisor == "" {
-		runtime.Supervisor = "claude"
+		runtime.Supervisor = "codex"
 	}
 	if value, ok := intFlagValue(argv, "--max-concurrent-tasks"); ok {
 		runtime.MaxConcurrentTasks = value

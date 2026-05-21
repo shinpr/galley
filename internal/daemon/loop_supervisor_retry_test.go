@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shinpr/galley/internal/supervisor"
 	"github.com/shinpr/galley/internal/task"
@@ -143,10 +144,76 @@ func TestSupervisorRetryExhaustedReturnsClassifiedFailure(t *testing.T) {
 	if attempt.Error.Phase != "supervisor" {
 		t.Fatalf("attempt error phase got %q, want supervisor", attempt.Error.Phase)
 	}
-	if attempt.Error.Kind != "idle_timeout" {
-		t.Fatalf("attempt error kind got %q, want idle_timeout", attempt.Error.Kind)
+	// AC2: an exhausted supervisor idle timeout records the distinct
+	// supervisor_idle_timeout kind, not the generic idle_timeout kind.
+	if attempt.Error.Kind != "supervisor_idle_timeout" {
+		t.Fatalf("attempt error kind got %q, want supervisor_idle_timeout", attempt.Error.Kind)
 	}
 	if attempt.Error.ArtifactDir != attemptDir {
 		t.Fatalf("attempt error artifact dir got %q, want %q", attempt.Error.ArtifactDir, attemptDir)
+	}
+	// AC2: the attempt error message carries the try count so the failed task
+	// YAML is self-describing without daemon logs.
+	if !strings.Contains(attempt.Error.Message, "tries=3/3") {
+		t.Fatalf("attempt error message %q must report the try count", attempt.Error.Message)
+	}
+	// AC4: the message must not blame the task execution_policy.timeout_ms.
+	if !strings.Contains(attempt.Error.Message, "not the task execution_policy.timeout_ms expiring") {
+		t.Fatalf("attempt error message %q must disambiguate from task timeout_ms", attempt.Error.Message)
+	}
+	// AC6: no needs_revision or accepted verdict is recorded for the exhausted
+	// idle-timeout attempt because no supervisor verdict was produced.
+	if attempt.SupervisorVerdict == "needs_revision" || attempt.SupervisorVerdict == "accepted" {
+		t.Fatalf("attempt supervisor verdict got %q, want an infrastructure kind", attempt.SupervisorVerdict)
+	}
+	if attempt.SupervisorVerdict != "supervisor_idle_timeout" {
+		t.Fatalf("attempt supervisor verdict got %q, want supervisor_idle_timeout", attempt.SupervisorVerdict)
+	}
+}
+
+// TestSupervisorIdleTimeoutErrorReporting exercises AC2/AC3/AC4: the typed
+// supervisorIdleTimeoutError produces a self-describing attempt-error message
+// and the exact one-line daemon log shape, and never describes the failure as
+// the task execution_policy.timeout_ms expiring.
+func TestSupervisorIdleTimeoutErrorReporting(t *testing.T) {
+	idle := &supervisorIdleTimeoutError{
+		Supervisor:  "codex",
+		IdleTimeout: 90 * time.Second,
+		Tries:       supervisorTotalAttempts,
+		MaxTries:    supervisorTotalAttempts,
+		Err:         errors.New("codex supervisor failed: command produced no output for 1m30s (idle timeout)"),
+	}
+
+	// AC3: exact one-line daemon log shape.
+	wantLog := "galley: task task-xyz failed: supervisor_idle_timeout (supervisor=codex idle_timeout=1m30s tries=3/3; requeue or adjust daemon settings)"
+	if got := idle.logLine("task-xyz"); got != wantLog {
+		t.Fatalf("log line got %q, want %q", got, wantLog)
+	}
+
+	// AC2: the attempt-error message names the phase cause, supervisor adapter,
+	// idle-timeout duration, and try count.
+	msg := idle.attemptErrorMessage()
+	for _, want := range []string{"supervisor idle timeout", "supervisor=codex", "idle_timeout=1m30s", "tries=3/3"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("attempt error message %q must contain %q", msg, want)
+		}
+	}
+	// AC4: the message points operators away from task-timeout wording.
+	if !strings.Contains(msg, "not the task execution_policy.timeout_ms expiring") {
+		t.Fatalf("attempt error message %q must disambiguate from task timeout_ms", msg)
+	}
+	// AC5: the message states the next action.
+	if !strings.Contains(msg, "Requeue the task") {
+		t.Fatalf("attempt error message %q must state the next action", msg)
+	}
+
+	// asSupervisorIdleTimeout must unwrap the typed error through fmt wrapping.
+	wrapped := fmt.Errorf("daemon run: %w", error(idle))
+	if _, ok := asSupervisorIdleTimeout(wrapped); !ok {
+		t.Fatal("asSupervisorIdleTimeout must detect a wrapped supervisorIdleTimeoutError")
+	}
+	// A generic supervisor failure must not be classified as an idle timeout.
+	if _, ok := asSupervisorIdleTimeout(errors.New("supervisor evaluation failed after 3 tries: boom")); ok {
+		t.Fatal("asSupervisorIdleTimeout must not match a generic supervisor failure")
 	}
 }

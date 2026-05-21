@@ -184,8 +184,25 @@ func TestDaemonSupervisorStallExhaustsRetryBudget(t *testing.T) {
 	if last.Error.Phase != "supervisor" {
 		t.Fatalf("attempt error phase got %q, want supervisor", last.Error.Phase)
 	}
-	if last.Error.Kind != "idle_timeout" {
-		t.Fatalf("attempt error kind got %q, want idle_timeout", last.Error.Kind)
+	// AC2: the exhausted supervisor idle timeout records the distinct kind and
+	// a message that names the supervisor adapter, idle-timeout duration, and
+	// try count so the failed task YAML explains the failure on its own.
+	if last.Error.Kind != "supervisor_idle_timeout" {
+		t.Fatalf("attempt error kind got %q, want supervisor_idle_timeout", last.Error.Kind)
+	}
+	for _, want := range []string{"supervisor=codex", "idle_timeout=200ms", "tries=3/3"} {
+		if !strings.Contains(last.Error.Message, want) {
+			t.Fatalf("attempt error message %q must contain %q", last.Error.Message, want)
+		}
+	}
+	// AC4: the message must not describe the failure as the task timeout_ms.
+	if !strings.Contains(last.Error.Message, "not the task execution_policy.timeout_ms expiring") {
+		t.Fatalf("attempt error message %q must disambiguate from task timeout_ms", last.Error.Message)
+	}
+	// AC6: an exhausted idle timeout is an infrastructure failure, not a
+	// supervisor verdict.
+	if last.SupervisorVerdict == "needs_revision" || last.SupervisorVerdict == "accepted" {
+		t.Fatalf("attempt supervisor verdict got %q, want an infrastructure kind", last.SupervisorVerdict)
 	}
 	if last.Error.ArtifactDir == "" {
 		t.Fatalf("attempt error artifact dir not persisted: %#v", last.Error)

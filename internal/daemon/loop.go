@@ -97,6 +97,12 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 			Prompt:   prompt,
 		})
 		if err != nil {
+			// AC3: when an exhausted supervisor idle timeout fails the task,
+			// emit one concise line in the existing Galley log tone so the
+			// daemon log distinguishes it from a task total-timeout expiry.
+			if idle, ok := asSupervisorIdleTimeout(err); ok {
+				fmt.Fprintln(os.Stderr, idle.logLine(loaded.ID))
+			}
 			return taskstate.FailMove(opts.Root, runningPath, loaded, err)
 		}
 		mergeAttemptEvidence(loaded, review.Outcome, runID, prepared.CWD, review.AttemptDir)
@@ -393,6 +399,21 @@ func evaluateSupervisorWithRetry(ctx context.Context, opts Options, evidence sup
 		}
 		lastErr = err
 		fmt.Fprintf(os.Stderr, "galley: supervisor try %d/%d failed (%s); %d retry budget remaining\n", try, supervisorTotalAttempts, kind, supervisorTotalAttempts-try)
+	}
+	// An exhausted idle timeout is the watchdog-recoverable failure mode the
+	// user-facing reporting must distinguish from a task total-timeout expiry
+	// (AC2/AC3/AC4). Wrap it in a typed error so appendSupervisorFailureAttempt
+	// and runSupervisorLoop can stamp the distinct supervisor_idle_timeout kind
+	// and log line. Total timeout and forced-kill exhaustion keep the existing
+	// generic wrapped error.
+	if isIdleTimeoutError(lastErr) {
+		return supervisor.Verdict{}, &supervisorIdleTimeoutError{
+			Supervisor:  opts.Supervisor,
+			IdleTimeout: opts.IdleTimeout,
+			Tries:       supervisorTotalAttempts,
+			MaxTries:    supervisorTotalAttempts,
+			Err:         lastErr,
+		}
 	}
 	return supervisor.Verdict{}, fmt.Errorf("supervisor evaluation failed after %d tries: %w", supervisorTotalAttempts, lastErr)
 }
@@ -749,6 +770,14 @@ func executorAttemptError(outcome attemptOutcome, attemptDir string) *task.Attem
 }
 
 func appendSupervisorFailureAttempt(loaded *task.Task, outcome attemptOutcome, err error, attemptDir string) {
+	// AC2/AC6: an exhausted supervisor idle timeout is an infrastructure
+	// watchdog failure, not a supervisor verdict. Record it under the distinct
+	// supervisor_idle_timeout kind with a self-explanatory message instead of
+	// the generic supervisor-failure classification.
+	if idle, ok := asSupervisorIdleTimeout(err); ok {
+		appendSupervisorIdleTimeoutAttempt(loaded, outcome, idle, attemptDir)
+		return
+	}
 	kind := classifyFailureKind("supervisor_failed", err)
 	loaded.Attempts = append(loaded.Attempts, task.Attempt{
 		Number:            len(loaded.Attempts) + 1,
@@ -772,6 +801,41 @@ func appendSupervisorFailureAttempt(loaded *task.Task, outcome attemptOutcome, e
 		Type:                 "partial_verification",
 		Detail:               fmt.Sprintf("Supervisor evaluation failed (%s): %s", kind, err.Error()),
 		Mitigation:           "Inspect the supervisor-try-N evidence under the attempt directory and requeue the task once the supervisor backend is healthy.",
+		HumanReviewSuggested: true,
+	})
+}
+
+// appendSupervisorIdleTimeoutAttempt records the failed attempt for an
+// exhausted built-in supervisor idle timeout. The attempt error uses the
+// distinct supervisor_idle_timeout kind and a message that names the
+// supervisor adapter, idle-timeout duration, and try count, so the failed task
+// YAML and `galley task show` explain the failure without daemon logs
+// (AC2/AC5). The SupervisorVerdict field is set to the same infrastructure
+// kind rather than needs_revision or accepted because no supervisor verdict
+// was produced (AC6). Task lifecycle stays identical to the existing
+// supervisor-stall path: needs_supervisor_review, then moved to failed/ (D1).
+func appendSupervisorIdleTimeoutAttempt(loaded *task.Task, outcome attemptOutcome, idle *supervisorIdleTimeoutError, attemptDir string) {
+	message := idle.attemptErrorMessage()
+	loaded.Attempts = append(loaded.Attempts, task.Attempt{
+		Number:            len(loaded.Attempts) + 1,
+		StartedAt:         outcome.Started.Format(time.RFC3339Nano),
+		CompletedAt:       time.Now().UTC().Format(time.RFC3339Nano),
+		ClaudeStatus:      claudeStatus(outcome.RunResult, outcome.RunErr),
+		SupervisorVerdict: supervisorIdleTimeoutKind,
+		Summary:           message,
+		Error: &task.AttemptError{
+			Phase:       "supervisor",
+			Kind:        supervisorIdleTimeoutKind,
+			Message:     message,
+			ArtifactDir: attemptDir,
+		},
+	})
+	loaded.Status = "needs_supervisor_review"
+	loaded.Risks = append(loaded.Risks, task.Risk{
+		ID:                   fmt.Sprintf("supervisor-idle-timeout-%d", len(loaded.Risks)+1),
+		Type:                 "partial_verification",
+		Detail:               message,
+		Mitigation:           "Inspect the supervisor-try-N evidence under the attempt directory, then requeue the task or adjust the daemon --idle-timeout or --supervisor settings.",
 		HumanReviewSuggested: true,
 	})
 }

@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- Exhausted built-in supervisor idle timeouts are now reported as a distinct supervisor watchdog failure instead of a generic idle timeout. When every supervisor retry is killed by the idle-output watchdog, the failed task attempt records `error_kind: supervisor_idle_timeout` (previously `idle_timeout`) with a message that names the supervisor adapter, the idle-timeout duration, and the try count; the daemon logs one concise line `galley: task <task-id> failed: supervisor_idle_timeout (supervisor=<name> idle_timeout=<duration> tries=<used>/<max>; requeue or adjust daemon settings)`; and `galley task show` explains the failure and the next action (requeue, or adjust `--idle-timeout` / `--supervisor`) without needing daemon logs. The failure is no longer described as the task `execution_policy.timeout_ms` expiring. The supervisor idle-timeout retry policy and the final failed task state are unchanged.
+
 ## v0.5.3 - 2026-05-19
 
 ### Fixed

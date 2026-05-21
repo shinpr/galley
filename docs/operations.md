@@ -128,6 +128,14 @@ When a subprocess produces no stdout or stderr for that timeout, Galley terminat
 
 When the built-in model supervisor subprocess exits because of idle timeout, total timeout, or a forced subprocess kill, Galley retries the same supervisor evaluation up to two additional times inside the same executor attempt before failing the task. Each supervisor try writes artifacts under `runs/<run-id>/attempt-N/supervisor-try-<M>/`, including `supervisor_error.json` for failed tries and `supervisor_verdict.json` for the successful try.
 
+The supervisor idle-timeout watchdog is separate from the task's `execution_policy.timeout_ms`: `timeout_ms` bounds the total wall-clock duration of one executor attempt, while the supervisor idle timeout only fires when the supervisor subprocess produces no stdout or stderr for `--idle-timeout`. When every supervisor retry is exhausted by idle timeout, it means the supervisor subprocess produced no output and was killed by the watchdog on each try — it does **not** mean the task ran out of `timeout_ms`. Galley reports this as a distinct supervisor watchdog failure rather than a generic idle timeout or a supervisor verdict:
+
+- The failed task attempt records `error_phase: supervisor` and `error_kind: supervisor_idle_timeout`, with an `error_message` that names the supervisor adapter, the idle-timeout duration, and the try count.
+- The daemon logs one concise line: `galley: task <task-id> failed: supervisor_idle_timeout (supervisor=<name> idle_timeout=<duration> tries=<used>/<max>; requeue or adjust daemon settings)`.
+- `galley task show <task>` surfaces the same failure context (`latest_error_kind: supervisor_idle_timeout` plus the explanatory message) so the failure is understandable without reading daemon logs.
+
+To recover, requeue the task. If the supervisor backend legitimately needs longer silent stretches, raise `--idle-timeout`; if the supervisor backend itself is unhealthy, switch `--supervisor`. The retry policy and the final failed task state are unchanged — the change above only clarifies how the exhausted-idle-timeout failure is reported.
+
 ## Operational Notes
 
 ### Filesystems

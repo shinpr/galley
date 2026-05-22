@@ -97,6 +97,7 @@ func TestDaemonDispatchesSelectedExecutorBinary(t *testing.T) {
 				JSONSchemaFile:     schemaPath,
 				Once:               true,
 				MaxConcurrentTasks: 1,
+				Supervisor:         "claude",
 				ClaudeBin:          claudeBin,
 				CodexBin:           codexBin,
 			})
@@ -199,6 +200,7 @@ func TestDaemonRejectsUnknownExecutorCLIAtRun(t *testing.T) {
 		JSONSchemaFile:     schemaPath,
 		Once:               true,
 		MaxConcurrentTasks: 1,
+		Supervisor:         "claude",
 		ClaudeBin:          claudeBin,
 		CodexBin:           codexBin,
 	})

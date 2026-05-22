@@ -96,7 +96,7 @@ galley daemon run --once
 
 Use the installed `galley` binary for `start`, `status`, and `stop`. PID verification records the executable path, so `go run ./cmd/galley ... daemon start` is not suitable for background daemon control because later `go run` invocations use different temporary binaries.
 
-`--supervisor` is a daemon startup flag (accepted on `galley daemon run` and inherited by `daemon start`) and selects the built-in supervisor adapter (`claude` or `codex`). It is not a repository `environment.yaml` field: supervisor selection is daemon startup state, not a per-repo profile setting.
+`--supervisor` is a daemon startup flag (accepted on `galley daemon run` and inherited by `daemon start`) and selects the built-in supervisor adapter (`claude` or `codex`). When unset, daemon startup uses Codex. It is not a repository `environment.yaml` field: supervisor selection is daemon startup state, not a per-repo profile setting.
 
 On Unix, foreground and background daemons use the same shutdown path. On `SIGINT` or `SIGTERM`, Galley stops claiming new queued tasks, lets active attempts finish until the shutdown timeout, records evidence, and avoids starting another retry attempt after shutdown is requested.
 

@@ -91,6 +91,7 @@ func TestCodexExecutorSuccessProducesParityRunEvidence(t *testing.T) {
 		JSONSchemaFile:     schemaPath,
 		Once:               true,
 		MaxConcurrentTasks: 1,
+		Supervisor:         "claude",
 		ClaudeBin:          claudeBin,
 		CodexBin:           codexBin,
 	}); err != nil {
@@ -187,6 +188,7 @@ fi
 		JSONSchemaFile:     schemaPath,
 		Once:               true,
 		MaxConcurrentTasks: 1,
+		Supervisor:         "claude",
 		ClaudeBin:          claudeBin,
 		CodexBin:           codexBin,
 	}); err != nil {
@@ -256,6 +258,7 @@ func TestCodexExecutorIdleTimeoutClassifiedConsistently(t *testing.T) {
 		JSONSchemaFile:     schemaPath,
 		Once:               true,
 		MaxConcurrentTasks: 1,
+		Supervisor:         "claude",
 		ClaudeBin:          claudeBin,
 		CodexBin:           codexBin,
 		IdleTimeout:        200 * time.Millisecond,

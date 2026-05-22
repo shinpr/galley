@@ -92,6 +92,7 @@ func TestCodexCommandPlanRecordsOutputSchemaAndLastMessage(t *testing.T) {
 		JSONSchemaFile:     schemaPath,
 		Once:               true,
 		MaxConcurrentTasks: 1,
+		Supervisor:         "claude",
 		ClaudeBin:          claudeBin,
 		CodexBin:           codexBin,
 	}); err != nil {
@@ -154,6 +155,7 @@ func TestCodexCommandPlanMaterializesEmbeddedSchemaWhenNoFileProvided(t *testing
 		SystemPromptFile:   promptPath,
 		Once:               true,
 		MaxConcurrentTasks: 1,
+		Supervisor:         "claude",
 		ClaudeBin:          claudeBin,
 		CodexBin:           codexBin,
 	}); err != nil {
@@ -229,6 +231,7 @@ printf '%s\n' '{"event":"unrelated"}'
 		JSONSchemaFile:     schemaPath,
 		Once:               true,
 		MaxConcurrentTasks: 1,
+		Supervisor:         "claude",
 		ClaudeBin:          claudeBin,
 		CodexBin:           codexBin,
 	}); err != nil {
@@ -294,6 +297,7 @@ printf '%s\n' '`+hardStopResult+`'
 		JSONSchemaFile:     schemaPath,
 		Once:               true,
 		MaxConcurrentTasks: 1,
+		Supervisor:         "claude",
 		ClaudeBin:          claudeBin,
 		CodexBin:           codexBin,
 	}); err != nil {

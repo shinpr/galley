@@ -23,7 +23,7 @@ For new task YAML that fails with decode or unmarshal errors, preserve the user'
 
 Queue only after the user approves the exact task file, user-confirmable decisions, and daemon plan.
 
-Use execution settings approved during task authoring. If the user chose a non-default supervisor such as Codex, carry that choice into the daemon command rather than trying to encode it in the task YAML.
+Use execution settings approved during task authoring. If the user chose an explicit supervisor, carry that choice into the daemon command rather than trying to encode it in the task YAML.
 
 Check daemon status before presenting the final queue approval prompt:
 
@@ -33,7 +33,7 @@ galley daemon status --output json
 
 If the daemon is already running, compare it with the approved execution settings. Surface mismatches that affect the user-visible plan, such as supervisor provider or PR automation. If the daemon is not running, ask whether to start it after queueing or only queue the task. Explain the main choices:
 
-- supervisor: `claude` by default, or `codex` when the user wants Codex review.
+- supervisor: `codex` by default, or `claude` when the user wants Claude review.
 - PR automation, PR comment handling, base branch, and worktree cleanup come from the repository `environment.yaml`.
 - execution mode: `galley daemon start` for background execution, or `galley daemon run --once` for one queue drain.
 - concurrency: use defaults for ordinary tasks; increase parallelism when the user explicitly asks for it.
@@ -131,4 +131,4 @@ For a single drain:
 galley daemon run --once
 ```
 
-Add `--supervisor codex` or `--supervisor claude` when the user selected a non-default supervisor. Keep PR and cleanup behavior in the repository environment profile.
+Add `--supervisor claude` when the user selected Claude review. Add `--supervisor codex` only when the user wants the default Codex review choice to be explicit. Keep PR and cleanup behavior in the repository environment profile.

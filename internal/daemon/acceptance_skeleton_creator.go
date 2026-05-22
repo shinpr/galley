@@ -87,7 +87,41 @@ func marshalBuiltinCreatorRequest(opts AcceptanceSkeletonPreflightOptions, allow
 	return payload, nil
 }
 
+// creatorProvider returns the acceptance skeleton creator provider for this
+// task. Per design decision D1 the creator follows the task implementation
+// executor backend (task.executor.cli) so creator runs and implementation
+// runs share the same provider. The daemon supervisor backend is deliberately
+// not consulted here. A validated task constrains executor.cli to the supported
+// provider enum; the empty value falls back to "claude" so the pre-routing
+// default behavior is preserved for callers that build a task without an
+// explicit backend.
+func creatorProvider(t task.Task) string {
+	switch t.Executor.CLI {
+	case "codex":
+		return "codex"
+	default:
+		return "claude"
+	}
+}
+
+// buildBuiltinCreatorCommandPlan routes command-plan construction to the
+// provider selected from the task implementation executor backend (AC1). The
+// Codex path runs through the Codex command planner; the Claude path keeps the
+// existing Claude creator behavior including the JSON guard plugin (AC3).
 func buildBuiltinCreatorCommandPlan(opts AcceptanceSkeletonPreflightOptions, payload []byte) (runner.Command, *preflightErr) {
+	if creatorProvider(opts.Task) == "codex" {
+		return buildCodexCreatorCommandPlan(opts, payload)
+	}
+	return buildClaudeCreatorCommandPlan(opts, payload)
+}
+
+// buildClaudeCreatorCommandPlan builds the Claude provider creator command
+// plan. It preserves the established Claude creator behavior: the JSON guard
+// plugin, replace-mode system prompt, and bypassPermissions permission mode.
+// The task executor model and effort settings are propagated so the creator
+// run uses the same executor backend configuration as the implementation
+// attempt (AC4).
+func buildClaudeCreatorCommandPlan(opts AcceptanceSkeletonPreflightOptions, payload []byte) (runner.Command, *preflightErr) {
 	bin := opts.ClaudeBin
 	if bin == "" {
 		bin = "claude"
@@ -102,6 +136,8 @@ func buildBuiltinCreatorCommandPlan(opts AcceptanceSkeletonPreflightOptions, pay
 	}
 	commandPlan, err := runner.ClaudeCommandPlan(runner.ClaudeOptions{
 		Bin:            bin,
+		Model:          opts.Task.Executor.Model,
+		Effort:         opts.Task.Executor.Effort,
 		WorkDir:        opts.WorkDir,
 		Prompt:         string(payload),
 		SystemPrompt:   prompts.AcceptanceSkeletonCreator(),
@@ -144,17 +180,43 @@ func runBuiltinCreatorCommand(ctx context.Context, opts AcceptanceSkeletonPrefli
 			message: fmt.Sprintf("built-in creator exited %d: %s", out.ExitCode, strings.TrimSpace(out.Stderr)),
 		}
 	}
-	manifest, err := extractCreatorManifest(out.Stdout)
-	if err != nil {
-		data, readErr := os.ReadFile(stdoutPath)
-		if readErr == nil {
-			manifest, err = extractCreatorManifest(string(data))
-		}
-	}
+	manifest, err := resolveCreatorManifest(opts, out.Stdout, stdoutPath)
 	if err != nil {
 		return creatorManifest{}, creatorErr("built-in creator did not return a valid manifest: %v", err)
 	}
 	return manifest, nil
+}
+
+// resolveCreatorManifest parses the creator manifest from the provider's
+// canonical output surface. Codex writes its structured final message to the
+// attempt-scoped `--output-last-message` capture file, so the Codex path reads
+// that file first and only falls back to the JSON event stream. Claude streams
+// the manifest directly on stdout (R2).
+func resolveCreatorManifest(opts AcceptanceSkeletonPreflightOptions, stdoutTail, stdoutPath string) (creatorManifest, error) {
+	if creatorProvider(opts.Task) == "codex" {
+		lastMessagePath := filepath.Join(opts.RunDir, runner.CodexLastMessageFilename)
+		return extractCodexCreatorManifest(lastMessagePath, stdoutTail, stdoutPath)
+	}
+	return extractClaudeCreatorManifest(stdoutTail, stdoutPath)
+}
+
+// extractCreatorManifestFromStdout parses the manifest from a creator stdout
+// JSONL stream, with the persisted stdout file as a fallback when the captured
+// tail did not contain the manifest.
+func extractCreatorManifestFromStdout(stdoutTail, stdoutPath string) (creatorManifest, error) {
+	manifest, err := extractCreatorManifest(stdoutTail)
+	if err != nil {
+		if data, readErr := os.ReadFile(stdoutPath); readErr == nil {
+			manifest, err = extractCreatorManifest(string(data))
+		}
+	}
+	return manifest, err
+}
+
+// extractClaudeCreatorManifest parses the manifest from the Claude creator
+// stdout JSONL stream.
+func extractClaudeCreatorManifest(stdoutTail, stdoutPath string) (creatorManifest, error) {
+	return extractCreatorManifestFromStdout(stdoutTail, stdoutPath)
 }
 
 func creatorManifestToDeclarations(manifest creatorManifest) ([]task.AcceptanceSkeletonOutputDef, []noSkeletonDeclaration) {

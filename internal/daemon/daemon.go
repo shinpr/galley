@@ -469,6 +469,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 			RunDir:    runDir,
 			Profiles:  profiles,
 			ClaudeBin: opts.ClaudeBin,
+			CodexBin:  opts.CodexBin,
 		})
 		if perr != nil {
 			appendFailureAttempt(&loaded, "acceptance_skeleton_preflight", "acceptance_skeleton_preflight_failed", perr, runDir)

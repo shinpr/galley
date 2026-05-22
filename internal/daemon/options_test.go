@@ -17,6 +17,41 @@ func TestWithDefaultsAppliesIdleTimeout(t *testing.T) {
 	}
 }
 
+func TestPreflightDefaultsSupervisorToCodex(t *testing.T) {
+	t.Parallel()
+	opts, err := Preflight(Options{Root: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Supervisor != DefaultSupervisor {
+		t.Fatalf("default supervisor got %q, want %s", opts.Supervisor, DefaultSupervisor)
+	}
+}
+
+func TestPreflightHonorsExplicitSupervisors(t *testing.T) {
+	t.Parallel()
+	for _, supervisor := range []string{"claude", "codex"} {
+		supervisor := supervisor
+		t.Run(supervisor, func(t *testing.T) {
+			t.Parallel()
+			opts, err := Preflight(Options{Root: t.TempDir(), Supervisor: supervisor})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if opts.Supervisor != supervisor {
+				t.Fatalf("supervisor got %q, want %q", opts.Supervisor, supervisor)
+			}
+		})
+	}
+}
+
+func TestPreflightRejectsUnsupportedSupervisor(t *testing.T) {
+	t.Parallel()
+	if _, err := Preflight(Options{Root: t.TempDir(), Supervisor: "opus"}); err == nil {
+		t.Fatal("expected unsupported supervisor error")
+	}
+}
+
 func TestEffectiveOptionsForProfilesUsesEnvironmentOperations(t *testing.T) {
 	t.Parallel()
 	cleanup := false

@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- Daemon startup now defaults the built-in supervisor adapter to Codex when `--supervisor` is unset. Operators can still select Claude explicitly with `--supervisor claude`; implementation executor defaults and task YAML `executor.cli` resolution are unchanged.
+
 ## v0.5.3 - 2026-05-19
 
 ### Fixed

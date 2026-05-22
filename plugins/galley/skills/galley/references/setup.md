@@ -100,7 +100,7 @@ Galley can use `claude` or `codex` separately for implementation and review.
 
 Which implementation executor should new tasks use? Which review supervisor should the daemon use?
 
-If the executor is left unset, new task authoring uses Codex. If the supervisor is left unset, the daemon uses Claude.
+If the executor is left unset, new task authoring uses Codex. If the supervisor is left unset, the daemon uses Codex.
 ```
 
 ```bash
@@ -113,18 +113,18 @@ If the executor is left unset, new task authoring uses Codex. If the supervisor 
 Choose daemon settings before startup. Explain the defaults and ask for changes when the user has not already chosen:
 
 - implementation executor: use `environment.yaml` `executor.default_cli` for new task authoring when it is set; if it is unset, task authoring resolves to Codex. Claude and Codex are both supported.
-- supervisor: Claude is the daemon default when unset; Codex can be selected for Codex review. Claude and Codex are both supported.
+- supervisor: Codex is the daemon default when unset; Claude can be selected for Claude review. Claude and Codex are both supported.
 - PR automation, PR comment handling, base branch, and worktree cleanup: use the resolved `environment.yaml`.
 - run mode: `daemon start` keeps working in the background; `daemon run --once` drains the current queue once.
 - concurrency: keep defaults unless the user asks for parallel task execution.
 
-Claude supervisor is the default:
+Codex supervisor is the default:
 
 ```bash
 <galley-bin> daemon start
 ```
 
-Codex supervisor:
+Explicit Codex supervisor:
 
 ```bash
 <galley-bin> daemon start --supervisor codex

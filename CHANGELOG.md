@@ -6,6 +6,8 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.5.4 - 2026-05-22
+
 ### Changed
 
 - Acceptance skeleton preflight now follows the task implementation executor backend: `executor.cli: codex` tasks run the built-in skeleton creator through Codex, while `executor.cli: claude` tasks keep the existing Claude creator path. The creator reuses task `executor.model` and `executor.effort`; daemon supervisor selection and persisted preflight evidence shape are unchanged, and no task YAML, profile, or CLI surface changed.

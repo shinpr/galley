@@ -116,6 +116,10 @@ type ExplicitOptions struct {
 	Supervisor             bool
 }
 
+// DefaultSupervisor is the built-in supervisor adapter used when daemon
+// startup does not receive an explicit --supervisor value.
+const DefaultSupervisor = "codex"
+
 // Run starts the daemon loop.
 func Run(ctx context.Context, opts Options) error {
 	var err error
@@ -189,7 +193,7 @@ func processQueuedTasks(ctx context.Context, opts Options) (int, error) {
 // Preflight resolves daemon options and verifies startup prerequisites.
 func Preflight(opts Options) (Options, error) {
 	opts = opts.withDefaults()
-	if opts.Supervisor != "" && opts.Supervisor != "codex" && opts.Supervisor != "claude" {
+	if opts.Supervisor != "codex" && opts.Supervisor != "claude" {
 		return Options{}, fmt.Errorf("supervisor must be one of: codex, claude")
 	}
 	if err := queue.EnsureLayout(opts.Root); err != nil {
@@ -203,7 +207,7 @@ func (opts Options) withDefaults() Options {
 		opts.Root = galleyhome.DefaultRoot()
 	}
 	if opts.Supervisor == "" {
-		opts.Supervisor = "codex"
+		opts.Supervisor = DefaultSupervisor
 	}
 	if opts.MaxConcurrentTasks <= 0 {
 		opts.MaxConcurrentTasks = 1

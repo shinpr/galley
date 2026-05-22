@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/shinpr/galley/internal/daemon"
 )
 
 func TestForegroundArgsRemovesStartCommand(t *testing.T) {
@@ -80,7 +82,7 @@ func TestStatusRuntimeRestoresDaemonArgs(t *testing.T) {
 func TestStatusRuntimeDefaultsSupervisorForDaemonWithoutFlag(t *testing.T) {
 	t.Parallel()
 	runtime := statusRuntime{}.withArgv([]string{"/bin/galley", "daemon"})
-	if runtime.Supervisor != "codex" {
+	if runtime.Supervisor != daemon.DefaultSupervisor {
 		t.Fatalf("supervisor got %q", runtime.Supervisor)
 	}
 }
@@ -95,7 +97,7 @@ func TestDaemonHelpReportsCodexSupervisorDefault(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), "defaults to codex") {
+	if !strings.Contains(stdout.String(), "defaults to "+daemon.DefaultSupervisor) {
 		t.Fatalf("help output missing codex supervisor default: %q", stdout.String())
 	}
 }

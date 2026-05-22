@@ -23,8 +23,8 @@ func TestPreflightDefaultsSupervisorToCodex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if opts.Supervisor != "codex" {
-		t.Fatalf("default supervisor got %q, want codex", opts.Supervisor)
+	if opts.Supervisor != DefaultSupervisor {
+		t.Fatalf("default supervisor got %q, want %s", opts.Supervisor, DefaultSupervisor)
 	}
 }
 

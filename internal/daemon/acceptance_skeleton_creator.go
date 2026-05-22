@@ -91,9 +91,10 @@ func marshalBuiltinCreatorRequest(opts AcceptanceSkeletonPreflightOptions, allow
 // task. Per design decision D1 the creator follows the task implementation
 // executor backend (task.executor.cli) so creator runs and implementation
 // runs share the same provider. The daemon supervisor backend is deliberately
-// not consulted here. A validated task always sets executor.cli, but the
-// empty value falls back to "claude" so the pre-routing default behavior is
-// preserved for callers that build a task without an explicit backend.
+// not consulted here. A validated task constrains executor.cli to the supported
+// provider enum; the empty value falls back to "claude" so the pre-routing
+// default behavior is preserved for callers that build a task without an
+// explicit backend.
 func creatorProvider(t task.Task) string {
 	switch t.Executor.CLI {
 	case "codex":
@@ -199,10 +200,10 @@ func resolveCreatorManifest(opts AcceptanceSkeletonPreflightOptions, stdoutTail,
 	return extractClaudeCreatorManifest(stdoutTail, stdoutPath)
 }
 
-// extractClaudeCreatorManifest parses the manifest from the Claude creator
-// stdout JSONL stream, with the persisted stdout file as a fallback when the
-// captured tail did not contain the manifest.
-func extractClaudeCreatorManifest(stdoutTail, stdoutPath string) (creatorManifest, error) {
+// extractCreatorManifestFromStdout parses the manifest from a creator stdout
+// JSONL stream, with the persisted stdout file as a fallback when the captured
+// tail did not contain the manifest.
+func extractCreatorManifestFromStdout(stdoutTail, stdoutPath string) (creatorManifest, error) {
 	manifest, err := extractCreatorManifest(stdoutTail)
 	if err != nil {
 		if data, readErr := os.ReadFile(stdoutPath); readErr == nil {
@@ -210,6 +211,12 @@ func extractClaudeCreatorManifest(stdoutTail, stdoutPath string) (creatorManifes
 		}
 	}
 	return manifest, err
+}
+
+// extractClaudeCreatorManifest parses the manifest from the Claude creator
+// stdout JSONL stream.
+func extractClaudeCreatorManifest(stdoutTail, stdoutPath string) (creatorManifest, error) {
+	return extractCreatorManifestFromStdout(stdoutTail, stdoutPath)
 }
 
 func creatorManifestToDeclarations(manifest creatorManifest) ([]task.AcceptanceSkeletonOutputDef, []noSkeletonDeclaration) {

@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -157,6 +158,43 @@ printf 'package foo_test\n\n// TODO(galley-skeleton): implement AC1 assertion.\n
 	}
 	if strings.Contains(plan.Stdin, "running inside Claude Code") {
 		t.Fatalf("codex creator used the Claude skeleton creator prompt")
+	}
+}
+
+// TestAcceptanceSkeletonPreflightCodexFallsBackToStdout proves the best-effort
+// fallback path: if Codex exits successfully but does not write a valid
+// --output-last-message capture file, Galley can still recover the creator
+// manifest from the Codex JSON stdout stream.
+func TestAcceptanceSkeletonPreflightCodexFallsBackToStdout(t *testing.T) {
+	manifest := codexCreatorManifest(`[{"ac_id":"AC1","path":"internal/foo/foo_test.go","kind":"integration","purpose":"verify AC1","satisfies":"AC1 observable behavior","integration_point":"executor completes this test before acceptance","implementation_required":true}]`)
+	codexBin := writeFakeCommand(t, "codex", `while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output-last-message)
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+cat >/dev/null
+mkdir -p internal/foo
+printf 'package foo_test\n\n// TODO(galley-skeleton): implement AC1 assertion.\n' > internal/foo/foo_test.go
+printf '%s\n' '{"event":"assistant_message","message":'`+strconv.Quote(manifest)+`'}'
+`)
+
+	res, err, runDir := runPreflightWithOptions(t, codexPreflightTask("AC1"), AcceptanceSkeletonPreflightOptions{CodexBin: codexBin})
+	if err != nil {
+		t.Fatalf("preflight error: %v", err)
+	}
+	if res == nil || res.Status != "completed" {
+		t.Fatalf("res = %+v", res)
+	}
+	if len(res.Outputs) != 1 || res.Outputs[0].Path != "internal/foo/foo_test.go" {
+		t.Fatalf("outputs = %+v", res.Outputs)
+	}
+	if _, statErr := os.Stat(filepath.Join(runDir, "codex.last-message.txt")); !os.IsNotExist(statErr) {
+		t.Fatalf("last-message capture should be absent to exercise stdout fallback, stat err = %v", statErr)
 	}
 }
 

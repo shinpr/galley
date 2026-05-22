@@ -16,7 +16,6 @@ package daemon
 
 import (
 	"os"
-	"strings"
 
 	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/prompts"
@@ -66,34 +65,19 @@ func extractCodexCreatorManifest(lastMessagePath, stdoutTail, stdoutPath string)
 	}
 	// Fallback: scan the Codex JSON event stream when the capture file is
 	// missing or did not contain a manifest.
-	manifest, err := extractCreatorManifest(stdoutTail)
-	if err != nil {
-		if data, readErr := os.ReadFile(stdoutPath); readErr == nil {
-			manifest, err = extractCreatorManifest(string(data))
-		}
-	}
-	return manifest, err
+	return extractCreatorManifestFromStdout(stdoutTail, stdoutPath)
 }
 
 // parseCodexCreatorManifestData parses the manifest from a Codex
 // `--output-last-message` capture file. The captured final message is normally
-// a single JSON object, but it is also scanned line by line so a multi-event
-// or prose-wrapped capture still resolves to a manifest.
+// a single JSON object, but it may also be prose-wrapped or a JSON event stream
+// containing the manifest.
 func parseCodexCreatorManifestData(data string) (creatorManifest, bool) {
 	if manifest, ok := parseCreatorManifestText(data); ok {
 		return manifest, true
 	}
 	if manifest, err := extractCreatorManifest(data); err == nil {
 		return manifest, true
-	}
-	for _, line := range strings.Split(strings.TrimSpace(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		if manifest, ok := parseCreatorManifestText(line); ok {
-			return manifest, true
-		}
 	}
 	return creatorManifest{}, false
 }

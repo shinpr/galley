@@ -122,11 +122,13 @@ A force kill can interrupt an active attempt; the next daemon startup recovers t
 
 ## Timeouts
 
-Each executor run and built-in model supervisor run is guarded by an idle-output watchdog. The default `--idle-timeout` is 10 minutes.
+Galley uses two timeout concepts. `--idle-timeout` is an idle-output watchdog for executor and built-in supervisor subprocesses: when a subprocess produces no stdout or stderr for that duration, Galley terminates it and records an idle-timeout failure. `execution_policy.timeout_ms` bounds the total wall-clock duration of one executor attempt.
 
-When a subprocess produces no stdout or stderr for that timeout, Galley terminates its process group, records a distinct idle-timeout result on the task attempt (`error_kind: idle_timeout`, executor status `idle_timed_out`) and in `runs/<run-id>/.../run_result.json` (`idle_timed_out: true`), and lets the loop continue according to the task loop budget instead of hanging on a stalled command. The watchdog is independent of the task's total per-attempt timeout, which still bounds total wall-clock duration. Raise `--idle-timeout` for executors that legitimately stay silent for long stretches while still making progress.
+Executor idle timeouts are recorded as `error_kind: idle_timeout` and as `idle_timed_out: true` in run evidence, then the task loop continues according to the task loop budget.
 
-When the built-in model supervisor subprocess exits because of idle timeout, total timeout, or a forced subprocess kill, Galley retries the same supervisor evaluation up to two additional times inside the same executor attempt before failing the task. Each supervisor try writes artifacts under `runs/<run-id>/attempt-N/supervisor-try-<M>/`, including `supervisor_error.json` for failed tries and `supervisor_verdict.json` for the successful try.
+Built-in supervisor subprocess failures caused by idle timeout, total timeout, or forced kill are retried up to two additional times inside the same executor attempt. Each try writes evidence under `runs/<run-id>/attempt-N/supervisor-try-<M>/`.
+
+If every supervisor try is killed by the idle-output watchdog, Galley records the failed attempt as `error_phase: supervisor` and `error_kind: supervisor_idle_timeout`; `galley task show` includes the supervisor name, idle-timeout duration, and try count. This is not `execution_policy.timeout_ms` expiring, and the retry policy and final failed task state are unchanged. Requeue the task, or adjust `--idle-timeout` / `--supervisor` if the supervisor backend needs it.
 
 ## Operational Notes
 

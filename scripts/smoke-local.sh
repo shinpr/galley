@@ -25,6 +25,26 @@ echo '{"status":"completed","summary":"smoke done","files_modified":["smoke-outp
 SH
 chmod +x "$BIN_DIR/claude"
 
+cat > "$BIN_DIR/codex" <<'SH'
+#!/bin/sh
+out=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output-last-message)
+      out="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+cat > /dev/null
+printf '%s\n' '{"status":"accepted","summary":"smoke supervisor accepted","acceptance_gaps":[],"reviewed_files":["smoke-output.txt"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["smoke-output.txt exists"]}],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}' > "$out"
+printf '%s\n' '{"event":"done"}'
+SH
+chmod +x "$BIN_DIR/codex"
+
 export PATH="$BIN_DIR:$PATH"
 
 git init "$REPO_DIR" >/dev/null

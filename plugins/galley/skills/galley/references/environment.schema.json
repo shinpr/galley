@@ -96,6 +96,32 @@
     },
     "required_checks": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "shell_path"
+            ]
+          },
+          "then": {
+            "properties": {
+              "shell": {
+                "enum": [
+                  "sh",
+                  "bash",
+                  "cmd",
+                  "powershell",
+                  "pwsh"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "shell"
+            ]
+          }
+        }
+      ],
       "properties": {
         "shell": {
           "enum": [
@@ -109,8 +135,9 @@
           "type": "string"
         },
         "shell_path": {
-          "description": "Explicit executable path for the configured required_checks.shell kind; requires shell to be set to a concrete kind (not auto).",
+          "description": "Explicit executable path for the configured required_checks.shell kind; requires shell to be set to a concrete kind (not auto). Leading and trailing whitespace is invalid.",
           "minLength": 1,
+          "pattern": "^\\S(?:.*\\S)?$",
           "type": "string"
         }
       },

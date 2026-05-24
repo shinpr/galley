@@ -35,7 +35,7 @@ Shell values:
 Responsibility split between Galley and the operator:
 
 - Galley auto-detects only the standard Git for Windows install layouts above. Exhaustively guessing every possible Bash layout (portable Git outside `Program Files`, Scoop, Chocolatey, MSYS2, Cygwin, WSL distros, managed corporate machines) is brittle, so Galley does not attempt it.
-- For non-standard Bash installs (MSYS2, Cygwin, portable Git outside `C:\Program Files\Git`), custom PowerShell installs, or intentionally WSL-based setups, set both `required_checks.shell` (the concrete shell kind) and `required_checks.shell_path` (the explicit executable path). Galley uses the configured path verbatim and skips auto-discovery.
+- For non-standard Bash installs (MSYS2, Cygwin, portable Git outside `C:\Program Files\Git`), custom PowerShell installs, intentionally WSL-based setups, or Unix environments that need a pinned shell such as Nix or Homebrew Bash, set both `required_checks.shell` (the concrete shell kind) and `required_checks.shell_path` (the explicit executable path). Galley uses the configured path verbatim, skips auto-discovery, and does not infer whether the executable name matches the selected shell kind.
 - `required_checks.shell_path` requires an explicit `required_checks.shell` kind. Profile validation rejects `shell_path` when `shell` is empty or `auto`, because there is no shell kind to associate the override with.
 
 During profile authoring, infer the shell from repository evidence:

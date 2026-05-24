@@ -206,6 +206,9 @@ func ValidateEnvironment(env Environment) ValidationResult {
 		require(&result, validRequiredCheckShell(env.RequiredChecks.Shell), "required_checks.shell must be one of: auto, sh, bash, cmd, powershell, pwsh")
 	}
 	if env.RequiredChecks.ShellPath != "" {
+		if strings.TrimSpace(env.RequiredChecks.ShellPath) != env.RequiredChecks.ShellPath {
+			result.Errors = append(result.Errors, "required_checks.shell_path must not have leading or trailing whitespace")
+		}
 		switch env.RequiredChecks.Shell {
 		case "", "auto":
 			result.Errors = append(result.Errors, "required_checks.shell_path requires an explicit required_checks.shell kind (sh, bash, cmd, powershell, or pwsh); auto-discovery is incompatible with an explicit executable override")

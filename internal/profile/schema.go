@@ -75,8 +75,23 @@ func EnvironmentJSONSchema() ([]byte, error) {
 			"required_checks": object(
 				properties(map[string]any{
 					"shell":      enumSchema([]string{"auto", "sh", "bash", "cmd", "powershell", "pwsh"}),
-					"shell_path": stringSchema("minLength", 1, "description", "Explicit executable path for the configured required_checks.shell kind; requires shell to be set to a concrete kind (not auto)."),
+					"shell_path": stringSchema("minLength", 1, "pattern", `^\S(?:.*\S)?$`, "description", "Explicit executable path for the configured required_checks.shell kind; requires shell to be set to a concrete kind (not auto). Leading and trailing whitespace is invalid."),
 				}),
+				func(m map[string]any) {
+					m["allOf"] = []any{
+						map[string]any{
+							"if": map[string]any{
+								"required": []string{"shell_path"},
+							},
+							"then": map[string]any{
+								"required": []string{"shell"},
+								"properties": map[string]any{
+									"shell": enumSchema([]string{"sh", "bash", "cmd", "powershell", "pwsh"}),
+								},
+							},
+						},
+					}
+				},
 			),
 			"constraints": object(
 				required("network", "secrets_policy", "destructive_commands"),

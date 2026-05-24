@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -67,6 +68,62 @@ constraints:
 	}
 }
 
+func TestValidateEnvironmentRejectsRequiredCheckShellPathWithOuterWhitespace(t *testing.T) {
+	cases := []string{
+		" /opt/galley/bash",
+		"/opt/galley/bash ",
+		" \t",
+	}
+	for _, shellPath := range cases {
+		shellPath := shellPath
+		t.Run(fmt.Sprintf("%q", shellPath), func(t *testing.T) {
+			env := validEnvironmentForTest()
+			env.RequiredChecks = RequiredCheckEnvironment{Shell: "bash", ShellPath: shellPath}
+			result := ValidateEnvironment(env)
+			if result.Valid() {
+				t.Fatal("expected invalid required_checks.shell_path with outer whitespace")
+			}
+			if !strings.Contains(strings.Join(result.Errors, "\n"), "required_checks.shell_path") {
+				t.Fatalf("error must name required_checks.shell_path, got %#v", result.Errors)
+			}
+		})
+	}
+}
+
+func TestEnvironmentJSONSchemaRequiresConcreteShellForShellPath(t *testing.T) {
+	data, err := EnvironmentJSONSchema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(data, &schema); err != nil {
+		t.Fatal(err)
+	}
+	props := schema["properties"].(map[string]any)
+	requiredChecks := props["required_checks"].(map[string]any)
+	allOf := requiredChecks["allOf"].([]any)
+	if len(allOf) != 1 {
+		t.Fatalf("required_checks allOf got %#v, want one shell_path conditional", allOf)
+	}
+	rule := allOf[0].(map[string]any)
+	thenNode := rule["then"].(map[string]any)
+	required := stringSliceFromAny(t, thenNode["required"])
+	if !containsString(required, "shell") {
+		t.Fatalf("shell_path conditional must require shell, got %#v", required)
+	}
+	thenProps := thenNode["properties"].(map[string]any)
+	shell := thenProps["shell"].(map[string]any)
+	got := stringSliceFromAny(t, shell["enum"])
+	want := []string{"sh", "bash", "cmd", "powershell", "pwsh"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("shell_path conditional shell enum got %#v, want %#v", got, want)
+	}
+	shellPath := requiredChecks["properties"].(map[string]any)["shell_path"].(map[string]any)
+	if shellPath["pattern"] == "" {
+		t.Fatalf("shell_path schema must reject leading/trailing whitespace: %#v", shellPath)
+	}
+}
+
 // AC4: required_checks.shell_path without an explicit shell kind, or with
 // required_checks.shell: "auto", must be rejected with an error that names
 // required_checks.shell_path and explains that a concrete shell kind is
@@ -100,4 +157,30 @@ func TestValidateEnvironmentRejectsRequiredCheckShellPathWithoutExplicitShellKin
 			}
 		})
 	}
+}
+
+func stringSliceFromAny(t *testing.T, raw any) []string {
+	t.Helper()
+	values, ok := raw.([]any)
+	if !ok {
+		t.Fatalf("got %#v, want []any", raw)
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		s, ok := value.(string)
+		if !ok {
+			t.Fatalf("got %#v, want string", value)
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

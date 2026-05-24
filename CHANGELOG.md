@@ -6,6 +6,14 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Fixed
+
+- Windows required-check shell auto-discovery now ignores WSL launchers, WindowsApps shims, and non-standard Bash installs. Galley only auto-selects standard Git for Windows Bash, or Bash inferred from Git for Windows, and falls back to `cmd.exe` when no supported Git Bash is found.
+
+### Added
+
+- `environment.yaml` now accepts `required_checks.shell_path` to explicitly choose the executable for a concrete `required_checks.shell` kind. This supports non-standard Bash, custom PowerShell, WSL-based setups, and pinned Unix shells; invalid `shell_path`/`auto` combinations are rejected, and verification evidence records the resolved shell executable.
+
 ## v0.6.0 - 2026-05-24
 
 ### Added

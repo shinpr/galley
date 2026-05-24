@@ -63,33 +63,6 @@ func TestStatusJSONReportsRoot(t *testing.T) {
 	}
 }
 
-func TestStatusRuntimeRestoresDaemonArgs(t *testing.T) {
-	t.Parallel()
-	runtime := statusRuntime{}.withArgv([]string{
-		"/bin/galley",
-		"daemon",
-		"--supervisor",
-		"codex",
-		"--max-concurrent-tasks",
-		"3",
-		"--max-concurrent-per-repo=2",
-	})
-	if runtime.Supervisor != "codex" {
-		t.Fatalf("supervisor got %q", runtime.Supervisor)
-	}
-	if runtime.MaxConcurrentTasks != 3 || runtime.MaxConcurrentPerRepo != 2 {
-		t.Fatalf("parsed values got %#v", runtime)
-	}
-}
-
-func TestStatusRuntimeDefaultsSupervisorForDaemonWithoutFlag(t *testing.T) {
-	t.Parallel()
-	runtime := statusRuntime{}.withArgv([]string{"/bin/galley", "daemon"})
-	if runtime.Supervisor != daemon.DefaultSupervisor {
-		t.Fatalf("supervisor got %q", runtime.Supervisor)
-	}
-}
-
 func TestDaemonHelpReportsCodexSupervisorDefault(t *testing.T) {
 	t.Parallel()
 	cmd := NewCommand("daemon")
@@ -105,14 +78,16 @@ func TestDaemonHelpReportsCodexSupervisorDefault(t *testing.T) {
 	}
 }
 
-func TestStatusJSONOmitsSupervisorField(t *testing.T) {
+func TestStatusJSONOmitsRuntimeDefaultFields(t *testing.T) {
 	t.Parallel()
-	// AC7 / D3: `galley daemon status --output json` must not include a
-	// single `supervisor` field because per-repository environment.yaml
-	// supervisor.default_cli can override the daemon startup supervisor
-	// for individual tasks; a daemon-wide supervisor field would be
-	// misleading. The resolved supervisor for a real task is persisted
-	// in runs/<run-id>/supervisor.json (AC8).
+	// AC7 / D3: `galley daemon status --output json` must not include
+	// daemon startup defaults that can be supplied by either daemon.yaml
+	// or per-repository environment.yaml. The single `supervisor` field is
+	// misleading because per-repository `supervisor.default_cli` overrides
+	// it per task. `max_concurrent_tasks` and `max_concurrent_per_repo`
+	// are misleading because `status` only sees PID argv and cannot read
+	// daemon.yaml-supplied values. Resolution evidence for actual tasks is
+	// persisted in runs/<run-id>/supervisor.json (AC8).
 	root := t.TempDir()
 	cmd := NewCommand("daemon")
 	var stdout bytes.Buffer
@@ -126,8 +101,10 @@ func TestStatusJSONOmitsSupervisorField(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &raw); err != nil {
 		t.Fatal(err)
 	}
-	if _, present := raw["supervisor"]; present {
-		t.Fatalf("status JSON must not include a supervisor field: %s", stdout.String())
+	for _, field := range []string{"supervisor", "max_concurrent_tasks", "max_concurrent_per_repo"} {
+		if _, present := raw[field]; present {
+			t.Fatalf("status JSON must not include %q: %s", field, stdout.String())
+		}
 	}
 }
 
@@ -163,27 +140,37 @@ func TestApplyDaemonConfigFillsAbsentFlagsAndPreservesExplicit(t *testing.T) {
 	// without requiring CLI flags.
 	// AC3: when both daemon.yaml and CLI options define the same setting,
 	// the CLI option overrides daemon.yaml for that run. This test exercises
-	// shutdown-timeout explicitly because the previous implementation
-	// missed it.
-	one := 1
+	// every daemon.yaml-backed startup option, including the integer
+	// concurrency fields, so a future change that drops one or weakens the
+	// CLI-wins contract is caught.
+	four := 4
+	two := 2
 	cfg := daemonconfig.File{
 		Supervisor:           "claude",
-		MaxConcurrentTasks:   &one,
-		MaxConcurrentPerRepo: &one,
+		MaxConcurrentTasks:   &four,
+		MaxConcurrentPerRepo: &two,
 		PollInterval:         "30s",
 		ClaimTTL:             "1h",
 		HeartbeatInterval:    "15s",
 		ShutdownTimeout:      "2m",
 		IdleTimeout:          "5m",
 	}
-	// Case 1: no flags explicit, daemon.yaml wins.
+	// Case 1: no flags explicit, daemon.yaml wins for every field.
 	opts := daemon.Options{
 		ShutdownTimeout: 5 * time.Minute,
 	}
 	var poll time.Duration
-	applyDaemonConfig(&opts, &poll, cfg)
+	if err := applyDaemonConfig(&opts, &poll, cfg); err != nil {
+		t.Fatal(err)
+	}
 	if opts.Supervisor != "claude" || opts.SupervisorSource != daemon.SupervisorSourceDaemonConfig {
 		t.Fatalf("daemon.yaml supervisor not applied: %#v", opts)
+	}
+	if opts.MaxConcurrentTasks != 4 || !opts.Explicit.MaxConcurrentTasks {
+		t.Fatalf("daemon.yaml max_concurrent_tasks not applied or not marked explicit: %#v", opts)
+	}
+	if opts.MaxConcurrentPerRepo != 2 || !opts.Explicit.MaxConcurrentPerRepo {
+		t.Fatalf("daemon.yaml max_concurrent_per_repo not applied or not marked explicit: %#v", opts)
 	}
 	if opts.ShutdownTimeout != 2*time.Minute {
 		t.Fatalf("daemon.yaml shutdown_timeout not applied: %s", opts.ShutdownTimeout)
@@ -195,23 +182,63 @@ func TestApplyDaemonConfigFillsAbsentFlagsAndPreservesExplicit(t *testing.T) {
 		t.Fatalf("daemon.yaml poll_interval not applied: %s", poll)
 	}
 
-	// Case 2: CLI flags explicit, CLI wins for shutdown-timeout and supervisor.
+	// Case 2: CLI flags explicit, CLI wins for every field daemon.yaml also provides.
 	opts2 := daemon.Options{
-		ShutdownTimeout:  90 * time.Second,
-		Supervisor:       "codex",
-		SupervisorSource: daemon.SupervisorSourceCLI,
+		ShutdownTimeout:      90 * time.Second,
+		Supervisor:           "codex",
+		SupervisorSource:     daemon.SupervisorSourceCLI,
+		MaxConcurrentTasks:   8,
+		MaxConcurrentPerRepo: 3,
 		Explicit: daemon.ExplicitOptions{
-			Supervisor:      true,
-			ShutdownTimeout: true,
+			Supervisor:           true,
+			ShutdownTimeout:      true,
+			MaxConcurrentTasks:   true,
+			MaxConcurrentPerRepo: true,
 		},
 	}
 	var poll2 time.Duration
-	applyDaemonConfig(&opts2, &poll2, cfg)
+	if err := applyDaemonConfig(&opts2, &poll2, cfg); err != nil {
+		t.Fatal(err)
+	}
 	if opts2.Supervisor != "codex" || opts2.SupervisorSource != daemon.SupervisorSourceCLI {
 		t.Fatalf("CLI supervisor must win: %#v", opts2)
 	}
+	if opts2.MaxConcurrentTasks != 8 || opts2.MaxConcurrentPerRepo != 3 {
+		t.Fatalf("CLI concurrency must win: %#v", opts2)
+	}
 	if opts2.ShutdownTimeout != 90*time.Second {
 		t.Fatalf("CLI shutdown_timeout must win: %s", opts2.ShutdownTimeout)
+	}
+}
+
+func TestApplyDaemonConfigPreservesZeroPerRepoLimit(t *testing.T) {
+	t.Parallel()
+	// daemon.yaml `max_concurrent_per_repo: 0` means "disable the per-repo
+	// limit", matching the CLI `--max-concurrent-per-repo=0` contract. The
+	// 0 must survive past daemon.Options.withDefaults; if applyDaemonConfig
+	// did not mark the option explicit, withDefaults would silently turn
+	// the user-configured 0 back into 1.
+	zero := 0
+	cfg := daemonconfig.File{MaxConcurrentPerRepo: &zero}
+	opts := daemon.Options{MaxConcurrentPerRepo: 1}
+	var poll time.Duration
+	if err := applyDaemonConfig(&opts, &poll, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if opts.MaxConcurrentPerRepo != 0 || !opts.Explicit.MaxConcurrentPerRepo {
+		t.Fatalf("daemon.yaml 0 must be preserved and marked explicit: %#v", opts)
+	}
+	preflighted, err := daemon.Preflight(daemon.Options{
+		Root:                 t.TempDir(),
+		Supervisor:           "codex",
+		MaxConcurrentPerRepo: 0,
+		Explicit:             daemon.ExplicitOptions{MaxConcurrentPerRepo: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preflighted.MaxConcurrentPerRepo != 0 {
+		t.Fatalf("Preflight must preserve max_concurrent_per_repo=0; got %d", preflighted.MaxConcurrentPerRepo)
 	}
 }
 

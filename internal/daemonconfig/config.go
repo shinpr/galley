@@ -142,9 +142,16 @@ func (f File) Validate() error {
 	if f.Supervisor != "" && f.Supervisor != "claude" && f.Supervisor != "codex" {
 		return fmt.Errorf("supervisor must be one of: claude, codex (got %q)", f.Supervisor)
 	}
-	if f.MaxConcurrentTasks != nil && *f.MaxConcurrentTasks < 0 {
-		return fmt.Errorf("max_concurrent_tasks must be >= 0 (got %d)", *f.MaxConcurrentTasks)
+	// max_concurrent_tasks must be >= 1: the daemon always needs at least
+	// one worker to make progress, and silently accepting 0 here just gets
+	// rewritten by daemon.Options.withDefaults to 1 — leaving operators
+	// unsure whether their daemon.yaml value took effect. This contract
+	// matches the CLI flag, which is documented and defaulted to 1.
+	if f.MaxConcurrentTasks != nil && *f.MaxConcurrentTasks < 1 {
+		return fmt.Errorf("max_concurrent_tasks must be >= 1 (got %d)", *f.MaxConcurrentTasks)
 	}
+	// max_concurrent_per_repo accepts 0 to disable the per-repo limit,
+	// matching the CLI `--max-concurrent-per-repo=0` contract.
 	if f.MaxConcurrentPerRepo != nil && *f.MaxConcurrentPerRepo < 0 {
 		return fmt.Errorf("max_concurrent_per_repo must be >= 0 (got %d)", *f.MaxConcurrentPerRepo)
 	}

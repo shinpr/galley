@@ -134,3 +134,48 @@ func TestLoadRejectsBadDuration(t *testing.T) {
 		t.Fatalf("expected error for invalid duration")
 	}
 }
+
+func TestLoadRejectsZeroMaxConcurrentTasks(t *testing.T) {
+	t.Parallel()
+	// The daemon always needs >= 1 worker. Accepting 0 in daemon.yaml and
+	// silently turning it into 1 inside daemon.Options.withDefaults makes
+	// the configured value invisible to operators; reject it instead.
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, Filename), []byte("max_concurrent_tasks: 0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Load(root); err == nil {
+		t.Fatalf("expected error for max_concurrent_tasks: 0")
+	}
+}
+
+func TestLoadAcceptsZeroMaxConcurrentPerRepo(t *testing.T) {
+	t.Parallel()
+	// CLI `--max-concurrent-per-repo=0` disables the per-repo limit; the
+	// daemon.yaml field has the same public meaning.
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, Filename), []byte("max_concurrent_per_repo: 0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, present, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !present {
+		t.Fatalf("expected present=true")
+	}
+	if file.MaxConcurrentPerRepo == nil || *file.MaxConcurrentPerRepo != 0 {
+		t.Fatalf("max_concurrent_per_repo got %#v, want pointer to 0", file.MaxConcurrentPerRepo)
+	}
+}
+
+func TestLoadRejectsNegativeMaxConcurrentPerRepo(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, Filename), []byte("max_concurrent_per_repo: -1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Load(root); err == nil {
+		t.Fatalf("expected error for max_concurrent_per_repo: -1")
+	}
+}

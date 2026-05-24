@@ -111,7 +111,7 @@ CLI flags on `galley daemon run` or `galley daemon start` always override the ma
 3. The `supervisor` field in `daemon.yaml`.
 4. The built-in default (`codex`).
 
-`galley daemon status` (text and `--output json`) intentionally does not display a single effective `supervisor` field. Once `environment.yaml` can override the supervisor per task, a daemon-wide value would be misleading. The supervisor that actually ran a task, and the layer that selected it (`environment_profile`, `cli`, `daemon_config`, or `default`), are persisted to `runs/<run-id>/supervisor.json` as review evidence.
+`galley daemon status` (text and `--output json`) intentionally does not display daemon startup-default fields it cannot read accurately. The single `supervisor` field is omitted because `environment.yaml` can override the supervisor per task, and a daemon-wide value would be misleading. `max_concurrent_tasks` and `max_concurrent_per_repo` are omitted because `status` only inspects the daemon's PID argv and cannot see `daemon.yaml`-supplied values. The supervisor that actually ran a task, and the layer that selected it (`environment_profile`, `cli`, `daemon_config`, or `default`), are persisted to `runs/<run-id>/supervisor.json` as review evidence; the running daemon's effective concurrency comes from `daemon.yaml` and CLI argv directly.
 
 On Unix, foreground and background daemons use the same shutdown path. On `SIGINT` or `SIGTERM`, Galley stops claiming new queued tasks, lets active attempts finish until the shutdown timeout, records evidence, and avoids starting another retry attempt after shutdown is requested.
 

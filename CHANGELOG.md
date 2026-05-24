@@ -16,6 +16,7 @@ This project follows semantic versioning.
 - Daemon CLI flags on `galley daemon run` and `galley daemon start` always override the matching `daemon.yaml` field for that run. `--shutdown-timeout` now follows the same explicit-flag tracking as the other startup defaults.
 - `galley daemon status` text and JSON output no longer report daemon startup-default fields that can be resolved per task or loaded from `daemon.yaml`. The removed JSON fields are `supervisor`, `max_concurrent_tasks`, and `max_concurrent_per_repo`; per-task supervisor evidence is recorded in `runs/<run-id>/supervisor.json`.
 - Generated environment profile JSON Schema now declares the `supervisor.default_cli` enum (`claude`, `codex`). The bundled `plugins/galley/skills/galley/references/environment.schema.json` is regenerated.
+- Packaged Claude and Codex Galley plugins are now versioned as `0.1.10`: task-authoring guidance now expands acceptance criteria by invariant before finalizing, checking sibling fields, later lifecycle states, stale or missing values, fallback paths, and publication or visibility boundaries so ACs cover acceptance-relevant edge cases without overloading a single observable obligation.
 
 ## v0.5.4 - 2026-05-22
 

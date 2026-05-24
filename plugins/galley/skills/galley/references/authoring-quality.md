@@ -147,6 +147,21 @@ AC traceability checks:
 - Every AC has a verification method or evidence source. Prefer profile required checks for runnable commands that must be enforced by Galley.
 - Every risky boundary crossing has an AC or quality finding target: API/schema, data persistence, authorization, UI state, CLI output, migration, external service, or config.
 - Each AC names one observable obligation. Split one AC when "and" joins independently verifiable obligations or the AC crosses multiple boundaries.
+- Each requirement is expanded by invariant before finalizing ACs; see Invariant Expansion below.
+
+### Invariant Expansion
+
+Before finalizing ACs, expand each requirement by invariant: the changed behavior that must remain true across relevant inputs, states, and lifecycle transitions.
+
+For each changed CLI output, JSON payload, config precedence rule, schema field, task state, queue file, process control path, or run evidence, check whether the same invariant affects:
+
+- sibling fields on the same surface
+- later lifecycle states or retries
+- stale, missing, or empty values
+- failed refreshes, failed lookups, or unavailable fallbacks
+- publication or visibility boundaries, such as when a file, status, or record becomes observable to another command, daemon loop, or user
+
+Cover acceptance-relevant cases in ACs. If a related case is intentionally out of scope, record the reason in `decisions`, `risks`, or the task summary. Verification should force each acceptance-relevant path when practical, or record why direct coverage is out of scope. Split separate obligations into separate ACs; keep multiple verification paths only for the same obligation.
 
 For bug-fix or behavior-correction tasks, define the smallest reproducing state before finalizing ACs. Include the prior state that makes the bug observable, such as stale local or remote state, cached or generated artifacts, persisted records, existing resources, configuration values, previous run state, or saved history. At least one AC or verification item should prove the fix in that reproducing state.
 

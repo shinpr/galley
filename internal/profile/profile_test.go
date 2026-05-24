@@ -128,6 +128,32 @@ func TestValidateEnvironmentRejectsInvalidExecutorDefault(t *testing.T) {
 	}
 }
 
+func TestValidateEnvironmentAcceptsSupervisorDefaultCLI(t *testing.T) {
+	for _, value := range []string{"claude", "codex"} {
+		value := value
+		t.Run(value, func(t *testing.T) {
+			env := validEnvironmentForTest()
+			env.Supervisor = &SupervisorDefault{DefaultCLI: value}
+			result := ValidateEnvironment(env)
+			if !result.Valid() {
+				t.Fatalf("errors got %#v", result.Errors)
+			}
+		})
+	}
+}
+
+func TestValidateEnvironmentRejectsInvalidSupervisorDefault(t *testing.T) {
+	env := validEnvironmentForTest()
+	env.Supervisor = &SupervisorDefault{DefaultCLI: "opus"}
+	result := ValidateEnvironment(env)
+	if result.Valid() {
+		t.Fatal("expected invalid supervisor default")
+	}
+	if !strings.Contains(strings.Join(result.Errors, "\n"), "supervisor.default_cli") {
+		t.Fatalf("errors missing supervisor.default_cli: %#v", result.Errors)
+	}
+}
+
 func TestValidateEnvironmentAcceptsRequiredCheckShell(t *testing.T) {
 	env := validEnvironmentForTest()
 	env.RequiredChecks.Shell = "bash"

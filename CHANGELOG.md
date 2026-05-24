@@ -6,6 +6,17 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Added
+
+- Persistent daemon startup defaults in `daemon.yaml`. `galley daemon run` and `galley daemon start` now create `daemon.yaml` under the selected daemon root on first use with documented defaults for `supervisor`, `max_concurrent_tasks`, `max_concurrent_per_repo`, `poll_interval`, `claim_ttl`, `heartbeat_interval`, `shutdown_timeout`, and `idle_timeout`. Operators can edit the file to change daemon-wide defaults without re-specifying CLI flags. `galley daemon status` and `galley daemon stop` never create the file.
+- Repository-scoped supervisor selection. `environment.yaml` now accepts `supervisor.default_cli` (`claude` or `codex`). When set, the daemon uses that supervisor for any task whose `scope.cwd` resolves to that environment profile, overriding the daemon startup supervisor for that task only. The resolved supervisor and the layer that selected it (`environment_profile`, `cli`, `daemon_config`, or `default`) are persisted to `runs/<run-id>/supervisor.json` as review evidence.
+
+### Changed
+
+- Daemon CLI flags on `galley daemon run` and `galley daemon start` always override the matching `daemon.yaml` field for that run. `--shutdown-timeout` now follows the same explicit-flag tracking as the other startup defaults.
+- `galley daemon status` text and JSON output no longer report daemon startup-default fields that can be resolved per task or loaded from `daemon.yaml`. The removed JSON fields are `supervisor`, `max_concurrent_tasks`, and `max_concurrent_per_repo`; per-task supervisor evidence is recorded in `runs/<run-id>/supervisor.json`.
+- Generated environment profile JSON Schema now declares the `supervisor.default_cli` enum (`claude`, `codex`). The bundled `plugins/galley/skills/galley/references/environment.schema.json` is regenerated.
+
 ## v0.5.4 - 2026-05-22
 
 ### Changed

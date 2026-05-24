@@ -75,7 +75,7 @@ func EnvironmentJSONSchema() ([]byte, error) {
 			"required_checks": object(
 				properties(map[string]any{
 					"shell":      enumSchema([]string{"auto", "sh", "bash", "cmd", "powershell", "pwsh"}),
-					"shell_path": stringSchema("minLength", 1, "pattern", `^\S(?:.*\S)?$`, "description", "Explicit executable path for the configured required_checks.shell kind; requires shell to be set to a concrete kind (not auto). Leading and trailing whitespace is invalid."),
+					"shell_path": stringSchema("minLength", 1, "pattern", `^\S(?:.*\S)?$`, "description", "Explicit executable path for the configured required_checks.shell kind; use an absolute path when pinning a shell. Requires shell to be set to a concrete kind (not auto). In Windows YAML, escape backslashes only in double-quoted strings; single-quoted or plain scalars use single backslashes. Leading and trailing whitespace is invalid."),
 				}),
 				func(m map[string]any) {
 					m["allOf"] = []any{

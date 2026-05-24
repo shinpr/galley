@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- Packaged Claude and Codex Galley plugins are now versioned as `0.1.10`: task-authoring guidance now expands acceptance criteria by invariant before finalizing, checking sibling fields, later lifecycle states, stale or missing values, fallback paths, and publication or visibility boundaries so ACs cover acceptance-relevant edge cases without overloading a single observable obligation.
+
 ## v0.5.4 - 2026-05-22
 
 ### Changed

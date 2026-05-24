@@ -169,6 +169,9 @@ func TestShellArgvForOSWindowsAutoFallsBackToCmdWhenBashMissing(t *testing.T) {
 	lookPath = func(file string) (string, error) {
 		return "", os.ErrNotExist
 	}
+	statFile = func(name string) (os.FileInfo, error) {
+		return nil, os.ErrNotExist
+	}
 	defer func() {
 		lookPath = old
 		statFile = oldStat

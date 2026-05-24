@@ -111,6 +111,19 @@
       },
       "type": "object"
     },
+    "supervisor": {
+      "additionalProperties": false,
+      "properties": {
+        "default_cli": {
+          "enum": [
+            "claude",
+            "codex"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "worktree": {
       "additionalProperties": false,
       "default": {

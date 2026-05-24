@@ -191,6 +191,15 @@ func effectiveOptionsForProfiles(opts Options, profiles profile.Bundle) Options 
 		if env.Worktree.Cleanup != nil {
 			effective.CleanupWorktrees = *env.Worktree.Cleanup
 		}
+		// Per-task supervisor selection (AC4 / D1): when the resolved
+		// environment.yaml declares supervisor.default_cli, the daemon uses
+		// that adapter for this task even when CLI startup options or
+		// daemon.yaml chose a different supervisor. The override is recorded
+		// as `environment_profile` in run evidence (AC8).
+		if env.Supervisor != nil && env.Supervisor.DefaultCLI != "" {
+			effective.Supervisor = env.Supervisor.DefaultCLI
+			effective.SupervisorSource = SupervisorSourceRepoProfile
+		}
 	}
 	if effective.OpenPR {
 		effective.CommitOnAccept = true

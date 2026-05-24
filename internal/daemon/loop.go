@@ -60,6 +60,13 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 	// bundle through this function keeps the supervisor loop from
 	// double-loading the environment profile.
 	effectiveOpts := effectiveOptionsForProfiles(opts, profiles)
+	// Persist the resolved supervisor and its source as run evidence (AC8).
+	// Reviewers can then tell whether the per-task supervisor came from the
+	// repository environment profile, daemon CLI startup options, daemon.yaml,
+	// or the built-in default without re-deriving the resolution from logs.
+	if err := writeSupervisorEvidence(runDir, effectiveOpts); err != nil {
+		fmt.Fprintf(os.Stderr, "galley: write supervisor evidence for run %s failed: %v\n", runID, err)
+	}
 	preflightResult, err := LoadPreflightResult(runDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "galley: could not load preflight result for run %s: %v\n", runID, err)
@@ -1210,4 +1217,17 @@ func attemptsLeft(budget, attempt int) int {
 		return 1
 	}
 	return budget - attempt
+}
+
+// writeSupervisorEvidence persists the resolved supervisor and its source for
+// a run so reviewers can verify which precedence layer (repository
+// environment profile, CLI startup flag, daemon.yaml, or built-in default)
+// determined the supervisor adapter Galley used (AC8). The function is
+// extracted from runSupervisorLoop so it can be unit-tested without driving a
+// full task through the daemon loop.
+func writeSupervisorEvidence(runDir string, effectiveOpts Options) error {
+	return writeJSON(filepath.Join(runDir, "supervisor.json"), map[string]string{
+		"resolved": effectiveOpts.Supervisor,
+		"source":   effectiveOpts.SupervisorSource,
+	})
 }

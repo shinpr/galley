@@ -85,14 +85,20 @@ type Options struct {
 	CleanupWorktrees       bool
 	PRBase                 string
 	Supervisor             string
-	ShutdownTimeout        time.Duration
-	DisableClaudeGuard     bool
-	ClaudeGuardPluginDir   string
-	ClaudeBin              string
-	CodexBin               string
-	GitBin                 string
-	GHBin                  string
-	Explicit               ExplicitOptions
+	// SupervisorSource records where the resolved supervisor value came from
+	// (cli, daemon_config, default, or environment_profile). It is set by
+	// daemon CLI wiring before Preflight and then overridden per task when an
+	// environment.yaml supervisor.default_cli wins for that task. The value is
+	// persisted to runs/<run-id>/supervisor.json as evidence (AC8).
+	SupervisorSource     string
+	ShutdownTimeout      time.Duration
+	DisableClaudeGuard   bool
+	ClaudeGuardPluginDir string
+	ClaudeBin            string
+	CodexBin             string
+	GitBin               string
+	GHBin                string
+	Explicit             ExplicitOptions
 }
 
 type ExplicitOptions struct {
@@ -106,6 +112,7 @@ type ExplicitOptions struct {
 	PollInterval           bool
 	ClaimTTL               bool
 	HeartbeatInterval      bool
+	ShutdownTimeout        bool
 	IdleTimeout            bool
 	CommitOnAccept         bool
 	OpenPR                 bool
@@ -119,6 +126,16 @@ type ExplicitOptions struct {
 // DefaultSupervisor is the built-in supervisor adapter used when daemon
 // startup does not receive an explicit --supervisor value.
 const DefaultSupervisor = "codex"
+
+// Supervisor source labels. Persisted in run evidence (AC8) so reviewers can
+// tell whether the per-task supervisor came from a repository environment
+// profile, a daemon CLI startup flag, daemon.yaml, or the built-in default.
+const (
+	SupervisorSourceRepoProfile  = "environment_profile"
+	SupervisorSourceCLI          = "cli"
+	SupervisorSourceDaemonConfig = "daemon_config"
+	SupervisorSourceDefault      = "default"
+)
 
 // Run starts the daemon loop.
 func Run(ctx context.Context, opts Options) error {
@@ -208,6 +225,12 @@ func (opts Options) withDefaults() Options {
 	}
 	if opts.Supervisor == "" {
 		opts.Supervisor = DefaultSupervisor
+		if opts.SupervisorSource == "" {
+			opts.SupervisorSource = SupervisorSourceDefault
+		}
+	}
+	if opts.SupervisorSource == "" {
+		opts.SupervisorSource = SupervisorSourceDefault
 	}
 	if opts.MaxConcurrentTasks <= 0 {
 		opts.MaxConcurrentTasks = 1

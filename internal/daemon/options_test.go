@@ -1,6 +1,9 @@
 package daemon
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -77,6 +80,73 @@ func TestEffectiveOptionsForProfilesUsesEnvironmentOperations(t *testing.T) {
 	}
 	if effective.CleanupWorktrees {
 		t.Fatalf("cleanup should follow environment profile: %#v", effective)
+	}
+}
+
+func TestEffectiveOptionsForProfilesAppliesRepoSupervisor(t *testing.T) {
+	t.Parallel()
+	// AC4 / D1: when environment.yaml supervisor.default_cli is set, the
+	// daemon must use that supervisor for the task and record the source
+	// as the repository environment profile so AC8 run evidence reflects
+	// the precedence chain.
+	opts := Options{
+		Root:             t.TempDir(),
+		Supervisor:       "codex",
+		SupervisorSource: SupervisorSourceCLI,
+	}
+	effective := effectiveOptionsForProfiles(opts, profile.Bundle{
+		Environment: &profile.Environment{
+			Supervisor: &profile.SupervisorDefault{DefaultCLI: "claude"},
+		},
+	})
+	if effective.Supervisor != "claude" {
+		t.Fatalf("supervisor got %q, want claude", effective.Supervisor)
+	}
+	if effective.SupervisorSource != SupervisorSourceRepoProfile {
+		t.Fatalf("source got %q, want %s", effective.SupervisorSource, SupervisorSourceRepoProfile)
+	}
+}
+
+func TestEffectiveOptionsForProfilesKeepsCLISupervisorWhenRepoEmpty(t *testing.T) {
+	t.Parallel()
+	// AC5: when no repository supervisor is configured for a task, the
+	// daemon retains the resolution from CLI/daemon.yaml/default.
+	opts := Options{
+		Root:             t.TempDir(),
+		Supervisor:       "claude",
+		SupervisorSource: SupervisorSourceDaemonConfig,
+	}
+	effective := effectiveOptionsForProfiles(opts, profile.Bundle{
+		Environment: &profile.Environment{},
+	})
+	if effective.Supervisor != "claude" || effective.SupervisorSource != SupervisorSourceDaemonConfig {
+		t.Fatalf("unexpected effective opts: supervisor=%q source=%q", effective.Supervisor, effective.SupervisorSource)
+	}
+}
+
+func TestWriteSupervisorEvidenceRecordsResolvedAndSource(t *testing.T) {
+	t.Parallel()
+	// AC8: each daemon-processed task persists the resolved supervisor and
+	// the source that determined it so reviewers can map the precedence
+	// chain (environment_profile / cli / daemon_config / default) without
+	// re-deriving it from daemon logs.
+	runDir := t.TempDir()
+	if err := writeSupervisorEvidence(runDir, Options{
+		Supervisor:       "claude",
+		SupervisorSource: SupervisorSourceRepoProfile,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(runDir, "supervisor.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]string
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["resolved"] != "claude" || got["source"] != SupervisorSourceRepoProfile {
+		t.Fatalf("supervisor evidence got %#v", got)
 	}
 }
 

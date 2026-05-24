@@ -96,7 +96,22 @@ galley daemon run --once
 
 Use the installed `galley` binary for `start`, `status`, and `stop`. PID verification records the executable path, so `go run ./cmd/galley ... daemon start` is not suitable for background daemon control because later `go run` invocations use different temporary binaries.
 
-`--supervisor` is a daemon startup flag (accepted on `galley daemon run` and inherited by `daemon start`) and selects the built-in supervisor adapter (`claude` or `codex`). When unset, daemon startup uses Codex. It is not a repository `environment.yaml` field: supervisor selection is daemon startup state, not a per-repo profile setting.
+### Daemon startup defaults (`daemon.yaml`)
+
+Both `galley daemon run` and `galley daemon start` create `daemon.yaml` under the selected daemon root on first use if the file does not already exist. The file holds the durable startup defaults for `supervisor`, `max_concurrent_tasks`, `max_concurrent_per_repo`, `poll_interval`, `claim_ttl`, `heartbeat_interval`, `shutdown_timeout`, and `idle_timeout`. Edit it to change daemon-wide defaults without re-specifying CLI flags. `galley daemon status` and `galley daemon stop` never create `daemon.yaml`; they are read-only.
+
+CLI flags on `galley daemon run` or `galley daemon start` always override the matching `daemon.yaml` field for that run (including `--shutdown-timeout`). Anything you do not set on the CLI falls back to `daemon.yaml`; anything `daemon.yaml` does not set falls back to the built-in default.
+
+### Supervisor resolution
+
+`--supervisor` selects the built-in supervisor adapter (`claude` or `codex`). The daemon resolves the supervisor for each task in this order:
+
+1. The repository `environment.yaml` `supervisor.default_cli` (resolved from `scope.cwd`). This overrides every layer below for that task only.
+2. The daemon CLI `--supervisor` startup flag.
+3. The `supervisor` field in `daemon.yaml`.
+4. The built-in default (`codex`).
+
+`galley daemon status` (text and `--output json`) intentionally does not display a single effective `supervisor` field. Once `environment.yaml` can override the supervisor per task, a daemon-wide value would be misleading. The supervisor that actually ran a task, and the layer that selected it (`environment_profile`, `cli`, `daemon_config`, or `default`), are persisted to `runs/<run-id>/supervisor.json` as review evidence.
 
 On Unix, foreground and background daemons use the same shutdown path. On `SIGINT` or `SIGTERM`, Galley stops claiming new queued tasks, lets active attempts finish until the shutdown timeout, records evidence, and avoids starting another retry attempt after shutdown is requested.
 

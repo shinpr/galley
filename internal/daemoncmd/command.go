@@ -11,11 +11,11 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/shinpr/galley/internal/daemon"
+	"github.com/shinpr/galley/internal/daemonconfig"
 	"github.com/shinpr/galley/internal/daemonctl"
 	"github.com/shinpr/galley/internal/galleyhome"
 	"github.com/shinpr/galley/internal/runner"
@@ -62,11 +62,36 @@ func NewCommand(use string) *cobra.Command {
 				switch supervisorProvider {
 				case "codex", "claude":
 					opts.Supervisor = supervisorProvider
+					opts.SupervisorSource = daemon.SupervisorSourceCLI
 				default:
 					return fmt.Errorf("--supervisor must be one of: codex, claude")
 				}
 			}
 			opts.Explicit = explicitOptionsFromFlags(cmd)
+			if pollInterval > 0 {
+				opts.PollInterval = pollInterval
+			}
+			// Daemon startup defaults (AC1/AC2/AC3). This RunE only fires
+			// for `galley daemon run` (via the run subcommand) and for the
+			// background daemon child spawned by `galley daemon start`
+			// (parent cmd name "daemon"). The `status` and `stop`
+			// subcommands install their own RunE and never reach this
+			// branch, so they remain read-only and do not create
+			// daemon.yaml (R2). `galley daemon start` itself also calls
+			// EnsureDefault before spawning the child so the operator sees
+			// the new file as soon as the start command returns. We then
+			// apply daemon.yaml values to any startup option the user did
+			// not explicitly set on the CLI; CLI flags always win (AC3).
+			if _, err := daemonconfig.EnsureDefault(opts.Root); err != nil {
+				return err
+			}
+			if cfg, present, err := daemonconfig.Load(opts.Root); err != nil {
+				return err
+			} else if present {
+				if err := applyDaemonConfig(&opts, &pollInterval, cfg); err != nil {
+					return err
+				}
+			}
 			if pollInterval > 0 {
 				opts.PollInterval = pollInterval
 			}
@@ -128,6 +153,82 @@ func NewCommand(use string) *cobra.Command {
 	return cmd
 }
 
+// applyDaemonConfig fills daemon startup options whose flag was not explicitly
+// set with values from daemon.yaml. CLI flags always win (AC3). The supervisor
+// source is recorded as `daemon_config` whenever daemon.yaml provided the
+// resolved supervisor value, so run evidence can distinguish a CLI override
+// from a daemon.yaml default (AC8). Per-task environment.yaml
+// supervisor.default_cli overrides this later in the daemon runtime (AC4).
+//
+// When daemon.yaml supplies an integer concurrency value, the corresponding
+// Explicit flag is set so daemon.Options.withDefaults treats it as an
+// explicitly configured value. This preserves `max_concurrent_per_repo: 0`
+// (disable the per-repo limit) from being silently turned back into 1 by the
+// daemon default fallback.
+func applyDaemonConfig(opts *daemon.Options, pollInterval *time.Duration, cfg daemonconfig.File) error {
+	if !opts.Explicit.Supervisor && cfg.Supervisor != "" {
+		opts.Supervisor = cfg.Supervisor
+		opts.SupervisorSource = daemon.SupervisorSourceDaemonConfig
+	}
+	if !opts.Explicit.MaxConcurrentTasks && cfg.MaxConcurrentTasks != nil {
+		opts.MaxConcurrentTasks = *cfg.MaxConcurrentTasks
+		opts.Explicit.MaxConcurrentTasks = true
+	}
+	if !opts.Explicit.MaxConcurrentPerRepo && cfg.MaxConcurrentPerRepo != nil {
+		opts.MaxConcurrentPerRepo = *cfg.MaxConcurrentPerRepo
+		opts.Explicit.MaxConcurrentPerRepo = true
+	}
+	if !opts.Explicit.PollInterval && cfg.PollInterval != "" {
+		d, ok, err := daemonconfig.Duration(cfg.PollInterval)
+		if err != nil {
+			return fmt.Errorf("daemon.yaml poll_interval: %w", err)
+		}
+		if ok {
+			*pollInterval = d
+		}
+	}
+	if !opts.Explicit.ClaimTTL && cfg.ClaimTTL != "" {
+		d, ok, err := daemonconfig.Duration(cfg.ClaimTTL)
+		if err != nil {
+			return fmt.Errorf("daemon.yaml claim_ttl: %w", err)
+		}
+		if ok {
+			opts.ClaimTTL = d
+		}
+	}
+	if !opts.Explicit.HeartbeatInterval && cfg.HeartbeatInterval != "" {
+		d, ok, err := daemonconfig.Duration(cfg.HeartbeatInterval)
+		if err != nil {
+			return fmt.Errorf("daemon.yaml heartbeat_interval: %w", err)
+		}
+		if ok {
+			opts.HeartbeatInterval = d
+		}
+	}
+	// ShutdownTimeout follows the same explicit-flag tracking as the other
+	// daemon.yaml-backed startup defaults (AC3): when the CLI flag was not
+	// changed, daemon.yaml wins; otherwise the CLI value is preserved.
+	if !opts.Explicit.ShutdownTimeout && cfg.ShutdownTimeout != "" {
+		d, ok, err := daemonconfig.Duration(cfg.ShutdownTimeout)
+		if err != nil {
+			return fmt.Errorf("daemon.yaml shutdown_timeout: %w", err)
+		}
+		if ok {
+			opts.ShutdownTimeout = d
+		}
+	}
+	if !opts.Explicit.IdleTimeout && cfg.IdleTimeout != "" {
+		d, ok, err := daemonconfig.Duration(cfg.IdleTimeout)
+		if err != nil {
+			return fmt.Errorf("daemon.yaml idle_timeout: %w", err)
+		}
+		if ok {
+			opts.IdleTimeout = d
+		}
+	}
+	return nil
+}
+
 func explicitOptionsFromFlags(cmd *cobra.Command) daemon.ExplicitOptions {
 	changed := cmd.Flags().Changed
 	return daemon.ExplicitOptions{
@@ -137,6 +238,7 @@ func explicitOptionsFromFlags(cmd *cobra.Command) daemon.ExplicitOptions {
 		PollInterval:         changed("poll-interval"),
 		ClaimTTL:             changed("claim-ttl"),
 		HeartbeatInterval:    changed("heartbeat-interval"),
+		ShutdownTimeout:      changed("shutdown-timeout"),
 		IdleTimeout:          changed("idle-timeout"),
 		Supervisor:           changed("supervisor"),
 	}
@@ -161,6 +263,15 @@ func newStartCommand(opts *daemon.Options, pidFile, logFile *string, readinessTi
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if opts.Once {
 				return fmt.Errorf("start does not support --once")
+			}
+			// Ensure daemon.yaml exists under the selected root before the
+			// child daemon spawns (AC1). The background child cannot reliably
+			// surface a creation error to the operator, and operators expect
+			// to edit daemon.yaml immediately after `galley daemon start`
+			// returns. The child still re-loads daemon.yaml so any value
+			// written here is what the child resolves on first boot.
+			if _, err := daemonconfig.EnsureDefault(opts.Root); err != nil {
+				return err
 			}
 			paths := daemonctl.ResolvePaths(opts.Root, *pidFile, *logFile)
 			exe, err := os.Executable()
@@ -370,29 +481,27 @@ func newStatusCommand(opts *daemon.Options, pidFile *string) *cobra.Command {
 }
 
 func writeStatusJSON(cmd *cobra.Command, opts *daemon.Options, paths daemonctl.Paths, status *daemonctl.Status, alive, verified bool) error {
-	runtime := statusRuntimeFromOptions(*opts)
-	if status != nil {
-		runtime = runtime.withArgv(status.Meta.Argv)
-	}
+	// AC7 / D3: daemon status intentionally does not surface daemon startup
+	// defaults that can be overridden by daemon.yaml or by per-repository
+	// environment.yaml. `supervisor` is omitted because a daemon-wide value
+	// would be misleading once per-task supervisor resolution exists.
+	// `max_concurrent_tasks` and `max_concurrent_per_repo` are omitted for the
+	// same reason: status can only see CLI argv, so daemon.yaml-supplied
+	// values would not be reflected accurately. Resolution evidence for an
+	// actual task is persisted in runs/<run-id>/supervisor.json (AC8).
 	payload := struct {
-		Running           bool   `json:"running"`
-		Verified          bool   `json:"verified"`
-		PID               int    `json:"pid,omitempty"`
-		Root              string `json:"root"`
-		PIDFile           string `json:"pid_file"`
-		LogFile           string `json:"log_file"`
-		Supervisor        string `json:"supervisor,omitempty"`
-		MaxConcurrent     int    `json:"max_concurrent_tasks,omitempty"`
-		MaxConcurrentRepo int    `json:"max_concurrent_per_repo,omitempty"`
+		Running  bool   `json:"running"`
+		Verified bool   `json:"verified"`
+		PID      int    `json:"pid,omitempty"`
+		Root     string `json:"root"`
+		PIDFile  string `json:"pid_file"`
+		LogFile  string `json:"log_file"`
 	}{
-		Running:           alive,
-		Verified:          verified,
-		Root:              opts.Root,
-		PIDFile:           paths.PIDFile,
-		LogFile:           paths.LogFile,
-		Supervisor:        runtime.Supervisor,
-		MaxConcurrent:     runtime.MaxConcurrentTasks,
-		MaxConcurrentRepo: runtime.MaxConcurrentPerRepo,
+		Running:  alive,
+		Verified: verified,
+		Root:     opts.Root,
+		PIDFile:  paths.PIDFile,
+		LogFile:  paths.LogFile,
 	}
 	if status != nil {
 		payload.PID = status.Meta.PID
@@ -400,66 +509,6 @@ func writeStatusJSON(cmd *cobra.Command, opts *daemon.Options, paths daemonctl.P
 	enc := json.NewEncoder(cmd.OutOrStdout())
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)
-}
-
-type statusRuntime struct {
-	Supervisor           string
-	MaxConcurrentTasks   int
-	MaxConcurrentPerRepo int
-}
-
-func statusRuntimeFromOptions(opts daemon.Options) statusRuntime {
-	return statusRuntime{
-		Supervisor:           opts.Supervisor,
-		MaxConcurrentTasks:   opts.MaxConcurrentTasks,
-		MaxConcurrentPerRepo: opts.MaxConcurrentPerRepo,
-	}
-}
-
-func (runtime statusRuntime) withArgv(argv []string) statusRuntime {
-	if len(argv) == 0 {
-		return runtime
-	}
-	if value, ok := flagValue(argv, "--supervisor"); ok {
-		runtime.Supervisor = value
-	} else if runtime.Supervisor == "" {
-		runtime.Supervisor = daemon.DefaultSupervisor
-	}
-	if value, ok := intFlagValue(argv, "--max-concurrent-tasks"); ok {
-		runtime.MaxConcurrentTasks = value
-	}
-	if value, ok := intFlagValue(argv, "--max-concurrent-per-repo"); ok {
-		runtime.MaxConcurrentPerRepo = value
-	}
-	return runtime
-}
-
-func flagValue(argv []string, name string) (string, bool) {
-	for i, arg := range argv {
-		if arg == name {
-			if i+1 < len(argv) {
-				return argv[i+1], true
-			}
-			return "", false
-		}
-		prefix := name + "="
-		if len(arg) > len(prefix) && arg[:len(prefix)] == prefix {
-			return arg[len(prefix):], true
-		}
-	}
-	return "", false
-}
-
-func intFlagValue(argv []string, name string) (int, bool) {
-	value, ok := flagValue(argv, name)
-	if !ok {
-		return 0, false
-	}
-	parsed, err := strconv.Atoi(value)
-	if err != nil {
-		return 0, false
-	}
-	return parsed, true
 }
 
 func waitReady(pidFile, root, executable string, timeout time.Duration) error {

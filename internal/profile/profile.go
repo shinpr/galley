@@ -49,6 +49,7 @@ type Environment struct {
 	CWD            string                   `yaml:"cwd" json:"cwd"`
 	Commands       map[string]string        `yaml:"commands" json:"commands"`
 	Executor       *ExecutorDefault         `yaml:"executor,omitempty" json:"executor,omitempty"`
+	Supervisor     *SupervisorDefault       `yaml:"supervisor,omitempty" json:"supervisor,omitempty"`
 	RequiredChecks RequiredCheckEnvironment `yaml:"required_checks,omitempty" json:"required_checks,omitempty"`
 	Constraints    Constraints              `yaml:"constraints" json:"constraints"`
 	PR             PRSettings               `yaml:"pr,omitempty" json:"pr,omitempty"`
@@ -56,6 +57,15 @@ type Environment struct {
 }
 
 type ExecutorDefault struct {
+	DefaultCLI string `yaml:"default_cli,omitempty" json:"default_cli,omitempty"`
+}
+
+// SupervisorDefault selects the repository-scoped review supervisor for tasks
+// whose `scope.cwd` resolves to this environment profile. When `default_cli`
+// is set, the daemon uses it for that task even when daemon CLI startup
+// options, `daemon.yaml`, or the built-in default would otherwise pick a
+// different supervisor. Allowed values are `claude` and `codex`.
+type SupervisorDefault struct {
 	DefaultCLI string `yaml:"default_cli,omitempty" json:"default_cli,omitempty"`
 }
 
@@ -188,6 +198,9 @@ func ValidateEnvironment(env Environment) ValidationResult {
 	if env.Executor != nil && env.Executor.DefaultCLI != "" {
 		require(&result, validExecutorCLI(env.Executor.DefaultCLI), "executor.default_cli must be one of: claude, codex")
 	}
+	if env.Supervisor != nil && env.Supervisor.DefaultCLI != "" {
+		require(&result, validSupervisorCLI(env.Supervisor.DefaultCLI), "supervisor.default_cli must be one of: claude, codex")
+	}
 	if env.RequiredChecks.Shell != "" {
 		require(&result, validRequiredCheckShell(env.RequiredChecks.Shell), "required_checks.shell must be one of: auto, sh, bash, cmd, powershell, pwsh")
 	}
@@ -198,6 +211,18 @@ func ValidateEnvironment(env Environment) ValidationResult {
 }
 
 func validExecutorCLI(value string) bool {
+	switch value {
+	case "claude", "codex":
+		return true
+	default:
+		return false
+	}
+}
+
+// validSupervisorCLI mirrors validExecutorCLI for the repository-scoped
+// supervisor selection. Allowed values are the two built-in supervisor
+// adapters Galley supports.
+func validSupervisorCLI(value string) bool {
 	switch value {
 	case "claude", "codex":
 		return true

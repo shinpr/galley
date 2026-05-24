@@ -25,12 +25,18 @@ Galley runs `quality.required_checks` itself after executor attempts. Choose the
 
 Shell values:
 
-- `auto`: Windows uses Git Bash when discoverable, otherwise `cmd.exe`.
+- `auto`: Galley auto-detects a standard Git for Windows Bash install (`C:\Program Files\Git\bin\bash.exe`, `C:\Program Files\Git\usr\bin\bash.exe`, the `(x86)` equivalents, or Git Bash inferred from a discoverable `git.exe`). Any other PATH-discovered `bash.exe` — including the WSL launcher (`C:\Windows\System32\bash.exe`), a `WindowsApps` shim, MSYS2, Cygwin, Scoop, or Chocolatey-managed Bashes — is not auto-selected. If no usable Git for Windows Bash is found, Galley falls back to `cmd.exe`. Use `required_checks.shell` plus `required_checks.shell_path` to opt into a non-standard Bash explicitly.
 - `sh`: Allowed when `/bin/sh` is known to exist on the Windows host; prefer `bash` for Git Bash environments.
 - `bash`: Use for checks that rely on POSIX tools or syntax such as `grep`, `find`, `xargs`, `test`, `$()`, POSIX pipelines using POSIX commands, or single-quoted shell strings.
 - `cmd`: Use for commands written for Command Prompt.
 - `powershell`: Use for commands written for Windows PowerShell.
 - `pwsh`: Use for commands written for PowerShell 7, which is separate from Windows PowerShell and may require separate installation.
+
+Responsibility split between Galley and the operator:
+
+- Galley auto-detects only the standard Git for Windows install layouts above. Exhaustively guessing every possible Bash layout (portable Git outside `Program Files`, Scoop, Chocolatey, MSYS2, Cygwin, WSL distros, managed corporate machines) is brittle, so Galley does not attempt it.
+- For non-standard Bash installs (MSYS2, Cygwin, portable Git outside `C:\Program Files\Git`), custom PowerShell installs, or intentionally WSL-based setups, set both `required_checks.shell` (the concrete shell kind) and `required_checks.shell_path` (the explicit executable path). Galley uses the configured path verbatim and skips auto-discovery.
+- `required_checks.shell_path` requires an explicit `required_checks.shell` kind. Profile validation rejects `shell_path` when `shell` is empty or `auto`, because there is no shell kind to associate the override with.
 
 During profile authoring, infer the shell from repository evidence:
 
@@ -50,4 +56,12 @@ Windows profile snippet for POSIX-style checks:
 ```yaml
 required_checks:
   shell: "bash"
+```
+
+Windows profile snippet for a non-standard Bash install (for example MSYS2 outside `C:\Program Files\Git`):
+
+```yaml
+required_checks:
+  shell: "bash"
+  shell_path: "C:\\msys64\\usr\\bin\\bash.exe"
 ```

@@ -74,7 +74,8 @@ func EnvironmentJSONSchema() ([]byte, error) {
 			),
 			"required_checks": object(
 				properties(map[string]any{
-					"shell": enumSchema([]string{"auto", "sh", "bash", "cmd", "powershell", "pwsh"}),
+					"shell":      enumSchema([]string{"auto", "sh", "bash", "cmd", "powershell", "pwsh"}),
+					"shell_path": stringSchema("minLength", 1, "description", "Explicit executable path for the configured required_checks.shell kind; requires shell to be set to a concrete kind (not auto)."),
 				}),
 			),
 			"constraints": object(

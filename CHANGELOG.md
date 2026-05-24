@@ -8,11 +8,11 @@ This project follows semantic versioning.
 
 ### Fixed
 
-- Windows required-check shell auto-discovery now selects only standard Git for Windows Bash installs (`C:\Program Files\Git\bin\bash.exe`, `C:\Program Files\Git\usr\bin\bash.exe`, the `(x86)` equivalents, or Git Bash inferred from a discoverable `git.exe`). Any other PATH-discovered `bash.exe` — including the WSL launcher (`C:\Windows\System32\bash.exe`), `WindowsApps` shims, MSYS2, Cygwin, Scoop, and Chocolatey-managed Bashes — is no longer auto-selected; non-standard installs must be opted into via `required_checks.shell` plus `required_checks.shell_path`. When no standard Git for Windows Bash is found, Galley falls back to `cmd.exe`. macOS and Linux behavior is unchanged.
+- Windows required-check shell auto-discovery now ignores WSL launchers, WindowsApps shims, and non-standard Bash installs. Galley only auto-selects standard Git for Windows Bash, or Bash inferred from Git for Windows, and falls back to `cmd.exe` when no supported Git Bash is found.
 
 ### Added
 
-- `environment.yaml` now accepts `required_checks.shell_path`, an explicit executable path used verbatim for required-check execution. It pairs with a concrete `required_checks.shell` kind (`sh`, `bash`, `cmd`, `powershell`, or `pwsh`); profile validation rejects `shell_path` when `shell` is empty or `auto`. Operators with non-standard Bash, MSYS2, Cygwin, portable Git, custom PowerShell, or intentionally WSL-based setups can use `shell_path` to bypass auto-discovery. Galley records the resolved shell kind and executable path in verification evidence so operators can distinguish Git Bash, WSL launcher, cmd.exe, PowerShell, and explicit override cases. Generated environment profile JSON Schema and the bundled `plugins/galley/skills/galley/references/environment.schema.json` include the new field; `docs/profiles.md` and `plugins/galley/skills/galley/references/windows.md` explain the auto-detection / explicit-override responsibility split.
+- `environment.yaml` now accepts `required_checks.shell_path` to explicitly choose the executable for a concrete `required_checks.shell` kind. This supports non-standard Bash, custom PowerShell, WSL-based setups, and pinned Unix shells; invalid `shell_path`/`auto` combinations are rejected, and verification evidence records the resolved shell executable.
 
 ## v0.6.0 - 2026-05-24
 

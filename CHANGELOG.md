@@ -6,6 +6,8 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.6.0 - 2026-05-24
+
 ### Added
 
 - Persistent daemon startup defaults in `daemon.yaml`. `galley daemon run` and `galley daemon start` now create `daemon.yaml` under the selected daemon root on first use with documented defaults for `supervisor`, `max_concurrent_tasks`, `max_concurrent_per_repo`, `poll_interval`, `claim_ttl`, `heartbeat_interval`, `shutdown_timeout`, and `idle_timeout`. Operators can edit the file to change daemon-wide defaults without re-specifying CLI flags. `galley daemon status` and `galley daemon stop` never create the file.

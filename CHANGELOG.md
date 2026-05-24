@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Fixed
+
+- Acceptance skeleton preflight no longer fails when the skeleton creator declares the same skeleton file path for multiple acceptance criteria. A single test file commonly covers more than one AC; the daemon now accepts duplicate output paths while continuing to enforce safe path rules, allowed/forbidden path scoping, declared-file existence, undeclared creator changes, and required AC coverage. Each output entry's `ac_id`, `purpose`, `satisfies`, and `integration_point` are preserved in `preflight_result.json` and in the task's acceptance skeleton outputs; baseline skeleton hashes are deduplicated per unique path.
+
 ## v0.6.0 - 2026-05-24
 
 ### Added

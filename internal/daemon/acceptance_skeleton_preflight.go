@@ -152,8 +152,17 @@ func AcceptanceSkeletonPreflight(ctx context.Context, opts AcceptanceSkeletonPre
 		return preflightFailure(opts.RunDir, perr.phase, perr.message)
 	}
 
+	// Multiple outputs may share the same skeleton path when a single test file
+	// covers several acceptance criteria. Dedupe so the baseline records each
+	// path once while preserving each AC's output entry above.
 	paths := make([]string, 0, len(outputs))
+	seenBaselinePaths := map[string]bool{}
 	for _, o := range outputs {
+		clean := filepath.Clean(o.Path)
+		if seenBaselinePaths[clean] {
+			continue
+		}
+		seenBaselinePaths[clean] = true
 		paths = append(paths, o.Path)
 	}
 	hashes, err := HashSkeletonFiles(opts.WorkDir, paths)

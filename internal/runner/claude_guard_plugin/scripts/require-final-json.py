@@ -61,6 +61,28 @@ CREATOR_TEMPLATE = """{
   "no_skeletons": []
 }"""
 
+SETUP_EXECUTOR_TEMPLATE = """{
+  "status": "ready",
+  "commands": [
+    {
+      "run": "setup command that was run",
+      "why": "Why this command is part of setup",
+      "source": "environment_commands",
+      "exit_code": 0,
+      "stdout_excerpt": "Short relevant output excerpt",
+      "stderr_excerpt": ""
+    }
+  ],
+  "successful_commands": [
+    {
+      "run": "setup command that should be persisted",
+      "why": "Why this command makes the worktree ready"
+    }
+  ],
+  "inspected_files": ["package.json"],
+  "readiness_evidence": "The setup command and a representative required check passed."
+}"""
+
 
 def block(reason):
     print(json.dumps({
@@ -290,6 +312,40 @@ def validate_creator_manifest(manifest):
                 raise ValueError(f"no_skeletons[{index}].{field} must be a non-empty string")
 
 
+def validate_setup_executor_result(result):
+    require_object(result, "setup_result")
+    if result.get("status") not in {"ready", "failed"}:
+        raise ValueError("status must be ready or failed")
+    if "commands" not in result:
+        raise ValueError("commands is required")
+    require_array(result["commands"], "commands")
+    if len(result["commands"]) > 50:
+        raise ValueError("commands must contain at most 50 entries")
+    for index, command in enumerate(result["commands"]):
+        require_object(command, f"commands[{index}]")
+        for field in ["run", "source", "exit_code"]:
+            if field not in command:
+                raise ValueError(f"commands[{index}].{field} is required")
+        if not isinstance(command["run"], str) or not command["run"].strip():
+            raise ValueError(f"commands[{index}].run must be a non-empty string")
+        if len(command["run"]) > 4096:
+            raise ValueError(f"commands[{index}].run is too long")
+        if command.get("source") not in {"environment_setup", "environment_commands", "discovered", "readiness_check"}:
+            raise ValueError(f"commands[{index}].source is invalid")
+        if not isinstance(command["exit_code"], int):
+            raise ValueError(f"commands[{index}].exit_code must be an integer")
+    if "successful_commands" in result:
+        require_array(result["successful_commands"], "successful_commands")
+        if len(result["successful_commands"]) > 50:
+            raise ValueError("successful_commands must contain at most 50 entries")
+        for index, command in enumerate(result["successful_commands"]):
+            require_object(command, f"successful_commands[{index}]")
+            if not isinstance(command.get("run"), str) or not command["run"].strip():
+                raise ValueError(f"successful_commands[{index}].run must be a non-empty string")
+            if len(command["run"]) > 4096:
+                raise ValueError(f"successful_commands[{index}].run is too long")
+
+
 def main():
     try:
         hook_input = json.load(sys.stdin)
@@ -316,6 +372,8 @@ def main():
             validate_supervisor_verdict(result)
         elif mode == "acceptance_skeleton_creator":
             validate_creator_manifest(result)
+        elif mode == "setup_executor":
+            validate_setup_executor_result(result)
         else:
             validate_result(result)
     except (json.JSONDecodeError, ValueError, TypeError) as err:
@@ -332,6 +390,13 @@ def main():
                 f"Validation error: {err}\n\n"
                 "Respond again with only the JSON object. Use this shape and fill it with the actual generated skeleton files:\n\n"
                 f"{CREATOR_TEMPLATE}"
+            )
+        elif mode == "setup_executor":
+            block(
+                "The final assistant response must be exactly one JSON object matching the Galley setup executor result contract.\n\n"
+                f"Validation error: {err}\n\n"
+                "Respond again with only the JSON object. Use this shape and fill it with the actual setup evidence:\n\n"
+                f"{SETUP_EXECUTOR_TEMPLATE}"
             )
         else:
             block(

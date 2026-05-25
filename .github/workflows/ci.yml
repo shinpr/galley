@@ -64,7 +64,7 @@ jobs:
         shell: powershell
         run: |
           $binDir = Join-Path $env:RUNNER_TEMP "galley-ps-bin"
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -BinDir $binDir
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Local -BinDir $binDir
           & (Join-Path $binDir "galley.exe") --help | Out-Null
 
       - name: Validate examples

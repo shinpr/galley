@@ -6,6 +6,15 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Added
+
+- Setup executor preflight phase and `environment.yaml` `setup.commands[]`. Galley now prepares fresh task worktrees before acceptance skeleton creation and implementation by running authored setup commands or dispatching a setup executor to learn a reusable setup plan, which is persisted back to `environment.yaml` on success.
+- Setup run evidence and failure routing. Setup now writes `setup_result.json` and, when a learned plan is persisted, `environment_update.json`; setup failures are classified as `phase: setup`, `kind: setup_failed` with repair guidance for `environment.setup`.
+
+### Changed
+
+- Packaged Claude and Codex Galley plugins are now versioned as `0.1.13`: setup executor prompts now include explicit result JSON contracts and troubleshooting guidance routes `setup_failed` diagnosis through setup run evidence.
+
 ## v0.6.2 - 2026-05-25
 
 ### Changed

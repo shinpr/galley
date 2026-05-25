@@ -204,37 +204,107 @@ func withDefaultEmbeddedCodexOptions(opts CodexOptions) CodexOptions {
 // CodexExecutorResultSchema returns the executor result schema shape accepted
 // by `codex exec --output-schema`. Codex currently rejects JSON Schema
 // conditionals such as allOf/if/then/else in response_format schemas and
-// requires every top-level property to be listed in required. The runner
-// converts hard_stop into a required nullable field before invoking Codex.
-// Galley still validates the parsed result with ClaudeResult.Validate(), which
-// preserves the hard_stop semantic requirement after the model responds.
+// requires every object property to be listed in required. The runner keeps
+// optional semantics by making originally optional properties nullable before
+// invoking Codex. Galley still validates the parsed result with
+// ClaudeResult.Validate(), which preserves semantic requirements after the
+// model responds.
 func CodexExecutorResultSchema() string {
-	var doc map[string]any
-	if err := json.Unmarshal([]byte(schemas.ClaudeResult), &doc); err != nil {
-		return schemas.ClaudeResult
+	return CodexCompatibleOutputSchema(schemas.ClaudeResult)
+}
+
+// CodexCompatibleOutputSchema adapts Galley's persisted JSON schemas for the
+// stricter response_format subset used by `codex exec --output-schema`.
+func CodexCompatibleOutputSchema(schema string) string {
+	var doc any
+	if err := json.Unmarshal([]byte(schema), &doc); err != nil {
+		return schema
 	}
-	delete(doc, "allOf")
-	props, _ := doc["properties"].(map[string]any)
-	if hardStop, _ := props["hard_stop"].(map[string]any); hardStop != nil {
-		hardStop["type"] = []any{"object", "null"}
-	}
-	if props != nil {
-		names := make([]string, 0, len(props))
-		for name := range props {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		required := make([]any, 0, len(names))
-		for _, name := range names {
-			required = append(required, name)
-		}
-		doc["required"] = required
-	}
+	normalizeCodexOutputSchema(doc)
 	out, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
-		return schemas.ClaudeResult
+		return schema
 	}
 	return string(out) + "\n"
+}
+
+func normalizeCodexOutputSchema(node any) {
+	switch v := node.(type) {
+	case map[string]any:
+		delete(v, "allOf")
+		props, _ := v["properties"].(map[string]any)
+		originalRequired := requiredNameSet(v["required"])
+		if props != nil {
+			names := make([]string, 0, len(props))
+			for name := range props {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			required := make([]any, 0, len(names))
+			for _, name := range names {
+				required = append(required, name)
+				prop := props[name]
+				if !originalRequired[name] {
+					allowNullSchema(prop)
+				}
+				normalizeCodexOutputSchema(prop)
+			}
+			v["required"] = required
+		}
+		if items, ok := v["items"]; ok {
+			normalizeCodexOutputSchema(items)
+		}
+	case []any:
+		for _, item := range v {
+			normalizeCodexOutputSchema(item)
+		}
+	}
+}
+
+func requiredNameSet(raw any) map[string]bool {
+	out := map[string]bool{}
+	items, ok := raw.([]any)
+	if !ok {
+		return out
+	}
+	for _, item := range items {
+		if name, ok := item.(string); ok {
+			out[name] = true
+		}
+	}
+	return out
+}
+
+func allowNullSchema(node any) {
+	m, ok := node.(map[string]any)
+	if !ok {
+		return
+	}
+	if enum, ok := m["enum"].([]any); ok && !containsNull(enum) {
+		m["enum"] = append(enum, nil)
+	}
+	switch t := m["type"].(type) {
+	case string:
+		if t != "null" {
+			m["type"] = []any{t, "null"}
+		}
+	case []any:
+		if !containsNull(t) {
+			m["type"] = append(t, "null")
+		}
+	}
+}
+
+func containsNull(items []any) bool {
+	for _, item := range items {
+		if item == nil {
+			return true
+		}
+		if s, ok := item.(string); ok && s == "null" {
+			return true
+		}
+	}
+	return false
 }
 
 func combinePromptForCodex(systemPrompt, workOrder string) string {

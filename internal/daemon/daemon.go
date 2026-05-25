@@ -470,7 +470,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	// start-point ref to the brand-new task branch instead of inheriting
 	// the source repository's current HEAD. The resolved bundle is threaded
 	// into runSupervisorLoop so the supervisor loop never re-loads it.
-	profiles, err := loadAndPersistTaskProfiles(opts, &loaded, runDir)
+	profiles, resolvedProfiles, err := loadAndPersistTaskProfiles(opts, &loaded, runDir)
 	if err != nil {
 		appendFailureAttempt(&loaded, "run_evidence", "run_evidence_failed", err, runDir)
 		return taskstate.FailMove(opts.Root, runningPath, &loaded, err)
@@ -479,6 +479,37 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	prepared, err := prepareClaimedWorkspace(ctx, opts, profiles, runningPath, runDir, &loaded)
 	if err != nil {
 		return taskstate.FailMove(opts.Root, runningPath, &loaded, err)
+	}
+	// Setup executor preflight runs after the worktree and input files are
+	// prepared, before acceptance skeleton preflight, and before any executor
+	// attempt (AC2, AC10). When environment.setup is present the daemon runs
+	// that authored plan directly; when absent the setup executor (Claude or
+	// Codex per task.executor.cli) attempts to make the worktree ready and may
+	// return a learned plan that Galley persists back to environment.yaml
+	// (AC3, AC4, AC6, AC7). Setup readiness excludes acceptance skeleton
+	// obligations (AC10).
+	setupRes, setupUpdate, setupErr := SetupExecutorPreflight(ctx, SetupExecutorPreflightOptions{
+		Task:                   loaded,
+		WorkDir:                prepared.CWD,
+		RunDir:                 runDir,
+		Profiles:               profiles,
+		ClaudeBin:              opts.ClaudeBin,
+		CodexBin:               opts.CodexBin,
+		EnvironmentProfilePath: resolvedProfiles.EnvironmentProfileFile,
+	})
+	if setupErr != nil {
+		appendFailureAttempt(&loaded, SetupPhase, SetupFailedKind, setupErr, runDir)
+		return taskstate.FailMove(opts.Root, runningPath, &loaded, setupErr)
+	}
+	// Apply setup readiness evidence (and any persisted profile change) to the
+	// running task before the implementation work order is built so the
+	// supervisor and executor share the same readiness facts (AC8).
+	applySetupResultToTask(&loaded, setupRes, setupUpdate)
+	if setupRes != nil {
+		if err := task.Save(runningPath, loaded); err != nil {
+			appendFailureAttempt(&loaded, SetupPhase, SetupFailedKind, err, runDir)
+			return taskstate.FailMove(opts.Root, runningPath, &loaded, err)
+		}
 	}
 	// Optional acceptance skeleton preflight runs after inputfiles.Prepare and
 	// before the first executor attempt. The stage is a no-op when the task
@@ -518,18 +549,79 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 // run directory. The same shape that loop.go's loadSupervisorProfiles wrote
 // previously is preserved so existing readers of profiles.json continue to
 // work.
-func loadAndPersistTaskProfiles(opts Options, loaded *task.Task, runDir string) (profile.Bundle, error) {
+func loadAndPersistTaskProfiles(opts Options, loaded *task.Task, runDir string) (profile.Bundle, resolvedProfileFiles, error) {
 	resolved, profiles, err := loadTaskProfiles(opts, loaded.Scope.CWD)
 	if err != nil {
-		return profile.Bundle{}, err
+		return profile.Bundle{}, resolvedProfileFiles{}, err
 	}
 	if err := writeJSON(filepath.Join(runDir, "profiles.json"), struct {
 		Resolved resolvedProfileFiles `json:"resolved"`
 		Bundle   profile.Bundle       `json:"bundle"`
 	}{Resolved: resolved, Bundle: profiles}); err != nil {
-		return profile.Bundle{}, err
+		return profile.Bundle{}, resolvedProfileFiles{}, err
 	}
-	return profiles, nil
+	return profiles, resolved, nil
+}
+
+// applySetupResultToTask records setup readiness evidence on the running task
+// so the implementation work order and supervisor evidence carry the same
+// facts. The setup outcome is also appended to task.verification.commands so
+// the task verification history and rendered PR/task output always include the
+// setup readiness fact (AC8) — including the unchanged-setup case, where no
+// environment.yaml change is recorded. When a learned plan was persisted to
+// environment.yaml the change is additionally surfaced as a Risk-style note so
+// PR/task output reflects the profile update.
+func applySetupResultToTask(loaded *task.Task, res *SetupResult, update *SetupEnvironmentUpdate) {
+	if loaded == nil || res == nil {
+		return
+	}
+	note := fmt.Sprintf("setup status=%s commands=%d", res.Status, len(res.Commands))
+	if res.ReadinessEvidence != "" {
+		note = note + " — " + res.ReadinessEvidence
+	}
+	// AC8: persist setup evidence in task.verification.commands so it shows up
+	// in the task verification history and the rendered PR/task output. The
+	// command label is a stable pseudo-command operators can recognize even
+	// without inspecting the run directory, and the excerpt names the setup
+	// source so readers can tell authored vs learned without opening
+	// setup_result.json.
+	setupCmd := "<galley:setup>"
+	if res.Provider != "" {
+		setupCmd = fmt.Sprintf("<galley:setup:%s>", res.Provider)
+	}
+	excerpt := note + fmt.Sprintf(" source=%s", res.Source)
+	if update != nil && update.Changed {
+		excerpt = excerpt + fmt.Sprintf(" environment.yaml=%s (%s)", update.ProfilePath, update.Reason)
+	} else if res.Status == SetupStatusReady {
+		excerpt = excerpt + " environment.yaml=unchanged"
+	}
+	loaded.Verification.Commands = append(loaded.Verification.Commands, task.VerificationCommand{
+		Cmd:           setupCmd,
+		Status:        setupVerificationStatus(res.Status),
+		OutputExcerpt: excerpt,
+	})
+	if update != nil && update.Changed {
+		// Surface profile changes as a Risk-style entry so task/PR output
+		// records that environment.yaml setup was rewritten.
+		loaded.Risks = append(loaded.Risks, task.Risk{
+			ID:     fmt.Sprintf("setup-profile-updated-%d", len(loaded.Risks)+1),
+			Type:   "technical_debt",
+			Detail: fmt.Sprintf("Setup executor persisted a learned plan to %s (%s). %s", update.ProfilePath, update.Reason, note),
+		})
+	}
+}
+
+// setupVerificationStatus maps SetupResult.Status to the canonical
+// VerificationCommand status vocabulary used by task verification history.
+func setupVerificationStatus(s string) string {
+	switch s {
+	case SetupStatusReady:
+		return "passed"
+	case SetupStatusFailed:
+		return "failed"
+	default:
+		return "skipped"
+	}
 }
 
 func loadClaimedTask(runningPath string) (task.Task, error) {

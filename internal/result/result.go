@@ -272,14 +272,28 @@ type resolvedShell struct {
 }
 
 func resolveShellForOS(goos, configured, configuredPath string) (resolvedShell, error) {
+	// required_checks.shell_path is the more specific executable selection.
+	// When set, infer the shell invocation style from the executable basename
+	// so the configured `required_checks.shell` cannot drive an incompatible
+	// argv shape against the chosen executable. When the basename is not a
+	// recognized shell, fall back to a concrete configured shell kind as
+	// fallback metadata. Profile validation rejects the no-fallback case at
+	// load time; the resolver guards it again so an unexpectedly-loaded
+	// profile surfaces a clear error.
+	if configuredPath != "" {
+		kind := profile.InferRequiredCheckShellKind(configuredPath)
+		if kind == "" {
+			switch configured {
+			case "sh", "bash", "cmd", "powershell", "pwsh":
+				kind = configured
+			default:
+				return resolvedShell{}, fmt.Errorf("required_checks.shell_path basename is not a recognized shell executable; set an explicit required_checks.shell kind (sh, bash, cmd, powershell, or pwsh) as fallback metadata")
+			}
+		}
+		return resolvedShell{Kind: kind, Bin: configuredPath}, nil
+	}
 	switch configured {
 	case "", "auto":
-		if configuredPath != "" {
-			// Profile validation should already reject this combination, but
-			// guard at the resolver too so an unexpectedly-loaded profile
-			// surfaces a clear error rather than a silently ignored override.
-			return resolvedShell{}, fmt.Errorf("required_checks.shell_path requires an explicit required_checks.shell kind (sh, bash, cmd, powershell, or pwsh)")
-		}
 		if goos == "windows" {
 			if bash, ok := discoverWindowsBash(); ok {
 				return resolvedShell{Kind: "bash", Bin: bash}, nil
@@ -289,8 +303,28 @@ func resolveShellForOS(goos, configured, configuredPath string) (resolvedShell, 
 		return resolvedShell{Kind: "sh", Bin: "/bin/sh"}, nil
 	case "sh", "bash", "cmd", "powershell", "pwsh":
 		shell := shellForKind(configured)
-		if configuredPath != "" {
-			shell.Bin = configuredPath
+		// AC4: When Windows required checks ask for Bash through
+		// `required_checks.shell: bash` and no `shell_path` is set, prefer
+		// standard Git for Windows Bash discovery over PATH-discovered WSL
+		// launchers, WindowsApps shims, or other non-standard Bash entries.
+		// When no standard Git for Windows Bash is discoverable, the resolver
+		// must NOT fall back to a bare `bash` executable: bare `bash` lets
+		// PATH lookup at exec time silently pick up the very entries that
+		// discoverWindowsBash just rejected (WSL launcher, WindowsApps shim,
+		// MSYS2, Cygwin, Scoop, Chocolatey-managed Bashes), defeating the
+		// rejection. Return a clear resolver error that names
+		// `required_checks.shell_path` as the explicit override path instead,
+		// so the operator opts in to a specific non-standard Bash rather than
+		// letting Galley silently launch one.
+		if goos == "windows" && configured == "bash" {
+			bash, ok := discoverWindowsBash()
+			if !ok {
+				return resolvedShell{}, fmt.Errorf(
+					"required_checks.shell is \"bash\" on Windows but no standard Git for Windows Bash install was discoverable; " +
+						"PATH-discovered bash entries (WSL launcher at C:\\Windows\\System32\\bash.exe, WindowsApps shims, MSYS2, Cygwin, Scoop, or Chocolatey-managed Bashes) are not auto-selected to avoid silently switching the required-check shell; " +
+						"set required_checks.shell_path to the exact bash executable path you want Galley to launch")
+			}
+			shell.Bin = bash
 		}
 		return shell, nil
 	default:

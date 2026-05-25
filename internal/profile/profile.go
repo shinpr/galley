@@ -209,9 +209,16 @@ func ValidateEnvironment(env Environment) ValidationResult {
 		if strings.TrimSpace(env.RequiredChecks.ShellPath) != env.RequiredChecks.ShellPath {
 			result.Errors = append(result.Errors, "required_checks.shell_path must not have leading or trailing whitespace")
 		}
-		switch env.RequiredChecks.Shell {
-		case "", "auto":
-			result.Errors = append(result.Errors, "required_checks.shell_path requires an explicit required_checks.shell kind (sh, bash, cmd, powershell, or pwsh); auto-discovery is incompatible with an explicit executable override")
+		// required_checks.shell_path is the more specific executable selection.
+		// When the executable basename is one of the recognized shells, Galley
+		// can infer the invocation style and shell_path may stand alone. When
+		// the basename is not recognized, an explicit non-auto
+		// required_checks.shell is required as fallback kind metadata.
+		if InferRequiredCheckShellKind(env.RequiredChecks.ShellPath) == "" {
+			switch env.RequiredChecks.Shell {
+			case "", "auto":
+				result.Errors = append(result.Errors, "required_checks.shell_path basename is not a recognized shell executable; set an explicit required_checks.shell kind (sh, bash, cmd, powershell, or pwsh) as fallback metadata")
+			}
 		}
 	}
 	if env.PR.Comments.Reply && !env.PR.Comments.Enabled {
@@ -248,6 +255,27 @@ func validRequiredCheckShell(value string) bool {
 	default:
 		return false
 	}
+}
+
+// InferRequiredCheckShellKind returns the required-check shell kind implied by
+// a shell_path executable name, or "" when the basename is not one of the
+// recognized shells. The match is case-insensitive, ignores a trailing `.exe`
+// suffix, and tolerates either forward-slash or backslash separators so
+// Windows paths can be inferred on any host. The caller is responsible for
+// pairing the inferred kind with the original path; only the basename is
+// considered.
+func InferRequiredCheckShellKind(shellPath string) string {
+	name := shellPath
+	if i := strings.LastIndexAny(name, `/\`); i >= 0 {
+		name = name[i+1:]
+	}
+	name = strings.ToLower(name)
+	name = strings.TrimSuffix(name, ".exe")
+	switch name {
+	case "bash", "sh", "cmd", "powershell", "pwsh":
+		return name
+	}
+	return ""
 }
 
 func loadYAML(path string, out any) error {

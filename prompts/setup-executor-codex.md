@@ -68,7 +68,7 @@ Before returning the final JSON, verify:
 
 - Every `commands[]` entry has `run`, `source`, and `exit_code`.
 - `status: "ready"` has non-empty `successful_commands`, `readiness_evidence`, and top-level `source` set to `environment_setup`, `environment_commands`, or `discovered`.
-- Every `successful_commands[].run` also appears in `commands[]` with `exit_code: 0`.
+- Every `successful_commands[].run` also appears in `commands[]` as a setup command with `exit_code: 0`; readiness-only checks are not persistable setup commands.
 - Quality-check commands you run to prove readiness appear in `commands[]`; `successful_commands` stays limited to the setup plan that should be saved.
 - `status: "failed"` has `error` and `repair_guidance`.
 

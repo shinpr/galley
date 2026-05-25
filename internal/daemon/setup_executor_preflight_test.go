@@ -886,6 +886,13 @@ func TestEnforceLearnedSetupPlanContractRequiresReadyEvidence(t *testing.T) {
 			want: "exited 0",
 		},
 		{
+			name: "successful command was readiness check only",
+			edit: func(res *SetupResult) {
+				res.Commands[0].Source = SetupSourceReadinessCheck
+			},
+			want: "setup commands",
+		},
+		{
 			name: "readiness check source is not canonical plan source",
 			edit: func(res *SetupResult) { res.Source = SetupSourceReadinessCheck },
 			want: "invalid source",

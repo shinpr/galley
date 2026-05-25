@@ -332,12 +332,12 @@ def validate_setup_executor_result(result):
             raise ValueError(f"commands[{index}].run must be a non-empty string")
         if len(command["run"]) > 4096:
             raise ValueError(f"commands[{index}].run is too long")
-        if command["exit_code"] == 0:
-            successful_command_runs.add(command["run"])
         if command.get("source") not in {"environment_setup", "environment_commands", "discovered", "readiness_check"}:
             raise ValueError(f"commands[{index}].source is invalid")
         if not isinstance(command["exit_code"], int):
             raise ValueError(f"commands[{index}].exit_code must be an integer")
+        if command["exit_code"] == 0 and command.get("source") != "readiness_check":
+            successful_command_runs.add(command["run"].strip())
     if "successful_commands" in result:
         require_array(result["successful_commands"], "successful_commands")
         if len(result["successful_commands"]) > 50:
@@ -348,8 +348,8 @@ def validate_setup_executor_result(result):
                 raise ValueError(f"successful_commands[{index}].run must be a non-empty string")
             if len(command["run"]) > 4096:
                 raise ValueError(f"successful_commands[{index}].run is too long")
-            if command["run"] not in successful_command_runs:
-                raise ValueError(f"successful_commands[{index}].run must match a commands[].run that exited 0")
+            if command["run"].strip() not in successful_command_runs:
+                raise ValueError(f"successful_commands[{index}].run must match a setup commands[].run that exited 0")
     if "source" in result and result.get("source") not in {"environment_setup", "environment_commands", "discovered"}:
         raise ValueError("source is invalid")
     if status == "ready":

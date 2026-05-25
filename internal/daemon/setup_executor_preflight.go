@@ -247,6 +247,9 @@ func runSetupExecutor(ctx context.Context, opts SetupExecutorPreflightOptions) (
 		if parsed.Error == "" {
 			parsed.Error = fmt.Sprintf("setup executor process exited non-zero: %v", runErr)
 		}
+		if parsed.RepairGuidance == "" {
+			parsed.RepairGuidance = "Inspect setup_executor.stderr.log and setup_executor.stdout.jsonl, fix the setup executor runtime failure, and requeue the task."
+		}
 	}
 	return parsed, nil
 }
@@ -324,7 +327,7 @@ func enforceLearnedSetupPlanContract(res *SetupResult) error {
 func validateSuccessfulSetupCommands(res *SetupResult) error {
 	successfulRuns := make(map[string]bool, len(res.Commands))
 	for _, cmd := range res.Commands {
-		if cmd.ExitCode == 0 {
+		if cmd.ExitCode == 0 && cmd.Source != SetupSourceReadinessCheck {
 			successfulRuns[strings.TrimSpace(cmd.Run)] = true
 		}
 	}
@@ -334,7 +337,7 @@ func validateSuccessfulSetupCommands(res *SetupResult) error {
 			return fmt.Errorf("setup executor returned status=ready with empty successful_commands[%d].run", i)
 		}
 		if !successfulRuns[run] {
-			return fmt.Errorf("setup executor returned status=ready with successful_commands[%d].run %q but no matching commands[] entry exited 0", i, run)
+			return fmt.Errorf("setup executor returned status=ready with successful_commands[%d].run %q but no matching setup commands[] entry exited 0", i, run)
 		}
 	}
 	return nil

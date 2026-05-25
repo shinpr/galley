@@ -6,6 +6,8 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.7.0 - 2026-05-25
+
 ### Added
 
 - Setup executor preflight phase and `environment.yaml` `setup.commands[]`. Galley now prepares fresh task worktrees before acceptance skeleton creation and implementation by running authored setup commands or dispatching a setup executor to learn a reusable setup plan, which is persisted back to `environment.yaml` on success.
@@ -14,6 +16,11 @@ This project follows semantic versioning.
 ### Changed
 
 - Packaged Claude and Codex Galley plugins are now versioned as `0.1.13`: setup executor prompts now include explicit result JSON contracts and troubleshooting guidance routes `setup_failed` diagnosis through setup run evidence.
+- The daemon now stages the executor-produced reviewable path set before capturing supervisor diff evidence, so newly created untracked files appear in `diff.patch` and supervisor review while `commit:false` input files and unrelated context-only worktree dirtiness stay out of the submitted diff. Review staging writes `git_add_review.stdout.log`, `git_add_review.stderr.log`, and `git_add_review_result.json` attempt evidence when it runs, and records a skipped result when there is no reviewable path set.
+
+### Fixed
+
+- Review-time staging failures are now recorded as attempt errors with `phase=review_staging` / `kind=review_staging_failed`; Galley does not invoke the supervisor with an empty or stale diff and moves the task to `tasks/failed` with staging-specific evidence for operator diagnosis.
 
 ## v0.6.2 - 2026-05-25
 

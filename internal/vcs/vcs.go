@@ -81,6 +81,7 @@ func addPathsForOS(ctx context.Context, bins Binaries, workDir, runDir string, p
 	if len(stagePaths) == 0 {
 		return fmt.Errorf("git add paths is empty")
 	}
+	pathspecs := literalPathspecs(stagePaths)
 	cmd := runner.Command{WorkDir: workDir}
 	if goos == "windows" {
 		// git add --pathspec-from-file=- --pathspec-file-nul reads pathspecs
@@ -88,9 +89,9 @@ func addPathsForOS(ctx context.Context, bins Binaries, workDir, runDir string, p
 		// NUL separator avoids any ambiguity with paths that contain LF or
 		// other whitespace characters.
 		cmd.Argv = []string{bins.git(), "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"}
-		cmd.Stdin = strings.Join(stagePaths, "\x00") + "\x00"
+		cmd.Stdin = strings.Join(pathspecs, "\x00") + "\x00"
 	} else {
-		cmd.Argv = append([]string{bins.git(), "add", "-A", "--"}, stagePaths...)
+		cmd.Argv = append([]string{bins.git(), "add", "-A", "--"}, pathspecs...)
 	}
 	result, err := runner.RunCommand(ctx, cmd, runner.RunOptions{
 		StdoutPath: filepath.Join(runDir, "git_add.stdout.log"),
@@ -104,6 +105,151 @@ func addPathsForOS(ctx context.Context, bins Binaries, workDir, runDir string, p
 		return writeErr
 	}
 	return nil
+}
+
+// StatusPorcelainZ returns the NUL-separated `git status --porcelain=v1 -z`
+// output for the worktree. Galley calls this in the review-staging step to
+// discover the explicit set of executor-produced changes before computing
+// the reviewable path set (the daemon-side representation of the submitted
+// artifact). The function does not write evidence files because the caller
+// captures the resolved reviewable path set itself in the staging command's
+// argv evidence (see StagePathsForReview).
+//
+// --untracked-files=all is required: without it, git status collapses an
+// untracked directory to a single trailing-slash entry (e.g. "docs/"), and a
+// commit:false destination such as "docs/plan.md" would not match the
+// directory-shaped entry. Galley would then stage the entire untracked
+// directory and leak the context-only input into the supervisor diff. The
+// `all` mode emits one entry per untracked file, which is the resolution
+// the reviewable-path-set contract requires.
+func StatusPorcelainZ(ctx context.Context, bins Binaries, workDir string) (string, error) {
+	result, err := runner.RunCommand(ctx, runner.Command{
+		WorkDir: workDir,
+		Argv:    []string{bins.git(), "status", "--porcelain=v1", "-z", "--untracked-files=all"},
+	}, runner.RunOptions{})
+	if err != nil {
+		return "", fmt.Errorf("git status --porcelain -z (review staging discovery) failed: %w", err)
+	}
+	return result.Stdout, nil
+}
+
+// StagePathsForReview stages the supplied worktree-relative paths so the
+// supervisor diff snapshot captures the executor-produced change set Galley
+// computed from `git status --porcelain` after the executor attempt. The
+// caller is expected to have already:
+//
+//   - discovered the change set with StatusPorcelainZ;
+//   - normalized and deduplicated each entry to slash form;
+//   - excluded task.files entries declared with commit:false so context-only
+//     inputs Galley materializes for the executor do not enter the
+//     submitted artifact.
+//
+// `paths` is therefore an explicit reviewable path set, not a wildcard or an
+// `-A` over the whole worktree. The function runs
+// `git add -A -- <path> [<path>...]` so paths that the executor added,
+// modified, or deleted are all reflected in the index. On Windows the
+// pathspecs are delivered via `--pathspec-from-file=- --pathspec-file-nul`
+// so a long list of changed files cannot push the CreateProcess command
+// line past the platform's argv limit; macOS and Linux continue to pass the
+// pathspecs on argv.
+//
+// When `paths` is empty (the no-executor-change context-only case) the
+// function records a "skipped" evidence payload at
+// `<runDir>/git_add_review_result.json` and returns nil. Falling through to
+// `git add -A` with no positional path would stage every dirty path in the
+// worktree, defeating the explicit reviewable-set contract; falling through
+// to `git add -A --` with no positional path would error on some git
+// versions. Recording the skipped evidence preserves the AC6 invariant that
+// the staging step is always observable in run evidence.
+//
+// On a non-skipped run the function writes:
+//
+//   - git_add_review.stdout.log
+//   - git_add_review.stderr.log
+//   - git_add_review_result.json (runner.RunResult)
+//
+// A staging failure returns the original git error joined with any evidence
+// write error so the caller can record a clear attempt failure instead of
+// handing an empty or stale diff to the supervisor.
+func StagePathsForReview(ctx context.Context, bins Binaries, workDir, runDir string, paths []string) error {
+	return stagePathsForReviewForOS(ctx, bins, workDir, runDir, paths, runtime.GOOS)
+}
+
+func stagePathsForReviewForOS(ctx context.Context, bins Binaries, workDir, runDir string, paths []string, goos string) error {
+	stagePaths := dedupeReviewPaths(paths)
+	if len(stagePaths) == 0 {
+		// The executor produced no reviewable change. Persist a skipped
+		// evidence payload so reviewers can still confirm review staging
+		// ran for this attempt (AC6) and then return without calling
+		// git add at all. Without this short-circuit, the alternative
+		// `git add -A` over the whole worktree would re-stage every
+		// dirty path (including context-only commit:false inputs),
+		// defeating the explicit reviewable-set contract.
+		return writeReviewStagingSkipped(runDir, "no executor-produced paths to stage")
+	}
+	pathspecs := literalPathspecs(stagePaths)
+	cmd := runner.Command{WorkDir: workDir}
+	if goos == "windows" {
+		// On Windows the pathspec list is delivered through stdin so a
+		// long list of changed files cannot push the CreateProcess command
+		// line past the platform's argv limit. The NUL separator avoids
+		// any ambiguity with paths that contain LF or other whitespace.
+		cmd.Argv = []string{bins.git(), "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"}
+		cmd.Stdin = strings.Join(pathspecs, "\x00") + "\x00"
+	} else {
+		cmd.Argv = append([]string{bins.git(), "add", "-A", "--"}, pathspecs...)
+	}
+	result, err := runner.RunCommand(ctx, cmd, runner.RunOptions{
+		StdoutPath: filepath.Join(runDir, "git_add_review.stdout.log"),
+		StderrPath: filepath.Join(runDir, "git_add_review.stderr.log"),
+	})
+	writeErr := writeJSON(filepath.Join(runDir, "git_add_review_result.json"), result)
+	if err != nil {
+		return errors.Join(fmt.Errorf("git add -A (review staging) failed: %w", err), writeErr)
+	}
+	if writeErr != nil {
+		return writeErr
+	}
+	return nil
+}
+
+// writeReviewStagingSkipped records a sentinel evidence payload when the
+// review-staging step is intentionally skipped because there were no
+// executor-produced paths to stage. The payload mirrors the field shape of
+// the runner.RunResult-derived evidence used on the non-skipped path so
+// readers can detect "skipped" by checking the dedicated key without
+// pattern-matching command output.
+func writeReviewStagingSkipped(runDir, reason string) error {
+	return writeJSON(filepath.Join(runDir, "git_add_review_result.json"), map[string]any{
+		"skipped": true,
+		"reason":  reason,
+	})
+}
+
+// dedupeReviewPaths normalizes and deduplicates worktree-relative review
+// paths. It accepts already-normalized input from the daemon (see
+// reviewablePathsFromStatus) and is defensive about callers that pass in
+// pre-normalized but duplicated entries.
+func dedupeReviewPaths(paths []string) []string {
+	out := make([]string, 0, len(paths))
+	seen := make(map[string]bool, len(paths))
+	for _, p := range paths {
+		clean := filepath.ToSlash(filepath.Clean(p))
+		if clean == "" || clean == "." || seen[clean] {
+			continue
+		}
+		seen[clean] = true
+		out = append(out, clean)
+	}
+	return out
+}
+
+func literalPathspecs(paths []string) []string {
+	out := make([]string, 0, len(paths))
+	for _, path := range paths {
+		out = append(out, ":(literal)"+path)
+	}
+	return out
 }
 
 // Commit creates a git commit and writes command evidence.

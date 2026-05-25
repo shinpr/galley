@@ -10,3 +10,6 @@ var ClaudeResult string
 
 //go:embed acceptance-skeleton-manifest.schema.json
 var AcceptanceSkeletonManifest string
+
+//go:embed setup-result.schema.json
+var SetupResult string

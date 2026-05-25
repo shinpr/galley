@@ -6,6 +6,13 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Added
+
+- Setup executor preflight phase. After the worktree and input files are prepared and before the acceptance skeleton preflight and implementation executor, Galley runs a setup phase that either executes the operator-authored `environment.setup.commands` or, when absent, dispatches a setup executor (Claude or Codex per task `executor.cli`) to discover and validate a working setup plan. On success the learned plan is atomically written back to `environment.yaml` so subsequent tasks reuse it without rediscovery.
+- `environment.yaml` now accepts a top-level `setup` block whose `commands[]` list is ordered shell commands with optional `why` annotations. The bundled environment schema requires `commands` to be non-empty and matches `ValidateEnvironment`.
+- New run evidence artifacts: `runs/<run-id>/setup_result.json` records attempted commands, command source (`environment_setup`, `environment_commands`, `readiness_check`, or `discovered`), inspected files, readiness evidence, and repair guidance; `runs/<run-id>/environment_update.json` records the before/after diff and rewrite reason when Galley persists a learned plan.
+- Setup failure classification. A failed setup phase records `phase: setup`, `kind: setup_failed` on the task and surfaces attempted commands, inspected files, stdout/stderr excerpts, and repair guidance in `setup_result.json` so operators can repair `environment.setup` and requeue.
+
 ## v0.6.2 - 2026-05-25
 
 ### Changed

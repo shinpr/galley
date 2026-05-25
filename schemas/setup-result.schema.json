@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Galley Setup Executor Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "commands"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["ready", "failed"],
+      "description": "Whether the worktree is ready for the implementation executor."
+    },
+    "commands": {
+      "type": "array",
+      "description": "Ordered command attempts the setup executor made. Each entry is one command that was actually executed, in order, with the captured outcome. The successful_commands subset is the persistable setup plan when status is ready.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["run", "source", "exit_code"],
+        "properties": {
+          "run": { "type": "string", "minLength": 1 },
+          "why": { "type": "string" },
+          "source": {
+            "type": "string",
+            "enum": ["environment_setup", "environment_commands", "discovered", "readiness_check"],
+            "description": "Where the executor took this command from. `readiness_check` is reserved for the daemon-authored readiness verification it runs after an authored environment.setup plan succeeds; setup executors should not author readiness_check entries."
+          },
+          "exit_code": { "type": "integer" },
+          "stdout_excerpt": { "type": "string" },
+          "stderr_excerpt": { "type": "string" }
+        }
+      }
+    },
+    "successful_commands": {
+      "type": "array",
+      "description": "The ordered subset of commands that made the worktree ready. When status is ready this is the setup plan that should be persisted to environment.yaml when the profile lacked a setup field or the learned plan differs.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["run"],
+        "properties": {
+          "run": { "type": "string", "minLength": 1 },
+          "why": { "type": "string" }
+        }
+      }
+    },
+    "inspected_files": {
+      "type": "array",
+      "description": "Files the setup executor inspected to plan the setup, such as package manifests, lockfiles, and setup docs.",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "readiness_evidence": {
+      "type": "string",
+      "description": "One or two sentences explaining why the executor concluded the worktree is ready, citing the verification it ran."
+    },
+    "repair_guidance": {
+      "type": "string",
+      "description": "When status is failed, concrete next steps the operator can take to repair environment.setup."
+    },
+    "error": {
+      "type": "string",
+      "description": "When status is failed, the terse failure summary."
+    },
+    "provider": {
+      "type": "string",
+      "enum": ["claude", "codex"],
+      "description": "Which executor provider ran the setup attempt. The daemon sets this from task.executor.cli when it dispatches the setup executor. Authored-only runs that never dispatched an executor omit this field."
+    },
+    "source": {
+      "type": "string",
+      "enum": ["environment_setup", "environment_commands", "discovered", "readiness_check"],
+      "description": "Where the canonical plan in this result came from. `environment_setup` means the authored environment.setup plan ran. `discovered` means the setup executor discovered the plan. `environment_commands` and `readiness_check` are reserved overlays kept in sync with the per-command `source` enum so a SetupResult.source can carry the same vocabulary."
+    }
+  }
+}

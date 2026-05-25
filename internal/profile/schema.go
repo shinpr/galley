@@ -112,6 +112,18 @@ func EnvironmentJSONSchema() ([]byte, error) {
 				}),
 				defaultValue(map[string]any{"cleanup": true}),
 			),
+			"setup": object(
+				required("commands"),
+				properties(map[string]any{
+					"commands": arraySchema(object(
+						required("run"),
+						properties(map[string]any{
+							"run": stringSchema("minLength", 1),
+							"why": stringSchema("minLength", 1),
+						}),
+					), "minItems", 1),
+				}),
+			),
 		}),
 	)
 	schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"

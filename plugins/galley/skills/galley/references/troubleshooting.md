@@ -84,6 +84,25 @@ For environment failure:
 1. Record the missing command, secret, service, or permission.
 2. Fix setup or mark as `needs_supervisor_review` if human action is required.
 
+## Setup failures (phase=setup, kind=setup_failed)
+
+A `setup_failed` attempt means Galley could not make the task worktree ready before the implementation executor ran. Inspect the run directory:
+
+- `runs/<run-id>/setup_result.json` — source-of-truth setup evidence. Read these fields first:
+  - `status`: `ready` or `failed`.
+  - `commands[]`: every command Galley attempted, with `source` (`environment_setup`, `environment_commands`, `readiness_check`, or `discovered`), `exit_code`, and stdout/stderr excerpts. The full output remains in the per-command `setup_authored.N.{stdout,stderr}.log`, `setup_readiness_check.{stdout,stderr}.log`, or `setup_executor.{stdout.jsonl,stderr.log}` files.
+  - `source`: which command list produced the final attempt (`environment_setup` for an authored plan, `discovered` for a learned plan).
+  - `inspected_files[]`: repository signals the setup executor read (manifests, lockfiles, setup docs).
+  - `repair_guidance`: actionable guidance for fixing `environment.setup` or rerunning discovery.
+- `runs/<run-id>/environment_update.json` — present only when Galley persisted a learned setup plan back to `environment.yaml`. Audit fields: `profile_path`, `before` (prior setup plan or null), `after` (new plan), `reason`, and `updated_at`. When a previously learned plan later fails, compare `before`/`after` to confirm which commands changed and decide whether to repair `environment.setup` by hand or to delete the `setup` field and let Galley rediscover.
+
+Repair flow:
+
+1. Read `setup_result.json` and identify the failing command (the last attempt with non-zero `exit_code`).
+2. Inspect the matching `setup_authored.N.stderr.log` or `setup_executor.stderr.log`.
+3. Edit `environment.yaml setup.commands` to fix the command, or remove the `setup` field entirely to let Galley discover and persist a new plan on the next run.
+4. Requeue the task.
+
 ## Report Format
 
 ```markdown

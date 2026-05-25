@@ -54,6 +54,28 @@ type Environment struct {
 	Constraints    Constraints              `yaml:"constraints" json:"constraints"`
 	PR             PRSettings               `yaml:"pr,omitempty" json:"pr,omitempty"`
 	Worktree       WorktreeSettings         `yaml:"worktree,omitempty" json:"worktree,omitempty"`
+	// Setup describes how Galley prepares a fresh task worktree before the
+	// implementation executor begins. When present, the daemon runs the listed
+	// commands as the setup phase. When absent, the daemon dispatches a setup
+	// executor that may discover the successful setup plan and write it back to
+	// environment.yaml so subsequent tasks reuse the learned setup without
+	// rediscovery.
+	Setup *SetupPlan `yaml:"setup,omitempty" json:"setup,omitempty"`
+}
+
+// SetupPlan is the ordered list of commands Galley runs during the setup
+// preflight phase. The plan may be authored by the operator or learned by the
+// setup executor and persisted back to environment.yaml.
+type SetupPlan struct {
+	Commands []SetupCommand `yaml:"commands" json:"commands"`
+}
+
+// SetupCommand is a single command in a SetupPlan. The optional Why string
+// explains the command's purpose so the persisted environment.yaml is readable
+// by humans after a learned setup is written back.
+type SetupCommand struct {
+	Run string `yaml:"run" json:"run"`
+	Why string `yaml:"why,omitempty" json:"why,omitempty"`
 }
 
 type ExecutorDefault struct {
@@ -224,6 +246,17 @@ func ValidateEnvironment(env Environment) ValidationResult {
 	if env.PR.Comments.Reply && !env.PR.Comments.Enabled {
 		result.Warnings = append(result.Warnings, "pr.comments.reply is set while pr.comments.enabled is false")
 	}
+	if env.Setup != nil {
+		if len(env.Setup.Commands) == 0 {
+			result.Errors = append(result.Errors, "setup.commands must not be empty when setup is present")
+		}
+		for i, cmd := range env.Setup.Commands {
+			prefix := fmt.Sprintf("setup.commands[%d]", i)
+			if strings.TrimSpace(cmd.Run) == "" {
+				result.Errors = append(result.Errors, fmt.Sprintf("%s.run is required", prefix))
+			}
+		}
+	}
 	return result
 }
 
@@ -276,6 +309,144 @@ func InferRequiredCheckShellKind(shellPath string) string {
 		return name
 	}
 	return ""
+}
+
+// UpdateEnvironmentSetup atomically rewrites the setup field of the environment
+// YAML at path, preserving unrelated profile content. The rewritten document is
+// decoded and validated in memory BEFORE the atomic rename — an invalid setup
+// never reaches the published file path, and concurrent readers therefore never
+// observe a transiently invalid state. The function returns the prior setup
+// plan (nil when absent) so callers can persist a before/after record of the
+// change.
+func UpdateEnvironmentSetup(path string, plan SetupPlan) (*SetupPlan, error) {
+	if path == "" {
+		return nil, fmt.Errorf("environment profile path is required")
+	}
+	original, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read environment profile %s: %w", path, err)
+	}
+	// Decode into a generic yaml.Node so unrelated fields, ordering, and
+	// comments survive the rewrite. Replacing the setup mapping in-place keeps
+	// the rest of the document untouched.
+	var root yaml.Node
+	if err := yaml.Unmarshal(original, &root); err != nil {
+		return nil, fmt.Errorf("decode environment profile %s: %w", path, err)
+	}
+	prior := extractEnvironmentSetup(&root)
+	if err := replaceEnvironmentSetup(&root, plan); err != nil {
+		return nil, fmt.Errorf("update environment profile setup: %w", err)
+	}
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(&root); err != nil {
+		return nil, fmt.Errorf("encode environment profile %s: %w", path, err)
+	}
+	if err := enc.Close(); err != nil {
+		return nil, fmt.Errorf("flush environment profile %s: %w", path, err)
+	}
+	// Validate the rewritten bytes in memory before publication. This is the
+	// publication boundary: parse the new document with the same KnownFields
+	// decoder used by LoadEnvironment, then run ValidateEnvironment on the
+	// decoded value. If either step fails the rewrite is rejected without
+	// touching the on-disk file at path, so the original file remains the
+	// canonical state for any reader.
+	var updated Environment
+	decoder := yaml.NewDecoder(bytes.NewReader(buf.Bytes()))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&updated); err != nil {
+		return nil, fmt.Errorf("decode rewritten environment profile: %w", err)
+	}
+	if vr := ValidateEnvironment(updated); !vr.Valid() {
+		return nil, fmt.Errorf("environment profile rewrite failed validation: %s", strings.Join(vr.Errors, "; "))
+	}
+	tmp, err := os.CreateTemp(filepathDir(path), ".environment-setup-*.yaml")
+	if err != nil {
+		return nil, fmt.Errorf("stage environment profile rewrite: %w", err)
+	}
+	tmpName := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.Write(buf.Bytes()); err != nil {
+		tmp.Close()
+		return nil, fmt.Errorf("write environment profile rewrite: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return nil, fmt.Errorf("close environment profile rewrite: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return nil, fmt.Errorf("rename environment profile rewrite: %w", err)
+	}
+	cleanup = false
+	return prior, nil
+}
+
+func extractEnvironmentSetup(root *yaml.Node) *SetupPlan {
+	mapping := documentMapping(root)
+	if mapping == nil {
+		return nil
+	}
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == "setup" {
+			var plan SetupPlan
+			if err := mapping.Content[i+1].Decode(&plan); err != nil {
+				return nil
+			}
+			return &plan
+		}
+	}
+	return nil
+}
+
+func replaceEnvironmentSetup(root *yaml.Node, plan SetupPlan) error {
+	mapping := documentMapping(root)
+	if mapping == nil {
+		// Build a fresh mapping when the document was empty.
+		mapping = &yaml.Node{Kind: yaml.MappingNode}
+		root.Kind = yaml.DocumentNode
+		root.Content = []*yaml.Node{mapping}
+	}
+	keyNode := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "setup"}
+	valueNode := &yaml.Node{}
+	if err := valueNode.Encode(plan); err != nil {
+		return err
+	}
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == "setup" {
+			mapping.Content[i+1] = valueNode
+			return nil
+		}
+	}
+	mapping.Content = append(mapping.Content, keyNode, valueNode)
+	return nil
+}
+
+func documentMapping(root *yaml.Node) *yaml.Node {
+	if root == nil {
+		return nil
+	}
+	node := root
+	if node.Kind == yaml.DocumentNode && len(node.Content) > 0 {
+		node = node.Content[0]
+	}
+	if node.Kind == yaml.MappingNode {
+		return node
+	}
+	return nil
+}
+
+func filepathDir(path string) string {
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == '/' || path[i] == '\\' {
+			return path[:i]
+		}
+	}
+	return "."
 }
 
 func loadYAML(path string, out any) error {

@@ -322,7 +322,7 @@ def validate_setup_executor_result(result):
     require_array(result["commands"], "commands")
     if len(result["commands"]) > 50:
         raise ValueError("commands must contain at most 50 entries")
-    command_runs = set()
+    successful_command_runs = set()
     for index, command in enumerate(result["commands"]):
         require_object(command, f"commands[{index}]")
         for field in ["run", "source", "exit_code"]:
@@ -332,7 +332,8 @@ def validate_setup_executor_result(result):
             raise ValueError(f"commands[{index}].run must be a non-empty string")
         if len(command["run"]) > 4096:
             raise ValueError(f"commands[{index}].run is too long")
-        command_runs.add(command["run"])
+        if command["exit_code"] == 0:
+            successful_command_runs.add(command["run"])
         if command.get("source") not in {"environment_setup", "environment_commands", "discovered", "readiness_check"}:
             raise ValueError(f"commands[{index}].source is invalid")
         if not isinstance(command["exit_code"], int):
@@ -347,9 +348,9 @@ def validate_setup_executor_result(result):
                 raise ValueError(f"successful_commands[{index}].run must be a non-empty string")
             if len(command["run"]) > 4096:
                 raise ValueError(f"successful_commands[{index}].run is too long")
-            if command["run"] not in command_runs:
-                raise ValueError(f"successful_commands[{index}].run must match an executed commands[].run")
-    if "source" in result and result.get("source") not in {"environment_setup", "environment_commands", "discovered", "readiness_check"}:
+            if command["run"] not in successful_command_runs:
+                raise ValueError(f"successful_commands[{index}].run must match a commands[].run that exited 0")
+    if "source" in result and result.get("source") not in {"environment_setup", "environment_commands", "discovered"}:
         raise ValueError("source is invalid")
     if status == "ready":
         if result.get("source") not in {"environment_setup", "environment_commands", "discovered"}:

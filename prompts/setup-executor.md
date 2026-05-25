@@ -71,8 +71,8 @@ If you cannot make the worktree ready, set `status: "failed"`, fill `error` with
 Before returning the final JSON, verify:
 
 - Every `commands[]` entry records the command `run`, its `source`, and its `exit_code`.
-- `status: "ready"` includes non-empty `successful_commands`, `readiness_evidence`, and a top-level `source` for the successful plan.
-- `successful_commands[].run` values are commands you actually ran and recorded in `commands[]`.
+- `status: "ready"` includes non-empty `successful_commands`, `readiness_evidence`, and top-level `source` set to `environment_setup`, `environment_commands`, or `discovered`.
+- `successful_commands[].run` values are commands you actually ran and recorded in `commands[]` with `exit_code: 0`.
 - Quality-check commands you run to prove readiness must appear in `commands[]`; keep `successful_commands` limited to the setup plan that should be saved.
 - `status: "failed"` includes both `error` and `repair_guidance`.
 

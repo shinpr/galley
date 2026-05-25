@@ -305,6 +305,9 @@ func enforceLearnedSetupPlanContract(res *SetupResult) error {
 	if len(res.SuccessfulCommands) == 0 {
 		return fmt.Errorf("setup executor returned status=ready with no successful_commands; cannot learn a setup plan to persist to environment.yaml")
 	}
+	if err := validateSuccessfulSetupCommands(res); err != nil {
+		return err
+	}
 	if strings.TrimSpace(res.ReadinessEvidence) == "" {
 		return fmt.Errorf("setup executor returned status=ready with no readiness_evidence")
 	}
@@ -316,6 +319,25 @@ func enforceLearnedSetupPlanContract(res *SetupResult) error {
 	default:
 		return fmt.Errorf("setup executor returned status=ready with invalid source %q", res.Source)
 	}
+}
+
+func validateSuccessfulSetupCommands(res *SetupResult) error {
+	successfulRuns := make(map[string]bool, len(res.Commands))
+	for _, cmd := range res.Commands {
+		if cmd.ExitCode == 0 {
+			successfulRuns[strings.TrimSpace(cmd.Run)] = true
+		}
+	}
+	for i, cmd := range res.SuccessfulCommands {
+		run := strings.TrimSpace(cmd.Run)
+		if run == "" {
+			return fmt.Errorf("setup executor returned status=ready with empty successful_commands[%d].run", i)
+		}
+		if !successfulRuns[run] {
+			return fmt.Errorf("setup executor returned status=ready with successful_commands[%d].run %q but no matching commands[] entry exited 0", i, run)
+		}
+	}
+	return nil
 }
 
 // applySetupContractViolation downgrades a result that violated the

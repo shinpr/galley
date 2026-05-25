@@ -15,7 +15,7 @@ This project follows semantic versioning.
 
 ### Changed
 
-- Packaged Claude and Codex Galley plugins are now versioned as `0.1.14`: setup executor prompts now include explicit result JSON contracts, profile-authoring guidance mentions optional fresh-worktree setup commands, and troubleshooting routes `setup_failed` diagnosis through setup executor evidence.
+- Packaged Claude and Codex Galley plugins are now versioned as `0.1.13`: setup executor prompts now include explicit result JSON contracts, profile-authoring guidance mentions optional fresh-worktree setup commands, and troubleshooting routes `setup_failed` diagnosis through setup executor evidence.
 - The daemon now stages the executor-produced reviewable path set before capturing supervisor diff evidence, so newly created untracked files appear in `diff.patch` and supervisor review while `commit:false` input files and unrelated context-only worktree dirtiness stay out of the submitted diff. Review staging writes `git_add_review.stdout.log`, `git_add_review.stderr.log`, and `git_add_review_result.json` attempt evidence when it runs, and records a skipped result when there is no reviewable path set.
 
 ### Fixed

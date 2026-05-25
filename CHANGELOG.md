@@ -6,14 +6,17 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.6.2 - 2026-05-25
+
 ### Changed
 
-- `environment.yaml`'s `required_checks.shell_path` is now an executable override that takes precedence over `required_checks.shell`. When the `shell_path` basename is one of `bash`, `sh`, `cmd.exe`, `powershell.exe`, or `pwsh.exe` (case-insensitive, optional `.exe`, either `/` or `\` separators), `shell_path` may stand alone and Galley infers the invocation style from the executable name. When both fields are set, Galley resolves the invocation style from `shell_path`'s basename and will not invoke that executable using an incompatible style from `shell`; the configured `shell` is fallback kind metadata for unrecognized executable names. Profile validation rejects an unrecognized `shell_path` paired with an unset or `auto` `shell`. Existing profiles that paired a concrete `shell` with a matching `shell_path` continue to validate and resolve to the same executable and shell style.
+- `environment.yaml`'s `required_checks.shell_path` is now the explicit executable override for required checks. Recognized shell executable names can be used without `required_checks.shell`; when both fields are present, `shell_path` wins and `shell` is only fallback metadata for unrecognized executable names.
+- Packaged Claude and Codex Galley plugins are now versioned as `0.1.12`: Windows profile guidance now treats `required_checks.shell_path` as the preferred exact executable override for non-standard shells, uses `required_checks.shell` only as fallback metadata for unrecognized executable names, and explains that explicit Windows Bash execution uses Git for Windows discovery unless operators opt into another Bash with `shell_path`.
 
 ### Fixed
 
-- Windows required-check execution with `required_checks.shell: bash` and no `shell_path` now also prefers standard Git for Windows Bash discovery so PATH lookup cannot silently select the WSL launcher (`C:\Windows\System32\bash.exe`), a `WindowsApps` shim, MSYS2, Cygwin, Scoop, or other non-standard Bash entries. When no standard Git for Windows Bash is discoverable, the resolver fails required-check shell resolution with a clear error that names `required_checks.shell_path` as the explicit override the operator must set, rather than launching a bare `bash` whose PATH lookup would silently resolve back to the same rejected non-standard entries that auto-discovery just refused. Operators that intentionally use one of these non-standard Bashes must opt in by setting `required_checks.shell_path` to the exact executable.
-- Required-check run evidence and failure messages now record both the resolved shell kind and the executable path actually launched for `shell_path`-only, `shell` plus `shell_path`, and Windows Bash discovery cases, so reviewers can see which executable produced each verification result without inferring from `shell` alone.
+- Windows required-check execution with `required_checks.shell: bash` now prefers standard Git for Windows Bash discovery and refuses to silently launch WSL, WindowsApps, MSYS2, Cygwin, Scoop, or other non-standard Bash entries. Operators can opt in to a specific non-standard Bash with `required_checks.shell_path`.
+- Required-check evidence now records both the resolved shell kind and the executable path actually launched.
 
 ## v0.6.1 - 2026-05-25
 

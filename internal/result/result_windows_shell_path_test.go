@@ -394,6 +394,14 @@ func TestShellArgvForOSShellPathInferredKindOverridesIncompatibleConfiguredShell
 			wantResolvedKind: "pwsh",
 			wantInvocation:   ".ps1",
 		},
+		{
+			name:             "UnixBashConfigured_ShPath_UsesShStyle",
+			goos:             "linux",
+			configuredShell:  "bash",
+			shellPath:        `/bin/sh`,
+			wantResolvedKind: "sh",
+			wantInvocation:   "-c",
+		},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -417,8 +425,12 @@ func TestShellArgvForOSShellPathInferredKindOverridesIncompatibleConfiguredShell
 			if argv[0] != tc.shellPath {
 				t.Fatalf("argv[0] got %q, want %q (verbatim shell_path)", argv[0], tc.shellPath)
 			}
-			if !strings.HasSuffix(argv[len(argv)-1], tc.wantInvocation) {
-				t.Fatalf("argv[-1] %q must end with %q (invocation style must match resolved kind)", argv[len(argv)-1], tc.wantInvocation)
+			if tc.goos == "windows" {
+				if !strings.HasSuffix(argv[len(argv)-1], tc.wantInvocation) {
+					t.Fatalf("argv[-1] %q must end with %q (invocation style must match resolved kind)", argv[len(argv)-1], tc.wantInvocation)
+				}
+			} else if len(argv) < 2 || argv[1] != tc.wantInvocation {
+				t.Fatalf("argv got %#v, want argv[1]=%q (invocation style must match resolved kind)", argv, tc.wantInvocation)
 			}
 		})
 	}

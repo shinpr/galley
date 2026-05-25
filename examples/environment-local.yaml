@@ -6,25 +6,11 @@ commands:
 executor:
   default_cli: "codex"
 required_checks:
-  # `shell_path` is the more specific executable selection and takes
-  # precedence over `shell` when both fields are set. Galley will not
-  # invoke that executable using an incompatible style from `shell`.
-  #
-  # When the basename of `shell_path` is one of `bash`, `sh`, `cmd.exe`,
-  # `powershell.exe`, or `pwsh.exe` (case-insensitive, optional `.exe`,
-  # either `/` or `\` separators), `shell_path` may stand alone and Galley
-  # infers the invocation style from the executable name. In that case the
-  # `shell` field below is unused for invocation and is only fallback kind
-  # metadata. The example below sets `shell: "auto"` to show that
-  # `shell_path` overrides it.
-  #
-  # When the basename is not recognized (for example
-  # `/opt/galley/custom-bash` or a renamed Cygwin shell), set `shell` to a
-  # concrete kind (`sh`, `bash`, `cmd`, `powershell`, or `pwsh`); profile
-  # validation rejects an unrecognized `shell_path` paired with an unset or
-  # `auto` `shell` because Galley has no fallback kind metadata to use.
+  # Use shell_path to pin a custom shell executable. Recognized executable
+  # names such as bash, cmd.exe, powershell.exe, and pwsh.exe can stand alone;
+  # use shell as fallback metadata only for renamed wrappers.
+  # shell_path: "/path/to/bash"
   shell: "auto"
-  shell_path: "/bin/bash"
 constraints:
   network: "approval_required"
   secrets_policy: "never_read_env_files"

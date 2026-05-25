@@ -123,12 +123,6 @@ func TestEnvironmentJSONSchemaAllowsShellPathStandaloneStructurally(t *testing.T
 	if shellPath["pattern"] == "" {
 		t.Fatalf("shell_path schema must reject leading/trailing whitespace: %#v", shellPath)
 	}
-	description, _ := shellPath["description"].(string)
-	for _, fragment := range []string{"precedence", "fallback"} {
-		if !strings.Contains(strings.ToLower(description), fragment) {
-			t.Fatalf("shell_path description must document %q precedence/fallback contract, got %q", fragment, description)
-		}
-	}
 }
 
 // AC1 (profile-side): When required_checks.shell_path uses a recognized

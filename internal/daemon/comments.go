@@ -59,15 +59,22 @@ func processTaskPRComments(ctx context.Context, opts Options, path string) error
 		fmt.Fprintf(os.Stderr, "galley: skipping PR comment scan for unreadable task %s: %v\n", path, err)
 		return nil
 	}
+	// Gate the task on the persisted fields before resolving the repository
+	// profile or calling GitHub. A closed, merged, archived, PR-less, or
+	// non-open PR task cannot drive a Galley follow-up run from a /galley
+	// comment, so scanning it would only add polling latency and GitHub API
+	// load without changing observable behavior. Performing the eligibility
+	// check here (rather than after profile load or after FetchPRComments)
+	// also lets historical tasks survive without a usable repository profile.
+	if !isActionableForPRCommentPoll(loaded) {
+		return nil
+	}
 	_, profiles, err := loadTaskProfiles(opts, loaded.Scope.CWD)
 	if err != nil {
 		return err
 	}
 	effectiveOpts := effectiveOptionsForProfiles(opts, profiles)
 	if !effectiveOpts.PollPRComments {
-		return nil
-	}
-	if loaded.PR.URL == "" {
 		return nil
 	}
 	// Retry the PR comment listing. `gh api .../comments` is a GET and
@@ -177,6 +184,43 @@ func applyPRCommandToLoadedTask(loaded *task.Task, command prCommand) {
 	}
 	if !task.ContainsRevisionRequest(loaded.RevisionRequests, request.ID) {
 		loaded.RevisionRequests = append(loaded.RevisionRequests, request)
+	}
+}
+
+// isActionableForPRCommentPoll reports whether the persisted task fields show
+// that the task could accept another /galley follow-up from a PR comment. The
+// gate intentionally consults only the persisted task YAML so the daemon can
+// skip non-actionable historical tasks before resolving the repository profile
+// or calling GitHub. The conditions are:
+//
+//  1. The task records a PR URL. PR-less tasks have no comment thread to scan.
+//  2. The PR status is "open" (case-insensitive). Merged or closed PRs cannot
+//     usefully trigger another Galley implementation pass.
+//  3. The task status is one of "pr_opened" (the primary actionable state used
+//     by the requeue path in tasks/done) or "needs_supervisor_review" (the
+//     actionable failed-review state used in tasks/failed). The production
+//     poller scans only tasks/done and tasks/failed, so "queued" and "running"
+//     are not reached through that path; they remain allowed only so direct
+//     calls to processTaskPRComments preserve the existing "already
+//     queued/running" reply behavior. Other statuses such as "merged",
+//     "closed", "accepted", "failed", "archived", or "draft" are
+//     non-actionable and are skipped here.
+//
+// Keeping this check ahead of loadTaskProfiles and vcs.FetchPRComments is the
+// reason the daemon no longer pays per-task latency or GitHub quota for
+// historical tasks during PR comment polling.
+func isActionableForPRCommentPoll(loaded task.Task) bool {
+	if loaded.PR.URL == "" {
+		return false
+	}
+	if !strings.EqualFold(loaded.PR.Status, "open") {
+		return false
+	}
+	switch loaded.Status {
+	case "pr_opened", "needs_supervisor_review", "queued", "running":
+		return true
+	default:
+		return false
 	}
 }
 

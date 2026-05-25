@@ -916,7 +916,7 @@ func buildCodexSetupExecutorCommandPlan(opts SetupExecutorPreflightOptions, payl
 	codexOpts.WorkDir = opts.WorkDir
 	codexOpts.Prompt = string(payload)
 	codexOpts.SystemPrompt = prompts.SetupExecutorCodex()
-	codexOpts.JSONSchema = schemas.SetupResult
+	codexOpts.JSONSchema = runner.CodexCompatibleOutputSchema(schemas.SetupResult)
 	codexOpts.AttemptDir = opts.RunDir
 
 	commandPlan, err := runner.CodexCommandPlan(codexOpts)

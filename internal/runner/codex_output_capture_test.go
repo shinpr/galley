@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/shinpr/galley/schemas"
 )
 
 func TestCodexCommandPlanMaterializesEmbeddedSchemaWhenOnlyContentAvailable(t *testing.T) {
@@ -90,6 +92,59 @@ func TestCodexCommandPlanMaterializesEmbeddedSchemaWhenOnlyContentAvailable(t *t
 	}
 	if filepath.Base(lastMsgFlag) != CodexLastMessageFilename {
 		t.Fatalf("output-last-message filename drift: got %q, want %q", filepath.Base(lastMsgFlag), CodexLastMessageFilename)
+	}
+}
+
+func TestCodexCompatibleOutputSchemaRecursivelyRequiresObjectProperties(t *testing.T) {
+	t.Parallel()
+	body := CodexCompatibleOutputSchema(schemas.SetupResult)
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(body), &doc); err != nil {
+		t.Fatalf("compatible setup schema is not valid JSON: %v", err)
+	}
+
+	props := objectProp(t, doc, "properties")
+	topRequired := requiredSet(t, doc)
+	for name := range props {
+		if !topRequired[name] {
+			t.Fatalf("top-level setup schema property %q is not required", name)
+		}
+	}
+	successful := objectProp(t, props, "successful_commands")
+	if !typeAllowsNull(successful["type"]) {
+		t.Fatalf("optional successful_commands must be nullable for Codex strict schema: %#v", successful["type"])
+	}
+	readiness := objectProp(t, props, "readiness_evidence")
+	if !typeAllowsNull(readiness["type"]) {
+		t.Fatalf("optional readiness_evidence must be nullable for Codex strict schema: %#v", readiness["type"])
+	}
+
+	commands := objectProp(t, props, "commands")
+	commandItems := objectProp(t, commands, "items")
+	commandProps := objectProp(t, commandItems, "properties")
+	commandRequired := requiredSet(t, commandItems)
+	for name := range commandProps {
+		if !commandRequired[name] {
+			t.Fatalf("commands.items property %q is not required", name)
+		}
+	}
+	why := objectProp(t, commandProps, "why")
+	if !typeAllowsNull(why["type"]) {
+		t.Fatalf("optional commands.items.why must be nullable: %#v", why["type"])
+	}
+	stdout := objectProp(t, commandProps, "stdout_excerpt")
+	if !typeAllowsNull(stdout["type"]) {
+		t.Fatalf("optional commands.items.stdout_excerpt must be nullable: %#v", stdout["type"])
+	}
+
+	successItems := objectProp(t, successful, "items")
+	successRequired := requiredSet(t, successItems)
+	if !successRequired["why"] {
+		t.Fatalf("successful_commands.items.why must be required for Codex strict schema")
+	}
+	successWhy := objectProp(t, objectProp(t, successItems, "properties"), "why")
+	if !typeAllowsNull(successWhy["type"]) {
+		t.Fatalf("optional successful_commands.items.why must be nullable: %#v", successWhy["type"])
 	}
 }
 
@@ -173,4 +228,44 @@ func flagValue(t *testing.T, argv []string, name string) string {
 		}
 	}
 	return ""
+}
+
+func objectProp(t *testing.T, parent map[string]any, name string) map[string]any {
+	t.Helper()
+	got, ok := parent[name].(map[string]any)
+	if !ok {
+		t.Fatalf("property %q is not an object: %#v", name, parent[name])
+	}
+	return got
+}
+
+func requiredSet(t *testing.T, schema map[string]any) map[string]bool {
+	t.Helper()
+	raw, ok := schema["required"].([]any)
+	if !ok {
+		t.Fatalf("schema missing required array: %#v", schema["required"])
+	}
+	out := make(map[string]bool, len(raw))
+	for _, item := range raw {
+		name, ok := item.(string)
+		if !ok {
+			t.Fatalf("required entry is not a string: %#v", item)
+		}
+		out[name] = true
+	}
+	return out
+}
+
+func typeAllowsNull(raw any) bool {
+	switch value := raw.(type) {
+	case string:
+		return value == "null"
+	case []any:
+		for _, item := range value {
+			if item == "null" {
+				return true
+			}
+		}
+	}
+	return false
 }

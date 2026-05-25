@@ -41,9 +41,8 @@ func (r acceptanceSkeletonPreflightRun) validateNoSkeletonDeclarations(declarati
 
 func (r acceptanceSkeletonPreflightRun) validateDeclarations(declarations []task.AcceptanceSkeletonOutputDef) ([]AcceptanceSkeletonOutput, *preflightErr) {
 	outputs := make([]AcceptanceSkeletonOutput, 0, len(declarations))
-	seenPaths := map[string]int{}
 	for i, decl := range declarations {
-		if perr := r.validateOneDeclaration(i, decl, seenPaths); perr != nil {
+		if perr := r.validateOneDeclaration(i, decl); perr != nil {
 			return nil, perr
 		}
 		if perr := r.ensureSkeletonFile(decl); perr != nil {
@@ -62,11 +61,11 @@ func (r acceptanceSkeletonPreflightRun) validateDeclarations(declarations []task
 	return outputs, nil
 }
 
-func (r acceptanceSkeletonPreflightRun) validateOneDeclaration(i int, decl task.AcceptanceSkeletonOutputDef, seenPaths map[string]int) *preflightErr {
+func (r acceptanceSkeletonPreflightRun) validateOneDeclaration(i int, decl task.AcceptanceSkeletonOutputDef) *preflightErr {
 	if !r.acIDs[decl.ACID] {
 		return providerErr("declared output %d ac_id %q does not match any acceptance_criteria.id", i, decl.ACID)
 	}
-	if perr := validateCreatorDeclaration(i, decl, seenPaths); perr != nil {
+	if perr := validateCreatorDeclaration(i, decl); perr != nil {
 		return perr
 	}
 	if !pathInsideEffective(decl.Path, r.allowed) {
@@ -81,15 +80,15 @@ func (r acceptanceSkeletonPreflightRun) validateOneDeclaration(i int, decl task.
 	return nil
 }
 
-func validateCreatorDeclaration(i int, decl task.AcceptanceSkeletonOutputDef, seenPaths map[string]int) *preflightErr {
+// validateCreatorDeclaration enforces per-output safety checks that are
+// independent of other declarations. Multiple outputs may share the same clean
+// path because a single skeleton file naturally covers several acceptance
+// criteria; the daemon still preserves each entry's AC binding and metadata in
+// the preflight result and task acceptance skeleton outputs.
+func validateCreatorDeclaration(i int, decl task.AcceptanceSkeletonOutputDef) *preflightErr {
 	if reason := unsafeSkeletonOutputPath(decl.Path); reason != "" {
 		return providerErr("declared output %d path %q is rejected: %s", i, decl.Path, reason)
 	}
-	cleanPath := filepath.Clean(decl.Path)
-	if prev, ok := seenPaths[cleanPath]; ok {
-		return providerErr("declared output %d path %q is duplicated (also at output %d)", i, decl.Path, prev)
-	}
-	seenPaths[cleanPath] = i
 	for _, field := range []struct {
 		name  string
 		value string

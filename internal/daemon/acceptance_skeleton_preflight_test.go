@@ -243,6 +243,68 @@ printf 'package foo\n' > secret/foo_test.go`)
 	}
 }
 
+func TestAcceptanceSkeletonPreflightAcceptsDuplicateOutputPaths(t *testing.T) {
+	t.Parallel()
+	manifest := resultManifest(`[` +
+		`{\"ac_id\":\"AC1\",\"path\":\"internal/foo/foo_test.go\",\"kind\":\"go-test\",\"purpose\":\"verify AC1\",\"satisfies\":\"AC1 user-visible behavior\",\"integration_point\":\"executor finishes AC1 case\",\"implementation_required\":true},` +
+		`{\"ac_id\":\"AC2\",\"path\":\"internal/foo/foo_test.go\",\"kind\":\"go-test\",\"purpose\":\"verify AC2\",\"satisfies\":\"AC2 user-visible behavior\",\"integration_point\":\"executor finishes AC2 case\",\"implementation_required\":true}` +
+		`]`)
+	claudeBin := fakeCreator(t, manifest, `mkdir -p internal/foo
+printf 'package foo_test\n\n// TODO(galley-skeleton): implement AC1 and AC2 assertions.\n' > internal/foo/foo_test.go`)
+
+	res, err, runDir := runPreflightWithOptions(t, preflightTestTask("AC1", "AC2"), AcceptanceSkeletonPreflightOptions{ClaudeBin: claudeBin})
+	if err != nil {
+		t.Fatalf("preflight error: %v", err)
+	}
+	if res == nil || res.Status != "completed" {
+		t.Fatalf("res = %+v", res)
+	}
+	if len(res.Outputs) != 2 {
+		t.Fatalf("expected 2 outputs for duplicate-path case, got %+v", res.Outputs)
+	}
+	byAC := map[string]AcceptanceSkeletonOutput{}
+	for _, out := range res.Outputs {
+		byAC[out.ACID] = out
+	}
+	for _, ac := range []string{"AC1", "AC2"} {
+		out, ok := byAC[ac]
+		if !ok {
+			t.Fatalf("missing output for %s in %+v", ac, res.Outputs)
+		}
+		if out.Path != "internal/foo/foo_test.go" {
+			t.Fatalf("%s path = %q, want shared skeleton path", ac, out.Path)
+		}
+		if out.Purpose == "" || out.Satisfies == "" || out.IntegrationPoint == "" {
+			t.Fatalf("%s metadata not preserved: %+v", ac, out)
+		}
+		if !strings.Contains(out.Purpose, ac) || !strings.Contains(out.Satisfies, ac) || !strings.Contains(out.IntegrationPoint, ac) {
+			t.Fatalf("%s metadata mixed up: %+v", ac, out)
+		}
+	}
+	if len(res.Baseline.SkeletonHashes) != 1 {
+		t.Fatalf("baseline should dedupe the shared path, got %+v", res.Baseline.SkeletonHashes)
+	}
+	persisted, lerr := LoadPreflightResult(runDir)
+	if lerr != nil {
+		t.Fatalf("LoadPreflightResult: %v", lerr)
+	}
+	if persisted == nil || len(persisted.Outputs) != 2 {
+		t.Fatalf("persisted preflight_result.json did not preserve duplicate outputs: %+v", persisted)
+	}
+	for _, ac := range []string{"AC1", "AC2"} {
+		found := false
+		for _, out := range persisted.Outputs {
+			if out.ACID == ac && out.Path == "internal/foo/foo_test.go" && out.Purpose != "" && out.Satisfies != "" && out.IntegrationPoint != "" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("persisted preflight_result.json missing %s entry: %+v", ac, persisted.Outputs)
+		}
+	}
+}
+
 func TestAcceptanceSkeletonPreflightRejectsInvalidManifestFields(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {

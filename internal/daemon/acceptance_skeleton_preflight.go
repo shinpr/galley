@@ -20,11 +20,26 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	slashpath "path"
 	"path/filepath"
+	"strings"
 
 	"github.com/shinpr/galley/internal/profile"
 	"github.com/shinpr/galley/internal/task"
 )
+
+// normalizeLogicalSkeletonPath converts a worktree-relative skeleton path to a
+// slash-based cleaned key suitable for cross-platform deduplication. This
+// mirrors task.normalizeLogicalPath (which is unexported); we keep the daemon
+// helper local so duplicate-path dedupe in this stage matches the task
+// validator's logical-path semantics (`foo/bar` and `foo\bar` collapse to the
+// same key on every OS) without exporting the task helper.
+func normalizeLogicalSkeletonPath(p string) string {
+	if p == "" {
+		return ""
+	}
+	return slashpath.Clean(strings.ReplaceAll(p, "\\", "/"))
+}
 
 func jsonDecode(data []byte, v any) error {
 	return json.Unmarshal(data, v)
@@ -152,8 +167,21 @@ func AcceptanceSkeletonPreflight(ctx context.Context, opts AcceptanceSkeletonPre
 		return preflightFailure(opts.RunDir, perr.phase, perr.message)
 	}
 
+	// Multiple outputs may share the same skeleton path when a single test file
+	// covers several acceptance criteria. Dedupe using a slash-normalized
+	// logical key (equivalent to task.normalizeLogicalPath) so the baseline
+	// records each unique path once on every OS while preserving each AC's
+	// output entry above; using a separator-sensitive key would let
+	// `internal/foo/foo_test.go` and `internal\foo\foo_test.go` produce
+	// duplicate baseline entries on Windows.
 	paths := make([]string, 0, len(outputs))
+	seenBaselinePaths := map[string]bool{}
 	for _, o := range outputs {
+		key := normalizeLogicalSkeletonPath(o.Path)
+		if seenBaselinePaths[key] {
+			continue
+		}
+		seenBaselinePaths[key] = true
 		paths = append(paths, o.Path)
 	}
 	hashes, err := HashSkeletonFiles(opts.WorkDir, paths)

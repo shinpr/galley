@@ -342,7 +342,12 @@ func validatePreflightOutputs(result *ValidationResult, t Task, cfg *AcceptanceS
 	if len(effectiveAllowed) == 0 {
 		effectiveAllowed = t.Scope.AllowedPaths
 	}
-	seenPaths := map[string]int{}
+	// Multiple skeleton outputs may share the same normalized path because a
+	// single test file naturally covers more than one acceptance criterion.
+	// Each entry's AC binding and metadata (purpose, satisfies, integration
+	// point) is preserved separately in the task YAML, work order, and
+	// preflight_result.json; per-entry safety checks below remain in force on
+	// every declaration regardless of duplication.
 	for i, out := range cfg.Outputs {
 		field := fmt.Sprintf("%s.outputs[%d]", prefix, i)
 		require(result, out.ACID != "", "%s.ac_id is required", field)
@@ -364,15 +369,6 @@ func validatePreflightOutputs(result *ValidationResult, t Task, cfg *AcceptanceS
 						result.Errors = append(result.Errors, fmt.Sprintf("%s.path %q must not be inside scope.forbidden_paths", field, out.Path))
 					}
 				}
-			}
-			// Deduplicate by slash-normalized form so `foo/bar` and `foo\bar`
-			// (or repeated entries that differ only in separator) collapse to
-			// the same key on every platform.
-			key := normalizeLogicalPath(out.Path)
-			if prev, ok := seenPaths[key]; ok {
-				result.Errors = append(result.Errors, fmt.Sprintf("%s.path %q is duplicated (also at outputs[%d])", field, out.Path, prev))
-			} else {
-				seenPaths[key] = i
 			}
 		}
 	}

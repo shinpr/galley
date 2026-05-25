@@ -78,6 +78,12 @@ Goal checks:
 
 Each AC must be explicit, testable, and useful to the supervisor.
 
+Draft ACs value-first:
+
+1. State the user, operator, or maintainer value the task must deliver.
+2. Define one or more observable ACs that prove that value is delivered.
+3. Add technical boundaries, regressions, and checks when the user/spec requires them or repository investigation shows they are needed to preserve the delivered value or existing accepted behavior.
+
 Use ACs for:
 
 - requested behavior

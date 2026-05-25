@@ -239,9 +239,8 @@ func TestPreflightValidationDuplicateOutputPathStillEnforcesPathSafety(t *testin
 				Purpose: "verify AC1 behavior",
 			},
 			{
-				// Repeats AC1's path conceptually but uses an unsafe parent
-				// traversal form. Duplicate paths may be accepted, but path
-				// safety checks must still reject this entry.
+				// Duplicate-path allowance must not bypass per-entry path
+				// safety checks; unsafe parent traversal is still rejected.
 				ACID:    "AC2",
 				Path:    "../foo/foo_test.go",
 				Kind:    "go-test",

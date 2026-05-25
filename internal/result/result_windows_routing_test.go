@@ -19,7 +19,7 @@ func TestShellArgvForOSWindowsUsesScriptFile(t *testing.T) {
 	scratch := t.TempDir()
 	command := strings.Repeat("echo placeholder && ", 400) + "echo done"
 
-	argv, cleanup, shell, err := shellArgvForOS("windows", command, scratch, "cmd")
+	argv, cleanup, shell, err := shellArgvForOS("windows", command, scratch, "cmd", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestShellArgvForOSWindowsUsesScriptFile(t *testing.T) {
 // execution shape is independent of command length.
 func TestShellArgvForOSWindowsShortCommandAlsoUsesScriptFile(t *testing.T) {
 	scratch := t.TempDir()
-	argv, cleanup, shell, err := shellArgvForOS("windows", "go test ./...", scratch, "cmd")
+	argv, cleanup, shell, err := shellArgvForOS("windows", "go test ./...", scratch, "cmd", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestShellArgvForOSWindowsShortCommandAlsoUsesScriptFile(t *testing.T) {
 
 func TestShellArgvForOSWindowsCreatesScratchDir(t *testing.T) {
 	scratch := t.TempDir() + "/nested/checks"
-	argv, cleanup, _, err := shellArgvForOS("windows", "go test ./...", scratch, "cmd")
+	argv, cleanup, _, err := shellArgvForOS("windows", "go test ./...", scratch, "cmd", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestShellArgvForOSWindowsCreatesScratchDir(t *testing.T) {
 // use /bin/sh -c and the existing argv shape regardless of command length.
 func TestShellArgvForOSNonWindowsKeepsShape(t *testing.T) {
 	long := strings.Repeat("echo placeholder && ", 1000) + "echo done"
-	argv, cleanup, shell, err := shellArgvForOS("linux", long, "", "")
+	argv, cleanup, shell, err := shellArgvForOS("linux", long, "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestShellArgvForOSWindowsAutoPrefersBashWhenPresent(t *testing.T) {
 	}()
 
 	scratch := t.TempDir()
-	argv, cleanup, shell, err := shellArgvForOS("windows", "grep -F ok proof.txt", scratch, "")
+	argv, cleanup, shell, err := shellArgvForOS("windows", "grep -F ok proof.txt", scratch, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,12 +169,15 @@ func TestShellArgvForOSWindowsAutoFallsBackToCmdWhenBashMissing(t *testing.T) {
 	lookPath = func(file string) (string, error) {
 		return "", os.ErrNotExist
 	}
+	statFile = func(name string) (os.FileInfo, error) {
+		return nil, os.ErrNotExist
+	}
 	defer func() {
 		lookPath = old
 		statFile = oldStat
 	}()
 
-	argv, cleanup, shell, err := shellArgvForOS("windows", "go test ./...", t.TempDir(), "")
+	argv, cleanup, shell, err := shellArgvForOS("windows", "go test ./...", t.TempDir(), "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +214,7 @@ func TestShellArgvForOSWindowsAutoFindsGitBashFromGitPath(t *testing.T) {
 		statFile = oldStat
 	}()
 
-	argv, cleanup, shell, err := shellArgvForOS("windows", "grep -F ok proof.txt", t.TempDir(), "")
+	argv, cleanup, shell, err := shellArgvForOS("windows", "grep -F ok proof.txt", t.TempDir(), "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +230,7 @@ func TestShellArgvForOSWindowsAutoFindsGitBashFromGitPath(t *testing.T) {
 }
 
 func TestShellArgvForOSWindowsExplicitPwshUsesPowerShellScript(t *testing.T) {
-	argv, cleanup, shell, err := shellArgvForOS("windows", "Write-Output ok", t.TempDir(), "pwsh")
+	argv, cleanup, shell, err := shellArgvForOS("windows", "Write-Output ok", t.TempDir(), "pwsh", "")
 	if err != nil {
 		t.Fatal(err)
 	}

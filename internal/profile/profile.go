@@ -70,7 +70,8 @@ type SupervisorDefault struct {
 }
 
 type RequiredCheckEnvironment struct {
-	Shell string `yaml:"shell,omitempty" json:"shell,omitempty"`
+	Shell     string `yaml:"shell,omitempty" json:"shell,omitempty"`
+	ShellPath string `yaml:"shell_path,omitempty" json:"shell_path,omitempty"`
 }
 
 type Constraints struct {
@@ -203,6 +204,15 @@ func ValidateEnvironment(env Environment) ValidationResult {
 	}
 	if env.RequiredChecks.Shell != "" {
 		require(&result, validRequiredCheckShell(env.RequiredChecks.Shell), "required_checks.shell must be one of: auto, sh, bash, cmd, powershell, pwsh")
+	}
+	if env.RequiredChecks.ShellPath != "" {
+		if strings.TrimSpace(env.RequiredChecks.ShellPath) != env.RequiredChecks.ShellPath {
+			result.Errors = append(result.Errors, "required_checks.shell_path must not have leading or trailing whitespace")
+		}
+		switch env.RequiredChecks.Shell {
+		case "", "auto":
+			result.Errors = append(result.Errors, "required_checks.shell_path requires an explicit required_checks.shell kind (sh, bash, cmd, powershell, or pwsh); auto-discovery is incompatible with an explicit executable override")
+		}
 	}
 	if env.PR.Comments.Reply && !env.PR.Comments.Enabled {
 		result.Warnings = append(result.Warnings, "pr.comments.reply is set while pr.comments.enabled is false")

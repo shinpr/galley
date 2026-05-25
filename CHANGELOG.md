@@ -8,7 +8,12 @@ This project follows semantic versioning.
 
 ### Fixed
 
-- Acceptance skeleton preflight no longer fails when the skeleton creator declares the same skeleton file path for multiple acceptance criteria. A single test file commonly covers more than one AC; the daemon and the task validator (`task.Validate` / `LoadAndValidate`) now both accept duplicate `preflight.acceptance_skeleton.outputs[*].path` values while continuing to enforce safe path rules, allowed/forbidden path scoping, declared-file existence, undeclared creator changes, and required AC coverage. Each output entry's `ac_id`, `purpose`, `satisfies`, and `integration_point` are preserved separately in `preflight_result.json`, task YAML outputs, and the rendered work-order obligations; baseline skeleton hashes are deduplicated per unique path using a slash-normalized logical key so `foo/bar` and `foo\bar` collapse consistently across platforms.
+- Windows required-check shell auto-discovery now ignores WSL launchers, WindowsApps shims, and non-standard Bash installs. Galley only auto-selects standard Git for Windows Bash, or Bash inferred from Git for Windows, and falls back to `cmd.exe` when no supported Git Bash is found.
+- Acceptance skeleton preflight and task validation now allow multiple AC output entries to share one skeleton file path, preserving each entry's metadata while still enforcing path safety, allowed/forbidden scoping, declared-file checks, undeclared-change detection, and required AC coverage. Baseline hashes are deduplicated by slash-normalized path.
+
+### Added
+
+- `environment.yaml` now accepts `required_checks.shell_path` to explicitly choose the executable for a concrete `required_checks.shell` kind. This supports non-standard Bash, custom PowerShell, WSL-based setups, and pinned Unix shells; invalid `shell_path`/`auto` combinations are rejected, and verification evidence records the resolved shell executable.
 
 ## v0.6.0 - 2026-05-24
 

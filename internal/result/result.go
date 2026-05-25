@@ -189,7 +189,8 @@ func runVerification(ctx context.Context, workDir, scratchDir, command string, e
 	// Profile commands are trusted operator-authored shell commands. Run them
 	// through the shared runner so cancellation, process cleanup, and output
 	// bounding behave like the rest of Galley's subprocesses.
-	argv, cleanup, shell, err := shellArgvForOS(runtime.GOOS, command, scratchDir, requiredCheckShell(env))
+	shellKind, shellPath := requiredCheckShellSettings(env)
+	argv, cleanup, shell, err := shellArgvForOS(runtime.GOOS, command, scratchDir, shellKind, shellPath)
 	if err != nil {
 		return verificationRun{command: command, err: err}
 	}
@@ -210,20 +211,23 @@ func runVerification(ctx context.Context, workDir, scratchDir, command string, e
 	}
 }
 
-func requiredCheckShell(env *profile.Environment) string {
+func requiredCheckShellSettings(env *profile.Environment) (string, string) {
 	if env == nil {
-		return ""
+		return "", ""
 	}
-	return env.RequiredChecks.Shell
+	return env.RequiredChecks.Shell, env.RequiredChecks.ShellPath
 }
 
 // shellArgvForOS returns the argv that runVerification should hand to the
 // shared runner, plus an optional cleanup function for materialized script
-// files. On Windows, an unset shell resolves to Git Bash when bash.exe is
-// discoverable and falls back to cmd.exe. Explicit profile shell settings skip
-// that auto-resolution.
-func shellArgvForOS(goos, command, scratchDir, configuredShell string) ([]string, func(), string, error) {
-	shell, err := resolveShellForOS(goos, configuredShell)
+// files. On Windows, an unset shell resolves to a standard Git for Windows
+// Bash install when one is discoverable and falls back to cmd.exe; PATH
+// entries that point at the WSL launcher (System32\bash.exe) or a
+// WindowsApps shim are not selected as Git Bash. An explicit configured
+// shell kind paired with a configuredShellPath uses that executable path
+// verbatim and skips discovery.
+func shellArgvForOS(goos, command, scratchDir, configuredShell, configuredShellPath string) ([]string, func(), string, error) {
+	shell, err := resolveShellForOS(goos, configuredShell, configuredShellPath)
 	if err != nil {
 		return nil, nil, "", err
 	}
@@ -267,9 +271,15 @@ type resolvedShell struct {
 	Bin  string
 }
 
-func resolveShellForOS(goos, configured string) (resolvedShell, error) {
+func resolveShellForOS(goos, configured, configuredPath string) (resolvedShell, error) {
 	switch configured {
 	case "", "auto":
+		if configuredPath != "" {
+			// Profile validation should already reject this combination, but
+			// guard at the resolver too so an unexpectedly-loaded profile
+			// surfaces a clear error rather than a silently ignored override.
+			return resolvedShell{}, fmt.Errorf("required_checks.shell_path requires an explicit required_checks.shell kind (sh, bash, cmd, powershell, or pwsh)")
+		}
 		if goos == "windows" {
 			if bash, ok := discoverWindowsBash(); ok {
 				return resolvedShell{Kind: "bash", Bin: bash}, nil
@@ -278,18 +288,39 @@ func resolveShellForOS(goos, configured string) (resolvedShell, error) {
 		}
 		return resolvedShell{Kind: "sh", Bin: "/bin/sh"}, nil
 	case "sh", "bash", "cmd", "powershell", "pwsh":
-		return shellForKind(configured), nil
+		shell := shellForKind(configured)
+		if configuredPath != "" {
+			shell.Bin = configuredPath
+		}
+		return shell, nil
 	default:
 		return resolvedShell{}, fmt.Errorf("unsupported required check shell %q", configured)
 	}
 }
 
+// standardWindowsGitBashPaths lists the canonical Git for Windows install
+// layouts that Galley should prefer for required-check shell auto-discovery.
+// These are written with Windows backslashes to match what statFile receives
+// from the OS path resolver on real Windows hosts.
+var standardWindowsGitBashPaths = []string{
+	`C:\Program Files\Git\bin\bash.exe`,
+	`C:\Program Files\Git\usr\bin\bash.exe`,
+	`C:\Program Files (x86)\Git\bin\bash.exe`,
+	`C:\Program Files (x86)\Git\usr\bin\bash.exe`,
+}
+
 func discoverWindowsBash() (string, bool) {
-	for _, name := range []string{"bash.exe", "bash"} {
-		if path, err := lookPath(name); err == nil {
-			return path, true
+	// 1) Prefer canonical Git for Windows install locations regardless of
+	//    PATH ordering, so a WSL launcher or WindowsApps shim that happens
+	//    to be earlier on PATH does not shadow a real Git Bash install.
+	for _, candidate := range standardWindowsGitBashPaths {
+		if _, err := statFile(candidate); err == nil {
+			return candidate, true
 		}
 	}
+	// 2) Infer Git Bash from a discoverable git.exe (cmd/git.exe -> bin/bash.exe).
+	//    This covers portable Git layouts that match the cmd/git -> bin/bash
+	//    convention without sitting under "Program Files".
 	for _, name := range []string{"git.exe", "git"} {
 		gitPath, err := lookPath(name)
 		if err != nil {
@@ -301,7 +332,43 @@ func discoverWindowsBash() (string, bool) {
 			}
 		}
 	}
+	// 3) As a last resort, accept a PATH-discovered bash.exe only when it
+	//    resolves to one of the canonical Git for Windows install paths.
+	//    This preserves Git for Windows installs that statFile in step 1
+	//    cannot observe (PATH-only or test environments) while refusing
+	//    arbitrary PATH entries — including the WSL launcher, WindowsApps
+	//    shims, MSYS2, Cygwin, Scoop, and Chocolatey-managed Bashes. Those
+	//    non-standard Bashes must be opted into via required_checks.shell
+	//    plus required_checks.shell_path, never auto-selected from PATH.
+	for _, name := range []string{"bash.exe", "bash"} {
+		path, err := lookPath(name)
+		if err != nil {
+			continue
+		}
+		if !isStandardGitForWindowsBashPath(path) {
+			continue
+		}
+		return path, true
+	}
 	return "", false
+}
+
+// isStandardGitForWindowsBashPath returns true when the supplied path
+// matches one of the canonical Git for Windows install locations in
+// standardWindowsGitBashPaths. Matching is case-insensitive and tolerates
+// either backslash or forward-slash separators so PATH-discovered entries
+// using the alternate separator form still resolve. Any non-matching path
+// — including the WSL launcher, WindowsApps shim, MSYS2, Cygwin, Scoop,
+// or Chocolatey-managed Bashes — is rejected and the auto resolver falls
+// back to cmd.exe so required checks do not silently switch shells.
+func isStandardGitForWindowsBashPath(path string) bool {
+	normalized := strings.ToLower(strings.ReplaceAll(path, `\`, `/`))
+	for _, std := range standardWindowsGitBashPaths {
+		if normalized == strings.ToLower(strings.ReplaceAll(std, `\`, `/`)) {
+			return true
+		}
+	}
+	return false
 }
 
 func gitBashFromGitPath(gitPath string) string {

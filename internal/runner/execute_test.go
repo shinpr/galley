@@ -23,7 +23,7 @@ func TestRunCommandCapturesOutputAndFiles(t *testing.T) {
 
 	result, err := RunCommand(context.Background(), Command{
 		WorkDir: dir,
-		Argv:    []string{script},
+		Argv:    scriptArgv(script),
 	}, RunOptions{
 		Timeout:    5 * time.Second,
 		StdoutPath: stdoutPath,
@@ -54,7 +54,7 @@ func TestRunCommandReturnsExitError(t *testing.T) {
 	}
 	script := writeScript(t, dir, "fail", body)
 
-	result, err := RunCommand(context.Background(), Command{Argv: []string{script}}, RunOptions{Timeout: 5 * time.Second})
+	result, err := RunCommand(context.Background(), Command{Argv: scriptArgv(script)}, RunOptions{Timeout: 5 * time.Second})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -75,7 +75,7 @@ func TestRunCommandKillsProcessGroup(t *testing.T) {
 	marker := filepath.Join(dir, "child-finished")
 	script := writeScript(t, dir, "spawn", "#!/bin/sh\n(sleep 1; touch "+marker+") &\nsleep 5\n")
 
-	result, err := RunCommand(context.Background(), Command{Argv: []string{script}}, RunOptions{Timeout: 50 * time.Millisecond})
+	result, err := RunCommand(context.Background(), Command{Argv: scriptArgv(script)}, RunOptions{Timeout: 50 * time.Millisecond})
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
@@ -107,7 +107,7 @@ func TestRunCommandKeepsBoundedTail(t *testing.T) {
 	}
 	script := writeScript(t, dir, "output", body)
 
-	result, err := RunCommand(context.Background(), Command{Argv: []string{script}}, RunOptions{
+	result, err := RunCommand(context.Background(), Command{Argv: scriptArgv(script)}, RunOptions{
 		Timeout:   5 * time.Second,
 		TailBytes: 4,
 	})
@@ -152,6 +152,13 @@ func writeScript(t *testing.T, dir, name, body string) string {
 	}
 	cleanup = false
 	return path
+}
+
+func scriptArgv(script string) []string {
+	if runtime.GOOS == "windows" {
+		return []string{script}
+	}
+	return []string{"/bin/sh", script}
 }
 
 func assertFileContains(t *testing.T, path, want string) {

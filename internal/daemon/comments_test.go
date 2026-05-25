@@ -188,6 +188,56 @@ fi
 	}
 }
 
+func TestPollPRCommentsRequeuesNeedsSupervisorReviewOpenPR(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	if err := queue.EnsureLayout(root); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonEnvironmentProfile(t, root, repo, true, false)
+	failedPath := filepath.Join(root, "tasks", "failed", "task.yaml")
+	writeDaemonTask(t, failedPath, repo)
+	loaded, err := task.Load(failedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Status = "needs_supervisor_review"
+	loaded.PR.URL = "https://github.com/example/galley/pull/123"
+	loaded.PR.Status = "open"
+	loaded.PR.AuthorLogin = "author"
+	if err := task.Save(failedPath, loaded); err != nil {
+		t.Fatal(err)
+	}
+	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ]; then
+echo '[[{"id":88,"body":"/galley address supervisor feedback","html_url":"https://github.com/example/galley/pull/123#issuecomment-88","user":{"login":"author"}}]]'
+else
+echo unexpected-gh >&2
+exit 1
+fi
+`)
+
+	if err := pollPRComments(context.Background(), Options{Root: root, GHBin: ghBin}.withDefaults()); err != nil {
+		t.Fatal(err)
+	}
+	queuedPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	requeued, err := task.Load(queuedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requeued.Status != "queued" {
+		t.Fatalf("status got %q", requeued.Status)
+	}
+	if !slices.Contains(requeued.PR.ProcessedCommentIDs, "88") {
+		t.Fatalf("processed comments got %#v", requeued.PR.ProcessedCommentIDs)
+	}
+	if len(requeued.RevisionRequests) != 1 || requeued.RevisionRequests[0].Text != "address supervisor feedback" {
+		t.Fatalf("revision requests got %#v", requeued.RevisionRequests)
+	}
+	if _, err := os.Stat(failedPath); !os.IsNotExist(err) {
+		t.Fatalf("failed task should be moved to queued, err=%v", err)
+	}
+}
+
 func TestPollPRCommentsPostsReply(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
@@ -762,6 +812,11 @@ func TestIsActionableForPRCommentPoll(t *testing.T) {
 		{
 			name: "running task with open PR is actionable for direct callers",
 			task: task.Task{Status: "running", PR: task.PR{URL: "https://github.com/example/repo/pull/3", Status: "open"}},
+			want: true,
+		},
+		{
+			name: "needs supervisor review task with open PR is actionable",
+			task: task.Task{Status: "needs_supervisor_review", PR: task.PR{URL: "https://github.com/example/repo/pull/11", Status: "open"}},
 			want: true,
 		},
 		{

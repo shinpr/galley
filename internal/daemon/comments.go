@@ -197,11 +197,14 @@ func applyPRCommandToLoadedTask(loaded *task.Task, command prCommand) {
 //  2. The PR status is "open" (case-insensitive). Merged or closed PRs cannot
 //     usefully trigger another Galley implementation pass.
 //  3. The task status is one of "pr_opened" (the primary actionable state used
-//     by the requeue path in tasks/done), "queued", or "running" (preserved so
-//     direct callers of processTaskPRComments still receive the existing
-//     "already queued/running" reply behavior). Other statuses such as
-//     "merged", "closed", "accepted", "needs_supervisor_review", "failed",
-//     "archived", or "draft" are non-actionable and are skipped here.
+//     by the requeue path in tasks/done) or "needs_supervisor_review" (the
+//     actionable failed-review state used in tasks/failed). The production
+//     poller scans only tasks/done and tasks/failed, so "queued" and "running"
+//     are not reached through that path; they remain allowed only so direct
+//     calls to processTaskPRComments preserve the existing "already
+//     queued/running" reply behavior. Other statuses such as "merged",
+//     "closed", "accepted", "failed", "archived", or "draft" are
+//     non-actionable and are skipped here.
 //
 // Keeping this check ahead of loadTaskProfiles and vcs.FetchPRComments is the
 // reason the daemon no longer pays per-task latency or GitHub quota for
@@ -214,7 +217,7 @@ func isActionableForPRCommentPoll(loaded task.Task) bool {
 		return false
 	}
 	switch loaded.Status {
-	case "pr_opened", "queued", "running":
+	case "pr_opened", "needs_supervisor_review", "queued", "running":
 		return true
 	default:
 		return false

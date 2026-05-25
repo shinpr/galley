@@ -103,7 +103,7 @@ Each generated skeleton file must include:
 - Arrange/Act/Assert structure using repository test idioms.
 - Explicit placeholders for production APIs, fixtures, mocks, and assertions the executor must complete.
 
-Skeletons are implementation obligations for the later executor. Comments may explain intent, but a skeleton that requires implementation must also contain a machine-visible unfinished-test signal. Do not write full assertions that force implementation details before the executor has implemented the behavior. Leave production implementation to the executor.
+Skeletons are implementation obligations for the later executor. Use machine-visible unfinished-test signals for skeletons that require implementation. Limit this pass to test skeleton files. Leave production implementation to the executor.
 
 # Completion Gates
 

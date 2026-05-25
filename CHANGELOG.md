@@ -20,6 +20,7 @@ This project follows semantic versioning.
 
 ### Fixed
 
+- Setup executor result handling now preserves failed executor repair guidance in task errors, validates ready results for source/readiness evidence before persistence, and keeps setup evidence visible when run evidence cannot be reloaded.
 - Review-time staging failures are now recorded as attempt errors with `phase=review_staging` / `kind=review_staging_failed`; Galley does not invoke the supervisor with an empty or stale diff and moves the task to `tasks/failed` with staging-specific evidence for operator diagnosis.
 
 ## v0.6.2 - 2026-05-25

@@ -70,12 +70,12 @@
     "provider": {
       "type": "string",
       "enum": ["claude", "codex"],
-      "description": "Which executor provider ran the setup attempt. The daemon sets this from task.executor.cli when it dispatches the setup executor. Authored-only runs that never dispatched an executor omit this field."
+      "description": "Daemon-owned provider metadata. If a setup executor emits this field, the daemon overwrites it from task.executor.cli before persisting setup_result.json."
     },
     "source": {
       "type": "string",
       "enum": ["environment_setup", "environment_commands", "discovered", "readiness_check"],
-      "description": "Where the canonical successful setup plan came from. `environment_setup` means the prior environment.setup plan made the worktree ready unchanged. `environment_commands` means the plan reused named environment commands. `discovered` means the setup executor composed the plan from repository signals or conventions. `readiness_check` is accepted for legacy evidence."
+      "description": "Where the canonical successful setup plan came from. Required by the daemon when status is ready. `environment_setup` means the prior environment.setup plan made the worktree ready unchanged. `environment_commands` means the plan reused named environment commands. `discovered` means the setup executor composed the plan from repository signals or conventions. `readiness_check` is accepted for legacy evidence."
     }
   }
 }

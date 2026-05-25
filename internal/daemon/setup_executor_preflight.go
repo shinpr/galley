@@ -162,7 +162,7 @@ func SetupExecutorPreflight(ctx context.Context, opts SetupExecutorPreflightOpti
 		return res, nil, err
 	}
 	if res == nil || res.Status != SetupStatusReady {
-		return res, nil, fmt.Errorf("setup executor did not make the worktree ready")
+		return res, nil, setupNotReadyError(res)
 	}
 	// Discovery reported ready: enforce the learned-plan contract before
 	// persistence so a ready+empty-successful_commands response cannot silently
@@ -180,7 +180,9 @@ func SetupExecutorPreflight(ctx context.Context, opts SetupExecutorPreflightOpti
 	// re-cost discovery every run.
 	update, perr := persistLearnedSetupPlan(opts, env, res)
 	if perr != nil {
-		recordSetupProfileUpdateFailure(opts.RunDir, perr)
+		if writeErr := recordSetupProfileUpdateFailure(opts.RunDir, perr); writeErr != nil {
+			perr = errors.Join(perr, writeErr)
+		}
 		// Promote the persistence failure into the setup result so
 		// setup_result.json carries the same failure facts as the rest of the
 		// run evidence (AC8).
@@ -190,7 +192,7 @@ func SetupExecutorPreflight(ctx context.Context, opts SetupExecutorPreflightOpti
 				res.Error = "learned setup plan persistence failed: " + perr.Error()
 			}
 			if res.RepairGuidance == "" {
-				res.RepairGuidance = "Inspect environment_update.json, fix the environment.yaml under runs/<run-id>/setup_result.json, and requeue the task."
+				res.RepairGuidance = "Inspect setup_result.json and environment_update.json, fix environment.yaml, and requeue the task."
 			}
 			_ = WriteSetupResult(opts.RunDir, res)
 		}
@@ -231,7 +233,7 @@ func runSetupExecutor(ctx context.Context, opts SetupExecutorPreflightOptions) (
 			message = fmt.Sprintf("setup executor exited %d: %s", out.ExitCode, truncateExcerpt(out.Stderr))
 		}
 		failure := setupExecutorFailureResult(message, provider, executorRun, out.ExitCode, out.Stdout, out.Stderr, signals)
-		return failure, fmt.Errorf("setup executor failed: %v", parseErr)
+		return failure, errors.Join(fmt.Errorf("setup executor failed: %w", parseErr), runErr)
 	}
 	parsed.Provider = provider
 	if parsed.Status == "" {
@@ -279,19 +281,41 @@ func setupExecutorFailureResult(message, provider, executorRun string, exitCode 
 	return res
 }
 
+func setupNotReadyError(res *SetupResult) error {
+	if res == nil {
+		return fmt.Errorf("setup executor did not make the worktree ready")
+	}
+	parts := []string{"setup executor did not make the worktree ready"}
+	if msg := strings.TrimSpace(res.Error); msg != "" {
+		parts = append(parts, msg)
+	}
+	if guidance := strings.TrimSpace(res.RepairGuidance); guidance != "" {
+		parts = append(parts, "repair: "+guidance)
+	}
+	return fmt.Errorf("%s", strings.Join(parts, ": "))
+}
+
 // enforceLearnedSetupPlanContract validates that a setup executor that returned
-// status=ready also returned a non-empty successful_commands plan. The daemon
-// does not execute environment.setup.commands itself, so a ready response
-// without the final successful plan would leave the next task without the setup
-// executor's repaired command sequence.
+// status=ready also returned the evidence and successful plan Galley needs to
+// persist setup readiness for the next task.
 func enforceLearnedSetupPlanContract(res *SetupResult) error {
 	if res == nil || res.Status != SetupStatusReady {
 		return nil
 	}
-	if len(res.SuccessfulCommands) > 0 {
-		return nil
+	if len(res.SuccessfulCommands) == 0 {
+		return fmt.Errorf("setup executor returned status=ready with no successful_commands; cannot learn a setup plan to persist to environment.yaml")
 	}
-	return fmt.Errorf("setup executor returned status=ready with no successful_commands; cannot learn a setup plan to persist to environment.yaml")
+	if strings.TrimSpace(res.ReadinessEvidence) == "" {
+		return fmt.Errorf("setup executor returned status=ready with no readiness_evidence")
+	}
+	switch res.Source {
+	case SetupSourceEnvironmentSetup, SetupSourceEnvironmentCommands, SetupSourceDiscovered:
+		return nil
+	case "":
+		return fmt.Errorf("setup executor returned status=ready with no source")
+	default:
+		return fmt.Errorf("setup executor returned status=ready with invalid source %q", res.Source)
+	}
 }
 
 // applySetupContractViolation downgrades a result that violated the
@@ -385,12 +409,15 @@ func setupPlansEqual(a, b profile.SetupPlan) bool {
 	return true
 }
 
-func recordSetupProfileUpdateFailure(runDir string, err error) {
+func recordSetupProfileUpdateFailure(runDir string, err error) error {
 	payload := map[string]any{
 		"changed": false,
 		"error":   err.Error(),
 	}
-	_ = writeJSON(filepath.Join(runDir, "environment_update.json"), payload)
+	if writeErr := writeJSON(filepath.Join(runDir, "environment_update.json"), payload); writeErr != nil {
+		return fmt.Errorf("write setup environment update failure evidence: %w", writeErr)
+	}
+	return nil
 }
 
 // WriteSetupResult persists the source-of-truth setup_result.json (AC8).
@@ -455,16 +482,37 @@ func LoadSetupEnvironmentUpdate(runDir string) (*SetupEnvironmentUpdate, error) 
 }
 
 // loadSetupRunEvidence reads the persisted setup_result.json and
-// environment_update.json from runDir. Errors are logged to stderr and the
-// helper returns nil, nil so a stale or missing file never blocks the loop.
+// environment_update.json from runDir. Evidence read failures are returned as a
+// degraded setup result so later prompts still see that setup evidence was
+// unavailable instead of silently losing the setup context.
 func loadSetupRunEvidence(runDir, runID string) (*SetupResult, *SetupEnvironmentUpdate) {
 	res, err := LoadSetupResult(runDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "galley: could not load setup result for run %s: %v\n", runID, err)
+		res = &SetupResult{
+			Status:         SetupStatusFailed,
+			Commands:       []SetupCommandAttempt{},
+			Error:          "setup_result.json could not be loaded: " + err.Error(),
+			RepairGuidance: "Inspect the run directory and restore readable setup_result.json evidence before trusting setup readiness.",
+		}
 	}
 	update, uerr := LoadSetupEnvironmentUpdate(runDir)
 	if uerr != nil {
 		fmt.Fprintf(os.Stderr, "galley: could not load setup environment update for run %s: %v\n", runID, uerr)
+		if res == nil {
+			res = &SetupResult{
+				Status:   SetupStatusFailed,
+				Commands: []SetupCommandAttempt{},
+			}
+		}
+		if res.Error == "" {
+			res.Error = "environment_update.json could not be loaded: " + uerr.Error()
+		} else {
+			res.Error += "; environment_update.json could not be loaded: " + uerr.Error()
+		}
+		if res.RepairGuidance == "" {
+			res.RepairGuidance = "Inspect the run directory and restore readable setup evidence before trusting setup readiness."
+		}
 	}
 	return res, update
 }
@@ -551,7 +599,12 @@ func truncateString(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}
-	return "…" + s[len(s)-max:]
+	if max <= 1 {
+		return s[:max]
+	}
+	head := (max - 1) / 2
+	tail := max - 1 - head
+	return s[:head] + "…" + s[len(s)-tail:]
 }
 
 // discoverRepositorySignals returns a small set of repository setup signal
@@ -578,6 +631,9 @@ func discoverRepositorySignals(workDir string) []string {
 	}
 	if scripts, err := os.ReadDir(filepath.Join(workDir, "scripts")); err == nil {
 		for _, entry := range scripts {
+			if len(out) >= maxSetupResultFiles {
+				break
+			}
 			if !entry.IsDir() {
 				out = append(out, filepath.Join("scripts", entry.Name()))
 			}
@@ -588,7 +644,16 @@ func discoverRepositorySignals(workDir string) []string {
 
 func marshalSetupExecutorRequest(opts SetupExecutorPreflightOptions, signals []string) ([]byte, error) {
 	request := map[string]any{
-		"task":               opts.Task,
+		"task": map[string]any{
+			"id":                  opts.Task.ID,
+			"mode":                opts.Task.Mode,
+			"goal":                opts.Task.Goal,
+			"acceptance_criteria": opts.Task.AcceptanceCriteria,
+			"scope":               opts.Task.Scope,
+			"execution_policy":    opts.Task.ExecutionPolicy,
+			"executor":            opts.Task.Executor,
+			"preflight":           opts.Task.Preflight,
+		},
 		"environment":        opts.Profiles.Environment,
 		"quality":            opts.Profiles.Quality,
 		"repository_signals": signals,

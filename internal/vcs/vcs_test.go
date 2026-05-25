@@ -249,6 +249,37 @@ func TestStagePathsForReviewTreatsPathspecMagicAsLiteral(t *testing.T) {
 	}
 }
 
+func TestAddPathsTreatsPathspecMagicAsLiteral(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows filenames cannot contain ':'")
+	}
+	repo := t.TempDir()
+	runDir := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	runGit(t, repo, "config", "user.email", "a@example.test")
+	runGit(t, repo, "config", "user.name", "A")
+	if err := os.WriteFile(filepath.Join(repo, "base.txt"), []byte("base\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "base.txt")
+	runGit(t, repo, "commit", "-q", "-m", "init")
+	if err := os.WriteFile(filepath.Join(repo, ":(glob)*"), []byte("magic\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "other.txt"), []byte("other\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := AddPaths(t.Context(), Binaries{}, repo, runDir, []string{":(glob)*"}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := strings.TrimSpace(string(runGitOutput(t, repo, "diff", "--cached", "--name-only")))
+	if got != ":(glob)*" {
+		t.Fatalf("staged paths got %q, want only literal magic filename", got)
+	}
+}
+
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)

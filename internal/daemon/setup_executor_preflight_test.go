@@ -853,6 +853,50 @@ pr:
 	}
 }
 
+func TestEnforceLearnedSetupPlanContractRequiresReadyEvidence(t *testing.T) {
+	base := func() *SetupResult {
+		return &SetupResult{
+			Status:             SetupStatusReady,
+			Commands:           []SetupCommandAttempt{{Run: "go mod download", Source: SetupSourceDiscovered, ExitCode: 0}},
+			SuccessfulCommands: []profile.SetupCommand{{Run: "go mod download", Why: "fetch modules"}},
+			ReadinessEvidence:  "go test ./... passed",
+			Source:             SetupSourceDiscovered,
+		}
+	}
+	tests := []struct {
+		name string
+		edit func(*SetupResult)
+		want string
+	}{
+		{
+			name: "missing readiness evidence",
+			edit: func(res *SetupResult) { res.ReadinessEvidence = "" },
+			want: "readiness_evidence",
+		},
+		{
+			name: "missing source",
+			edit: func(res *SetupResult) { res.Source = "" },
+			want: "source",
+		},
+		{
+			name: "readiness check source is not canonical plan source",
+			edit: func(res *SetupResult) { res.Source = SetupSourceReadinessCheck },
+			want: "invalid source",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res := base()
+			tt.edit(res)
+
+			err := enforceLearnedSetupPlanContract(res)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("contract error got %v, want mention %q", err, tt.want)
+			}
+		})
+	}
+}
+
 // TestSetupResultSchemaMatchesPersistedShape is the JSON/schema validation
 // regression for the persisted SetupResult shape. It writes a representative
 // SetupResult (covering every field the runtime can serialize today),

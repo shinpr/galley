@@ -314,13 +314,15 @@ def validate_creator_manifest(manifest):
 
 def validate_setup_executor_result(result):
     require_object(result, "setup_result")
-    if result.get("status") not in {"ready", "failed"}:
+    status = result.get("status")
+    if status not in {"ready", "failed"}:
         raise ValueError("status must be ready or failed")
     if "commands" not in result:
         raise ValueError("commands is required")
     require_array(result["commands"], "commands")
     if len(result["commands"]) > 50:
         raise ValueError("commands must contain at most 50 entries")
+    command_runs = set()
     for index, command in enumerate(result["commands"]):
         require_object(command, f"commands[{index}]")
         for field in ["run", "source", "exit_code"]:
@@ -330,6 +332,7 @@ def validate_setup_executor_result(result):
             raise ValueError(f"commands[{index}].run must be a non-empty string")
         if len(command["run"]) > 4096:
             raise ValueError(f"commands[{index}].run is too long")
+        command_runs.add(command["run"])
         if command.get("source") not in {"environment_setup", "environment_commands", "discovered", "readiness_check"}:
             raise ValueError(f"commands[{index}].source is invalid")
         if not isinstance(command["exit_code"], int):
@@ -344,6 +347,22 @@ def validate_setup_executor_result(result):
                 raise ValueError(f"successful_commands[{index}].run must be a non-empty string")
             if len(command["run"]) > 4096:
                 raise ValueError(f"successful_commands[{index}].run is too long")
+            if command["run"] not in command_runs:
+                raise ValueError(f"successful_commands[{index}].run must match an executed commands[].run")
+    if "source" in result and result.get("source") not in {"environment_setup", "environment_commands", "discovered", "readiness_check"}:
+        raise ValueError("source is invalid")
+    if status == "ready":
+        if result.get("source") not in {"environment_setup", "environment_commands", "discovered"}:
+            raise ValueError("source is required for ready setup results")
+        if "successful_commands" not in result or not result["successful_commands"]:
+            raise ValueError("successful_commands is required for ready setup results")
+        if not isinstance(result.get("readiness_evidence"), str) or not result["readiness_evidence"].strip():
+            raise ValueError("readiness_evidence is required for ready setup results")
+    if status == "failed":
+        if not isinstance(result.get("error"), str) or not result["error"].strip():
+            raise ValueError("error is required for failed setup results")
+        if not isinstance(result.get("repair_guidance"), str) or not result["repair_guidance"].strip():
+            raise ValueError("repair_guidance is required for failed setup results")
 
 
 def main():

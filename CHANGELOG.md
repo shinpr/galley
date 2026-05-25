@@ -6,21 +6,29 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- Existing `environment.yaml` `setup.commands[]` plans now run through the setup executor instead of a daemon-owned direct execution path. Setup failures from saved plans can therefore be diagnosed and repaired in the same executor context that learns new setup plans, while successful repaired plans are still persisted back to `environment.yaml`.
+- Packaged Claude and Codex Galley plugins are now versioned as `0.1.13`: profile-authoring guidance now mentions optional fresh-worktree setup commands when proposing `environment.yaml`, keeping detailed setup behavior in `docs/profiles.md` and the bundled environment schema.
+
+### Fixed
+
+- Learned setup plans are now persisted only when the setup executor reports setup commands that actually exited successfully. Readiness-check-only commands such as tests or builds are no longer saved as `environment.setup.commands[]`, and failed setup executor results keep repair guidance visible in task/run evidence.
+
 ## v0.7.0 - 2026-05-25
 
 ### Added
 
-- Setup executor preflight phase and `environment.yaml` `setup.commands[]`. Galley now prepares fresh task worktrees before acceptance skeleton creation and implementation by dispatching a setup executor to try, diagnose, and repair the saved setup plan or learn a reusable one, which is persisted back to `environment.yaml` on success.
+- Setup executor preflight phase and `environment.yaml` `setup.commands[]`. Galley now prepares fresh task worktrees before acceptance skeleton creation and implementation by running authored setup commands or dispatching a setup executor to learn a reusable setup plan, which is persisted back to `environment.yaml` on success.
 - Setup run evidence and failure routing. Setup now writes `setup_result.json` and, when a learned plan is persisted, `environment_update.json`; setup failures are classified as `phase: setup`, `kind: setup_failed` with repair guidance for `environment.setup`.
 
 ### Changed
 
-- Packaged Claude and Codex Galley plugins are now versioned as `0.1.13`: setup executor prompts now include explicit result JSON contracts, profile-authoring guidance mentions optional fresh-worktree setup commands, and troubleshooting routes `setup_failed` diagnosis through setup executor evidence.
+- Packaged Claude and Codex Galley plugins are now versioned as `0.1.13`: setup executor prompts now include explicit result JSON contracts and troubleshooting guidance routes `setup_failed` diagnosis through setup run evidence.
 - The daemon now stages the executor-produced reviewable path set before capturing supervisor diff evidence, so newly created untracked files appear in `diff.patch` and supervisor review while `commit:false` input files and unrelated context-only worktree dirtiness stay out of the submitted diff. Review staging writes `git_add_review.stdout.log`, `git_add_review.stderr.log`, and `git_add_review_result.json` attempt evidence when it runs, and records a skipped result when there is no reviewable path set.
 
 ### Fixed
 
-- Setup executor result handling now preserves failed executor repair guidance in task errors, validates ready results for source/readiness evidence before persistence, and keeps setup evidence visible when run evidence cannot be reloaded.
 - Review-time staging failures are now recorded as attempt errors with `phase=review_staging` / `kind=review_staging_failed`; Galley does not invoke the supervisor with an empty or stale diff and moves the task to `tasks/failed` with staging-specific evidence for operator diagnosis.
 
 ## v0.6.2 - 2026-05-25

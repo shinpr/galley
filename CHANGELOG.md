@@ -6,6 +6,18 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.6.2 - 2026-05-25
+
+### Changed
+
+- `environment.yaml`'s `required_checks.shell_path` is now the explicit executable override for required checks. Recognized shell executable names can be used without `required_checks.shell`; when both fields are present, `shell_path` wins and `shell` is only fallback metadata for unrecognized executable names.
+- Packaged Claude and Codex Galley plugins are now versioned as `0.1.12`: Windows profile guidance now treats `required_checks.shell_path` as the preferred exact executable override for non-standard shells, uses `required_checks.shell` only as fallback metadata for unrecognized executable names, and explains that explicit Windows Bash execution uses Git for Windows discovery unless operators opt into another Bash with `shell_path`.
+
+### Fixed
+
+- Windows required-check execution with `required_checks.shell: bash` now prefers standard Git for Windows Bash discovery and refuses to silently launch WSL, WindowsApps, MSYS2, Cygwin, Scoop, or other non-standard Bash entries. Operators can opt in to a specific non-standard Bash with `required_checks.shell_path`.
+- Required-check evidence now records both the resolved shell kind and the executable path actually launched.
+
 ## v0.6.1 - 2026-05-25
 
 ### Changed

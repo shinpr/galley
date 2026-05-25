@@ -75,23 +75,8 @@ func EnvironmentJSONSchema() ([]byte, error) {
 			"required_checks": object(
 				properties(map[string]any{
 					"shell":      enumSchema([]string{"auto", "sh", "bash", "cmd", "powershell", "pwsh"}),
-					"shell_path": stringSchema("minLength", 1, "pattern", `^\S(?:.*\S)?$`, "description", "Explicit executable path for the configured required_checks.shell kind; use an absolute path when pinning a shell. Requires shell to be set to a concrete kind (not auto). In Windows YAML, escape backslashes only in double-quoted strings; single-quoted or plain scalars use single backslashes. Leading and trailing whitespace is invalid."),
+					"shell_path": stringSchema("minLength", 1, "pattern", `^\S(?:.*\S)?$`, "description", "Explicit executable path override for required-check shell selection. When the basename is one of `bash`, `sh`, `cmd.exe`, `powershell.exe`, or `pwsh.exe` (case-insensitive, optional `.exe`, either `/` or `\\` separators), `shell_path` may stand alone and Galley infers the invocation style from the executable name. When both `shell` and `shell_path` are set, `shell_path` takes precedence as the more specific executable selection and Galley will not invoke that executable using an incompatible style from `shell`. When the basename is not recognized, an explicit `required_checks.shell` kind is required as fallback metadata. In Windows YAML, escape backslashes only in double-quoted strings; single-quoted or plain scalars use single backslashes. Leading and trailing whitespace is invalid."),
 				}),
-				func(m map[string]any) {
-					m["allOf"] = []any{
-						map[string]any{
-							"if": map[string]any{
-								"required": []string{"shell_path"},
-							},
-							"then": map[string]any{
-								"required": []string{"shell"},
-								"properties": map[string]any{
-									"shell": enumSchema([]string{"sh", "bash", "cmd", "powershell", "pwsh"}),
-								},
-							},
-						},
-					}
-				},
 			),
 			"constraints": object(
 				required("network", "secrets_policy", "destructive_commands"),

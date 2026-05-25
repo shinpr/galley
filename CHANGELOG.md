@@ -6,6 +6,12 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.6.1 - 2026-05-25
+
+### Changed
+
+- Packaged Claude and Codex Galley plugins are now versioned as `0.1.11`: task-authoring guidance now drafts acceptance criteria value-first and enables acceptance skeleton preflight only when pre-created integration, cross-layer, or E2E skeletons add value, while Windows profile guidance and the bundled environment schema now document `required_checks.shell_path` for explicit non-standard shell executables and keep `auto` limited to standard Git for Windows Bash discovery.
+
 ### Fixed
 
 - Windows required-check shell auto-discovery now ignores WSL launchers, WindowsApps shims, and non-standard Bash installs. Galley only auto-selects standard Git for Windows Bash, or Bash inferred from Git for Windows, and falls back to `cmd.exe` when no supported Git Bash is found.

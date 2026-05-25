@@ -57,12 +57,77 @@ Run at least one quality required check (or its closest available equivalent). C
 
 ## Step 5. Return Result
 
-Return exactly one JSON object that matches the configured schema. `successful_commands` must be the ordered minimal plan that would make a fresh worktree ready if rerun. Include `why` strings so persisted environment.yaml stays human-readable.
+Run the Self Quality Gate below, then return exactly one JSON object that matches the Output Contract.
 
 If you cannot make the worktree ready, set `status: "failed"`, write a terse `error`, fill `repair_guidance` with concrete next steps, and still return the attempted `commands[]` for operator diagnosis.
+
+# Self Quality Gate
+
+Before returning the final JSON, verify:
+
+- Every `commands[]` entry has `run`, `source`, and `exit_code`.
+- `status: "ready"` has non-empty `successful_commands`, `readiness_evidence`, and top-level `source`.
+- Every `successful_commands[].run` also appears in `commands[]`.
+- Setup executor output does not use `source: "readiness_check"`; that source is reserved for the daemon.
+- `status: "failed"` has `error` and `repair_guidance`.
 
 # Setup-Specific Rules
 
 - Setup readiness EXCLUDES acceptance skeleton obligations. Do not fail because a task-specific test skeleton has not been implemented yet.
 - Keep `commands[].stdout_excerpt` and `stderr_excerpt` short (final 200-400 characters at most).
 - The setup executor result JSON is the only authoritative output. Print it as the final assistant message so Codex captures it through `--output-last-message`.
+
+# Output Contract
+
+Return one JSON object as the entire response body. Use no Markdown fences, commentary, logs, or surrounding text.
+
+Use this shape for a ready worktree:
+
+```json
+{
+  "status": "ready",
+  "source": "environment_commands",
+  "commands": [
+    {
+      "run": "npm ci",
+      "why": "Install locked project dependencies.",
+      "source": "environment_commands",
+      "exit_code": 0,
+      "stdout_excerpt": "added packages",
+      "stderr_excerpt": ""
+    }
+  ],
+  "successful_commands": [
+    {
+      "run": "npm ci",
+      "why": "Install locked project dependencies."
+    }
+  ],
+  "inspected_files": ["package.json", "package-lock.json"],
+  "readiness_evidence": "`npm ci` exited 0 and the selected quality required check passed."
+}
+```
+
+Set top-level `source` to `environment_setup` when the authored setup plan made the worktree ready unchanged, `environment_commands` when the successful plan reuses environment commands, or `discovered` when the successful plan is composed from repository signals or conventions. After an authored plan fails, use the `source` of the replacement plan that made the worktree ready.
+
+Use this shape when setup cannot make the worktree ready:
+
+```json
+{
+  "status": "failed",
+  "source": "discovered",
+  "commands": [
+    {
+      "run": "npm ci",
+      "why": "Install locked project dependencies.",
+      "source": "environment_commands",
+      "exit_code": 1,
+      "stdout_excerpt": "",
+      "stderr_excerpt": "authentication required"
+    }
+  ],
+  "inspected_files": ["package.json", "package-lock.json"],
+  "error": "Dependency installation requires unavailable private registry credentials.",
+  "repair_guidance": "Configure the registry credentials for this repository or author environment.setup with the approved internal install command."
+}
+```

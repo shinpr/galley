@@ -18,8 +18,73 @@ import (
 	"github.com/shinpr/galley/internal/supervisor"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/internal/taskstate"
+	"github.com/shinpr/galley/internal/vcs"
 	"github.com/shinpr/galley/internal/workspace"
 )
+
+// reviewStagingError signals that Galley's review-time `git add -A` step
+// failed after the executor exited and before the supervisor evaluation
+// would have been driven against an empty or stale diff. The loop
+// classification path (runOneSupervisorAttempt) inspects this type to record
+// the failure with a distinct `review_staging` phase / `review_staging_failed`
+// kind instead of the generic executor failure classification (AC6).
+type reviewStagingError struct{ Err error }
+
+func (e *reviewStagingError) Error() string {
+	if e == nil || e.Err == nil {
+		return "review staging failed"
+	}
+	return e.Err.Error()
+}
+
+func (e *reviewStagingError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func asReviewStagingError(err error) (*reviewStagingError, bool) {
+	var rse *reviewStagingError
+	if errors.As(err, &rse) {
+		return rse, true
+	}
+	return nil, false
+}
+
+// stageExecutorOutput is the package-level seam used by runExecutorAttempt to
+// pre-stage executor-produced worktree changes before snapshot capture.
+// excludePaths constrains the staged set to executor-produced changes by
+// keeping non-committed task input file destinations (task.files with
+// commit:false) out of the index, so the supervisor diff/evidence does not
+// silently widen to include context-only inputs Galley materialized for the
+// executor (AC4). Tests override this seam to inject failure paths and to
+// assert the exclude list without spawning a real git process. Production
+// callers always use vcs.StageAll.
+var stageExecutorOutput = func(ctx context.Context, opts Options, workDir, attemptDir string, excludePaths []string) error {
+	return vcs.StageAll(ctx, vcsBinaries(opts), workDir, attemptDir, excludePaths)
+}
+
+// nonCommittedInputDestinations returns the worktree-relative destinations of
+// task input files declared with commit:false. These are context-only inputs
+// Galley materializes in the worktree before the executor runs; review-time
+// staging must keep them out of the supervisor diff so reviewable evidence
+// only reflects executor-produced changes (AC4 / supervisor feedback on
+// attempt 3).
+func nonCommittedInputDestinations(files []task.InputFile) []string {
+	var paths []string
+	for _, f := range files {
+		if f.Commit {
+			continue
+		}
+		dest := strings.TrimSpace(f.Destination)
+		if dest == "" {
+			continue
+		}
+		paths = append(paths, dest)
+	}
+	return paths
+}
 
 const progressNoDiffThreshold = 2
 
@@ -200,6 +265,14 @@ func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) 
 	}
 	outcome, err := runExecutorAttempt(ctx, req.Opts, effectiveTask, req.Profiles, req.Prepared.CWD, req.Prepared.BaseSHA, attemptDir, req.Prompt, effectiveTaskPath, preflightOutputs)
 	if err != nil {
+		// A review-time staging failure is recorded under a distinct phase
+		// and kind so the failed task surfaces the staging-related error to
+		// the supervisor and operators instead of mis-classifying it as an
+		// executor failure (AC6).
+		if _, ok := asReviewStagingError(err); ok {
+			appendFailureAttempt(req.Loaded, "review_staging", "review_staging_failed", err, attemptDir)
+			return attemptReview{}, err
+		}
 		appendFailureAttempt(req.Loaded, "executor", classifyFailureKind("executor_failed", err), err, attemptDir)
 		return attemptReview{}, err
 	}
@@ -537,6 +610,24 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 		if err := writeJSON(resultPath, claudeResult); err != nil {
 			return attemptOutcome{}, err
 		}
+	}
+
+	// Stage executor-produced worktree changes before capturing the snapshot
+	// Galley hands to the supervisor. Without this step, newly-created
+	// untracked files would not appear in the staged or unstaged diff surfaces
+	// and the supervisor would receive an empty diff for new-file work (D1 /
+	// AC1 / AC2). Non-committed task input file destinations are excluded so
+	// the staged review evidence is constrained to executor-produced changes
+	// and context-only inputs do not leak into the supervisor diff (AC4 /
+	// supervisor feedback on attempt 3). Staging failure is fatal: we surface
+	// a typed error so the caller records a `review_staging` attempt failure
+	// instead of sending an empty diff to the supervisor (AC6). The parent
+	// ctx (not attemptCtx) is used here so a staging step initiated after
+	// executor timeout still has a chance to capture worktree state and write
+	// its evidence file.
+	excludePaths := nonCommittedInputDestinations(loaded.Files)
+	if err := stageExecutorOutput(ctx, opts, workDir, attemptDir, excludePaths); err != nil {
+		return attemptOutcome{}, &reviewStagingError{Err: err}
 	}
 
 	diffSnapshot, diffErr := workspace.CaptureSnapshotFromBase(ctx, workDir, baseSHA, workspaceOptions(opts))

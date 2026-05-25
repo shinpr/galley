@@ -106,6 +106,63 @@ func addPathsForOS(ctx context.Context, bins Binaries, workDir, runDir string, p
 	return nil
 }
 
+// StageAll stages every change in the worktree using `git add -A` and writes
+// command evidence under runDir. The function is used to make executor-produced
+// worktree changes visible in the snapshot Galley hands to the supervisor —
+// in particular, newly-created untracked files that the executor did not run
+// `git add` for would otherwise be invisible to the staged or unstaged diff
+// surfaces. Evidence files (git_add_review.stdout.log, git_add_review.stderr.log,
+// git_add_review_result.json) let reviewers inspect the staging step that ran
+// before supervisor evaluation. A staging failure returns an error so the
+// caller can record a clear attempt failure instead of handing an empty diff
+// to the supervisor.
+//
+// excludePaths is the list of worktree-relative paths that must be kept out of
+// the staged set even when they exist in the worktree. Galley uses this to
+// constrain review-time staging/evidence to executor-produced changes: task
+// input files declared with commit:false are context-only inputs Galley
+// materializes in the worktree before the executor runs, so they must not
+// appear in the staged review evidence the supervisor sees. The exclusions
+// are expressed via git pathspec magic (`:(exclude)<path>`) so the files
+// remain physically present in the worktree (the supervisor's read-only
+// context) but are not added to the index, keeping them out of every diff
+// surface (`git diff --cached`, `git diff`, and the snapshot Diff Galley
+// hands to the supervisor).
+func StageAll(ctx context.Context, bins Binaries, workDir, runDir string, excludePaths []string) error {
+	argv := []string{bins.git(), "add", "-A"}
+	if len(excludePaths) > 0 {
+		seen := make(map[string]bool, len(excludePaths))
+		// A positive pathspec is required when adding exclude pathspecs;
+		// without one the exclude list applies against an empty include set
+		// and stages nothing. `.` keeps the existing "stage everything"
+		// behavior intact and limits exclusions to the explicit list.
+		argv = append(argv, "--", ".")
+		for _, p := range excludePaths {
+			clean := filepath.ToSlash(filepath.Clean(p))
+			if clean == "" || clean == "." || seen[clean] {
+				continue
+			}
+			seen[clean] = true
+			argv = append(argv, ":(exclude,literal)"+clean)
+		}
+	}
+	result, err := runner.RunCommand(ctx, runner.Command{
+		WorkDir: workDir,
+		Argv:    argv,
+	}, runner.RunOptions{
+		StdoutPath: filepath.Join(runDir, "git_add_review.stdout.log"),
+		StderrPath: filepath.Join(runDir, "git_add_review.stderr.log"),
+	})
+	writeErr := writeJSON(filepath.Join(runDir, "git_add_review_result.json"), result)
+	if err != nil {
+		return errors.Join(fmt.Errorf("git add -A (review staging) failed: %w", err), writeErr)
+	}
+	if writeErr != nil {
+		return writeErr
+	}
+	return nil
+}
+
 // Commit creates a git commit and writes command evidence.
 func Commit(ctx context.Context, bins Binaries, workDir, runDir, message string) error {
 	result, err := runner.RunCommand(ctx, runner.Command{

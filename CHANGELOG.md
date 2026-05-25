@@ -6,6 +6,14 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- The daemon now stages executor-produced worktree changes with `git add -A` before capturing the supervisor diff snapshot, so newly created untracked files appear in the attempt `diff.patch` instead of being silently dropped from the supervisor's view. Review-time staging is constrained to executor-produced changes: task input files declared with `commit:false` are excluded via git pathspec magic (`:(exclude,literal)<destination>`) so context-only inputs Galley materializes in the worktree do not leak into the staged review evidence, the attempt `diff.patch`, or the supervisor `Evidence.Diff`. The staging step writes `git_add_review.stdout.log`, `git_add_review.stderr.log`, and `git_add_review_result.json` under each attempt directory as run evidence.
+
+### Fixed
+
+- A failure of the review-time `git add -A` step is now recorded as an attempt error with `phase=review_staging` / `kind=review_staging_failed`, the supervisor is not invoked with an empty or stale diff, and the task is moved to `tasks/failed` so operators can inspect the staging-specific failure instead of seeing it misclassified as a generic executor failure.
+
 ## v0.6.2 - 2026-05-25
 
 ### Changed

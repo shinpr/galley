@@ -117,6 +117,38 @@
       },
       "type": "object"
     },
+    "setup": {
+      "additionalProperties": false,
+      "properties": {
+        "commands": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "run": {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              "why": {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "run"
+            ],
+            "type": "object"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "commands"
+      ],
+      "type": "object"
+    },
     "supervisor": {
       "additionalProperties": false,
       "properties": {

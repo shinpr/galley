@@ -81,6 +81,7 @@ func addPathsForOS(ctx context.Context, bins Binaries, workDir, runDir string, p
 	if len(stagePaths) == 0 {
 		return fmt.Errorf("git add paths is empty")
 	}
+	pathspecs := literalPathspecs(stagePaths)
 	cmd := runner.Command{WorkDir: workDir}
 	if goos == "windows" {
 		// git add --pathspec-from-file=- --pathspec-file-nul reads pathspecs
@@ -88,9 +89,9 @@ func addPathsForOS(ctx context.Context, bins Binaries, workDir, runDir string, p
 		// NUL separator avoids any ambiguity with paths that contain LF or
 		// other whitespace characters.
 		cmd.Argv = []string{bins.git(), "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"}
-		cmd.Stdin = strings.Join(stagePaths, "\x00") + "\x00"
+		cmd.Stdin = strings.Join(pathspecs, "\x00") + "\x00"
 	} else {
-		cmd.Argv = append([]string{bins.git(), "add", "-A", "--"}, stagePaths...)
+		cmd.Argv = append([]string{bins.git(), "add", "-A", "--"}, pathspecs...)
 	}
 	result, err := runner.RunCommand(ctx, cmd, runner.RunOptions{
 		StdoutPath: filepath.Join(runDir, "git_add.stdout.log"),
@@ -186,6 +187,7 @@ func stagePathsForReviewForOS(ctx context.Context, bins Binaries, workDir, runDi
 		// defeating the explicit reviewable-set contract.
 		return writeReviewStagingSkipped(runDir, "no executor-produced paths to stage")
 	}
+	pathspecs := literalPathspecs(stagePaths)
 	cmd := runner.Command{WorkDir: workDir}
 	if goos == "windows" {
 		// On Windows the pathspec list is delivered through stdin so a
@@ -193,9 +195,9 @@ func stagePathsForReviewForOS(ctx context.Context, bins Binaries, workDir, runDi
 		// line past the platform's argv limit. The NUL separator avoids
 		// any ambiguity with paths that contain LF or other whitespace.
 		cmd.Argv = []string{bins.git(), "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"}
-		cmd.Stdin = strings.Join(stagePaths, "\x00") + "\x00"
+		cmd.Stdin = strings.Join(pathspecs, "\x00") + "\x00"
 	} else {
-		cmd.Argv = append([]string{bins.git(), "add", "-A", "--"}, stagePaths...)
+		cmd.Argv = append([]string{bins.git(), "add", "-A", "--"}, pathspecs...)
 	}
 	result, err := runner.RunCommand(ctx, cmd, runner.RunOptions{
 		StdoutPath: filepath.Join(runDir, "git_add_review.stdout.log"),
@@ -238,6 +240,14 @@ func dedupeReviewPaths(paths []string) []string {
 		}
 		seen[clean] = true
 		out = append(out, clean)
+	}
+	return out
+}
+
+func literalPathspecs(paths []string) []string {
+	out := make([]string, 0, len(paths))
+	for _, path := range paths {
+		out = append(out, ":(literal)"+path)
 	}
 	return out
 }

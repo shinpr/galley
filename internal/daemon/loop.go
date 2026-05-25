@@ -136,6 +136,11 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "galley: could not load preflight result for run %s: %v\n", runID, err)
 	}
+	// Setup result is loaded from runs/<run-id>/setup_result.json which the
+	// setup executor preflight wrote before this loop. It is appended to the
+	// implementation work order so the executor sees the readiness facts and
+	// threaded into supervisor evidence so reviewers can verify them (AC8).
+	setupResultEvidence, setupUpdateEvidence := loadSetupRunEvidence(runDir, runID)
 	promptTask := executionTask(*loaded, prepared.CWD)
 	if preflightResult != nil {
 		// Runtime obligations below are the source of truth after preflight.
@@ -153,6 +158,9 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 	prompt := task.RenderWorkOrderWithProfiles(promptTask, profiles)
 	if preflightResult != nil {
 		prompt = appendPreflightObligations(prompt, preflightResult)
+	}
+	if setupResultEvidence != nil {
+		prompt = appendSetupReadinessObligations(prompt, setupResultEvidence, setupUpdateEvidence)
 	}
 	budget := attemptBudget(loaded.ExecutionPolicy.LoopBudget)
 	consecutiveNoDiff := 0
@@ -276,18 +284,21 @@ func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) 
 		appendFailureAttempt(req.Loaded, "executor", classifyFailureKind("executor_failed", err), err, attemptDir)
 		return attemptReview{}, err
 	}
+	setupResultEvidence, setupUpdateEvidence := loadSetupRunEvidence(req.RunDir, req.RunID)
 	evidence := supervisor.Evidence{
-		Task:            *req.Loaded,
-		Profiles:        req.Profiles,
-		Claude:          outcome.ClaudeResult,
-		ParseError:      outcome.ParseErr,
-		RunError:        outcome.RunErr,
-		DiffDirty:       outcome.DiffDirty,
-		Diff:            outcome.Diff,
-		DiffError:       outcome.DiffErr,
-		Attempt:         req.Attempt,
-		AttemptsLeft:    attemptsLeft(req.Budget, req.Attempt),
-		PreflightResult: preflightOutputs,
+		Task:                   *req.Loaded,
+		Profiles:               req.Profiles,
+		Claude:                 outcome.ClaudeResult,
+		ParseError:             outcome.ParseErr,
+		RunError:               outcome.RunErr,
+		DiffDirty:              outcome.DiffDirty,
+		Diff:                   outcome.Diff,
+		DiffError:              outcome.DiffErr,
+		Attempt:                req.Attempt,
+		AttemptsLeft:           attemptsLeft(req.Budget, req.Attempt),
+		PreflightResult:        preflightOutputs,
+		SetupResult:            setupResultEvidence,
+		SetupEnvironmentUpdate: setupUpdateEvidence,
 	}
 	verdict, err := evaluateSupervisorWithRetry(ctx, req.Opts, evidence, attemptDir, req.Prepared.CWD)
 	if err != nil {

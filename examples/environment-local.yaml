@@ -23,3 +23,13 @@ pr:
     reply: true
 worktree:
   cleanup: true
+# setup defines how Galley prepares a fresh task worktree before the
+# implementation executor begins. When this block is absent, Galley dispatches
+# a setup executor that discovers a working plan and writes it back here so
+# subsequent tasks reuse the learned setup without rediscovery.
+setup:
+  commands:
+    - run: "go mod download"
+      why: "fetch Go module cache so build/test commands run hermetically"
+    - run: "go build ./..."
+      why: "fail fast if the workspace cannot compile before the executor runs"

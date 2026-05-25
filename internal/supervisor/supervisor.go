@@ -55,4 +55,10 @@ type Evidence struct {
 	Attempt         int
 	AttemptsLeft    int
 	PreflightResult any
+	// SetupResult carries the setup executor preflight outcome (authored or
+	// learned) so reviewers see the readiness facts that gated the executor.
+	SetupResult any
+	// SetupEnvironmentUpdate carries the optional learned-plan profile update
+	// record, present when Galley rewrote environment.yaml with a learned setup.
+	SetupEnvironmentUpdate any
 }

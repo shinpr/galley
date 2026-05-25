@@ -1,6 +1,7 @@
 param(
   [string]$Version = $(if ($env:GALLEY_VERSION) { $env:GALLEY_VERSION } else { "latest" }),
-  [string]$BinDir = $(if ($env:GALLEY_BIN_DIR) { $env:GALLEY_BIN_DIR } else { Join-Path $HOME ".local\bin" })
+  [string]$BinDir = $(if ($env:GALLEY_BIN_DIR) { $env:GALLEY_BIN_DIR } else { Join-Path $HOME ".local\bin" }),
+  [switch]$Local
 )
 
 $ErrorActionPreference = "Stop"
@@ -45,7 +46,29 @@ function Stop-ExistingDaemon {
   }
 }
 
-if ($Version -eq "latest") {
+function Install-Local {
+  param([string]$Dest)
+
+  if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
+    throw "go is required for -Local install"
+  }
+
+  Stop-ExistingDaemon $Dest
+  Write-Host "Installing galley from local checkout into $BinDir"
+
+  $previousGoBin = $env:GOBIN
+  try {
+    $env:GOBIN = $BinDir
+    & go install ./cmd/galley
+    if ($LASTEXITCODE -ne 0) {
+      throw "go install ./cmd/galley failed with exit code $LASTEXITCODE"
+    }
+  } finally {
+    $env:GOBIN = $previousGoBin
+  }
+}
+
+if (-not $Local -and $Version -eq "latest") {
   $Version = Resolve-LatestVersion
   if (-not $Version) {
     throw "could not resolve latest Galley release"
@@ -65,17 +88,21 @@ New-Item -ItemType Directory -Force $tmpDir | Out-Null
 try {
   New-Item -ItemType Directory -Force $BinDir | Out-Null
 
-  Write-Host "Downloading $url"
-  Invoke-WebRequest $url -OutFile $archive -UseBasicParsing
+  if ($Local) {
+    Install-Local $dest
+  } else {
+    Write-Host "Downloading $url"
+    Invoke-WebRequest $url -OutFile $archive -UseBasicParsing
 
-  tar.exe -xzf $archive -C $tmpDir galley.exe
-  $src = Join-Path $tmpDir "galley.exe"
-  if (-not (Test-Path $src)) {
-    throw "release asset did not contain galley.exe"
+    tar.exe -xzf $archive -C $tmpDir galley.exe
+    $src = Join-Path $tmpDir "galley.exe"
+    if (-not (Test-Path $src)) {
+      throw "release asset did not contain galley.exe"
+    }
+
+    Stop-ExistingDaemon $dest
+    Copy-Item $src $dest -Force
   }
-
-  Stop-ExistingDaemon $dest
-  Copy-Item $src $dest -Force
 
   & $dest --help | Out-Null
 

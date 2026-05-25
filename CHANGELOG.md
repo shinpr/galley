@@ -6,13 +6,21 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.7.0 - 2026-05-25
+
+### Added
+
+- Setup executor preflight phase and `environment.yaml` `setup.commands[]`. Galley now prepares fresh task worktrees before acceptance skeleton creation and implementation by running authored setup commands or dispatching a setup executor to learn a reusable setup plan, which is persisted back to `environment.yaml` on success.
+- Setup run evidence and failure routing. Setup now writes `setup_result.json` and, when a learned plan is persisted, `environment_update.json`; setup failures are classified as `phase: setup`, `kind: setup_failed` with repair guidance for `environment.setup`.
+
 ### Changed
 
-- The daemon now stages an explicit reviewable path set before capturing the supervisor diff snapshot, so newly created untracked files appear in the attempt `diff.patch` instead of being silently dropped from the supervisor's view. After each executor attempt Galley runs `git status --porcelain=v1 -z --untracked-files=all` to discover the executor-produced worktree changes, builds the reviewable path set (slash-normalized, deduplicated, non-local entries dropped, `task.files` entries declared with `commit:false` excluded, forbidden-path entries intentionally kept so the existing finalize-time safety gate still observes them), and stages exactly those paths with `git add -A -- <path> [<path>...]` (delivered via `--pathspec-from-file=- --pathspec-file-nul` on Windows). Context-only Galley material (`commit:false` inputs and other untracked content that is not part of the executor's submitted change set) stays in the worktree as diagnostic context but never enters the index, the attempt `diff.patch`, or the supervisor `Evidence.Diff`. When the reviewable path set is empty (e.g. the executor made no repository change while a `commit:false` input file exists) the staging step is skipped and a sentinel `{ "skipped": true, "reason": ... }` payload is recorded at `git_add_review_result.json`; on a non-skipped run the staging step writes `git_add_review.stdout.log`, `git_add_review.stderr.log`, and `git_add_review_result.json` under each attempt directory as run evidence. The supervisor-facing `DiffDirty` signal is now computed from the submitted diff fields (`BranchDiff`/`StagedDiff`/`UnstagedDiff`) rather than the raw worktree status, so context-only worktree dirtiness no longer widens "has work to review".
+- Packaged Claude and Codex Galley plugins are now versioned as `0.1.13`: setup executor prompts now include explicit result JSON contracts and troubleshooting guidance routes `setup_failed` diagnosis through setup run evidence.
+- The daemon now stages the executor-produced reviewable path set before capturing supervisor diff evidence, so newly created untracked files appear in `diff.patch` and supervisor review while `commit:false` input files and unrelated context-only worktree dirtiness stay out of the submitted diff. Review staging writes `git_add_review.stdout.log`, `git_add_review.stderr.log`, and `git_add_review_result.json` attempt evidence when it runs, and records a skipped result when there is no reviewable path set.
 
 ### Fixed
 
-- A failure of the review-time staging step is now recorded as an attempt error with `phase=review_staging` / `kind=review_staging_failed`, the supervisor is not invoked with an empty or stale diff, and the task is moved to `tasks/failed` so operators can inspect the staging-specific failure instead of seeing it misclassified as a generic executor failure.
+- Review-time staging failures are now recorded as attempt errors with `phase=review_staging` / `kind=review_staging_failed`; Galley does not invoke the supervisor with an empty or stale diff and moves the task to `tasks/failed` with staging-specific evidence for operator diagnosis.
 
 ## v0.6.2 - 2026-05-25
 

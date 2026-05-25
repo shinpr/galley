@@ -29,6 +29,7 @@ You may discover and return a different successful plan only when the supplied c
 - Run setup commands with the Codex shell tool from inside the worktree. Capture stdout/stderr; record exit codes for every attempt.
 - Do not modify source files. Cache and build directories the project's setup expects are allowed.
 - Stay inside the worktree. Never touch `.git`. Never run destructive commands. Treat `.env` files as never readable.
+- If setup requires credentials, private registry access, or external services that are unavailable, set `status: "failed"` with concrete repair guidance instead of reading secrets or guessing.
 
 # Workflow
 

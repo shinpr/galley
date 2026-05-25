@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -242,6 +243,66 @@ func TestSetupPreflightAbsentSetupInvokesExecutorWithEnvironmentAndSignals(t *te
 	}
 }
 
+// TestSetupPreflightAuthoredPlanUsesRequiredCheckShellPath proves the authored
+// setup path and the daemon-authored readiness check share the same
+// profile-owned shell selection contract as required checks. A prior regression
+// used a setup-only bash/sh lookup and ignored required_checks.shell_path.
+func TestSetupPreflightAuthoredPlanUsesRequiredCheckShellPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a POSIX fake shell script")
+	}
+	work := t.TempDir()
+	runDir := t.TempDir()
+	fakeShell := filepath.Join(t.TempDir(), "bash")
+	marker := filepath.Join(t.TempDir(), "shell.invoked")
+	if err := os.WriteFile(fakeShell, []byte("#!/bin/sh\nprintf invoked >> "+marker+"\nexec /bin/sh \"$@\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	env := &profile.Environment{
+		ID:  "shell-path",
+		CWD: work,
+		RequiredChecks: profile.RequiredCheckEnvironment{
+			ShellPath: fakeShell,
+		},
+		Setup: &profile.SetupPlan{Commands: []profile.SetupCommand{
+			{Run: "printf setup > setup.proof", Why: "prove setup shell"},
+		}},
+		Constraints: profile.Constraints{
+			Network:             "approval_required",
+			SecretsPolicy:       "never_read_env_files",
+			DestructiveCommands: "deny",
+		},
+	}
+	quality := &profile.Quality{
+		ID: "quality",
+		RequiredChecks: []profile.RequiredCheck{{
+			ID:                "proof",
+			PreferredCommands: []string{"test -f setup.proof"},
+			Required:          true,
+		}},
+		PassPolicy: profile.PassPolicy{MinScore: 1},
+	}
+	res, _, err := SetupExecutorPreflight(context.Background(), SetupExecutorPreflightOptions{
+		Task:     setupTask(),
+		WorkDir:  work,
+		RunDir:   runDir,
+		Profiles: profile.Bundle{Environment: env, Quality: quality},
+	})
+	if err != nil {
+		t.Fatalf("setup preflight: %v", err)
+	}
+	if res == nil || res.Status != SetupStatusReady {
+		t.Fatalf("setup result: %+v", res)
+	}
+	data, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("fake shell marker missing: %v", err)
+	}
+	if got := strings.Count(string(data), "invoked"); got != 2 {
+		t.Fatalf("fake shell invocations got %d, want setup command and readiness check", got)
+	}
+}
+
 // TestSetupExecutorCommandPlanClaudeAndCodex proves part of AC4: building the
 // setup executor command plan for both Claude and Codex returns provider-shaped
 // argv that embeds the bin path and references the canonical capture path each
@@ -290,6 +351,9 @@ func TestSetupExecutorCommandPlanClaudeAndCodex(t *testing.T) {
 	}
 	if len(codexPlan.Argv) == 0 || codexPlan.Argv[0] != "/path/to/codex" {
 		t.Fatalf("codex argv[0] got %v", codexPlan.Argv)
+	}
+	if len(codexPlan.Env) == 0 {
+		t.Fatalf("codex setup executor must run with runner restricted env")
 	}
 	joined := strings.Join(codexPlan.Argv, " ")
 	if !strings.Contains(joined, "--output-last-message") {
@@ -468,6 +532,9 @@ pr:
 	}
 	if update1 == nil || !update1.Changed {
 		t.Fatalf("first run should have persisted plan: %+v", update1)
+	}
+	if !strings.Contains(update1.Diff, "+ run: \"echo learned\"") {
+		t.Fatalf("environment update missing setup diff: %+v", update1)
 	}
 
 	// Verify the file was atomically rewritten with the new setup AND unrelated

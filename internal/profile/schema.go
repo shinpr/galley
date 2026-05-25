@@ -118,8 +118,8 @@ func EnvironmentJSONSchema() ([]byte, error) {
 					"commands": arraySchema(object(
 						required("run"),
 						properties(map[string]any{
-							"run": stringSchema("minLength", 1),
-							"why": stringSchema("minLength", 1),
+							"run": stringSchema("minLength", 1, "maxLength", MaxSetupCommandRunLength),
+							"why": stringSchema("minLength", 1, "maxLength", MaxSetupCommandWhyLength),
 						}),
 					), "minItems", 1),
 				}),

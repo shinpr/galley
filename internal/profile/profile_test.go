@@ -175,6 +175,34 @@ func TestValidateEnvironmentRejectsInvalidRequiredCheckShell(t *testing.T) {
 	}
 }
 
+func TestValidateEnvironmentRejectsUnsafeSetupCommandTextShape(t *testing.T) {
+	env := validEnvironmentForTest()
+	env.Setup = &SetupPlan{Commands: []SetupCommand{{
+		Run: strings.Repeat("x", MaxSetupCommandRunLength+1),
+		Why: "too long run",
+	}}}
+	result := ValidateEnvironment(env)
+	if result.Valid() {
+		t.Fatal("expected oversized setup command to be invalid")
+	}
+	if !strings.Contains(strings.Join(result.Errors, "\n"), "setup.commands[0].run") {
+		t.Fatalf("expected setup command run error, got %#v", result.Errors)
+	}
+
+	env = validEnvironmentForTest()
+	env.Setup = &SetupPlan{Commands: []SetupCommand{{
+		Run: "printf ok\x00",
+		Why: "contains nul",
+	}}}
+	result = ValidateEnvironment(env)
+	if result.Valid() {
+		t.Fatal("expected setup command with control char to be invalid")
+	}
+	if !strings.Contains(strings.Join(result.Errors, "\n"), "control characters") {
+		t.Fatalf("expected control character error, got %#v", result.Errors)
+	}
+}
+
 func validEnvironmentForTest() Environment {
 	return Environment{
 		ID:       "local",

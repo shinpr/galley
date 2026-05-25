@@ -125,10 +125,12 @@
             "additionalProperties": false,
             "properties": {
               "run": {
+                "maxLength": 4096,
                 "minLength": 1,
                 "type": "string"
               },
               "why": {
+                "maxLength": 1024,
                 "minLength": 1,
                 "type": "string"
               }

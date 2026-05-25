@@ -78,6 +78,11 @@ type SetupCommand struct {
 	Why string `yaml:"why,omitempty" json:"why,omitempty"`
 }
 
+const (
+	MaxSetupCommandRunLength = 4096
+	MaxSetupCommandWhyLength = 1024
+)
+
 type ExecutorDefault struct {
 	DefaultCLI string `yaml:"default_cli,omitempty" json:"default_cli,omitempty"`
 }
@@ -255,9 +260,25 @@ func ValidateEnvironment(env Environment) ValidationResult {
 			if strings.TrimSpace(cmd.Run) == "" {
 				result.Errors = append(result.Errors, fmt.Sprintf("%s.run is required", prefix))
 			}
+			validateSetupCommandText(&result, prefix+".run", cmd.Run, MaxSetupCommandRunLength)
+			if cmd.Why != "" {
+				validateSetupCommandText(&result, prefix+".why", cmd.Why, MaxSetupCommandWhyLength)
+			}
 		}
 	}
 	return result
+}
+
+func validateSetupCommandText(result *ValidationResult, field, value string, max int) {
+	if len(value) > max {
+		result.Errors = append(result.Errors, fmt.Sprintf("%s must be at most %d bytes", field, max))
+	}
+	for _, r := range value {
+		if r < 0x20 && r != '\n' && r != '\r' && r != '\t' {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s must not contain control characters other than tab or newline", field))
+			return
+		}
+	}
 }
 
 func validExecutorCLI(value string) bool {

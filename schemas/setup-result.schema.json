@@ -12,53 +12,59 @@
     },
     "commands": {
       "type": "array",
+      "maxItems": 50,
       "description": "Ordered command attempts the setup executor made. Each entry is one command that was actually executed, in order, with the captured outcome. The successful_commands subset is the persistable setup plan when status is ready.",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "required": ["run", "source", "exit_code"],
         "properties": {
-          "run": { "type": "string", "minLength": 1 },
-          "why": { "type": "string" },
+          "run": { "type": "string", "minLength": 1, "maxLength": 4096 },
+          "why": { "type": "string", "maxLength": 1024 },
           "source": {
             "type": "string",
             "enum": ["environment_setup", "environment_commands", "discovered", "readiness_check"],
             "description": "Where the executor took this command from. `readiness_check` is reserved for the daemon-authored readiness verification it runs after an authored environment.setup plan succeeds; setup executors should not author readiness_check entries."
           },
           "exit_code": { "type": "integer" },
-          "stdout_excerpt": { "type": "string" },
-          "stderr_excerpt": { "type": "string" }
+          "stdout_excerpt": { "type": "string", "maxLength": 400 },
+          "stderr_excerpt": { "type": "string", "maxLength": 400 }
         }
       }
     },
     "successful_commands": {
       "type": "array",
+      "maxItems": 50,
       "description": "The ordered subset of commands that made the worktree ready. When status is ready this is the setup plan that should be persisted to environment.yaml when the profile lacked a setup field or the learned plan differs.",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "required": ["run"],
         "properties": {
-          "run": { "type": "string", "minLength": 1 },
-          "why": { "type": "string" }
+          "run": { "type": "string", "minLength": 1, "maxLength": 4096 },
+          "why": { "type": "string", "maxLength": 1024 }
         }
       }
     },
     "inspected_files": {
       "type": "array",
+      "maxItems": 100,
       "description": "Files the setup executor inspected to plan the setup, such as package manifests, lockfiles, and setup docs.",
-      "items": { "type": "string", "minLength": 1 }
+      "items": { "type": "string", "minLength": 1, "maxLength": 512 }
     },
     "readiness_evidence": {
       "type": "string",
+      "maxLength": 2048,
       "description": "One or two sentences explaining why the executor concluded the worktree is ready, citing the verification it ran."
     },
     "repair_guidance": {
       "type": "string",
+      "maxLength": 2048,
       "description": "When status is failed, concrete next steps the operator can take to repair environment.setup."
     },
     "error": {
       "type": "string",
+      "maxLength": 2048,
       "description": "When status is failed, the terse failure summary."
     },
     "provider": {

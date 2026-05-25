@@ -30,12 +30,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/shinpr/galley/internal/profile"
+	"github.com/shinpr/galley/internal/profilecmd"
 	"github.com/shinpr/galley/internal/runner"
 	claudeguard "github.com/shinpr/galley/internal/runner/claude_guard_plugin"
 	"github.com/shinpr/galley/internal/task"
@@ -98,9 +99,17 @@ type SetupEnvironmentUpdate struct {
 	Changed     bool               `json:"changed"`
 	Before      *profile.SetupPlan `json:"before,omitempty"`
 	After       profile.SetupPlan  `json:"after"`
+	Diff        string             `json:"diff,omitempty"`
 	Reason      string             `json:"reason"`
 	UpdatedAt   string             `json:"updated_at"`
 }
+
+const (
+	maxSetupResultCommands      = 50
+	maxSetupResultFiles         = 100
+	maxSetupResultExcerptLength = 400
+	maxSetupResultTextLength    = 2048
+)
 
 // SetupExecutorPreflightOptions configures one preflight invocation. The
 // EnvironmentProfilePath is required when the daemon should persist a learned
@@ -271,7 +280,23 @@ func runAuthoredSetupPlan(ctx context.Context, opts SetupExecutorPreflightOption
 		Source:             SetupSourceEnvironmentSetup,
 	}
 	for i, cmd := range plan.Commands {
-		argv := []string{shellExecutable(opts.Profiles), "-c", cmd.Run}
+		argv, cleanup, _, err := setupShellArgv(opts, cmd.Run, fmt.Sprintf("setup_authored.%d", i+1))
+		if cleanup != nil {
+			defer cleanup()
+		}
+		if err != nil {
+			attempt := SetupCommandAttempt{
+				Run:      cmd.Run,
+				Why:      cmd.Why,
+				Source:   SetupSourceEnvironmentSetup,
+				ExitCode: -1,
+			}
+			res.Commands = append(res.Commands, attempt)
+			res.Status = SetupStatusFailed
+			res.Error = fmt.Sprintf("authored setup command %d shell resolution failed: %v", i+1, err)
+			res.RepairGuidance = "Inspect required_checks.shell and required_checks.shell_path in environment.yaml, fix the setup shell configuration, and requeue."
+			return res, fmt.Errorf("setup phase failed: %s", res.Error)
+		}
 		command := runner.Command{Argv: argv, WorkDir: opts.WorkDir}
 		stdoutPath := filepath.Join(opts.RunDir, fmt.Sprintf("setup_authored.%d.stdout.log", i+1))
 		stderrPath := filepath.Join(opts.RunDir, fmt.Sprintf("setup_authored.%d.stderr.log", i+1))
@@ -323,7 +348,22 @@ func runAuthoredReadinessCheck(ctx context.Context, opts SetupExecutorPreflightO
 		}
 		return
 	}
-	argv := []string{shellExecutable(opts.Profiles), "-c", command}
+	argv, cleanup, _, shellErr := setupShellArgv(opts, command, "setup_readiness_check")
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if shellErr != nil {
+		res.Status = SetupStatusFailed
+		res.Error = fmt.Sprintf("authored setup readiness check '%s' shell resolution failed: %v", check, shellErr)
+		res.RepairGuidance = "Inspect required_checks.shell and required_checks.shell_path in environment.yaml, fix the setup shell configuration, and requeue."
+		res.Commands = append(res.Commands, SetupCommandAttempt{
+			Run:      command,
+			Why:      "required-check readiness verification (" + check + ")",
+			Source:   SetupSourceReadinessCheck,
+			ExitCode: -1,
+		})
+		return
+	}
 	stdoutPath := filepath.Join(opts.RunDir, "setup_readiness_check.stdout.log")
 	stderrPath := filepath.Join(opts.RunDir, "setup_readiness_check.stderr.log")
 	out, err := runner.RunCommand(ctx, runner.Command{Argv: argv, WorkDir: opts.WorkDir}, runner.RunOptions{
@@ -546,9 +586,34 @@ func persistLearnedSetupPlan(opts SetupExecutorPreflightOptions, env *profile.En
 		Changed:     true,
 		Before:      prior,
 		After:       plan,
+		Diff:        setupPlanDiff(prior, plan),
 		Reason:      reason,
 		UpdatedAt:   time.Now().UTC().Format(time.RFC3339Nano),
 	}, nil
+}
+
+func setupPlanDiff(before *profile.SetupPlan, after profile.SetupPlan) string {
+	var b strings.Builder
+	b.WriteString("environment.setup.commands\n")
+	if before == nil || len(before.Commands) == 0 {
+		b.WriteString("- <absent>\n")
+	} else {
+		for _, cmd := range before.Commands {
+			fmt.Fprintf(&b, "- run: %q", cmd.Run)
+			if cmd.Why != "" {
+				fmt.Fprintf(&b, " why: %q", cmd.Why)
+			}
+			b.WriteString("\n")
+		}
+	}
+	for _, cmd := range after.Commands {
+		fmt.Fprintf(&b, "+ run: %q", cmd.Run)
+		if cmd.Why != "" {
+			fmt.Fprintf(&b, " why: %q", cmd.Why)
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 func setupPlansEqual(a, b profile.SetupPlan) bool {
@@ -579,10 +644,38 @@ func WriteSetupResult(runDir string, res *SetupResult) error {
 	if res == nil {
 		return nil
 	}
+	normalizeSetupResult(res)
 	if err := os.MkdirAll(runDir, 0o700); err != nil {
 		return fmt.Errorf("create setup run dir: %w", err)
 	}
 	return writeJSON(filepath.Join(runDir, "setup_result.json"), res)
+}
+
+func normalizeSetupResult(res *SetupResult) {
+	if res == nil {
+		return
+	}
+	res.ReadinessEvidence = truncateString(res.ReadinessEvidence, maxSetupResultTextLength)
+	res.RepairGuidance = truncateString(res.RepairGuidance, maxSetupResultTextLength)
+	res.Error = truncateString(res.Error, maxSetupResultTextLength)
+	if len(res.Commands) > maxSetupResultCommands {
+		res.Commands = res.Commands[:maxSetupResultCommands]
+	}
+	for i := range res.Commands {
+		res.Commands[i].Run = truncateString(res.Commands[i].Run, profile.MaxSetupCommandRunLength)
+		res.Commands[i].Why = truncateString(res.Commands[i].Why, profile.MaxSetupCommandWhyLength)
+		res.Commands[i].StdoutExcerpt = truncateExcerpt(res.Commands[i].StdoutExcerpt)
+		res.Commands[i].StderrExcerpt = truncateExcerpt(res.Commands[i].StderrExcerpt)
+	}
+	if len(res.SuccessfulCommands) > maxSetupResultCommands {
+		res.SuccessfulCommands = res.SuccessfulCommands[:maxSetupResultCommands]
+	}
+	if len(res.InspectedFiles) > maxSetupResultFiles {
+		res.InspectedFiles = res.InspectedFiles[:maxSetupResultFiles]
+	}
+	for i := range res.InspectedFiles {
+		res.InspectedFiles[i] = truncateString(res.InspectedFiles[i], 512)
+	}
 }
 
 // LoadSetupEnvironmentUpdate reads the persisted environment_update.json.
@@ -685,14 +778,13 @@ func WriteSetupEnvironmentUpdate(runDir string, update *SetupEnvironmentUpdate) 
 	return writeJSON(filepath.Join(runDir, "environment_update.json"), update)
 }
 
-func shellExecutable(_ profile.Bundle) string {
-	if path, err := exec.LookPath("bash"); err == nil {
-		return path
+func setupShellArgv(opts SetupExecutorPreflightOptions, command, name string) ([]string, func(), string, error) {
+	shell := profile.RequiredCheckEnvironment{}
+	if opts.Profiles.Environment != nil {
+		shell = opts.Profiles.Environment.RequiredChecks
 	}
-	if path, err := exec.LookPath("sh"); err == nil {
-		return path
-	}
-	return "/bin/sh"
+	scratchDir := filepath.Join(opts.RunDir, "setup-shell", name)
+	return profilecmd.ShellArgvForOS(runtime.GOOS, command, scratchDir, shell)
 }
 
 func setupCommandTimeout(t task.Task) time.Duration {
@@ -703,8 +795,11 @@ func setupCommandTimeout(t task.Task) time.Duration {
 }
 
 func truncateExcerpt(s string) string {
-	const max = 400
 	s = strings.TrimSpace(s)
+	return truncateString(s, maxSetupResultExcerptLength)
+}
+
+func truncateString(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}
@@ -910,5 +1005,6 @@ func parseSetupResultRaw(data []byte) (*SetupResult, bool) {
 	if res.Status == "" || res.Commands == nil {
 		return nil, false
 	}
+	normalizeSetupResult(&res)
 	return &res, true
 }

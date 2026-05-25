@@ -54,17 +54,16 @@ type Environment struct {
 	Constraints    Constraints              `yaml:"constraints" json:"constraints"`
 	PR             PRSettings               `yaml:"pr,omitempty" json:"pr,omitempty"`
 	Worktree       WorktreeSettings         `yaml:"worktree,omitempty" json:"worktree,omitempty"`
-	// Setup describes how Galley prepares a fresh task worktree before the
-	// implementation executor begins. When present, the daemon runs the listed
-	// commands as the setup phase. When absent, the daemon dispatches a setup
-	// executor that may discover the successful setup plan and write it back to
-	// environment.yaml so subsequent tasks reuse the learned setup without
-	// rediscovery.
+	// Setup describes the prior plan the setup executor should try when
+	// preparing a fresh task worktree before the implementation executor begins.
+	// When absent, the setup executor may discover the successful setup plan and
+	// write it back to environment.yaml so subsequent tasks reuse the learned
+	// setup without rediscovery.
 	Setup *SetupPlan `yaml:"setup,omitempty" json:"setup,omitempty"`
 }
 
-// SetupPlan is the ordered list of commands Galley runs during the setup
-// preflight phase. The plan may be authored by the operator or learned by the
+// SetupPlan is the ordered list of commands the setup executor should use as a
+// prior setup plan. The plan may be authored by the operator or learned by the
 // setup executor and persisted back to environment.yaml.
 type SetupPlan struct {
 	Commands []SetupCommand `yaml:"commands" json:"commands"`

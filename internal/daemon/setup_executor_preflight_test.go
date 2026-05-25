@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -41,7 +40,7 @@ func writeSetupEnvironmentProfile(t *testing.T, dir string, body string) string 
 // executor runner stub records its observed order vs the daemon-level
 // acceptance_skeleton_creator subprocess.
 func TestSetupPreflightSequencesBeforeSkeletonAndExecutor(t *testing.T) {
-	// Authored setup plan that writes a sentinel file BEFORE skeleton creation.
+	// Setup executor writes a sentinel file BEFORE skeleton creation.
 	// AcceptanceSkeletonPreflight is invoked by processClaimedTask AFTER the
 	// setup preflight, so if setup ran first the sentinel exists by the time
 	// AcceptanceSkeletonPreflight's stub creator writes the skeleton file.
@@ -76,13 +75,10 @@ echo change > daemon-output.txt
 echo '{"status":"completed","summary":"done","files_modified":["daemon-output.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"decisions":[],"risks":[]}'
 `)
 
-	// Authored environment profile with a setup plan whose first command
-	// writes the sentinel inside the worktree. When the daemon-level setup
-	// preflight runs the authored plan it creates setup.sentinel before
-	// AcceptanceSkeletonPreflight is invoked, which is exactly the ordering
-	// AC2 requires. Because the authored plan succeeds, persistLearnedSetupPlan
-	// is never reached and the verification excerpt records
-	// "environment.yaml=unchanged".
+	// Environment profile carries the prior setup plan as context, but the
+	// daemon must delegate execution to the setup executor. The stub creates
+	// setup.sentinel before AcceptanceSkeletonPreflight is invoked, which is
+	// exactly the ordering AC2 requires.
 	envDir := t.TempDir()
 	envPath := writeSetupEnvironmentProfile(t, envDir, `id: "sequencing"
 cwd: `+workdirQuote(repo)+`
@@ -97,11 +93,26 @@ setup:
     - run: "touch setup.sentinel"
       why: "sentinel for setup-before-skeleton ordering proof"
 `)
-	// Defensive: if anything changes the path so the daemon falls back to
-	// discovery, fail loudly rather than silently masking AC2.
-	withSetupExecutorRunner(t, func(_ context.Context, _ SetupExecutorPreflightOptions) (*SetupResult, error) {
-		t.Fatalf("setup executor runner should not be invoked when authored environment.setup plan succeeds")
-		return nil, nil
+	withSetupExecutorRunner(t, func(_ context.Context, opts SetupExecutorPreflightOptions) (*SetupResult, error) {
+		if err := os.WriteFile(filepath.Join(opts.WorkDir, "setup.sentinel"), []byte("ok\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return &SetupResult{
+			Status: SetupStatusReady,
+			Commands: []SetupCommandAttempt{{
+				Run:      "touch setup.sentinel",
+				Why:      "sentinel for setup-before-skeleton ordering proof",
+				Source:   SetupSourceEnvironmentSetup,
+				ExitCode: 0,
+			}},
+			SuccessfulCommands: []profile.SetupCommand{{
+				Run: "touch setup.sentinel",
+				Why: "sentinel for setup-before-skeleton ordering proof",
+			}},
+			ReadinessEvidence: "setup executor ran the existing environment.setup plan before skeleton creation",
+			Source:            SetupSourceEnvironmentSetup,
+			Provider:          "claude",
+		}, nil
 	})
 
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
@@ -243,29 +254,18 @@ func TestSetupPreflightAbsentSetupInvokesExecutorWithEnvironmentAndSignals(t *te
 	}
 }
 
-// TestSetupPreflightAuthoredPlanUsesRequiredCheckShellPath proves the authored
-// setup path and the daemon-authored readiness check share the same
-// profile-owned shell selection contract as required checks. A prior regression
-// used a setup-only bash/sh lookup and ignored required_checks.shell_path.
-func TestSetupPreflightAuthoredPlanUsesRequiredCheckShellPath(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("uses a POSIX fake shell script")
-	}
+// TestSetupPreflightExistingSetupPlanDelegatesToSetupExecutor proves the daemon
+// treats environment.setup.commands as setup executor input, not as commands the
+// daemon runs directly. This preserves the setup executor's ability to observe
+// command failures and repair the plan in the same model context.
+func TestSetupPreflightExistingSetupPlanDelegatesToSetupExecutor(t *testing.T) {
 	work := t.TempDir()
 	runDir := t.TempDir()
-	fakeShell := filepath.Join(t.TempDir(), "bash")
-	marker := filepath.Join(t.TempDir(), "shell.invoked")
-	if err := os.WriteFile(fakeShell, []byte("#!/bin/sh\nprintf invoked >> "+marker+"\nexec /bin/sh \"$@\"\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
 	env := &profile.Environment{
-		ID:  "shell-path",
+		ID:  "delegated-setup",
 		CWD: work,
-		RequiredChecks: profile.RequiredCheckEnvironment{
-			ShellPath: fakeShell,
-		},
 		Setup: &profile.SetupPlan{Commands: []profile.SetupCommand{
-			{Run: "printf setup > setup.proof", Why: "prove setup shell"},
+			{Run: "touch setup.proof", Why: "seed plan for setup executor"},
 		}},
 		Constraints: profile.Constraints{
 			Network:             "approval_required",
@@ -273,20 +273,34 @@ func TestSetupPreflightAuthoredPlanUsesRequiredCheckShellPath(t *testing.T) {
 			DestructiveCommands: "deny",
 		},
 	}
-	quality := &profile.Quality{
-		ID: "quality",
-		RequiredChecks: []profile.RequiredCheck{{
-			ID:                "proof",
-			PreferredCommands: []string{"test -f setup.proof"},
-			Required:          true,
-		}},
-		PassPolicy: profile.PassPolicy{MinScore: 1},
-	}
+	called := false
+	withSetupExecutorRunner(t, func(_ context.Context, opts SetupExecutorPreflightOptions) (*SetupResult, error) {
+		called = true
+		if opts.Profiles.Environment == nil || opts.Profiles.Environment.Setup == nil {
+			t.Fatalf("setup executor did not receive environment.setup: %+v", opts.Profiles.Environment)
+		}
+		if _, err := os.Stat(filepath.Join(work, "setup.proof")); !os.IsNotExist(err) {
+			t.Fatalf("daemon executed environment.setup directly before setup executor; stat err=%v", err)
+		}
+		return &SetupResult{
+			Status: SetupStatusReady,
+			Commands: []SetupCommandAttempt{{
+				Run:      "touch setup.proof",
+				Why:      "seed plan for setup executor",
+				Source:   SetupSourceEnvironmentSetup,
+				ExitCode: 0,
+			}},
+			SuccessfulCommands: []profile.SetupCommand{{Run: "touch setup.proof", Why: "seed plan for setup executor"}},
+			ReadinessEvidence:  "setup executor used the seeded plan",
+			Source:             SetupSourceEnvironmentSetup,
+			Provider:           "claude",
+		}, nil
+	})
 	res, _, err := SetupExecutorPreflight(context.Background(), SetupExecutorPreflightOptions{
 		Task:     setupTask(),
 		WorkDir:  work,
 		RunDir:   runDir,
-		Profiles: profile.Bundle{Environment: env, Quality: quality},
+		Profiles: profile.Bundle{Environment: env},
 	})
 	if err != nil {
 		t.Fatalf("setup preflight: %v", err)
@@ -294,12 +308,8 @@ func TestSetupPreflightAuthoredPlanUsesRequiredCheckShellPath(t *testing.T) {
 	if res == nil || res.Status != SetupStatusReady {
 		t.Fatalf("setup result: %+v", res)
 	}
-	data, err := os.ReadFile(marker)
-	if err != nil {
-		t.Fatalf("fake shell marker missing: %v", err)
-	}
-	if got := strings.Count(string(data), "invoked"); got != 2 {
-		t.Fatalf("fake shell invocations got %d, want setup command and readiness check", got)
+	if !called {
+		t.Fatalf("setup executor runner was not invoked")
 	}
 }
 
@@ -398,12 +408,10 @@ func TestSetupExecutorResolveResultClaudeAndCodex(t *testing.T) {
 	}
 }
 
-// TestSetupPreflightStaleAuthoredPlanFallsBackToDiscovery proves AC6: a stale
-// authored setup plan whose first command fails causes the daemon to fall back
-// to the setup executor's discovery, and both the failed authored command and
-// the successful discovered command are recorded in setup_result.json with
-// their distinct sources.
-func TestSetupPreflightStaleAuthoredPlanFallsBackToDiscovery(t *testing.T) {
+// TestSetupPreflightStaleSetupPlanCanBeRepairedBySetupExecutor proves AC6: a
+// stale setup plan is passed to the setup executor, which can record the failed
+// seeded command and the successful replacement plan in one setup_result.json.
+func TestSetupPreflightStaleSetupPlanCanBeRepairedBySetupExecutor(t *testing.T) {
 	work := t.TempDir()
 	runDir := t.TempDir()
 	dir := t.TempDir()
@@ -425,9 +433,12 @@ setup:
 		t.Fatal(err)
 	}
 	withSetupExecutorRunner(t, func(_ context.Context, opts SetupExecutorPreflightOptions) (*SetupResult, error) {
+		if opts.Profiles.Environment == nil || opts.Profiles.Environment.Setup == nil {
+			t.Fatalf("setup executor did not receive stale setup plan: %+v", opts.Profiles.Environment)
+		}
 		return &SetupResult{
 			Status:             SetupStatusReady,
-			Commands:           []SetupCommandAttempt{{Run: "echo discovered", Source: SetupSourceDiscovered, ExitCode: 0}},
+			Commands:           []SetupCommandAttempt{{Run: "false", Why: "stale authored command that no longer works", Source: SetupSourceEnvironmentSetup, ExitCode: 1}, {Run: "echo discovered", Source: SetupSourceDiscovered, ExitCode: 0}},
 			SuccessfulCommands: []profile.SetupCommand{{Run: "echo discovered", Why: "actual working command"}},
 			ReadinessEvidence:  "discovered plan passed",
 			Source:             SetupSourceDiscovered,
@@ -473,11 +484,12 @@ setup:
 	}
 }
 
-// TestSetupPreflightAtomicProfileRewriteAndSecondRunReuse proves AC7: a
+// TestSetupPreflightAtomicProfileRewriteAndSecondRunSeededReuse proves AC7: a
 // successful learned plan atomically rewrites environment.yaml setup while
-// preserving unrelated content, and a second daemon run with the persisted
-// setup uses the authored plan without invoking discovery.
-func TestSetupPreflightAtomicProfileRewriteAndSecondRunReuse(t *testing.T) {
+// preserving unrelated content, and a second daemon run passes the persisted
+// setup back to the setup executor as the seed plan without rewriting the
+// profile again when the successful plan is unchanged.
+func TestSetupPreflightAtomicProfileRewriteAndSecondRunSeededReuse(t *testing.T) {
 	work := t.TempDir()
 	dir := t.TempDir()
 	// Profile without setup; includes unrelated content that must survive the
@@ -502,15 +514,19 @@ pr:
 		t.Fatal(err)
 	}
 	runDir1 := t.TempDir()
-	discoveryCalls := 0
-	withSetupExecutorRunner(t, func(_ context.Context, _ SetupExecutorPreflightOptions) (*SetupResult, error) {
-		discoveryCalls++
+	setupCalls := 0
+	withSetupExecutorRunner(t, func(_ context.Context, opts SetupExecutorPreflightOptions) (*SetupResult, error) {
+		setupCalls++
+		source := SetupSourceDiscovered
+		if opts.Profiles.Environment != nil && opts.Profiles.Environment.Setup != nil {
+			source = SetupSourceEnvironmentSetup
+		}
 		return &SetupResult{
 			Status:             SetupStatusReady,
-			Commands:           []SetupCommandAttempt{{Run: "echo learned", Source: SetupSourceDiscovered, ExitCode: 0}},
+			Commands:           []SetupCommandAttempt{{Run: "echo learned", Source: source, ExitCode: 0}},
 			SuccessfulCommands: []profile.SetupCommand{{Run: "echo learned", Why: "learned setup"}},
-			ReadinessEvidence:  "discovery passed",
-			Source:             SetupSourceDiscovered,
+			ReadinessEvidence:  "setup executor passed",
+			Source:             source,
 			Provider:           "claude",
 		}, nil
 	})
@@ -524,8 +540,8 @@ pr:
 	if err != nil {
 		t.Fatalf("first run: %v", err)
 	}
-	if discoveryCalls != 1 {
-		t.Fatalf("discoveryCalls first run got %d, want 1", discoveryCalls)
+	if setupCalls != 1 {
+		t.Fatalf("setupCalls first run got %d, want 1", setupCalls)
 	}
 	if res1 == nil || res1.Status != SetupStatusReady {
 		t.Fatalf("first run result: %+v", res1)
@@ -562,8 +578,9 @@ pr:
 		t.Fatalf("rewritten env setup wrong: %+v", env2.Setup)
 	}
 
-	// AC7 second-run reuse: re-running preflight with the persisted plan must
-	// NOT invoke discovery and must not record any new environment.yaml change.
+	// AC7 second-run reuse: re-running preflight with the persisted plan still
+	// invokes the setup executor, but as a seeded run that reuses the saved
+	// plan and records no new environment.yaml change.
 	runDir2 := t.TempDir()
 	res2, update2, err := SetupExecutorPreflight(context.Background(), SetupExecutorPreflightOptions{
 		Task:                   setupTask(),
@@ -575,8 +592,8 @@ pr:
 	if err != nil {
 		t.Fatalf("second run: %v", err)
 	}
-	if discoveryCalls != 1 {
-		t.Fatalf("discovery was re-invoked on second run; discoveryCalls=%d", discoveryCalls)
+	if setupCalls != 2 {
+		t.Fatalf("setup executor call count got %d, want 2", setupCalls)
 	}
 	if res2 == nil || res2.Status != SetupStatusReady {
 		t.Fatalf("second run result: %+v", res2)
@@ -584,10 +601,10 @@ pr:
 	if update2 != nil {
 		t.Fatalf("second run should not have rewritten environment.yaml: %+v", update2)
 	}
-	// All recorded commands should be from the authored (now persisted) source.
+	// All recorded commands should be from the seeded environment setup source.
 	for _, c := range res2.Commands {
 		if c.Source == SetupSourceDiscovered {
-			t.Fatalf("second run recorded discovered command but should reuse persisted plan: %+v", res2.Commands)
+			t.Fatalf("second run recorded discovered command but should use persisted seed plan: %+v", res2.Commands)
 		}
 	}
 }
@@ -660,12 +677,10 @@ func TestSetupPreflightSetupFailedClassifiesAndWritesEvidence(t *testing.T) {
 	}
 }
 
-// TestSetupPreflightExcludesAcceptanceSkeletonReadiness proves AC10: setup
-// readiness checks do not include acceptance-skeleton obligations. The
-// authored-plan readiness check picks a required quality check; with no
-// skeleton-related required checks defined, the readiness check should succeed
-// without depending on any task-specific skeleton file.
-func TestSetupPreflightExcludesAcceptanceSkeletonReadiness(t *testing.T) {
+// TestSetupPreflightSetupExecutorRunsBeforeSkeletonFilesExist proves AC10:
+// setup readiness happens before acceptance skeleton creation, so the setup
+// executor must not depend on task-specific skeleton files.
+func TestSetupPreflightSetupExecutorRunsBeforeSkeletonFilesExist(t *testing.T) {
 	work := t.TempDir()
 	runDir := t.TempDir()
 	env := &profile.Environment{
@@ -696,6 +711,24 @@ func TestSetupPreflightExcludesAcceptanceSkeletonReadiness(t *testing.T) {
 	// finish first and must not depend on any skeleton file having been
 	// created.
 	tk.Preflight = &task.Preflight{AcceptanceSkeleton: &task.AcceptanceSkeletonConfig{Enabled: true}}
+	withSetupExecutorRunner(t, func(_ context.Context, opts SetupExecutorPreflightOptions) (*SetupResult, error) {
+		if _, err := os.Stat(filepath.Join(opts.WorkDir, "internal/foo/foo_test.go")); !os.IsNotExist(err) {
+			t.Fatalf("setup executor saw a skeleton file before skeleton preflight; stat err=%v", err)
+		}
+		return &SetupResult{
+			Status: SetupStatusReady,
+			Commands: []SetupCommandAttempt{{
+				Run:      "true",
+				Why:      "seeded setup command",
+				Source:   SetupSourceEnvironmentSetup,
+				ExitCode: 0,
+			}},
+			SuccessfulCommands: []profile.SetupCommand{{Run: "true", Why: "noop"}},
+			ReadinessEvidence:  "setup executor confirmed repository readiness without skeleton files",
+			Source:             SetupSourceEnvironmentSetup,
+			Provider:           "claude",
+		}, nil
+	})
 	res, _, err := SetupExecutorPreflight(context.Background(), SetupExecutorPreflightOptions{
 		Task:     tk,
 		WorkDir:  work,
@@ -708,25 +741,13 @@ func TestSetupPreflightExcludesAcceptanceSkeletonReadiness(t *testing.T) {
 	if res == nil || res.Status != SetupStatusReady {
 		t.Fatalf("setup result: %+v", res)
 	}
-	// The recorded commands must include the readiness check entry with the
-	// daemon-only source value `readiness_check` (AC10 + schema fix).
-	foundReadiness := false
 	for _, c := range res.Commands {
-		if c.Source == SetupSourceReadinessCheck {
-			foundReadiness = true
-			if c.ExitCode != 0 {
-				t.Fatalf("readiness check failed: %+v", c)
-			}
-		}
 		if strings.Contains(c.Run, "internal/foo/foo_test.go") {
-			t.Fatalf("readiness check executed task-specific skeleton command: %+v", c)
+			t.Fatalf("setup executor executed task-specific skeleton command: %+v", c)
 		}
-	}
-	if !foundReadiness {
-		t.Fatalf("readiness check entry missing from commands: %+v", res.Commands)
 	}
 	// The worktree directory must not contain any skeleton files written by
-	// setup; only the authored plan ran.
+	// setup.
 	entries, _ := os.ReadDir(work)
 	if len(entries) != 0 {
 		t.Fatalf("setup left files in worktree: %v", entries)
@@ -829,6 +850,64 @@ pr:
 	}
 	if saved.RepairGuidance == "" {
 		t.Fatalf("saved failure missing repair guidance: %+v", saved)
+	}
+}
+
+func TestEnforceLearnedSetupPlanContractRequiresReadyEvidence(t *testing.T) {
+	base := func() *SetupResult {
+		return &SetupResult{
+			Status:             SetupStatusReady,
+			Commands:           []SetupCommandAttempt{{Run: "go mod download", Source: SetupSourceDiscovered, ExitCode: 0}},
+			SuccessfulCommands: []profile.SetupCommand{{Run: "go mod download", Why: "fetch modules"}},
+			ReadinessEvidence:  "go test ./... passed",
+			Source:             SetupSourceDiscovered,
+		}
+	}
+	tests := []struct {
+		name string
+		edit func(*SetupResult)
+		want string
+	}{
+		{
+			name: "missing readiness evidence",
+			edit: func(res *SetupResult) { res.ReadinessEvidence = "" },
+			want: "readiness_evidence",
+		},
+		{
+			name: "missing source",
+			edit: func(res *SetupResult) { res.Source = "" },
+			want: "source",
+		},
+		{
+			name: "successful command did not exit zero",
+			edit: func(res *SetupResult) {
+				res.Commands[0].ExitCode = 1
+			},
+			want: "exited 0",
+		},
+		{
+			name: "successful command was readiness check only",
+			edit: func(res *SetupResult) {
+				res.Commands[0].Source = SetupSourceReadinessCheck
+			},
+			want: "setup commands",
+		},
+		{
+			name: "readiness check source is not canonical plan source",
+			edit: func(res *SetupResult) { res.Source = SetupSourceReadinessCheck },
+			want: "invalid source",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res := base()
+			tt.edit(res)
+
+			err := enforceLearnedSetupPlanContract(res)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("contract error got %v, want mention %q", err, tt.want)
+			}
+		})
 	}
 }
 

@@ -24,7 +24,7 @@
           "source": {
             "type": "string",
             "enum": ["environment_setup", "environment_commands", "discovered", "readiness_check"],
-            "description": "Where the executor took this command from. `readiness_check` is reserved for the daemon-authored readiness verification it runs after an authored environment.setup plan succeeds; setup executors should not author readiness_check entries."
+            "description": "Where the setup executor took this command from. `environment_setup` means a prior environment.setup command, `environment_commands` means a named environment command, `discovered` means repository signals or conventions, and `readiness_check` means a command run only to verify readiness."
           },
           "exit_code": { "type": "integer" },
           "stdout_excerpt": { "type": "string", "maxLength": 400 },
@@ -70,12 +70,12 @@
     "provider": {
       "type": "string",
       "enum": ["claude", "codex"],
-      "description": "Which executor provider ran the setup attempt. The daemon sets this from task.executor.cli when it dispatches the setup executor. Authored-only runs that never dispatched an executor omit this field."
+      "description": "Daemon-owned provider metadata. If a setup executor emits this field, the daemon overwrites it from task.executor.cli before persisting setup_result.json."
     },
     "source": {
       "type": "string",
-      "enum": ["environment_setup", "environment_commands", "discovered", "readiness_check"],
-      "description": "Where the canonical plan in this result came from. `environment_setup` means the authored environment.setup plan ran. `discovered` means the setup executor discovered the plan. `environment_commands` and `readiness_check` are reserved overlays kept in sync with the per-command `source` enum so a SetupResult.source can carry the same vocabulary."
+      "enum": ["environment_setup", "environment_commands", "discovered"],
+      "description": "Where the canonical successful setup plan came from. Required by the daemon when status is ready. `environment_setup` means the prior environment.setup plan made the worktree ready unchanged. `environment_commands` means the plan reused named environment commands. `discovered` means the setup executor composed the plan from repository signals or conventions."
     }
   }
 }

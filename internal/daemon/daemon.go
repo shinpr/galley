@@ -482,12 +482,12 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	}
 	// Setup executor preflight runs after the worktree and input files are
 	// prepared, before acceptance skeleton preflight, and before any executor
-	// attempt (AC2, AC10). When environment.setup is present the daemon runs
-	// that authored plan directly; when absent the setup executor (Claude or
-	// Codex per task.executor.cli) attempts to make the worktree ready and may
-	// return a learned plan that Galley persists back to environment.yaml
-	// (AC3, AC4, AC6, AC7). Setup readiness excludes acceptance skeleton
-	// obligations (AC10).
+	// attempt (AC2, AC10). The daemon always delegates setup execution to the
+	// setup executor (Claude or Codex per task.executor.cli); any
+	// environment.setup plan is passed as model-visible context so the executor
+	// can try, diagnose, and repair it before returning the successful plan for
+	// Galley to persist (AC3, AC4, AC6, AC7). Setup readiness excludes
+	// acceptance skeleton obligations (AC10).
 	setupRes, setupUpdate, setupErr := SetupExecutorPreflight(ctx, SetupExecutorPreflightOptions{
 		Task:                   loaded,
 		WorkDir:                prepared.CWD,

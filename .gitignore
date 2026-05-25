@@ -9,6 +9,8 @@
 /.claude/
 /.agent-workflow/
 /worktrees/
+/AGENTS.md
+/CLAUDE.md
 
 # Test and coverage output
 /coverage.out

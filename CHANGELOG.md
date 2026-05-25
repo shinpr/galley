@@ -6,6 +6,15 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- Existing `environment.yaml` `setup.commands[]` plans now run through the setup executor instead of a daemon-owned direct execution path. Setup failures from saved plans can therefore be diagnosed and repaired in the same executor context that learns new setup plans, while successful repaired plans are still persisted back to `environment.yaml`.
+- Packaged Claude and Codex Galley plugins are now versioned as `0.1.13`: profile-authoring guidance now mentions optional fresh-worktree setup commands when proposing `environment.yaml`, keeping detailed setup behavior in `docs/profiles.md` and the bundled environment schema.
+
+### Fixed
+
+- Learned setup plans are now persisted only when the setup executor reports setup commands that actually exited successfully. Readiness-check-only commands such as tests or builds are no longer saved as `environment.setup.commands[]`, and failed setup executor results keep repair guidance visible in task/run evidence.
+
 ## v0.7.0 - 2026-05-25
 
 ### Added

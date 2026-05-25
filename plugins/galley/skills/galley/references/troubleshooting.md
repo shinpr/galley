@@ -39,6 +39,8 @@ Inspect the latest attempt directory:
 | `command_plan.json` | Claude executor invocation plan |
 | `codex_supervisor_request.json` | Evidence sent to Codex supervisor |
 | `claude_supervisor_request.json` | Evidence sent to Claude supervisor |
+| `setup_result.json` (run directory, not `attempt-N/`) | Setup phase result: attempted commands, source, readiness evidence, and repair guidance |
+| `environment_update.json` (run directory, when present) | Audit trail for a learned setup plan persisted back to `environment.yaml` |
 
 Read the files that exist. Focus on the newest attempt first.
 
@@ -53,6 +55,7 @@ Read the files that exist. Focus on the newest attempt first.
 | `accepted` with quality concerns | pass policy treats concern as non-blocking | Add quality profile or PR comment requeue with specific blocker. |
 | no diff produced | task was investigation-only or executor stopped early | Check executor result and work order. |
 | PR comments ignored | polling disabled in `environment.yaml`, auth missing, or comment ID already processed | Check `pr.comments.enabled`, `gh auth status`, and `pr.processed_comment_ids`. |
+| attempt kind is `setup_failed` | authored `environment.setup` failed, readiness verification failed, or setup discovery could not make the worktree ready | Read `setup_result.json` and the matching stderr log; fix `environment.yaml setup.commands` or remove the `setup` field. See Setup failures below. |
 
 ## Repair Actions
 
@@ -86,22 +89,32 @@ For environment failure:
 
 ## Setup failures (phase=setup, kind=setup_failed)
 
-A `setup_failed` attempt means Galley could not make the task worktree ready before the implementation executor ran. Inspect the run directory:
+A `setup_failed` attempt means Galley could not make the task worktree ready before the implementation executor ran. Setup evidence lives in the run directory (`~/.galley/runs/<task-id>/<run-id>/`), not under `attempt-N/`.
 
-- `runs/<run-id>/setup_result.json` — source-of-truth setup evidence. Read these fields first:
-  - `status`: `ready` or `failed`.
-  - `commands[]`: every command Galley attempted, with `source` (`environment_setup`, `environment_commands`, `readiness_check`, or `discovered`), `exit_code`, and stdout/stderr excerpts. The full output remains in the per-command `setup_authored.N.{stdout,stderr}.log`, `setup_readiness_check.{stdout,stderr}.log`, or `setup_executor.{stdout.jsonl,stderr.log}` files.
-  - `source`: which command list produced the final attempt (`environment_setup` for an authored plan, `discovered` for a learned plan).
+- `setup_result.json` — source-of-truth setup evidence. Read these fields first:
+  - `status`: should be `failed` for a `setup_failed` attempt. A `ready` value here indicates daemon/executor disagreement; escalate with the run evidence.
+  - `commands[]`: every command Galley attempted, with `source` (`environment_setup`, `environment_commands`, `readiness_check`, or `discovered`), `exit_code`, and stdout/stderr excerpts.
+  - `source`: which command list produced the final plan. Use `environment_setup` for an authored plan, `environment_commands` for a plan reused from `environment.commands`, and `discovered` for a plan composed from repository signals or conventions. `readiness_check` is daemon-owned and appears only in `commands[].source`.
   - `inspected_files[]`: repository signals the setup executor read (manifests, lockfiles, setup docs).
   - `repair_guidance`: actionable guidance for fixing `environment.setup` or rerunning discovery.
-- `runs/<run-id>/environment_update.json` — present only when Galley persisted a learned setup plan back to `environment.yaml`. Audit fields: `profile_path`, `before` (prior setup plan or null), `after` (new plan), `reason`, and `updated_at`. When a previously learned plan later fails, compare `before`/`after` to confirm which commands changed and decide whether to repair `environment.setup` by hand or to delete the `setup` field and let Galley rediscover.
+- Matching full-output logs:
+  - `setup_authored.N.stdout.log` / `setup_authored.N.stderr.log` — authored `environment.setup` command at position `N`.
+  - `setup_readiness_check.stdout.log` / `setup_readiness_check.stderr.log` — daemon readiness verification after an authored plan.
+  - `setup_executor.stdout.jsonl` / `setup_executor.stderr.log` — setup executor invocation; stdout is the provider JSONL stream.
+- `environment_update.json` — present only when Galley persisted or attempted to persist a learned setup plan back to `environment.yaml`. Audit fields: `profile_path`, `changed` (true when a setup plan was written; false when an update record exists but no profile change was published), `before` (prior setup plan or null), `after` (new plan), `diff`, `reason`, and `updated_at`. `diff` is a text representation of the setup command change and may be empty when no change was published. When a previously learned plan later fails, compare `before`/`after` to confirm which commands changed.
 
 Repair flow:
 
 1. Read `setup_result.json` and identify the failing command (the last attempt with non-zero `exit_code`).
-2. Inspect the matching `setup_authored.N.stderr.log` or `setup_executor.stderr.log`.
-3. Edit `environment.yaml setup.commands` to fix the command, or remove the `setup` field entirely to let Galley discover and persist a new plan on the next run.
+2. Inspect the matching log by `commands[].source`: `environment_setup` -> `setup_authored.N.stderr.log`; `readiness_check` -> `setup_readiness_check.stderr.log`; `environment_commands` or `discovered` -> `setup_executor.stderr.log` and `setup_executor.stdout.jsonl`.
+3. Edit `environment.yaml setup.commands` when the failing command needs a small fix such as a typo, missing flag, or stale script name and the rest of the plan is still valid. Remove the `setup` field when the failure looks structural, such as a changed package manager, renamed setup flow, or toolchain migration, and rediscovery is cheaper than triage.
 4. Requeue the task.
+
+```bash
+galley task requeue <task-id-or-task-file> --reason "retry after repairing environment.setup"
+```
+
+For setup failures, populate `Evidence:` in the report with the failing `setup_result.json` command, the matching stderr log path, and `environment_update.json` before/after or `diff` when a learned plan changed.
 
 ## Report Format
 

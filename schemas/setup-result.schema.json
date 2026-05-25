@@ -24,7 +24,7 @@
           "source": {
             "type": "string",
             "enum": ["environment_setup", "environment_commands", "discovered", "readiness_check"],
-            "description": "Where the executor took this command from. `readiness_check` is reserved for the daemon-authored readiness verification it runs after an authored environment.setup plan succeeds; setup executors should not author readiness_check entries."
+            "description": "Where the setup executor took this command from. `environment_setup` means a prior environment.setup command, `environment_commands` means a named environment command, and `discovered` means repository signals or conventions. `readiness_check` is accepted for legacy evidence."
           },
           "exit_code": { "type": "integer" },
           "stdout_excerpt": { "type": "string", "maxLength": 400 },
@@ -75,7 +75,7 @@
     "source": {
       "type": "string",
       "enum": ["environment_setup", "environment_commands", "discovered", "readiness_check"],
-      "description": "Where the canonical plan in this result came from. `environment_setup` means the authored environment.setup plan ran. `discovered` means the setup executor discovered the plan. `environment_commands` and `readiness_check` are reserved overlays kept in sync with the per-command `source` enum so a SetupResult.source can carry the same vocabulary."
+      "description": "Where the canonical successful setup plan came from. `environment_setup` means the prior environment.setup plan made the worktree ready unchanged. `environment_commands` means the plan reused named environment commands. `discovered` means the setup executor composed the plan from repository signals or conventions. `readiness_check` is accepted for legacy evidence."
     }
   }
 }

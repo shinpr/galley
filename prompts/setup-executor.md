@@ -20,12 +20,12 @@ The user message is one JSON object with these top-level keys:
 
 Use this priority order:
 
-1. `environment.setup` when present. Run those commands first; if they all succeed and the worktree is ready, return them as the successful plan.
+1. `environment.setup` when present. Treat it as the prior setup plan: run those commands first, observe failures directly, and return it unchanged only when it makes the worktree ready.
 2. `environment.commands` named like `setup`, `install`, `bootstrap`, `deps`, `build`, `test_unit`. Prefer the smallest combination that proves the build/test surface works.
 3. Repository setup docs, package manifests, and lockfiles surfaced in `repository_signals`.
 4. Repository conventions discovered in the worktree.
 
-When `environment.setup` runs cleanly you must return it unchanged as `successful_commands`. Only discover and return a different plan when the supplied commands do not make the worktree ready.
+When `environment.setup` runs cleanly you must return it unchanged as `successful_commands`. Discover and return a different plan when the supplied commands do not make the worktree ready.
 
 # Claude Code Tool Policy
 
@@ -43,17 +43,17 @@ Identify:
 - Repository language(s) and package manager(s) from manifests.
 - Required check commands from `quality.required_checks` that prove the build/test surface.
 
-## Step 2. Try The Authored Plan [BLOCKING WHEN PRESENT]
+## Step 2. Try The Prior Plan [BLOCKING WHEN PRESENT]
 
 If `environment.setup.commands` is present, run each command in order inside the worktree. Record every attempt in `commands[]` with `source: "environment_setup"`.
 
-If every command succeeds and a chosen quality required check passes, you are done — set `status: "ready"` and copy the authored plan into `successful_commands`.
+If every command succeeds and a chosen quality required check passes, you are done — set `status: "ready"` and copy the prior plan into `successful_commands`.
 
-If any authored command fails, record the failure, then continue to Step 3 to discover a working plan.
+If any prior-plan command fails, keep its stdout/stderr evidence in `commands[]`, then continue to Step 3 to discover a working plan from that failure.
 
 ## Step 3. Discover [WHEN AUTHORED PLAN MISSING OR INSUFFICIENT]
 
-Build the smallest sequence of commands that brings the worktree from a fresh clone to a state where a representative quality required check passes. Prefer commands that already exist in `environment.commands`. Each command goes into `commands[]` with `source` set to `environment_commands` when it came from the commands map or `discovered` when you composed it from repository signals. Do NOT author entries with `source: "readiness_check"` — that value is reserved for the daemon's own readiness verification when it runs an authored `environment.setup` plan.
+Build the smallest sequence of commands that brings the worktree from a fresh clone to a state where a representative quality required check passes. Prefer commands that already exist in `environment.commands`. Each command goes into `commands[]` with `source` set to `environment_commands` when it came from the commands map or `discovered` when you composed it from repository signals.
 
 ## Step 4. Verify Readiness [BLOCKING]
 
@@ -72,7 +72,7 @@ Before returning the final JSON, verify:
 - Every `commands[]` entry records the command `run`, its `source`, and its `exit_code`.
 - `status: "ready"` includes non-empty `successful_commands`, `readiness_evidence`, and a top-level `source` for the successful plan.
 - `successful_commands[].run` values are commands you actually ran and recorded in `commands[]`.
-- Setup executor output never uses `source: "readiness_check"`; that source is reserved for the daemon's own authored-plan verification.
+- Quality-check commands you run to prove readiness must appear in `commands[]`; keep `successful_commands` limited to the setup plan that should be saved.
 - `status: "failed"` includes both `error` and `repair_guidance`.
 
 # Setup-Specific Rules
@@ -111,7 +111,7 @@ Your final assistant response is the setup executor result. Return exactly one J
 }
 ```
 
-Use top-level `source` for the successful plan: `environment_setup` when the authored setup plan made the worktree ready unchanged, `environment_commands` when the successful plan reuses environment commands, and `discovered` when the successful plan is composed from repository signals or conventions. After an authored plan fails, set top-level `source` from the replacement plan that made the worktree ready.
+Use top-level `source` for the successful plan: `environment_setup` when the prior setup plan made the worktree ready unchanged, `environment_commands` when the successful plan reuses environment commands, and `discovered` when the successful plan is composed from repository signals or conventions. After a prior plan fails, set top-level `source` from the replacement plan that made the worktree ready.
 
 Use this shape when setup cannot make the worktree ready:
 

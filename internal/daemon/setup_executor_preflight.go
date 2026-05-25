@@ -7,13 +7,13 @@
 // readiness is verified independently of any task-specific skeletons (AC2,
 // AC10).
 //
-// When environment.setup is present the stage executes the authored plan
-// directly (AC2). When environment.setup is absent the stage dispatches a
-// setup executor (Claude or Codex per task.executor.cli) that may discover and
-// return a successful setup plan (AC3, AC4). On success the daemon persists
-// runs/<run-id>/setup_result.json (AC8) and, when the resolved environment
-// profile lacked a setup field or the learned plan differs, atomically rewrites
-// the repository environment.yaml setup field (AC7) and records the change in
+// The daemon always delegates setup execution to the setup executor (Claude or
+// Codex per task.executor.cli). environment.setup.commands, when present, is
+// passed as a prior plan for the setup executor to try, diagnose, and repair in
+// the same model context. On success the daemon persists
+// runs/<run-id>/setup_result.json (AC8) and, when the successful plan differs
+// from the resolved environment profile, atomically rewrites the repository
+// environment.yaml setup field (AC7) and records the change in
 // runs/<run-id>/environment_update.json so a subsequent task reuses the learned
 // setup without rediscovery.
 //
@@ -31,12 +31,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
 	"github.com/shinpr/galley/internal/profile"
-	"github.com/shinpr/galley/internal/profilecmd"
 	"github.com/shinpr/galley/internal/runner"
 	claudeguard "github.com/shinpr/galley/internal/runner/claude_guard_plugin"
 	"github.com/shinpr/galley/internal/task"
@@ -57,12 +55,12 @@ const (
 )
 
 // Source values recorded in SetupCommandAttempt.Source so reviewers can
-// distinguish authored vs learned commands (AC6).
+// distinguish prior-plan commands from learned commands (AC6).
 const (
 	SetupSourceEnvironmentSetup    = "environment_setup"
 	SetupSourceEnvironmentCommands = "environment_commands"
 	SetupSourceDiscovered          = "discovered"
-	SetupSourceReadinessCheck      = "readiness_check"
+	SetupSourceReadinessCheck      = "readiness_check" // legacy evidence value
 )
 
 // SetupResult is the runtime source-of-truth output of the setup executor
@@ -79,9 +77,9 @@ type SetupResult struct {
 	Source             string                 `json:"source,omitempty" yaml:"source,omitempty"`
 }
 
-// SetupCommandAttempt is one command Galley executed (either directly from the
-// authored plan or via the setup executor's run). Stdout/stderr are truncated
-// excerpts; the full subprocess output remains in the run directory log files.
+// SetupCommandAttempt is one command the setup executor attempted. Stdout/stderr
+// are truncated excerpts; the full subprocess output remains in the setup
+// executor logs under the run directory.
 type SetupCommandAttempt struct {
 	Run           string `json:"run" yaml:"run"`
 	Why           string `json:"why,omitempty" yaml:"why,omitempty"`
@@ -156,66 +154,6 @@ func SetupExecutorPreflight(ctx context.Context, opts SetupExecutorPreflightOpti
 	}
 
 	env := opts.Profiles.Environment
-	if env.Setup != nil && len(env.Setup.Commands) > 0 {
-		res, authoredErr := runAuthoredSetupPlan(ctx, opts, env.Setup)
-		if authoredErr == nil {
-			// Authored commands all exited 0. Run a representative quality
-			// required check to prove the worktree is actually ready before
-			// declaring success (AC2 readiness verification).
-			runAuthoredReadinessCheck(ctx, opts, res)
-		}
-		if res != nil && res.Status == SetupStatusReady {
-			if err := WriteSetupResult(opts.RunDir, res); err != nil {
-				return res, nil, err
-			}
-			return res, nil, nil
-		}
-		// Authored plan failed (either a setup command or the readiness check).
-		// Per AC6 fall back to the setup executor (discovery) so a stale or
-		// incorrect authored plan can be repaired by learning a working one.
-		discovered, derr := setupExecutorRunner(ctx, opts)
-		if discovered != nil {
-			res = mergeAuthoredAttemptsIntoDiscovery(res, discovered)
-		}
-		if writeErr := WriteSetupResult(opts.RunDir, res); writeErr != nil && derr == nil {
-			derr = writeErr
-		}
-		if derr != nil {
-			return res, nil, derr
-		}
-		if res == nil || res.Status != SetupStatusReady {
-			return res, nil, fmt.Errorf("setup executor did not make the worktree ready")
-		}
-		// Discovery succeeded but produced no successful_commands while the
-		// authored plan had also failed. Persisting nothing would silently
-		// leave environment.yaml unchanged with the stale authored plan still
-		// active — AC7's "no silent unchanged" invariant. Downgrade to failed
-		// with repair guidance and keep setup_result.json diagnostic.
-		if vErr := enforceLearnedSetupPlanContract(res, env); vErr != nil {
-			applySetupContractViolation(res, vErr)
-			_ = WriteSetupResult(opts.RunDir, res)
-			return res, nil, fmt.Errorf("setup phase failed: %w", vErr)
-		}
-		// Discovery succeeded: persist the learned plan and continue.
-		update, perr := persistLearnedSetupPlan(opts, env, res)
-		if perr != nil {
-			recordSetupProfileUpdateFailure(opts.RunDir, perr)
-			res.Status = SetupStatusFailed
-			if res.Error == "" {
-				res.Error = "learned setup plan persistence failed: " + perr.Error()
-			}
-			_ = WriteSetupResult(opts.RunDir, res)
-			return res, nil, fmt.Errorf("setup phase failed: persist learned setup plan: %w", perr)
-		}
-		if update != nil {
-			if err := WriteSetupEnvironmentUpdate(opts.RunDir, update); err != nil {
-				return res, nil, err
-			}
-		}
-		return res, update, nil
-	}
-
-	// No authored plan: dispatch the setup executor.
 	res, err := setupExecutorRunner(ctx, opts)
 	if writeErr := WriteSetupResult(opts.RunDir, res); writeErr != nil && err == nil {
 		err = writeErr
@@ -229,7 +167,7 @@ func SetupExecutorPreflight(ctx context.Context, opts SetupExecutorPreflightOpti
 	// Discovery reported ready: enforce the learned-plan contract before
 	// persistence so a ready+empty-successful_commands response cannot silently
 	// leave environment.yaml unchanged (AC7 invariant).
-	if vErr := enforceLearnedSetupPlanContract(res, env); vErr != nil {
+	if vErr := enforceLearnedSetupPlanContract(res); vErr != nil {
 		applySetupContractViolation(res, vErr)
 		_ = WriteSetupResult(opts.RunDir, res)
 		return res, nil, fmt.Errorf("setup phase failed: %w", vErr)
@@ -266,179 +204,8 @@ func SetupExecutorPreflight(ctx context.Context, opts SetupExecutorPreflightOpti
 	return res, update, nil
 }
 
-// runAuthoredSetupPlan executes the operator-authored environment.setup
-// commands directly. Each command runs through runner.RunCommand inside the
-// worktree with stdout/stderr captured to setup_authored.N.{stdout,stderr}.log
-// so the operator can inspect a failure even when the daemon reports only the
-// terse excerpt in setup_result.json.
-func runAuthoredSetupPlan(ctx context.Context, opts SetupExecutorPreflightOptions, plan *profile.SetupPlan) (*SetupResult, error) {
-	timeout := setupCommandTimeout(opts.Task)
-	res := &SetupResult{
-		Status:             SetupStatusReady,
-		Commands:           []SetupCommandAttempt{},
-		SuccessfulCommands: []profile.SetupCommand{},
-		Source:             SetupSourceEnvironmentSetup,
-	}
-	for i, cmd := range plan.Commands {
-		argv, cleanup, _, err := setupShellArgv(opts, cmd.Run, fmt.Sprintf("setup_authored.%d", i+1))
-		if cleanup != nil {
-			defer cleanup()
-		}
-		if err != nil {
-			attempt := SetupCommandAttempt{
-				Run:      cmd.Run,
-				Why:      cmd.Why,
-				Source:   SetupSourceEnvironmentSetup,
-				ExitCode: -1,
-			}
-			res.Commands = append(res.Commands, attempt)
-			res.Status = SetupStatusFailed
-			res.Error = fmt.Sprintf("authored setup command %d shell resolution failed: %v", i+1, err)
-			res.RepairGuidance = "Inspect required_checks.shell and required_checks.shell_path in environment.yaml, fix the setup shell configuration, and requeue."
-			return res, fmt.Errorf("setup phase failed: %s", res.Error)
-		}
-		command := runner.Command{Argv: argv, WorkDir: opts.WorkDir}
-		stdoutPath := filepath.Join(opts.RunDir, fmt.Sprintf("setup_authored.%d.stdout.log", i+1))
-		stderrPath := filepath.Join(opts.RunDir, fmt.Sprintf("setup_authored.%d.stderr.log", i+1))
-		out, err := runner.RunCommand(ctx, command, runner.RunOptions{
-			Timeout:    timeout,
-			StdoutPath: stdoutPath,
-			StderrPath: stderrPath,
-			TailBytes:  8192,
-		})
-		attempt := SetupCommandAttempt{
-			Run:           cmd.Run,
-			Why:           cmd.Why,
-			Source:        SetupSourceEnvironmentSetup,
-			ExitCode:      out.ExitCode,
-			StdoutExcerpt: truncateExcerpt(out.Stdout),
-			StderrExcerpt: truncateExcerpt(out.Stderr),
-		}
-		res.Commands = append(res.Commands, attempt)
-		if err != nil {
-			res.Status = SetupStatusFailed
-			res.Error = fmt.Sprintf("authored setup command %d failed (exit %d): %v", i+1, out.ExitCode, err)
-			res.RepairGuidance = "Inspect setup_authored." + fmt.Sprint(i+1) + ".stderr.log, fix the failing command in environment.yaml setup.commands, and requeue."
-			return res, fmt.Errorf("setup phase failed: %s", res.Error)
-		}
-		res.SuccessfulCommands = append(res.SuccessfulCommands, cmd)
-	}
-	res.ReadinessEvidence = fmt.Sprintf("All %d authored environment.setup commands exited 0.", len(plan.Commands))
-	return res, nil
-}
-
-// runAuthoredReadinessCheck runs ONE representative required quality check in
-// the prepared worktree so the daemon can prove the authored setup plan
-// actually made the worktree ready (AC2). When no qualifying required check is
-// available the readiness check is skipped and the rationale is recorded in
-// ReadinessEvidence. On failure the result is downgraded to setup_failed; the
-// failed attempt is recorded with Source="readiness_check" so the caller can
-// fall back to discovery.
-func runAuthoredReadinessCheck(ctx context.Context, opts SetupExecutorPreflightOptions, res *SetupResult) {
-	if res == nil {
-		return
-	}
-	check, command := selectAuthoredReadinessCheck(opts)
-	if command == "" {
-		// No required check qualifies: keep res ready but record the rationale.
-		if check != "" {
-			res.ReadinessEvidence += " (readiness check skipped: required check '" + check + "' has no preferred command)"
-		} else {
-			res.ReadinessEvidence += " (no required quality check available — readiness inferred from command success)"
-		}
-		return
-	}
-	argv, cleanup, _, shellErr := setupShellArgv(opts, command, "setup_readiness_check")
-	if cleanup != nil {
-		defer cleanup()
-	}
-	if shellErr != nil {
-		res.Status = SetupStatusFailed
-		res.Error = fmt.Sprintf("authored setup readiness check '%s' shell resolution failed: %v", check, shellErr)
-		res.RepairGuidance = "Inspect required_checks.shell and required_checks.shell_path in environment.yaml, fix the setup shell configuration, and requeue."
-		res.Commands = append(res.Commands, SetupCommandAttempt{
-			Run:      command,
-			Why:      "required-check readiness verification (" + check + ")",
-			Source:   SetupSourceReadinessCheck,
-			ExitCode: -1,
-		})
-		return
-	}
-	stdoutPath := filepath.Join(opts.RunDir, "setup_readiness_check.stdout.log")
-	stderrPath := filepath.Join(opts.RunDir, "setup_readiness_check.stderr.log")
-	out, err := runner.RunCommand(ctx, runner.Command{Argv: argv, WorkDir: opts.WorkDir}, runner.RunOptions{
-		Timeout:    setupCommandTimeout(opts.Task),
-		StdoutPath: stdoutPath,
-		StderrPath: stderrPath,
-		TailBytes:  8192,
-	})
-	attempt := SetupCommandAttempt{
-		Run:           command,
-		Why:           "required-check readiness verification (" + check + ")",
-		Source:        SetupSourceReadinessCheck,
-		ExitCode:      out.ExitCode,
-		StdoutExcerpt: truncateExcerpt(out.Stdout),
-		StderrExcerpt: truncateExcerpt(out.Stderr),
-	}
-	res.Commands = append(res.Commands, attempt)
-	if err != nil {
-		res.Status = SetupStatusFailed
-		res.Error = fmt.Sprintf("authored setup readiness check '%s' failed (exit %d): %v", check, out.ExitCode, err)
-		res.RepairGuidance = "Inspect setup_readiness_check.stderr.log; fix environment.yaml setup.commands so the required check '" + check + "' passes, or remove the stale setup field and requeue to let Galley learn a working plan."
-		return
-	}
-	res.ReadinessEvidence += fmt.Sprintf(" Readiness verified by required check '%s' (`%s`).", check, command)
-}
-
-// selectAuthoredReadinessCheck picks the first required quality check that has
-// a non-empty preferred command. Returns ("", "") when no check qualifies.
-func selectAuthoredReadinessCheck(opts SetupExecutorPreflightOptions) (string, string) {
-	if opts.Profiles.Quality == nil {
-		return "", ""
-	}
-	for _, check := range opts.Profiles.Quality.RequiredChecks {
-		if !check.Required {
-			continue
-		}
-		if len(check.PreferredCommands) == 0 {
-			return check.ID, ""
-		}
-		cmd := strings.TrimSpace(check.PreferredCommands[0])
-		if cmd == "" {
-			return check.ID, ""
-		}
-		return check.ID, cmd
-	}
-	return "", ""
-}
-
-// mergeAuthoredAttemptsIntoDiscovery folds the authored attempts (commands and
-// readiness check) into the discovery result so reviewers can see both the
-// failed authored plan and the successful discovered plan in one
-// setup_result.json (AC6).
-func mergeAuthoredAttemptsIntoDiscovery(authored, discovered *SetupResult) *SetupResult {
-	if discovered == nil {
-		return authored
-	}
-	if authored == nil {
-		return discovered
-	}
-	merged := *discovered
-	combined := make([]SetupCommandAttempt, 0, len(authored.Commands)+len(discovered.Commands))
-	combined = append(combined, authored.Commands...)
-	combined = append(combined, discovered.Commands...)
-	merged.Commands = combined
-	// Discovery is the canonical source when both ran.
-	merged.Source = SetupSourceDiscovered
-	if merged.ReadinessEvidence == "" && authored.ReadinessEvidence != "" {
-		merged.ReadinessEvidence = authored.ReadinessEvidence
-	}
-	return &merged
-}
-
 // runSetupExecutor dispatches the setup executor (Claude or Codex per
-// task.executor.cli) to attempt to make the worktree ready when no authored
-// plan exists.
+// task.executor.cli) to attempt to make the worktree ready.
 func runSetupExecutor(ctx context.Context, opts SetupExecutorPreflightOptions) (*SetupResult, error) {
 	signals := opts.RepositorySignals
 	if signals == nil {
@@ -512,27 +279,17 @@ func setupExecutorFailureResult(message, provider, executorRun string, exitCode 
 	return res
 }
 
-// enforceLearnedSetupPlanContract validates that a setup executor that
-// returned status=ready also returned a non-empty successful_commands plan
-// whenever Galley would persist a learned plan to environment.yaml — that is,
-// whenever environment.setup is absent or the discovery path overrode a
-// failed authored plan. A ready response with no successful_commands cannot
-// be persisted, and silently skipping persistence would either (a) leave
-// environment.yaml without a learned plan so the next task re-pays discovery
-// cost, or (b) keep a stale authored plan that Galley already proved was
-// broken. Either is a silent violation of AC7's "environment.yaml is not
-// silently left unchanged" invariant. The returned error is treated as a
-// setup_failed by the caller, which downgrades status and writes
-// setup_result.json with repair guidance for the operator.
-func enforceLearnedSetupPlanContract(res *SetupResult, env *profile.Environment) error {
+// enforceLearnedSetupPlanContract validates that a setup executor that returned
+// status=ready also returned a non-empty successful_commands plan. The daemon
+// does not execute environment.setup.commands itself, so a ready response
+// without the final successful plan would leave the next task without the setup
+// executor's repaired command sequence.
+func enforceLearnedSetupPlanContract(res *SetupResult) error {
 	if res == nil || res.Status != SetupStatusReady {
 		return nil
 	}
 	if len(res.SuccessfulCommands) > 0 {
 		return nil
-	}
-	if env != nil && env.Setup != nil && len(env.Setup.Commands) > 0 {
-		return fmt.Errorf("setup executor returned status=ready with no successful_commands; cannot confirm whether the authored environment.setup plan ran or persist a replacement plan")
 	}
 	return fmt.Errorf("setup executor returned status=ready with no successful_commands; cannot learn a setup plan to persist to environment.yaml")
 }
@@ -551,7 +308,7 @@ func applySetupContractViolation(res *SetupResult, err error) {
 		res.Error = err.Error()
 	}
 	if res.RepairGuidance == "" {
-		res.RepairGuidance = "Return the ordered successful_commands the setup executor ran (or author environment.setup.commands manually), then requeue. environment.yaml was intentionally left unchanged to avoid silently dropping a stale or unknown setup plan."
+		res.RepairGuidance = "Return the ordered successful_commands the setup executor ran, then requeue. environment.yaml was intentionally left unchanged to avoid silently dropping a stale or unknown setup plan."
 	}
 }
 
@@ -778,15 +535,6 @@ func WriteSetupEnvironmentUpdate(runDir string, update *SetupEnvironmentUpdate) 
 	return writeJSON(filepath.Join(runDir, "environment_update.json"), update)
 }
 
-func setupShellArgv(opts SetupExecutorPreflightOptions, command, name string) ([]string, func(), string, error) {
-	shell := profile.RequiredCheckEnvironment{}
-	if opts.Profiles.Environment != nil {
-		shell = opts.Profiles.Environment.RequiredChecks
-	}
-	scratchDir := filepath.Join(opts.RunDir, "setup-shell", name)
-	return profilecmd.ShellArgvForOS(runtime.GOOS, command, scratchDir, shell)
-}
-
 func setupCommandTimeout(t task.Task) time.Duration {
 	if t.ExecutionPolicy.TimeoutMS > 0 {
 		return time.Duration(t.ExecutionPolicy.TimeoutMS) * time.Millisecond
@@ -808,8 +556,8 @@ func truncateString(s string, max int) string {
 
 // discoverRepositorySignals returns a small set of repository setup signal
 // paths (manifests, lockfiles, setup docs) the daemon surfaces to the setup
-// executor when no authored plan exists. The list is intentionally bounded so
-// the work order payload stays small.
+// executor. The list is intentionally bounded so the work order payload stays
+// small.
 func discoverRepositorySignals(workDir string) []string {
 	candidates := []string{
 		"package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock",

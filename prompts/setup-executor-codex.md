@@ -16,12 +16,12 @@ The work order message is one JSON object with these top-level keys:
 
 # Source Priority
 
-1. `environment.setup` when present. Run those commands first; if they all succeed and a representative quality required check passes, return the unchanged plan as `successful_commands`.
+1. `environment.setup` when present. Treat it as the prior setup plan: run those commands first, observe failures directly, and return it unchanged only when it makes the worktree ready.
 2. `environment.commands` named like `setup`, `install`, `bootstrap`, `deps`, `build`, `test_unit`.
 3. Repository setup docs, package manifests, lockfiles surfaced in `repository_signals`.
 4. Repository conventions discovered in the worktree.
 
-You may discover and return a different successful plan only when the supplied commands do not make the worktree ready.
+Discover and return a different successful plan when the supplied commands do not make the worktree ready.
 
 # Tool And Write Rules
 
@@ -39,17 +39,17 @@ You may discover and return a different successful plan only when the supplied c
 - Detect language(s) and package manager(s) from manifests in `repository_signals`.
 - Pick a quality required check that proves the build/test surface.
 
-## Step 2. Try The Authored Plan
+## Step 2. Try The Prior Plan
 
 If `environment.setup.commands` exists, run each command in order. Record every attempt in `commands[]` with `source: "environment_setup"`.
 
-If every authored command succeeds and the chosen quality required check passes, set `status: "ready"` and copy the authored plan into `successful_commands`. Return the result.
+If every prior-plan command succeeds and the chosen quality required check passes, set `status: "ready"` and copy the prior plan into `successful_commands`. Return the result.
 
-If any authored command fails, record the failure and proceed to Step 3.
+If any prior-plan command fails, keep its stdout/stderr evidence in `commands[]` and proceed to Step 3.
 
 ## Step 3. Discover
 
-Build the smallest ordered sequence that brings the worktree from a fresh clone to a state where a quality required check passes. Prefer commands already present in `environment.commands`. Each command goes into `commands[]` with `source` set to `environment_commands` when reused from the commands map or `discovered` when composed from repository signals. Never author entries with `source: "readiness_check"` — that value is reserved for the daemon's authored-plan readiness verification.
+Build the smallest ordered sequence that brings the worktree from a fresh clone to a state where a quality required check passes. Prefer commands already present in `environment.commands`. Each command goes into `commands[]` with `source` set to `environment_commands` when reused from the commands map or `discovered` when composed from repository signals.
 
 ## Step 4. Verify Readiness
 
@@ -68,7 +68,7 @@ Before returning the final JSON, verify:
 - Every `commands[]` entry has `run`, `source`, and `exit_code`.
 - `status: "ready"` has non-empty `successful_commands`, `readiness_evidence`, and top-level `source`.
 - Every `successful_commands[].run` also appears in `commands[]`.
-- Setup executor output does not use `source: "readiness_check"`; that source is reserved for the daemon.
+- Quality-check commands you run to prove readiness appear in `commands[]`; `successful_commands` stays limited to the setup plan that should be saved.
 - `status: "failed"` has `error` and `repair_guidance`.
 
 # Setup-Specific Rules
@@ -108,7 +108,7 @@ Use this shape for a ready worktree:
 }
 ```
 
-Set top-level `source` to `environment_setup` when the authored setup plan made the worktree ready unchanged, `environment_commands` when the successful plan reuses environment commands, or `discovered` when the successful plan is composed from repository signals or conventions. After an authored plan fails, use the `source` of the replacement plan that made the worktree ready.
+Set top-level `source` to `environment_setup` when the prior setup plan made the worktree ready unchanged, `environment_commands` when the successful plan reuses environment commands, or `discovered` when the successful plan is composed from repository signals or conventions. After a prior plan fails, use the `source` of the replacement plan that made the worktree ready.
 
 Use this shape when setup cannot make the worktree ready:
 

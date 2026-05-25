@@ -10,6 +10,7 @@ This project follows semantic versioning.
 
 - Windows required-check shell auto-discovery now ignores WSL launchers, WindowsApps shims, and non-standard Bash installs. Galley only auto-selects standard Git for Windows Bash, or Bash inferred from Git for Windows, and falls back to `cmd.exe` when no supported Git Bash is found.
 - Acceptance skeleton preflight and task validation now allow multiple AC output entries to share one skeleton file path, preserving each entry's metadata while still enforcing path safety, allowed/forbidden scoping, declared-file checks, undeclared-change detection, and required AC coverage. Baseline hashes are deduplicated by slash-normalized path.
+- PR comment polling now skips closed, merged, archived, PR-less, and non-open PR tasks before profile loading or GitHub calls while preserving requeue handling for open actionable PR tasks.
 
 ### Added
 

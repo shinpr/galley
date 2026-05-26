@@ -6,80 +6,92 @@ import (
 	"strings"
 )
 
-// defaultInheritedEnv lists the cross-platform environment keys that
-// RestrictedEnv preserves from the parent process. Keys are matched
-// case-sensitively on Unix-style hosts and case-insensitively on Windows
-// (see restrictedEnvFromOS).
-var defaultInheritedEnv = map[string]bool{
-	"ANTHROPIC_API_KEY": true,
-	"CODEX_HOME":        true,
-	// GitHub token env vars are intentionally omitted; PR operations should use
-	// the authenticated gh configuration instead of exposing tokens to model runs.
-	"HOME":            true,
-	"LANG":            true,
-	"LOGNAME":         true,
-	"OPENAI_API_KEY":  true,
-	"PATH":            true,
-	"SHELL":           true,
-	"TERM":            true,
-	"TMPDIR":          true,
-	"USER":            true,
-	"XDG_CONFIG_HOME": true,
-	"XDG_CACHE_HOME":  true,
-	"XDG_DATA_HOME":   true,
+// InheritedEnv returns the parent process environment, optionally overridden
+// by caller-supplied extras, for Galley-launched model subprocesses (Claude
+// and Codex executor, setup executor, acceptance skeleton creator, and
+// supervisor adapters).
+//
+// Galley treats the parent process environment as the subprocess execution
+// contract and does not curate an allowlist of inherited keys. Issue #75
+// showed that hidden allowlist filtering breaks Windows AFK runs because the
+// removed entries (SystemDrive, ProgramData, ChocolateyInstall, user-defined
+// PATH augmentations, custom toolchain variables, etc.) cannot be safely
+// reconstructed from a fixed list. Inheriting the parent environment as-is
+// is the only mechanism that preserves the toolchains the operator already
+// configured.
+//
+// AC1: every inherited entry whose key is non-empty and whose raw entry
+// contains "=" is preserved exactly (the original key and value bytes are
+// copied verbatim into the returned slice).
+//
+// AC2: each entry in extra overrides any inherited entry that shares the
+// same key. Override matching is case-sensitive on Unix-style hosts and
+// case-insensitive on Windows (where the OS itself treats environment keys
+// case-insensitively). Extras are appended after the surviving inherited
+// entries so the override behavior is deterministic for any Go-managed
+// subprocess.
+//
+// AC5: callers that persist subprocess command plans strip the returned
+// environment slice before writing run evidence; the slice itself is only
+// used at process-launch time.
+func InheritedEnv(extra ...string) []string {
+	return inheritedEnvFromOS(runtime.GOOS, os.Environ(), extra...)
 }
 
-// windowsInheritedEnv lists the additional process environment keys that
-// Windows requires for cmd.exe, .cmd shims, user-local tool discovery,
-// temp files, and executable resolution. These keys are matched
-// case-insensitively because Windows env keys themselves are case-insensitive
-// and the parent process may surface them with any casing (e.g. "Path",
-// "SystemRoot", "ComSpec").
-var windowsInheritedEnv = map[string]bool{
-	"SYSTEMROOT":   true,
-	"WINDIR":       true,
-	"COMSPEC":      true,
-	"PATHEXT":      true,
-	"USERPROFILE":  true,
-	"APPDATA":      true,
-	"LOCALAPPDATA": true,
-	"TEMP":         true,
-	"TMP":          true,
-}
-
-// RestrictedEnv returns a small inherited environment for model subprocesses.
-// On Unix-style hosts it preserves the historical Unix-oriented allowlist
-// (case-sensitive keys, LC_* preservation, and caller-supplied extras). On
-// Windows it additionally preserves Windows process environment keys that
-// cmd.exe, .cmd shims, user-local tool discovery, temp files, and executable
-// resolution require, and matches all keys case-insensitively because Windows
-// env keys are case-insensitive.
+// RestrictedEnv is retained as a backward-compatible alias for InheritedEnv
+// so existing internal call sites continue to compile without churn.
+//
+// Deprecated: use InheritedEnv. RestrictedEnv no longer filters parent
+// environment entries through an allowlist; it returns the parent
+// environment with caller-supplied extras applied as overrides.
 func RestrictedEnv(extra ...string) []string {
-	return restrictedEnvFromOS(runtime.GOOS, os.Environ(), extra...)
+	return InheritedEnv(extra...)
 }
 
-// restrictedEnvFromOS is the platform-parameterized implementation of
-// RestrictedEnv. It is exported within the package so tests can exercise the
-// Windows-specific path without running on a Windows host.
-func restrictedEnvFromOS(goos string, parentEnv []string, extra ...string) []string {
+// inheritedEnvFromOS is the platform-parameterized implementation of
+// InheritedEnv. It is exported within the package so tests can exercise the
+// Windows-specific override casing without running on a Windows host.
+//
+// parentEnv is expected to be the parent process environment (os.Environ()
+// in production). Entries with an empty key or no "=" separator are dropped,
+// matching the contract documented on InheritedEnv (and matching Go's
+// os/exec behavior, which silently ignores such malformed entries).
+func inheritedEnvFromOS(goos string, parentEnv []string, extra ...string) []string {
 	isWindows := goos == "windows"
-	env := make([]string, 0, len(parentEnv)+len(extra))
+	normalize := func(key string) string {
+		if isWindows {
+			return strings.ToUpper(key)
+		}
+		return key
+	}
+
+	// Collect extras first so the override key set is known before the
+	// parent environment is filtered. Skip malformed extras (no "=" or
+	// empty key) so the override contract documented on InheritedEnv is
+	// strict about what counts as an override and so the returned slice
+	// never contains a no-op extra.
+	overrideKeys := make(map[string]struct{}, len(extra))
+	cleanedExtras := make([]string, 0, len(extra))
+	for _, entry := range extra {
+		key, _, ok := strings.Cut(entry, "=")
+		if !ok || key == "" {
+			continue
+		}
+		overrideKeys[normalize(key)] = struct{}{}
+		cleanedExtras = append(cleanedExtras, entry)
+	}
+
+	out := make([]string, 0, len(parentEnv)+len(cleanedExtras))
 	for _, entry := range parentEnv {
 		key, _, ok := strings.Cut(entry, "=")
-		if !ok {
+		if !ok || key == "" {
 			continue
 		}
-		if isWindows {
-			upper := strings.ToUpper(key)
-			if defaultInheritedEnv[upper] || windowsInheritedEnv[upper] || strings.HasPrefix(upper, "LC_") {
-				env = append(env, entry)
-			}
+		if _, overridden := overrideKeys[normalize(key)]; overridden {
 			continue
 		}
-		if defaultInheritedEnv[key] || strings.HasPrefix(key, "LC_") {
-			env = append(env, entry)
-		}
+		out = append(out, entry)
 	}
-	env = append(env, extra...)
-	return env
+	out = append(out, cleanedExtras...)
+	return out
 }

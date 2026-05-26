@@ -6,67 +6,82 @@ import (
 	"testing"
 )
 
-// TestRestrictedEnvUnixDefaults covers AC3: the historical Unix-oriented
-// allowlist (PATH/HOME/LANG/...), LC_* preservation, caller-supplied extras,
-// and omission of unrelated parent environment values.
-func TestRestrictedEnvUnixDefaults(t *testing.T) {
+// AC6: the historical allowlist tests are removed and replaced with
+// inheritance-contract tests that exercise the Issue #75 environment shape
+// on Unix and Windows: parent entries (including credential-like, Windows
+// system, and arbitrary custom keys) must reach the constructed subprocess
+// environment unchanged, and caller-supplied extras must override matching
+// inherited entries by key.
+
+// TestInheritedEnvUnixPassesEveryParentEntry covers AC1/AC6: on Unix-style
+// hosts every parent process entry with a non-empty key and "=" separator is
+// preserved exactly, including credential-like and unrelated values that the
+// previous allowlist used to drop.
+func TestInheritedEnvUnixPassesEveryParentEntry(t *testing.T) {
 	parent := []string{
 		"PATH=/usr/bin",
 		"HOME=/home/u",
 		"LANG=en_US.UTF-8",
 		"LC_ALL=en_US.UTF-8",
 		"LC_TIME=POSIX",
-		"FOO=bar",            // unrelated
-		"AWS_SECRET_KEY=xxx", // unrelated
-		"=novalue",           // empty key
-		"NOVAR",              // malformed entry without "="
+		"FOO=bar",
+		"AWS_SECRET_KEY=xxx",
+		"GITHUB_TOKEN=ghp_example",
+		"=novalue", // empty key - must be dropped
+		"NOVAR",    // no "=" - must be dropped
 	}
-	got := restrictedEnvFromOS("linux", parent, "EXTRA=value", "GALLEY_GUARD=on")
+	got := inheritedEnvFromOS("linux", parent, "EXTRA=value", "GALLEY_CLAUDE_GUARD_MODE=on")
 	want := []string{
 		"PATH=/usr/bin",
 		"HOME=/home/u",
 		"LANG=en_US.UTF-8",
 		"LC_ALL=en_US.UTF-8",
 		"LC_TIME=POSIX",
+		"FOO=bar",
+		"AWS_SECRET_KEY=xxx",
+		"GITHUB_TOKEN=ghp_example",
 		"EXTRA=value",
-		"GALLEY_GUARD=on",
+		"GALLEY_CLAUDE_GUARD_MODE=on",
 	}
 	assertSameEntries(t, got, want)
 	for _, entry := range got {
-		if strings.HasPrefix(entry, "FOO=") || strings.HasPrefix(entry, "AWS_SECRET_KEY=") {
-			t.Errorf("unrelated env entry leaked into restricted env: %q", entry)
+		if strings.HasPrefix(entry, "=") {
+			t.Errorf("empty-key entry leaked into inherited env: %q", entry)
+		}
+		if entry == "NOVAR" {
+			t.Errorf("malformed entry without '=' leaked into inherited env: %q", entry)
 		}
 	}
 }
 
-// TestRestrictedEnvUnixDoesNotInheritWindowsKeys also covers AC3: the
-// Windows-only allowlist must not widen Unix behavior. A Linux/Darwin process
-// with Windows-shaped environment keys should still see only the documented
-// Unix allowlist (here, PATH).
-func TestRestrictedEnvUnixDoesNotInheritWindowsKeys(t *testing.T) {
+// TestInheritedEnvUnixPassesWindowsShapedKeys covers AC6: keys that the
+// previous Windows-only allowlist treated specially must inherit on Unix
+// hosts too, because Galley no longer filters by key shape. A Linux process
+// that happens to see "PATHEXT" or "WINDIR" in its parent environment must
+// still pass them through.
+func TestInheritedEnvUnixPassesWindowsShapedKeys(t *testing.T) {
 	parent := []string{
 		"PATH=/usr/bin",
 		"PATHEXT=.EXE",
 		"WINDIR=C\\Windows",
 		"USERPROFILE=C\\Users\\u",
-		"APPDATA=C\\Users\\u\\AppData\\Roaming",
-		"LOCALAPPDATA=C\\Users\\u\\AppData\\Local",
-		"TEMP=C\\Temp",
-		"TMP=C\\Tmp",
-		"SYSTEMROOT=C\\Windows",
-		"COMSPEC=C\\Windows\\System32\\cmd.exe",
+		"SystemDrive=C:",
+		"ProgramData=C:\\ProgramData",
+		"CustomVar=anything-the-user-set",
 	}
-	got := restrictedEnvFromOS("linux", parent)
-	assertSameEntries(t, got, []string{"PATH=/usr/bin"})
+	got := inheritedEnvFromOS("linux", parent)
+	assertSameEntries(t, got, parent)
 }
 
-// TestRestrictedEnvWindowsPreservesWindowsKeys covers AC1: on Windows the
-// documented Windows process environment keys (SYSTEMROOT, WINDIR, COMSPEC,
-// PATHEXT, USERPROFILE, APPDATA, LOCALAPPDATA, TEMP, TMP) are preserved when
-// present, alongside the historical allowlist (PATH/LANG/...), while unrelated
-// values stay omitted.
-func TestRestrictedEnvWindowsPreservesWindowsKeys(t *testing.T) {
+// TestInheritedEnvWindowsPassesEveryParentEntry covers AC1/AC3/AC6: every
+// parent entry must inherit on Windows, including Windows system variables
+// (SystemDrive, ProgramData, SYSTEMROOT, WINDIR, COMSPEC, PATHEXT,
+// USERPROFILE, APPDATA, LOCALAPPDATA, TEMP, TMP), the historical Unix
+// allowlist keys, credential-like values, and arbitrary custom entries.
+func TestInheritedEnvWindowsPassesEveryParentEntry(t *testing.T) {
 	parent := []string{
+		"SystemDrive=C:",
+		"ProgramData=C:\\ProgramData",
 		"SYSTEMROOT=C:\\Windows",
 		"WINDIR=C:\\Windows",
 		"COMSPEC=C:\\Windows\\System32\\cmd.exe",
@@ -80,106 +95,117 @@ func TestRestrictedEnvWindowsPreservesWindowsKeys(t *testing.T) {
 		"LANG=en_US.UTF-8",
 		"FOO=bar",
 		"AWS_SECRET_KEY=xxx",
+		"GITHUB_TOKEN=ghp_example",
+		"ChocolateyInstall=C:\\ProgramData\\chocolatey",
+		"Custom_Tool_Home=C:\\tools\\custom",
 	}
-	got := restrictedEnvFromOS("windows", parent, "GALLEY_CLAUDE_GUARD_MODE=supervisor")
+	got := inheritedEnvFromOS("windows", parent, "GALLEY_CLAUDE_GUARD_MODE=supervisor")
+	want := append([]string(nil), parent...)
+	want = append(want, "GALLEY_CLAUDE_GUARD_MODE=supervisor")
+	assertSameEntries(t, got, want)
+}
+
+// TestInheritedEnvWindowsCaseInsensitiveOverride covers AC2: on Windows the
+// override match is case-insensitive because Windows environment keys are
+// case-insensitive at the OS level. A caller-supplied "Path=..." override
+// must replace a parent "PATH=..." entry rather than producing two
+// conflicting Path-like entries.
+func TestInheritedEnvWindowsCaseInsensitiveOverride(t *testing.T) {
+	parent := []string{
+		"PATH=C:\\Windows",
+		"SystemRoot=C:\\Windows",
+		"Custom=keep-me",
+	}
+	got := inheritedEnvFromOS("windows", parent, "Path=C:\\overridden", "SYSTEMROOT=C:\\OverrideWin")
 	want := []string{
-		"SYSTEMROOT=C:\\Windows",
-		"WINDIR=C:\\Windows",
-		"COMSPEC=C:\\Windows\\System32\\cmd.exe",
-		"PATHEXT=.COM;.EXE;.BAT;.CMD",
-		"USERPROFILE=C:\\Users\\u",
-		"APPDATA=C:\\Users\\u\\AppData\\Roaming",
-		"LOCALAPPDATA=C:\\Users\\u\\AppData\\Local",
-		"TEMP=C:\\Users\\u\\AppData\\Local\\Temp",
-		"TMP=C:\\Users\\u\\AppData\\Local\\Temp",
-		"PATH=C:\\Windows;C:\\Program Files\\Git\\cmd",
-		"LANG=en_US.UTF-8",
-		"GALLEY_CLAUDE_GUARD_MODE=supervisor",
+		"Custom=keep-me",
+		"Path=C:\\overridden",
+		"SYSTEMROOT=C:\\OverrideWin",
 	}
 	assertSameEntries(t, got, want)
-	for _, entry := range got {
-		if strings.HasPrefix(entry, "FOO=") || strings.HasPrefix(entry, "AWS_SECRET_KEY=") {
-			t.Errorf("unrelated env entry leaked into restricted env: %q", entry)
-		}
-	}
 }
 
-// TestRestrictedEnvWindowsCaseInsensitiveKeys covers AC2: Windows env keys are
-// case-insensitive, so parent environments using "Path", "SystemRoot",
-// "ComSpec", "PathExt", "UserProfile", "AppData", "LocalAppData", "Temp",
-// "Tmp", or "Windir" casing must be preserved. The original entry (including
-// its original casing) is retained in the resulting environment so downstream
-// processes observe the same key shape they would inherit from the OS.
-func TestRestrictedEnvWindowsCaseInsensitiveKeys(t *testing.T) {
+// TestInheritedEnvUnixOverrideIsCaseSensitive covers AC2 on Unix: an extra
+// with a different-cased key from a parent entry does not collide; only
+// exact key matches override.
+func TestInheritedEnvUnixOverrideIsCaseSensitive(t *testing.T) {
 	parent := []string{
-		"Path=C:\\Windows;C:\\Tools",
-		"SystemRoot=C:\\Windows",
-		"ComSpec=C:\\Windows\\System32\\cmd.exe",
-		"PathExt=.COM;.EXE;.BAT;.CMD",
-		"UserProfile=C:\\Users\\u",
-		"AppData=C:\\Users\\u\\AppData\\Roaming",
-		"LocalAppData=C:\\Users\\u\\AppData\\Local",
-		"Temp=C:\\Tmp",
-		"Tmp=C:\\Tmp2",
-		"Windir=C:\\Windows",
-		"NotAllowed=value",
+		"PATH=/usr/bin",
+		"path=/lower",
 	}
-	got := restrictedEnvFromOS("windows", parent)
-	wantContains := []string{
-		"Path=C:\\Windows;C:\\Tools",
-		"SystemRoot=C:\\Windows",
-		"ComSpec=C:\\Windows\\System32\\cmd.exe",
-		"PathExt=.COM;.EXE;.BAT;.CMD",
-		"UserProfile=C:\\Users\\u",
-		"AppData=C:\\Users\\u\\AppData\\Roaming",
-		"LocalAppData=C:\\Users\\u\\AppData\\Local",
-		"Temp=C:\\Tmp",
-		"Tmp=C:\\Tmp2",
-		"Windir=C:\\Windows",
+	got := inheritedEnvFromOS("linux", parent, "PATH=/override")
+	want := []string{
+		"path=/lower",
+		"PATH=/override",
 	}
-	assertSameEntries(t, got, wantContains)
-	for _, entry := range got {
-		if strings.HasPrefix(entry, "NotAllowed=") {
-			t.Errorf("unrelated env entry leaked into restricted env: %q", entry)
-		}
-	}
+	assertSameEntries(t, got, want)
 }
 
-// TestRestrictedEnvWindowsPreservesLCKeys ensures LC_* preservation still
-// applies on Windows (with case-insensitive matching), supporting AC2/AC3
-// interaction: turning on Windows-specific behavior must not regress LC_*
-// inheritance.
-func TestRestrictedEnvWindowsPreservesLCKeys(t *testing.T) {
+// TestInheritedEnvOverrideSkipsMalformedExtras documents that an extra with
+// no "=" or an empty key is silently dropped (matching os/exec semantics)
+// and does not trigger an override against any inherited entry.
+func TestInheritedEnvOverrideSkipsMalformedExtras(t *testing.T) {
 	parent := []string{
-		"LC_ALL=en_US.UTF-8",
-		"Lc_Time=POSIX",
-		"PATH=C:\\Windows",
-		"OTHER=value",
+		"PATH=/usr/bin",
+		"HOME=/home/u",
 	}
-	got := restrictedEnvFromOS("windows", parent)
-	assertSameEntries(t, got, []string{
-		"LC_ALL=en_US.UTF-8",
-		"Lc_Time=POSIX",
-		"PATH=C:\\Windows",
-	})
+	got := inheritedEnvFromOS("linux", parent, "NO_EQUALS_HERE", "=novalue", "VALID=ok")
+	want := []string{
+		"PATH=/usr/bin",
+		"HOME=/home/u",
+		"VALID=ok",
+	}
+	assertSameEntries(t, got, want)
 }
 
-// TestRestrictedEnvExportedAPI is a smoke test ensuring the exported
-// RestrictedEnv signature still produces inherited entries from the live
-// parent environment for the current host, supporting AC4 (call sites
-// continue to receive a usable env without contract changes).
-func TestRestrictedEnvExportedAPI(t *testing.T) {
+// TestInheritedEnvIssue75ShapeOnEveryHostOS covers AC3 explicitly: the
+// SystemDrive, ProgramData, and an arbitrary custom entry from the Issue #75
+// reproducing shape must reach the constructed subprocess environment
+// unchanged when the host OS is linux, darwin, or windows.
+func TestInheritedEnvIssue75ShapeOnEveryHostOS(t *testing.T) {
+	parent := []string{
+		"SystemDrive=C:",
+		"ProgramData=C:\\ProgramData",
+		"Galley_Issue_75=arbitrary-custom-value",
+	}
+	for _, goos := range []string{"linux", "darwin", "windows"} {
+		t.Run(goos, func(t *testing.T) {
+			got := inheritedEnvFromOS(goos, parent)
+			assertSameEntries(t, got, parent)
+		})
+	}
+}
+
+// TestInheritedEnvExportedAPI is a smoke test for InheritedEnv (and the
+// backward-compatible RestrictedEnv alias) against the live parent
+// environment of the test process. It supports AC4: existing call sites
+// continue to receive a usable env without contract changes.
+func TestInheritedEnvExportedAPI(t *testing.T) {
 	t.Setenv("PATH", "/usr/bin")
-	got := RestrictedEnv("EXTRA=ok")
-	foundExtra := false
-	for _, entry := range got {
-		if entry == "EXTRA=ok" {
-			foundExtra = true
-			break
+	t.Setenv("GALLEY_ISSUE_75_TEST_KEY", "ok")
+	for _, name := range []string{"InheritedEnv", "RestrictedEnv"} {
+		var got []string
+		switch name {
+		case "InheritedEnv":
+			got = InheritedEnv("EXTRA=ok")
+		case "RestrictedEnv":
+			got = RestrictedEnv("EXTRA=ok")
 		}
-	}
-	if !foundExtra {
-		t.Errorf("expected EXTRA=ok in RestrictedEnv output, got %v", got)
+		var foundExtra, foundCustom bool
+		for _, entry := range got {
+			if entry == "EXTRA=ok" {
+				foundExtra = true
+			}
+			if entry == "GALLEY_ISSUE_75_TEST_KEY=ok" {
+				foundCustom = true
+			}
+		}
+		if !foundExtra {
+			t.Errorf("%s: expected EXTRA=ok in output", name)
+		}
+		if !foundCustom {
+			t.Errorf("%s: expected custom parent entry GALLEY_ISSUE_75_TEST_KEY=ok to inherit", name)
+		}
 	}
 }
 

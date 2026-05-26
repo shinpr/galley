@@ -6,6 +6,11 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Fixed
+
+- Subprocess environment construction for Claude and Codex model runs (executor, setup executor, acceptance skeleton creator, and supervisor) now inherits the full parent process environment instead of curating an allowlist. Issue #75 reported that the previous allowlist dropped Windows system entries (SystemDrive, ProgramData, ChocolateyInstall, user-defined PATH augmentations) and arbitrary toolchain variables that Galley cannot safely reconstruct, breaking AFK execution on Windows. Caller-supplied extras (Claude guard mode markers) still override matching inherited entries, and persisted command-plan evidence continues to omit environment values.
+- Galley-owned git invocations (worktree creation/removal, status, add, diff, commit, push, review staging, profile origin lookups, and result post-checks) now pass `-c core.longpaths=true` through a shared `runner.GitArgs` argv wrapper so Windows long-path cleanup and staging failures no longer trip MAX_PATH limits. The flag is benign on macOS and Linux and routing every invocation through the shared wrapper ensures new git call sites pick up the override automatically.
+
 ## v0.7.1 - 2026-05-26
 
 ### Changed

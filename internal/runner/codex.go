@@ -73,18 +73,15 @@ func CodexFromTask(t task.Task) CodexOptions {
 		sandbox = "danger-full-access"
 	}
 
-	promptMode := t.Executor.PromptMode
-	if promptMode == "" {
-		promptMode = "replace"
-	}
+	common := executorOptionsFromTask(t)
 
 	return CodexOptions{
-		Model:        t.Executor.Model,
-		Effort:       t.Executor.Effort,
-		PromptMode:   promptMode,
-		MaxBudgetUSD: t.Executor.MaxBudgetUSDValue(),
+		Model:        common.Model,
+		Effort:       common.Effort,
+		PromptMode:   common.PromptMode,
+		MaxBudgetUSD: common.MaxBudgetUSD,
 		Sandbox:      sandbox,
-		WorkDir:      t.Scope.CWD,
+		WorkDir:      common.WorkDir,
 	}
 }
 
@@ -110,7 +107,11 @@ func CodexCommandPlan(opts CodexOptions) (Command, error) {
 	if opts.PromptMode == "" {
 		opts.PromptMode = "replace"
 	}
-	opts = withDefaultEmbeddedCodexOptions(opts)
+	var err error
+	opts, err = withDefaultEmbeddedCodexOptions(opts)
+	if err != nil {
+		return Command{}, err
+	}
 	resolvedOpts, err := resolveCodexAttemptFiles(opts)
 	if err != nil {
 		return Command{}, err
@@ -138,8 +139,8 @@ func CodexCommandPlan(opts CodexOptions) (Command, error) {
 	switch opts.PromptMode {
 	case "replace", "append":
 		// Codex inlines the system prompt via stdin. The CLI has no distinct
-		// append-system-prompt surface, so append is accepted for task-schema
-		// compatibility and surfaced as a warning below.
+		// append-system-prompt surface, so append is accepted by the task
+		// contract and surfaced as a warning below.
 	default:
 		return Command{}, fmt.Errorf("unsupported prompt mode %q", opts.PromptMode)
 	}
@@ -191,14 +192,18 @@ func CodexEffectiveSystemPrompt(opts CodexOptions) (string, error) {
 	return prompts.CodexExecutorFull(), nil
 }
 
-func withDefaultEmbeddedCodexOptions(opts CodexOptions) CodexOptions {
+func withDefaultEmbeddedCodexOptions(opts CodexOptions) (CodexOptions, error) {
 	if opts.SystemPromptFile == "" && opts.SystemPrompt == "" {
 		opts.SystemPrompt = prompts.CodexExecutorFull()
 	}
 	if opts.JSONSchemaFile == "" && opts.JSONSchema == "" {
-		opts.JSONSchema = CodexExecutorResultSchema()
+		schema, err := CodexExecutorResultSchema()
+		if err != nil {
+			return opts, err
+		}
+		opts.JSONSchema = schema
 	}
-	return opts
+	return opts, nil
 }
 
 // CodexExecutorResultSchema returns the executor result schema shape accepted
@@ -209,23 +214,23 @@ func withDefaultEmbeddedCodexOptions(opts CodexOptions) CodexOptions {
 // invoking Codex. Galley still validates the parsed result with
 // ClaudeResult.Validate(), which preserves semantic requirements after the
 // model responds.
-func CodexExecutorResultSchema() string {
+func CodexExecutorResultSchema() (string, error) {
 	return CodexCompatibleOutputSchema(schemas.ClaudeResult)
 }
 
 // CodexCompatibleOutputSchema adapts Galley's persisted JSON schemas for the
 // stricter response_format subset used by `codex exec --output-schema`.
-func CodexCompatibleOutputSchema(schema string) string {
+func CodexCompatibleOutputSchema(schema string) (string, error) {
 	var doc any
 	if err := json.Unmarshal([]byte(schema), &doc); err != nil {
-		return schema
+		return "", fmt.Errorf("decode codex output schema: %w", err)
 	}
 	normalizeCodexOutputSchema(doc)
 	out, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
-		return schema
+		return "", fmt.Errorf("encode codex output schema: %w", err)
 	}
-	return string(out) + "\n"
+	return string(out) + "\n", nil
 }
 
 func normalizeCodexOutputSchema(node any) {

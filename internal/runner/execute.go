@@ -20,6 +20,61 @@ const (
 	maxIdleCheckInterval   = 30 * time.Second
 )
 
+var (
+	ErrIdleTimeout = errors.New("idle timeout")
+	ErrTimeout     = errors.New("timeout")
+	ErrKilled      = errors.New("killed")
+	ErrExitNonZero = errors.New("exit nonzero")
+)
+
+type CommandErrorKind string
+
+const (
+	CommandErrorIdleTimeout CommandErrorKind = "idle_timeout"
+	CommandErrorTimeout     CommandErrorKind = "timeout"
+	CommandErrorKilled      CommandErrorKind = "killed"
+	CommandErrorExitNonZero CommandErrorKind = "exit_nonzero"
+	CommandErrorStart       CommandErrorKind = "start_failed"
+)
+
+type CommandError struct {
+	Kind   CommandErrorKind
+	Result RunResult
+	Err    error
+}
+
+func (e *CommandError) Error() string {
+	if e == nil || e.Err == nil {
+		return string(e.Kind)
+	}
+	return e.Err.Error()
+}
+
+func (e *CommandError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func (e *CommandError) Is(target error) bool {
+	if e == nil {
+		return false
+	}
+	switch target {
+	case ErrIdleTimeout:
+		return e.Kind == CommandErrorIdleTimeout
+	case ErrTimeout:
+		return e.Kind == CommandErrorTimeout
+	case ErrKilled:
+		return e.Kind == CommandErrorKilled
+	case ErrExitNonZero:
+		return e.Kind == CommandErrorExitNonZero
+	default:
+		return false
+	}
+}
+
 // RunOptions controls subprocess execution and optional audit file capture.
 type RunOptions struct {
 	Timeout    time.Duration
@@ -95,7 +150,7 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 	if err := cmd.Start(); err != nil {
 		_ = stdoutFile.Close()
 		_ = stderrFile.Close()
-		return RunResult{}, fmt.Errorf("start %s: %w", command.Argv[0], err)
+		return RunResult{}, &CommandError{Kind: CommandErrorStart, Err: fmt.Errorf("start %s: %w", command.Argv[0], err)}
 	}
 
 	// Track the freshly created child process group so galley daemon stop
@@ -201,13 +256,33 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 		}()
 	}
 	if result.IdleTimedOut {
-		return result, errors.Join(fmt.Errorf("command produced no output for %s (idle timeout)", opts.IdleTimeout), closeErr)
+		return result, errors.Join(&CommandError{
+			Kind:   CommandErrorIdleTimeout,
+			Result: result,
+			Err:    fmt.Errorf("command produced no output for %s (idle timeout)", opts.IdleTimeout),
+		}, closeErr)
 	}
 	if result.TimedOut {
-		return result, errors.Join(fmt.Errorf("command timed out after %s", opts.Timeout), closeErr)
+		kind := CommandErrorTimeout
+		if waitTimedOut {
+			kind = CommandErrorKilled
+		}
+		return result, errors.Join(&CommandError{
+			Kind:   kind,
+			Result: result,
+			Err:    fmt.Errorf("command timed out after %s", opts.Timeout),
+		}, closeErr)
 	}
 	if runErr != nil {
-		return result, errors.Join(fmt.Errorf("run %s: %w", command.Argv[0], runErr), closeErr)
+		kind := CommandErrorExitNonZero
+		if strings.Contains(runErr.Error(), "signal: killed") {
+			kind = CommandErrorKilled
+		}
+		return result, errors.Join(&CommandError{
+			Kind:   kind,
+			Result: result,
+			Err:    fmt.Errorf("run %s: %w", command.Argv[0], runErr),
+		}, closeErr)
 	}
 	return result, closeErr
 }

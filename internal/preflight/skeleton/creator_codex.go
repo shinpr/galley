@@ -1,5 +1,5 @@
-// Package daemon — Codex provider integration for the acceptance skeleton
-// creator.
+// Package skeleton contains Codex provider integration for the acceptance
+// skeleton creator.
 //
 // This file owns the Codex-specific creator concerns kept separate from the
 // Claude creator path so provider routing, runner integration, and Codex
@@ -11,8 +11,8 @@
 // skeleton prompt is delivered as the system prompt, the acceptance skeleton
 // manifest schema is wired through `codex exec --output-schema`, and the
 // structured manifest is captured from the attempt-scoped
-// `codex exec --output-last-message` file rather than stdout (R2, AC2).
-package daemon
+// `codex exec --output-last-message` file rather than stdout.
+package skeleton
 
 import (
 	"os"
@@ -26,13 +26,13 @@ import (
 //
 // runner.CodexFromTask carries the task implementation executor backend
 // configuration (model, effort, sandbox, prompt mode, budget) so the creator
-// run and the implementation attempt share the same backend settings (AC4).
+// run and the implementation attempt share the same backend settings.
 // The acceptance skeleton creator prompt and manifest schema are supplied
 // explicitly, and RunDir is used as the attempt directory so the Codex runner
 // materializes the `--output-schema` file and requests the
 // `--output-last-message` capture file alongside the other preflight creator
-// evidence (AC2).
-func buildCodexCreatorCommandPlan(opts AcceptanceSkeletonPreflightOptions, payload []byte) (runner.Command, *preflightErr) {
+// evidence.
+func buildCodexCreatorCommandPlan(opts Options, payload []byte) (runner.Command, *preflightErr) {
 	codexOpts := runner.CodexFromTask(opts.Task)
 	codexOpts.Bin = opts.CodexBin
 	if codexOpts.Bin == "" {
@@ -41,7 +41,11 @@ func buildCodexCreatorCommandPlan(opts AcceptanceSkeletonPreflightOptions, paylo
 	codexOpts.WorkDir = opts.WorkDir
 	codexOpts.Prompt = string(payload)
 	codexOpts.SystemPrompt = prompts.AcceptanceSkeletonCreatorCodex()
-	codexOpts.JSONSchema = schemas.AcceptanceSkeletonManifest
+	schema, err := runner.CodexCompatibleOutputSchema(schemas.AcceptanceSkeletonManifest)
+	if err != nil {
+		return runner.Command{}, creatorErr("prepare built-in creator schema: %v", err)
+	}
+	codexOpts.JSONSchema = schema
 	codexOpts.AttemptDir = opts.RunDir
 
 	commandPlan, err := runner.CodexCommandPlan(codexOpts)

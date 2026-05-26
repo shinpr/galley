@@ -74,6 +74,16 @@ func TestSkillBundledTaskSchemaReferenceCoversCodexCLI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read skill-bundled task.schema.json: %v", err)
 	}
+	var generatedDoc, bundledDoc any
+	if err := json.Unmarshal(generated, &generatedDoc); err != nil {
+		t.Fatalf("generated task schema is invalid JSON: %v", err)
+	}
+	if err := json.Unmarshal(bundled, &bundledDoc); err != nil {
+		t.Fatalf("skill-bundled task schema is invalid JSON: %v", err)
+	}
+	if !reflect.DeepEqual(generatedDoc, bundledDoc) {
+		t.Fatalf("generated task schema differs from %s; regenerate the skill-bundled reference schema from TaskJSONSchema", TaskSchemaPath)
+	}
 
 	want := []string{"claude", "codex"}
 	for label, data := range map[string][]byte{

@@ -60,9 +60,8 @@ func (b Binaries) gh() string {
 //
 // On Windows the pathspec list is delivered through stdin via
 // --pathspec-from-file=- so a long list of changed files cannot push the
-// CreateProcess command line past the Windows limit. macOS and Linux continue
-// to pass the pathspecs on argv to preserve the existing behavior covered by
-// AddPaths regression tests.
+// CreateProcess command line past the Windows limit. macOS and Linux pass the
+// pathspecs on argv, matching git's common local invocation shape.
 func AddPaths(ctx context.Context, bins Binaries, workDir, runDir string, paths []string) error {
 	return addPathsForOS(ctx, bins, workDir, runDir, paths, runtime.GOOS)
 }
@@ -93,18 +92,8 @@ func addPathsForOS(ctx context.Context, bins Binaries, workDir, runDir string, p
 	} else {
 		cmd.Argv = append([]string{bins.git(), "add", "-A", "--"}, pathspecs...)
 	}
-	result, err := runner.RunCommand(ctx, cmd, runner.RunOptions{
-		StdoutPath: filepath.Join(runDir, "git_add.stdout.log"),
-		StderrPath: filepath.Join(runDir, "git_add.stderr.log"),
-	})
-	writeErr := writeJSON(filepath.Join(runDir, "git_add_result.json"), result)
-	if err != nil {
-		return errors.Join(fmt.Errorf("git add failed: %w", err), writeErr)
-	}
-	if writeErr != nil {
-		return writeErr
-	}
-	return nil
+	_, err := runCommandWithEvidence(ctx, cmd, runDir, "git_add", "git add failed")
+	return err
 }
 
 // StatusPorcelainZ returns the NUL-separated `git status --porcelain=v1 -z`
@@ -138,11 +127,11 @@ func StatusPorcelainZ(ctx context.Context, bins Binaries, workDir string) (strin
 // computed from `git status --porcelain` after the executor attempt. The
 // caller is expected to have already:
 //
-//   - discovered the change set with StatusPorcelainZ;
-//   - normalized and deduplicated each entry to slash form;
-//   - excluded task.files entries declared with commit:false so context-only
-//     inputs Galley materializes for the executor do not enter the
-//     submitted artifact.
+// - discovered the change set with StatusPorcelainZ;
+// - normalized and deduplicated each entry to slash form;
+// - excluded task.files entries declared with commit:false so context-only
+// inputs Galley materializes for the executor do not enter the
+// submitted artifact.
 //
 // `paths` is therefore an explicit reviewable path set, not a wildcard or an
 // `-A` over the whole worktree. The function runs
@@ -159,14 +148,14 @@ func StatusPorcelainZ(ctx context.Context, bins Binaries, workDir string) (strin
 // `git add -A` with no positional path would stage every dirty path in the
 // worktree, defeating the explicit reviewable-set contract; falling through
 // to `git add -A --` with no positional path would error on some git
-// versions. Recording the skipped evidence preserves the AC6 invariant that
+// versions. Recording the skipped evidence preserves the invariant that
 // the staging step is always observable in run evidence.
 //
 // On a non-skipped run the function writes:
 //
-//   - git_add_review.stdout.log
-//   - git_add_review.stderr.log
-//   - git_add_review_result.json (runner.RunResult)
+// - git_add_review.stdout.log
+// - git_add_review.stderr.log
+// - git_add_review_result.json (runner.RunResult)
 //
 // A staging failure returns the original git error joined with any evidence
 // write error so the caller can record a clear attempt failure instead of
@@ -180,7 +169,7 @@ func stagePathsForReviewForOS(ctx context.Context, bins Binaries, workDir, runDi
 	if len(stagePaths) == 0 {
 		// The executor produced no reviewable change. Persist a skipped
 		// evidence payload so reviewers can still confirm review staging
-		// ran for this attempt (AC6) and then return without calling
+		// ran for this attempt and then return without calling
 		// git add at all. Without this short-circuit, the alternative
 		// `git add -A` over the whole worktree would re-stage every
 		// dirty path (including context-only commit:false inputs),
@@ -254,40 +243,20 @@ func literalPathspecs(paths []string) []string {
 
 // Commit creates a git commit and writes command evidence.
 func Commit(ctx context.Context, bins Binaries, workDir, runDir, message string) error {
-	result, err := runner.RunCommand(ctx, runner.Command{
+	_, err := runCommandWithEvidence(ctx, runner.Command{
 		WorkDir: workDir,
 		Argv:    []string{bins.git(), "commit", "-m", message},
-	}, runner.RunOptions{
-		StdoutPath: filepath.Join(runDir, "git_commit.stdout.log"),
-		StderrPath: filepath.Join(runDir, "git_commit.stderr.log"),
-	})
-	writeErr := writeJSON(filepath.Join(runDir, "git_commit_result.json"), result)
-	if err != nil {
-		return errors.Join(fmt.Errorf("git commit failed: %w", err), writeErr)
-	}
-	if writeErr != nil {
-		return writeErr
-	}
-	return nil
+	}, runDir, "git_commit", "git commit failed")
+	return err
 }
 
 // PushCurrentBranch pushes HEAD to origin and writes command evidence.
 func PushCurrentBranch(ctx context.Context, bins Binaries, workDir, runDir string) error {
-	result, err := runner.RunCommand(ctx, runner.Command{
+	_, err := runCommandWithEvidence(ctx, runner.Command{
 		WorkDir: workDir,
 		Argv:    []string{bins.git(), "push", "-u", "origin", "HEAD"},
-	}, runner.RunOptions{
-		StdoutPath: filepath.Join(runDir, "git_push.stdout.log"),
-		StderrPath: filepath.Join(runDir, "git_push.stderr.log"),
-	})
-	writeErr := writeJSON(filepath.Join(runDir, "git_push_result.json"), result)
-	if err != nil {
-		return errors.Join(fmt.Errorf("git push failed: %w", err), writeErr)
-	}
-	if writeErr != nil {
-		return writeErr
-	}
-	return nil
+	}, runDir, "git_push", "git push failed")
+	return err
 }
 
 // CreatePullRequest opens a GitHub PR with gh and writes command evidence.
@@ -300,19 +269,12 @@ func CreatePullRequest(ctx context.Context, bins Binaries, workDir, runDir, body
 	if base != "" {
 		argv = append(argv, "--base", base)
 	}
-	result, err := runner.RunCommand(ctx, runner.Command{
+	result, err := runCommandWithEvidence(ctx, runner.Command{
 		WorkDir: workDir,
 		Argv:    argv,
-	}, runner.RunOptions{
-		StdoutPath: filepath.Join(runDir, "gh_pr_create.stdout.log"),
-		StderrPath: filepath.Join(runDir, "gh_pr_create.stderr.log"),
-	})
-	writeErr := writeJSON(filepath.Join(runDir, "gh_pr_create_result.json"), result)
+	}, runDir, "gh_pr_create", "gh pr create failed")
 	if err != nil {
-		return "", errors.Join(fmt.Errorf("gh pr create failed: %w", err), writeErr)
-	}
-	if writeErr != nil {
-		return "", writeErr
+		return "", err
 	}
 	prURL := ExtractFirstHTTPSURL(result.Stdout)
 	if prURL == "" {
@@ -329,27 +291,50 @@ func CreatePullRequest(ctx context.Context, bins Binaries, workDir, runDir, body
 // returns "" with a nil error so the caller can surface the original
 // create-failure unchanged.
 func FetchPRURLForCurrentBranch(ctx context.Context, bins Binaries, workDir, runDir string) (string, error) {
-	result, err := runner.RunCommand(ctx, runner.Command{
+	cmd := runner.Command{
 		WorkDir: workDir,
 		Argv:    []string{bins.gh(), "pr", "view", "--json", "url", "-q", ".url"},
-	}, runner.RunOptions{
-		StdoutPath: filepath.Join(runDir, "gh_pr_view.stdout.log"),
-		StderrPath: filepath.Join(runDir, "gh_pr_view.stderr.log"),
-	})
-	writeErr := writeJSON(filepath.Join(runDir, "gh_pr_view_result.json"), result)
-	if err != nil {
-		if strings.Contains(strings.ToLower(result.Stderr), "no pull requests found") {
+	}
+	result, runErr, writeErr := runCommandEvidence(ctx, cmd, runDir, "gh_pr_view")
+	if runErr != nil {
+		if isGHPRViewNoPullRequest(result.Stderr) {
 			if writeErr != nil {
 				return "", writeErr
 			}
 			return "", nil
 		}
-		return "", errors.Join(fmt.Errorf("gh pr view failed: %w", err), writeErr)
+		return "", errors.Join(fmt.Errorf("gh pr view failed: %w", runErr), writeErr)
 	}
 	if writeErr != nil {
 		return "", writeErr
 	}
 	return strings.TrimSpace(result.Stdout), nil
+}
+
+var ghPRViewNoPullRequestPattern = regexp.MustCompile(`(?im)^\s*no pull requests found(?:\s+for\s+(?:branch|current branch)\b.*)?\s*$`)
+
+func isGHPRViewNoPullRequest(stderr string) bool {
+	return ghPRViewNoPullRequestPattern.MatchString(stderr)
+}
+
+func runCommandWithEvidence(ctx context.Context, cmd runner.Command, runDir, label, failure string) (runner.RunResult, error) {
+	result, runErr, writeErr := runCommandEvidence(ctx, cmd, runDir, label)
+	if runErr != nil {
+		return result, errors.Join(fmt.Errorf("%s: %w", failure, runErr), writeErr)
+	}
+	if writeErr != nil {
+		return result, writeErr
+	}
+	return result, nil
+}
+
+func runCommandEvidence(ctx context.Context, cmd runner.Command, runDir, label string) (runner.RunResult, error, error) {
+	result, runErr := runner.RunCommand(ctx, cmd, runner.RunOptions{
+		StdoutPath: filepath.Join(runDir, label+".stdout.log"),
+		StderrPath: filepath.Join(runDir, label+".stderr.log"),
+	})
+	writeErr := writeJSON(filepath.Join(runDir, label+"_result.json"), result)
+	return result, runErr, writeErr
 }
 
 // FetchPRComments returns all PR comments using gh api pagination.
@@ -359,25 +344,9 @@ func FetchPRComments(ctx context.Context, bins Binaries, root, prURL string) ([]
 		return nil, err
 	}
 	apiPath := fmt.Sprintf("repos/%s/%s/issues/%s/comments", owner, repo, number)
-	stdoutFile, err := os.CreateTemp("", "galley-pr-comments-*.json")
+	output, err := fetchGHAPIOutput(ctx, bins, root, apiPath, "PR comments", "--paginate", "--slurp")
 	if err != nil {
-		return nil, fmt.Errorf("create PR comments temp file: %w", err)
-	}
-	stdoutPath := stdoutFile.Name()
-	if err := stdoutFile.Close(); err != nil {
-		return nil, fmt.Errorf("close PR comments temp file: %w", err)
-	}
-	defer os.Remove(stdoutPath)
-	_, err = runner.RunCommand(ctx, runner.Command{
-		WorkDir: root,
-		Argv:    []string{bins.gh(), "api", apiPath, "--paginate", "--slurp"},
-	}, runner.RunOptions{StdoutPath: stdoutPath})
-	if err != nil {
-		return nil, fmt.Errorf("gh api PR comments failed: %w", err)
-	}
-	output, err := os.ReadFile(stdoutPath)
-	if err != nil {
-		return nil, fmt.Errorf("read PR comments response: %w", err)
+		return nil, err
 	}
 	comments, err := DecodePRComments(string(output))
 	if err != nil {
@@ -418,33 +387,13 @@ func FetchPRAuthorLogin(ctx context.Context, bins Binaries, root, prURL string) 
 		return "", err
 	}
 	apiPath := fmt.Sprintf("repos/%s/%s/pulls/%s", owner, repo, number)
-	stdoutFile, err := os.CreateTemp("", "galley-pr-author-*.json")
-	if err != nil {
-		return "", fmt.Errorf("create PR author temp file: %w", err)
-	}
-	stdoutPath := stdoutFile.Name()
-	if err := stdoutFile.Close(); err != nil {
-		return "", fmt.Errorf("close PR author temp file: %w", err)
-	}
-	defer os.Remove(stdoutPath)
-	_, err = runner.RunCommand(ctx, runner.Command{
-		WorkDir: root,
-		Argv:    []string{bins.gh(), "api", apiPath},
-	}, runner.RunOptions{StdoutPath: stdoutPath})
-	if err != nil {
-		return "", fmt.Errorf("gh api PR author failed: %w", err)
-	}
-	output, err := os.ReadFile(stdoutPath)
-	if err != nil {
-		return "", fmt.Errorf("read PR author response: %w", err)
-	}
-	var payload struct {
+	payload, err := fetchGHAPIJSON[struct {
 		User struct {
 			Login string `json:"login"`
 		} `json:"user"`
-	}
-	if err := json.Unmarshal(output, &payload); err != nil {
-		return "", fmt.Errorf("decode PR author: %w", err)
+	}](ctx, bins, root, apiPath, "PR author")
+	if err != nil {
+		return "", err
 	}
 	if payload.User.Login == "" {
 		// Treat a missing/empty user.login as a lookup failure so callers can
@@ -462,31 +411,45 @@ func FetchPRState(ctx context.Context, bins Binaries, root, prURL string) (PullR
 		return PullRequestState{}, err
 	}
 	apiPath := fmt.Sprintf("repos/%s/%s/pulls/%s", owner, repo, number)
-	stdoutFile, err := os.CreateTemp("", "galley-pr-state-*.json")
+	return fetchGHAPIJSON[PullRequestState](ctx, bins, root, apiPath, "PR state")
+}
+
+func fetchGHAPIJSON[T any](ctx context.Context, bins Binaries, root, apiPath, label string, extraArgs ...string) (T, error) {
+	var zero T
+	output, err := fetchGHAPIOutput(ctx, bins, root, apiPath, label, extraArgs...)
 	if err != nil {
-		return PullRequestState{}, fmt.Errorf("create PR state temp file: %w", err)
+		return zero, err
+	}
+	var value T
+	if err := json.Unmarshal(output, &value); err != nil {
+		return zero, fmt.Errorf("decode %s: %w", label, err)
+	}
+	return value, nil
+}
+
+func fetchGHAPIOutput(ctx context.Context, bins Binaries, root, apiPath, label string, extraArgs ...string) ([]byte, error) {
+	stdoutFile, err := os.CreateTemp("", "galley-gh-api-*.json")
+	if err != nil {
+		return nil, fmt.Errorf("create %s temp file: %w", label, err)
 	}
 	stdoutPath := stdoutFile.Name()
 	if err := stdoutFile.Close(); err != nil {
-		return PullRequestState{}, fmt.Errorf("close PR state temp file: %w", err)
+		return nil, fmt.Errorf("close %s temp file: %w", label, err)
 	}
 	defer os.Remove(stdoutPath)
+	argv := append([]string{bins.gh(), "api", apiPath}, extraArgs...)
 	_, err = runner.RunCommand(ctx, runner.Command{
 		WorkDir: root,
-		Argv:    []string{bins.gh(), "api", apiPath},
+		Argv:    argv,
 	}, runner.RunOptions{StdoutPath: stdoutPath})
 	if err != nil {
-		return PullRequestState{}, fmt.Errorf("gh api PR state failed: %w", err)
+		return nil, fmt.Errorf("gh api %s failed: %w", label, err)
 	}
 	output, err := os.ReadFile(stdoutPath)
 	if err != nil {
-		return PullRequestState{}, fmt.Errorf("read PR state response: %w", err)
+		return nil, fmt.Errorf("read %s response: %w", label, err)
 	}
-	var state PullRequestState
-	if err := json.Unmarshal(output, &state); err != nil {
-		return PullRequestState{}, fmt.Errorf("decode PR state: %w", err)
-	}
-	return state, nil
+	return output, nil
 }
 
 // DecodePRComments decodes gh api --slurp output, with a single-page fallback.

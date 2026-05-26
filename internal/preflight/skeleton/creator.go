@@ -1,4 +1,4 @@
-package daemon
+package skeleton
 
 import (
 	"context"
@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shinpr/galley/internal/jsonio"
+	"github.com/shinpr/galley/internal/runartifact"
 	"github.com/shinpr/galley/internal/runner"
 	claudeguard "github.com/shinpr/galley/internal/runner/claude_guard_plugin"
 	"github.com/shinpr/galley/internal/task"
@@ -45,11 +47,11 @@ type creatorManifest struct {
 // entries for the preflight stage. The first version always uses the built-in
 // test creator because the core value is reasoning from natural-language task
 // context and ACs into concrete test skeletons.
-func resolveSkeletonDeclarations(ctx context.Context, opts AcceptanceSkeletonPreflightOptions) ([]task.AcceptanceSkeletonOutputDef, []noSkeletonDeclaration, *preflightErr) {
+func resolveSkeletonDeclarations(ctx context.Context, opts Options) ([]task.AcceptanceSkeletonOutputDef, []noSkeletonDeclaration, *preflightErr) {
 	return runBuiltinSkeletonCreator(ctx, opts)
 }
 
-func runBuiltinSkeletonCreator(ctx context.Context, opts AcceptanceSkeletonPreflightOptions) ([]task.AcceptanceSkeletonOutputDef, []noSkeletonDeclaration, *preflightErr) {
+func runBuiltinSkeletonCreator(ctx context.Context, opts Options) ([]task.AcceptanceSkeletonOutputDef, []noSkeletonDeclaration, *preflightErr) {
 	allowed, _, _ := EffectivePreflightPaths(opts.Task)
 	payload, perr := marshalBuiltinCreatorRequest(opts, allowed)
 	if perr != nil {
@@ -66,50 +68,33 @@ func runBuiltinSkeletonCreator(ctx context.Context, opts AcceptanceSkeletonPrefl
 	if perr != nil {
 		return nil, nil, perr
 	}
-	if err := writeJSON(filepath.Join(opts.RunDir, "preflight_creator_manifest.json"), manifest); err != nil {
+	if err := jsonio.Write(runartifact.Path(opts.RunDir, runartifact.PreflightCreatorManifestFilename), manifest); err != nil {
 		return nil, nil, creatorErr("write creator manifest: %v", err)
 	}
 	decls, noSkel := creatorManifestToDeclarations(manifest)
 	return decls, noSkel, nil
 }
 
-func marshalBuiltinCreatorRequest(opts AcceptanceSkeletonPreflightOptions, allowed []string) ([]byte, *preflightErr) {
+func marshalBuiltinCreatorRequest(opts Options, allowed []string) ([]byte, *preflightErr) {
 	request := map[string]any{
 		"task":            opts.Task,
 		"allowed_paths":   allowed,
 		"profiles":        opts.Profiles,
 		"reference_files": opts.Task.Files,
 	}
-	payload, err := json.MarshalIndent(request, "", "  ")
+	payload, err := json.MarshalIndent(request, "", " ")
 	if err != nil {
 		return nil, creatorErr("encode creator request: %v", err)
 	}
 	return payload, nil
 }
 
-// creatorProvider returns the acceptance skeleton creator provider for this
-// task. Per design decision D1 the creator follows the task implementation
-// executor backend (task.executor.cli) so creator runs and implementation
-// runs share the same provider. The daemon supervisor backend is deliberately
-// not consulted here. A validated task constrains executor.cli to the supported
-// provider enum; the empty value falls back to "claude" so the pre-routing
-// default behavior is preserved for callers that build a task without an
-// explicit backend.
-func creatorProvider(t task.Task) string {
-	switch t.Executor.CLI {
-	case "codex":
-		return "codex"
-	default:
-		return "claude"
-	}
-}
-
 // buildBuiltinCreatorCommandPlan routes command-plan construction to the
-// provider selected from the task implementation executor backend (AC1). The
+// provider selected from the task implementation executor backend. The
 // Codex path runs through the Codex command planner; the Claude path keeps the
-// existing Claude creator behavior including the JSON guard plugin (AC3).
-func buildBuiltinCreatorCommandPlan(opts AcceptanceSkeletonPreflightOptions, payload []byte) (runner.Command, *preflightErr) {
-	if creatorProvider(opts.Task) == "codex" {
+// existing Claude creator behavior including the JSON guard plugin.
+func buildBuiltinCreatorCommandPlan(opts Options, payload []byte) (runner.Command, *preflightErr) {
+	if task.ExecutorProvider(opts.Task) == "codex" {
 		return buildCodexCreatorCommandPlan(opts, payload)
 	}
 	return buildClaudeCreatorCommandPlan(opts, payload)
@@ -120,8 +105,8 @@ func buildBuiltinCreatorCommandPlan(opts AcceptanceSkeletonPreflightOptions, pay
 // plugin, replace-mode system prompt, and bypassPermissions permission mode.
 // The task executor model and effort settings are propagated so the creator
 // run uses the same executor backend configuration as the implementation
-// attempt (AC4).
-func buildClaudeCreatorCommandPlan(opts AcceptanceSkeletonPreflightOptions, payload []byte) (runner.Command, *preflightErr) {
+// attempt.
+func buildClaudeCreatorCommandPlan(opts Options, payload []byte) (runner.Command, *preflightErr) {
 	bin := opts.ClaudeBin
 	if bin == "" {
 		bin = "claude"
@@ -156,16 +141,16 @@ func buildClaudeCreatorCommandPlan(opts AcceptanceSkeletonPreflightOptions, payl
 }
 
 func writeBuiltinCreatorCommandPlan(runDir string, commandPlan runner.Command) *preflightErr {
-	planPath := filepath.Join(runDir, "preflight_creator_command_plan.json")
+	planPath := runartifact.Path(runDir, runartifact.PreflightCreatorPlanFilename)
 	auditPlan := commandPlan
 	auditPlan.Env = nil
-	if err := writeJSON(planPath, auditPlan); err != nil {
+	if err := jsonio.Write(planPath, auditPlan); err != nil {
 		return creatorErr("write creator command plan: %v", err)
 	}
 	return nil
 }
 
-func runBuiltinCreatorCommand(ctx context.Context, opts AcceptanceSkeletonPreflightOptions, commandPlan runner.Command) (creatorManifest, *preflightErr) {
+func runBuiltinCreatorCommand(ctx context.Context, opts Options, commandPlan runner.Command) (creatorManifest, *preflightErr) {
 	stdoutPath := filepath.Join(opts.RunDir, "preflight_creator.stdout.jsonl")
 	stderrPath := filepath.Join(opts.RunDir, "preflight_creator.stderr.log")
 	out, err := runner.RunCommand(ctx, commandPlan, runner.RunOptions{
@@ -191,9 +176,9 @@ func runBuiltinCreatorCommand(ctx context.Context, opts AcceptanceSkeletonPrefli
 // canonical output surface. Codex writes its structured final message to the
 // attempt-scoped `--output-last-message` capture file, so the Codex path reads
 // that file first and only falls back to the JSON event stream. Claude streams
-// the manifest directly on stdout (R2).
-func resolveCreatorManifest(opts AcceptanceSkeletonPreflightOptions, stdoutTail, stdoutPath string) (creatorManifest, error) {
-	if creatorProvider(opts.Task) == "codex" {
+// the manifest directly on stdout.
+func resolveCreatorManifest(opts Options, stdoutTail, stdoutPath string) (creatorManifest, error) {
+	if task.ExecutorProvider(opts.Task) == "codex" {
 		lastMessagePath := filepath.Join(opts.RunDir, runner.CodexLastMessageFilename)
 		return extractCodexCreatorManifest(lastMessagePath, stdoutTail, stdoutPath)
 	}

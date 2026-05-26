@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	skeletonpreflight "github.com/shinpr/galley/internal/preflight/skeleton"
 	"github.com/shinpr/galley/internal/profile"
 	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/supervisor"
@@ -31,23 +32,23 @@ func acceptanceGateTask(required bool) *task.Task {
 // writeAcceptanceGateRun seeds runs/<run-id>/preflight_result.json so
 // evaluateAcceptanceGate reads the same preflight evidence shape the daemon
 // writes at runtime.
-func writeAcceptanceGateRun(t *testing.T, status string, outputs []AcceptanceSkeletonOutput) string {
+func writeAcceptanceGateRun(t *testing.T, status string, outputs []skeletonpreflight.Output) string {
 	t.Helper()
 	runDir := t.TempDir()
-	res := &AcceptanceSkeletonResult{
+	res := &skeletonpreflight.Result{
 		Status:        status,
 		SourceOfTruth: true,
 		Outputs:       outputs,
-		Baseline:      AcceptanceSkeletonBaseline{SkeletonHashes: []SkeletonHash{}},
+		Baseline:      skeletonpreflight.Baseline{SkeletonHashes: []skeletonpreflight.SkeletonHash{}},
 	}
-	if err := WritePreflightResult(runDir, res); err != nil {
+	if err := skeletonpreflight.WriteResult(runDir, res); err != nil {
 		t.Fatal(err)
 	}
 	return runDir
 }
 
-func skeletonOutput() AcceptanceSkeletonOutput {
-	return AcceptanceSkeletonOutput{
+func skeletonOutput() skeletonpreflight.Output {
+	return skeletonpreflight.Output{
 		ACID:                   "AC1",
 		Path:                   "internal/foo/foo_test.go",
 		Kind:                   "go-test",
@@ -70,7 +71,7 @@ func TestAcceptanceGateDowngradesOnMissingRequiredSkeletonCoverage(t *testing.T)
 
 func TestAcceptanceGateAllowsWhenRequiredSkeletonCoverageExists(t *testing.T) {
 	t.Parallel()
-	runDir := writeAcceptanceGateRun(t, "completed", []AcceptanceSkeletonOutput{skeletonOutput()})
+	runDir := writeAcceptanceGateRun(t, "completed", []skeletonpreflight.Output{skeletonOutput()})
 	reason, ok := evaluateAcceptanceGate(acceptanceGateTask(true), runDir)
 	if !ok {
 		t.Fatalf("expected gate to allow acceptance, reason=%q", reason)
@@ -80,13 +81,13 @@ func TestAcceptanceGateAllowsWhenRequiredSkeletonCoverageExists(t *testing.T) {
 func TestAcceptanceGateDowngradesOnFailedPreflightResult(t *testing.T) {
 	t.Parallel()
 	runDir := t.TempDir()
-	res := &AcceptanceSkeletonResult{
+	res := &skeletonpreflight.Result{
 		Status:        "failed",
 		SourceOfTruth: true,
-		Baseline:      AcceptanceSkeletonBaseline{SkeletonHashes: []SkeletonHash{}},
-		Error:         &AcceptanceSkeletonError{Phase: "acceptance_skeleton_creator", Message: "creator command exited 1"},
+		Baseline:      skeletonpreflight.Baseline{SkeletonHashes: []skeletonpreflight.SkeletonHash{}},
+		Error:         &skeletonpreflight.PreflightError{Phase: "acceptance_skeleton_creator", Message: "creator command exited 1"},
 	}
-	if err := WritePreflightResult(runDir, res); err != nil {
+	if err := skeletonpreflight.WriteResult(runDir, res); err != nil {
 		t.Fatal(err)
 	}
 	reason, ok := evaluateAcceptanceGate(acceptanceGateTask(true), runDir)
@@ -122,7 +123,7 @@ func TestAcceptanceGateDowngradesOnFailedRequiredCheckEvidence(t *testing.T) {
 
 func TestAcceptanceGateAllowsWhenRequiredCheckPassed(t *testing.T) {
 	t.Parallel()
-	runDir := writeAcceptanceGateRun(t, "completed", []AcceptanceSkeletonOutput{skeletonOutput()})
+	runDir := writeAcceptanceGateRun(t, "completed", []skeletonpreflight.Output{skeletonOutput()})
 	writeRunProfiles(t, runDir, []profile.RequiredCheck{{ID: "tests", Required: true, PreferredCommands: []string{"go test ./..."}}})
 	writeAttemptResult(t, runDir, 1, []runner.ClaudeVerification{{Command: "go test ./...", Status: "passed"}})
 	reason, ok := evaluateAcceptanceGate(acceptanceGateTask(true), runDir)

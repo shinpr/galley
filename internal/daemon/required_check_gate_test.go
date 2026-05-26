@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/shinpr/galley/internal/profile"
+	"github.com/shinpr/galley/internal/runartifact"
 	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/task"
 )
@@ -22,7 +23,7 @@ func writeRunProfiles(t *testing.T, runDir string, checks []profile.RequiredChec
 }
 
 func writeAttemptResult(t *testing.T, runDir string, n int, verifications []runner.ClaudeVerification) {
-	writeAttemptResultFile(t, runDir, n, executorResultFilename, verifications)
+	writeAttemptResultFile(t, runDir, n, runartifact.ExecutorResultFilename, verifications)
 }
 
 func writeAttemptResultFile(t *testing.T, runDir string, n int, filename string, verifications []runner.ClaudeVerification) {
@@ -55,21 +56,6 @@ func TestRequiredCheckEvidenceGateFallbackSemantics(t *testing.T) {
 	reason, ok := requiredCheckEvidenceGate(&task.Task{}, runDir)
 	if !ok {
 		t.Fatalf("gate failed unexpectedly: %s", reason)
-	}
-}
-
-func TestRequiredCheckEvidenceGateReadsLegacyClaudeResult(t *testing.T) {
-	t.Parallel()
-	runDir := t.TempDir()
-	writeRunProfiles(t, runDir, []profile.RequiredCheck{
-		{ID: "test", PreferredCommands: []string{"make test"}, Required: true},
-	})
-	writeAttemptResultFile(t, runDir, 1, legacyClaudeResultFilename, []runner.ClaudeVerification{
-		{Command: "make test", Status: "passed", Reason: "ok"},
-	})
-	reason, ok := requiredCheckEvidenceGate(&task.Task{}, runDir)
-	if !ok {
-		t.Fatalf("gate failed for legacy executor result: %s", reason)
 	}
 }
 
@@ -112,8 +98,8 @@ func TestRequiredCheckEvidenceGateFailsWhenNoEvidence(t *testing.T) {
 	}
 }
 
-// TestRequiredCheckEvidenceGateNoQualityProfilePasses verifies legacy flows
-// without a resolved quality profile are unaffected.
+// TestRequiredCheckEvidenceGateNoQualityProfilePasses verifies tasks without
+// a resolved quality profile are unaffected.
 func TestRequiredCheckEvidenceGateNoQualityProfilePasses(t *testing.T) {
 	t.Parallel()
 	runDir := t.TempDir()

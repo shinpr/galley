@@ -8,11 +8,11 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// legacyArchiveStatusIs reports whether the top-level `status` field in the
+// lenientArchiveStatusIs reports whether the top-level `status` field in the
 // given task YAML body parses to want. It tolerates any lexical formatting
 // (quoting style, indentation) the YAML round-trip may produce, since the
 // observable contract is the decoded value rather than the byte layout.
-func legacyArchiveStatusIs(body, want string) bool {
+func lenientArchiveStatusIs(body, want string) bool {
 	var doc map[string]any
 	if err := yaml.Unmarshal([]byte(body), &doc); err != nil {
 		return false
@@ -21,11 +21,11 @@ func legacyArchiveStatusIs(body, want string) bool {
 	return got == want
 }
 
-// legacyArchiveKeyHasValue reports whether some key path in the YAML body
+// lenientArchiveKeyHasValue reports whether some key path in the YAML body
 // has the given string scalar value. It walks the tree to find the first
 // occurrence of key, which is enough for fixtures here (the unknown field
 // only appears once).
-func legacyArchiveKeyHasValue(body, key, want string) bool {
+func lenientArchiveKeyHasValue(body, key, want string) bool {
 	var doc any
 	if err := yaml.Unmarshal([]byte(body), &doc); err != nil {
 		return false
@@ -54,17 +54,17 @@ func findScalarValue(node any, key, want string) bool {
 	return false
 }
 
-// writeLegacyTaskYAML writes a task YAML file that contains a field
+// writeSchemaIncompatibleTaskYAML writes a task YAML file that contains a field
 // (`supervisor.provider`) the current Task schema does not declare. It
 // preserves the rest of the current-schema fields so the only reason strict
 // Load fails is the unknown nested field.
-func writeLegacyTaskYAML(t *testing.T, dir, baseName string) string {
+func writeSchemaIncompatibleTaskYAML(t *testing.T, dir, baseName string) string {
 	t.Helper()
 	path := filepath.Join(dir, baseName)
-	body := `id: "task-legacy-1"
+	body := `id: "task-schema-incompatible-1"
 mode: "afk"
 status: "failed"
-goal: "Legacy task fixture."
+goal: "Schema-incompatible task fixture."
 acceptance_criteria:
   - id: "AC1"
     text: "Loads."
@@ -85,11 +85,11 @@ execution_policy:
   stop_on_external_service_unavailable: false
 worktree:
   enabled: true
-  branch: "agent/task-legacy-1"
-  path: "../repo.worktrees/task-legacy-1"
+  branch: "agent/task-schema-incompatible-1"
+  path: "../repo.worktrees/task-schema-incompatible-1"
 supervisor:
   review_iterations: 0
-  provider: "legacy-supervisor"
+  provider: "unknown-supervisor"
 executor:
   cli: "claude"
   effort: "high"
@@ -110,45 +110,45 @@ pr:
 	return path
 }
 
-// TestLoadRejectsLegacyUnknownNestedField guards AC4 strictness: active task
-// intake must still reject legacy unknown nested fields.
-func TestLoadRejectsLegacyUnknownNestedField(t *testing.T) {
+// TestLoadRejectsStrictDecodeIncompatibleUnknownNestedField guards AC4 strictness: active task
+// intake must still reject strict-decode-incompatible unknown nested fields.
+func TestLoadRejectsStrictDecodeIncompatibleUnknownNestedField(t *testing.T) {
 	t.Parallel()
-	path := writeLegacyTaskYAML(t, t.TempDir(), "task.yaml")
+	path := writeSchemaIncompatibleTaskYAML(t, t.TempDir(), "task.yaml")
 	if _, err := Load(path); err == nil {
-		t.Fatal("expected strict Load to reject legacy unknown nested field")
+		t.Fatal("expected strict Load to reject strict-decode-incompatible unknown nested field")
 	}
 }
 
-// TestLoadLenientDecodesLegacyUnknownNestedField covers the tolerant read
+// TestLoadLenientDecodesStrictDecodeIncompatibleUnknownNestedField covers the tolerant read
 // API used by scans (list/show/helper sweeps).
-func TestLoadLenientDecodesLegacyUnknownNestedField(t *testing.T) {
+func TestLoadLenientDecodesStrictDecodeIncompatibleUnknownNestedField(t *testing.T) {
 	t.Parallel()
-	path := writeLegacyTaskYAML(t, t.TempDir(), "task.yaml")
+	path := writeSchemaIncompatibleTaskYAML(t, t.TempDir(), "task.yaml")
 	loaded, err := LoadLenient(path)
 	if err != nil {
 		t.Fatalf("lenient load failed: %v", err)
 	}
-	if loaded.ID != "task-legacy-1" || loaded.Status != "failed" {
+	if loaded.ID != "task-schema-incompatible-1" || loaded.Status != "failed" {
 		t.Fatalf("lenient load fields: %#v", loaded)
 	}
 }
 
-// TestArchiveLegacyUnknownFieldUsesStatusEdit covers AC6 path 2: editable
+// TestArchiveStrictDecodeIncompatibleUnknownFieldUsesStatusEdit covers AC6 path 2: editable
 // top-level status, unknown fields retained across YAML reserialization.
-func TestArchiveLegacyUnknownFieldUsesStatusEdit(t *testing.T) {
+func TestArchiveStrictDecodeIncompatibleUnknownFieldUsesStatusEdit(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	doneDir := filepath.Join(root, "tasks", "done")
 	if err := os.MkdirAll(doneDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	path := writeLegacyTaskYAML(t, doneDir, "task.yaml")
-	result, err := Archive(path, ArchiveOptions{Reason: "legacy cleanup"})
+	path := writeSchemaIncompatibleTaskYAML(t, doneDir, "task.yaml")
+	result, err := Archive(path, ArchiveOptions{Reason: "schema-incompatible cleanup"})
 	if err != nil {
 		t.Fatalf("archive failed: %v", err)
 	}
-	if result.Mode != "legacy_status_edit" {
+	if result.Mode != "lenient_status_edit" {
 		t.Fatalf("mode got %q", result.Mode)
 	}
 	archivedPath := filepath.Join(root, "tasks", "archived", "task.yaml")
@@ -165,10 +165,10 @@ func TestArchiveLegacyUnknownFieldUsesStatusEdit(t *testing.T) {
 	// formatting (quoting style, indentation) is not asserted: yaml.Node
 	// round-tripping may normalize scalar style and indentation, but the
 	// observable contract is that no unknown field is lost.
-	if !legacyArchiveStatusIs(body, "archived") {
+	if !lenientArchiveStatusIs(body, "archived") {
 		t.Fatalf("archived YAML missing status=archived: %q", body)
 	}
-	if !legacyArchiveKeyHasValue(body, "provider", "legacy-supervisor") {
+	if !lenientArchiveKeyHasValue(body, "provider", "unknown-supervisor") {
 		t.Fatalf("unknown field provider must be preserved: %q", body)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -176,9 +176,9 @@ func TestArchiveLegacyUnknownFieldUsesStatusEdit(t *testing.T) {
 	}
 }
 
-// TestArchiveLegacyMovesUnchangedWhenStatusEditUnsafe covers AC6 path 3 with
+// TestArchiveUnreadableMovesUnchangedWhenStatusEditUnsafe covers AC6 path 3 with
 // a YAML that parses but whose top-level is not a mapping.
-func TestArchiveLegacyMovesUnchangedWhenStatusEditUnsafe(t *testing.T) {
+func TestArchiveUnreadableMovesUnchangedWhenStatusEditUnsafe(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	doneDir := filepath.Join(root, "tasks", "done")
@@ -196,7 +196,7 @@ func TestArchiveLegacyMovesUnchangedWhenStatusEditUnsafe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("archive failed: %v", err)
 	}
-	if result.Mode != "legacy_move_unchanged" {
+	if result.Mode != "move_unreadable_unchanged" {
 		t.Fatalf("mode got %q", result.Mode)
 	}
 	archivedPath := filepath.Join(root, "tasks", "archived", "broken.yaml")
@@ -212,9 +212,9 @@ func TestArchiveLegacyMovesUnchangedWhenStatusEditUnsafe(t *testing.T) {
 	}
 }
 
-// TestArchiveLegacyRefusesDestinationConflict guards AC6's failure boundary:
+// TestArchiveStrictDecodeIncompatibleRefusesDestinationConflict guards AC6's failure boundary:
 // archive must still surface destination conflicts.
-func TestArchiveLegacyRefusesDestinationConflict(t *testing.T) {
+func TestArchiveStrictDecodeIncompatibleRefusesDestinationConflict(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	doneDir := filepath.Join(root, "tasks", "done")
@@ -225,7 +225,7 @@ func TestArchiveLegacyRefusesDestinationConflict(t *testing.T) {
 	if err := os.MkdirAll(archivedDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	path := writeLegacyTaskYAML(t, doneDir, "task.yaml")
+	path := writeSchemaIncompatibleTaskYAML(t, doneDir, "task.yaml")
 	if err := os.WriteFile(filepath.Join(archivedDir, "task.yaml"), []byte("existing"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -234,31 +234,31 @@ func TestArchiveLegacyRefusesDestinationConflict(t *testing.T) {
 	}
 }
 
-// TestRequeueRejectsLegacyTaskWithoutMigration covers AC5: requeue of a
-// legacy task fails clearly and leaves the file untouched.
-func TestRequeueRejectsLegacyTaskWithoutMigration(t *testing.T) {
+// TestRequeueRejectsStrictDecodeIncompatibleTask covers AC5: requeue of a
+// strict-decode-incompatible task fails clearly and leaves the file untouched.
+func TestRequeueRejectsStrictDecodeIncompatibleTask(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	failedDir := filepath.Join(root, "tasks", "failed")
 	if err := os.MkdirAll(failedDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	path := writeLegacyTaskYAML(t, failedDir, "task.yaml")
+	path := writeSchemaIncompatibleTaskYAML(t, failedDir, "task.yaml")
 	original, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Requeue(path, RequeueOptions{Root: root}); err == nil {
-		t.Fatal("expected requeue to reject legacy task")
+		t.Fatal("expected requeue to reject strict-decode-incompatible task")
 	}
 	after, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("legacy task must not be removed: %v", err)
+		t.Fatalf("strict-decode-incompatible task must not be removed: %v", err)
 	}
 	if string(after) != string(original) {
-		t.Fatalf("legacy task must not be modified by requeue")
+		t.Fatalf("strict-decode-incompatible task must not be modified by requeue")
 	}
 	if _, err := os.Stat(filepath.Join(root, "tasks", "queued", "task.yaml")); !os.IsNotExist(err) {
-		t.Fatalf("requeue must not publish a queued copy of a legacy task, err=%v", err)
+		t.Fatalf("requeue must not publish a queued copy of a strict-decode-incompatible task, err=%v", err)
 	}
 }

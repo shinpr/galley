@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	setuppreflight "github.com/shinpr/galley/internal/preflight/setup"
 	"github.com/shinpr/galley/internal/profile"
 	"github.com/shinpr/galley/internal/retry"
 )
@@ -41,24 +42,24 @@ func TestMain(m *testing.M) {
 // string so an accidental dependency would surface clearly.
 //
 // The stub returns one SuccessfulCommand (`true`) so the learned-plan contract
-// enforced by enforceLearnedSetupPlanContract passes: a real setup executor
+// enforced by setuppreflight.EnforceLearnedPlanContract passes: a real setup executor
 // that returns status=ready with no successful_commands fails the setup
 // phase, and using an empty stub here would either mask that contract or
 // inject false-positive successes into daemon tests that exercise the setup
 // preflight indirectly through Run.
-func defaultTestSetupExecutorRunner(_ context.Context, _ SetupExecutorPreflightOptions) (*SetupResult, error) {
-	return &SetupResult{
-		Status:             SetupStatusReady,
-		Commands:           []SetupCommandAttempt{{Run: "true", Source: SetupSourceDiscovered, ExitCode: 0}},
+func defaultTestSetupExecutorRunner(_ context.Context, _ setuppreflight.Options) (*setuppreflight.Result, error) {
+	return &setuppreflight.Result{
+		Status:             setuppreflight.StatusReady,
+		Commands:           []setuppreflight.CommandAttempt{{Run: "true", Source: setuppreflight.SourceDiscovered, ExitCode: 0}},
 		SuccessfulCommands: []profile.SetupCommand{{Run: "true", Why: "test stub no-op"}},
 		ReadinessEvidence:  "test stub: setup executor preflight skipped",
-		Source:             SetupSourceDiscovered,
+		Source:             setuppreflight.SourceDiscovered,
 	}, nil
 }
 
 // withSetupExecutorRunner installs a setup executor runner for the duration of
 // a test. The previous runner is restored when the cleanup fires.
-func withSetupExecutorRunner(t interface{ Cleanup(func()) }, runner func(context.Context, SetupExecutorPreflightOptions) (*SetupResult, error)) {
+func withSetupExecutorRunner(t interface{ Cleanup(func()) }, runner func(context.Context, setuppreflight.Options) (*setuppreflight.Result, error)) {
 	prev := setupExecutorRunner
 	setupExecutorRunner = runner
 	t.Cleanup(func() { setupExecutorRunner = prev })

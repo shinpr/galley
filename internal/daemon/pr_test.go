@@ -269,17 +269,16 @@ func TestNewValidationEvidenceIncludesAuditableFields(t *testing.T) {
 		}
 	}
 
-	// Decoding into a struct that ignores unknown fields must still recover
-	// the existing errors slice for backward compatibility.
-	var legacy struct {
+	// Decoding into a narrower struct must still recover the existing errors slice.
+	var narrow struct {
 		Errors   []string `json:"errors"`
 		Warnings []string `json:"warnings"`
 	}
-	if err := json.Unmarshal(encoded, &legacy); err != nil {
-		t.Fatalf("legacy decode failed: %v", err)
+	if err := json.Unmarshal(encoded, &narrow); err != nil {
+		t.Fatalf("narrow decode failed: %v", err)
 	}
-	if legacy.Errors == nil {
-		t.Fatal("legacy decode lost errors slice")
+	if narrow.Errors == nil {
+		t.Fatal("narrow decode lost errors slice")
 	}
 }
 

@@ -1,4 +1,4 @@
-package daemon
+package skeleton
 
 import (
 	"fmt"
@@ -19,8 +19,8 @@ func (r acceptanceSkeletonPreflightRun) requireDeclarations(outputs []task.Accep
 	}
 }
 
-func (r acceptanceSkeletonPreflightRun) validateNoSkeletonDeclarations(declarations []noSkeletonDeclaration) ([]AcceptanceSkeletonNoOutput, *preflightErr) {
-	noSkeletons := make([]AcceptanceSkeletonNoOutput, 0, len(declarations))
+func (r acceptanceSkeletonPreflightRun) validateNoSkeletonDeclarations(declarations []noSkeletonDeclaration) ([]NoOutput, *preflightErr) {
+	noSkeletons := make([]NoOutput, 0, len(declarations))
 	for i, ns := range declarations {
 		if !r.acIDs[ns.ACID] {
 			return nil, &preflightErr{
@@ -34,13 +34,13 @@ func (r acceptanceSkeletonPreflightRun) validateNoSkeletonDeclarations(declarati
 				message: fmt.Sprintf("no_skeletons entry %d for ac_id %q must have a reason", i, ns.ACID),
 			}
 		}
-		noSkeletons = append(noSkeletons, AcceptanceSkeletonNoOutput{ACID: ns.ACID, Reason: ns.Reason})
+		noSkeletons = append(noSkeletons, NoOutput{ACID: ns.ACID, Reason: ns.Reason})
 	}
 	return noSkeletons, nil
 }
 
-func (r acceptanceSkeletonPreflightRun) validateDeclarations(declarations []task.AcceptanceSkeletonOutputDef) ([]AcceptanceSkeletonOutput, *preflightErr) {
-	outputs := make([]AcceptanceSkeletonOutput, 0, len(declarations))
+func (r acceptanceSkeletonPreflightRun) validateDeclarations(declarations []task.AcceptanceSkeletonOutputDef) ([]Output, *preflightErr) {
+	outputs := make([]Output, 0, len(declarations))
 	for i, decl := range declarations {
 		if perr := r.validateOneDeclaration(i, decl); perr != nil {
 			return nil, perr
@@ -48,7 +48,7 @@ func (r acceptanceSkeletonPreflightRun) validateDeclarations(declarations []task
 		if perr := r.ensureSkeletonFile(decl); perr != nil {
 			return nil, perr
 		}
-		outputs = append(outputs, AcceptanceSkeletonOutput{
+		outputs = append(outputs, Output{
 			ACID:                   decl.ACID,
 			Path:                   decl.Path,
 			Kind:                   decl.Kind,
@@ -122,7 +122,7 @@ func (r acceptanceSkeletonPreflightRun) ensureSkeletonFile(decl task.AcceptanceS
 	return nil
 }
 
-func (r acceptanceSkeletonPreflightRun) checkOutputExistence(outputs []AcceptanceSkeletonOutput) *preflightErr {
+func (r acceptanceSkeletonPreflightRun) checkOutputExistence(outputs []Output) *preflightErr {
 	for _, out := range outputs {
 		if !fileExists(filepath.Join(r.opts.WorkDir, out.Path)) {
 			return &preflightErr{
@@ -134,7 +134,7 @@ func (r acceptanceSkeletonPreflightRun) checkOutputExistence(outputs []Acceptanc
 	return nil
 }
 
-func (r acceptanceSkeletonPreflightRun) checkACCoverage(outputs []AcceptanceSkeletonOutput, noSkeletons []AcceptanceSkeletonNoOutput) *preflightErr {
+func (r acceptanceSkeletonPreflightRun) checkACCoverage(outputs []Output, noSkeletons []NoOutput) *preflightErr {
 	if !r.cfg.IsRequired() {
 		return nil
 	}

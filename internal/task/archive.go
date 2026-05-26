@@ -21,12 +21,12 @@ type ArchiveResult struct {
 	From string `json:"from"`
 	To   string `json:"to"`
 	// Mode records which archive path actually ran. Operators consume it to
-	// understand why an archived legacy task may be missing the audit
+	// understand why an archived strict-decode-incompatible task may be missing the audit
 	// append-attempt or a freshly normalized status line.
 	//   - "current_schema": strict load + append-attempt path (default).
-	//   - "legacy_status_edit": lenient YAML round-trip that only updates the
+	//   - "lenient_status_edit": lenient YAML round-trip that only updates the
 	//     top-level status field while preserving unknown fields.
-	//   - "legacy_move_unchanged": fallback that copies the YAML bytes
+	//   - "move_unreadable_unchanged": fallback that copies the YAML bytes
 	//     unchanged when even safe status editing is unsafe.
 	Mode    string `json:"mode,omitempty"`
 	Warning string `json:"warning,omitempty"`
@@ -50,23 +50,22 @@ type ArchiveResult struct {
 //     the file unchanged to the archived path and surfaces a warning.
 //
 // Archive fails only when the destination move itself cannot proceed safely,
-// such as a duplicate destination or filesystem error. Legacy task YAML is
-// never migrated, normalized, or rewritten through the current Task struct.
+// such as a duplicate destination or filesystem error. Strict-decode-
+// incompatible task YAML is never migrated, normalized, or rewritten through
+// the current Task struct.
 func Archive(path string, opts ArchiveOptions) (ArchiveResult, error) {
 	loaded, strictErr := Load(path)
 	if strictErr == nil {
 		return archiveCurrentSchema(path, loaded, opts)
 	}
-	return archiveLegacy(path, opts, strictErr)
+	return archiveStrictDecodeIncompatible(path, opts, strictErr)
 }
 
 func archiveCurrentSchema(path string, loaded Task, opts ArchiveOptions) (ArchiveResult, error) {
-	switch loaded.Status {
-	case "accepted", "pr_opened", "failed", "needs_supervisor_review", "merged", "closed":
-	default:
+	if !CanArchive(loaded.Status) {
 		return ArchiveResult{}, fmt.Errorf("task %s status %q cannot be archived", loaded.ID, loaded.Status)
 	}
-	loaded.Status = "archived"
+	loaded.Status = StatusArchived
 	loaded.Attempts = append(loaded.Attempts, Attempt{
 		Number:            len(loaded.Attempts) + 1,
 		StartedAt:         time.Now().UTC().Format(time.RFC3339Nano),
@@ -88,8 +87,8 @@ func archiveCurrentSchema(path string, loaded Task, opts ArchiveOptions) (Archiv
 	return ArchiveResult{Task: loaded, From: path, To: nextPath, Mode: "current_schema"}, nil
 }
 
-func archiveLegacy(path string, opts ArchiveOptions, strictErr error) (ArchiveResult, error) {
-	_ = opts // reason is not appended for legacy archive; no struct round-trip is safe.
+func archiveStrictDecodeIncompatible(path string, opts ArchiveOptions, strictErr error) (ArchiveResult, error) {
+	_ = opts // reason is not appended; no struct round-trip is safe.
 	data, readErr := os.ReadFile(path)
 	if readErr != nil {
 		return ArchiveResult{}, fmt.Errorf("read %s: %w", path, readErr)
@@ -101,7 +100,7 @@ func archiveLegacy(path string, opts ArchiveOptions, strictErr error) (ArchiveRe
 	// authored.
 	if updated, ok, editErr := editTopLevelStatus(data, "archived"); ok && editErr == nil {
 		if nextPath == path {
-			// In-place legacy edit: overwrite the existing file. Lossy struct
+			// In-place lenient edit: overwrite the existing file. Lossy struct
 			// round-tripping is avoided because updated[] came from a YAML
 			// node mutation rather than yaml.Marshal(Task).
 			if err := writeFileAtomic(path, updated, 0o600); err != nil {
@@ -118,7 +117,7 @@ func archiveLegacy(path string, opts ArchiveOptions, strictErr error) (ArchiveRe
 			Task:    summary,
 			From:    path,
 			To:      nextPath,
-			Mode:    "legacy_status_edit",
+			Mode:    "lenient_status_edit",
 			Warning: fmt.Sprintf("strict load failed (%v); archived with safe top-level status edit only", strictErr),
 		}, nil
 	} else if editErr != nil {
@@ -134,7 +133,7 @@ func archiveLegacy(path string, opts ArchiveOptions, strictErr error) (ArchiveRe
 	if nextPath == path {
 		// Cannot improve on the current location; report the strict error so
 		// the operator knows the file remained where it was.
-		return ArchiveResult{}, fmt.Errorf("archive %s: cannot move legacy file to a separate archived directory and status editing is unsafe: %w", path, strictErr)
+		return ArchiveResult{}, fmt.Errorf("archive %s: cannot move strict-decode-incompatible file to a separate archived directory and status editing is unsafe: %w", path, strictErr)
 	}
 	if err := moveYAMLNoOverwrite(path, nextPath, data); err != nil {
 		return ArchiveResult{}, err
@@ -144,7 +143,7 @@ func archiveLegacy(path string, opts ArchiveOptions, strictErr error) (ArchiveRe
 		Task:    summary,
 		From:    path,
 		To:      nextPath,
-		Mode:    "legacy_move_unchanged",
+		Mode:    "move_unreadable_unchanged",
 		Warning: fmt.Sprintf("strict load failed (%v); archived unchanged because safe status editing was not possible", strictErr),
 	}, nil
 }
@@ -223,10 +222,9 @@ func lenientHeader(data []byte) (Task, error) {
 }
 
 // moveYAMLNoOverwrite writes data to dst through the queue's no-overwrite
-// atomic primitive and removes src on success. It is the legacy-archive
-// counterpart of WriteMovedTask: the bytes are passed through unchanged
-// rather than re-marshalled through the Task struct, so unknown fields are
-// preserved.
+// atomic primitive and removes src on success. It is the archive counterpart
+// of WriteMovedTask for files that cannot be safely represented as the current
+// Task struct.
 func moveYAMLNoOverwrite(src, dst string, data []byte) error {
 	if err := writeFileNoOverwriteAtomic(dst, data, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", dst, err)

@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shinpr/galley/internal/runartifact"
 	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/task"
 )
@@ -238,7 +239,7 @@ printf '%s\n' '{"event":"unrelated"}'
 		t.Fatal(err)
 	}
 
-	data := mustReadSingleGlob(t, filepath.Join(root, "runs", "*", "attempt-1", executorResultFilename))
+	data := mustReadSingleGlob(t, filepath.Join(root, "runs", "*", "attempt-1", runartifact.ExecutorResultFilename))
 	var got runner.ClaudeResult
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("decode executor_result.json: %v", err)
@@ -304,7 +305,7 @@ printf '%s\n' '`+hardStopResult+`'
 		t.Fatal(err)
 	}
 
-	data := mustReadSingleGlob(t, filepath.Join(root, "runs", "*", "attempt-1", executorResultFilename))
+	data := mustReadSingleGlob(t, filepath.Join(root, "runs", "*", "attempt-1", runartifact.ExecutorResultFilename))
 	var got runner.ClaudeResult
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("decode executor_result.json: %v", err)

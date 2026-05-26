@@ -3,18 +3,20 @@ package daemon
 import (
 	"fmt"
 	"strings"
+
+	skeletonpreflight "github.com/shinpr/galley/internal/preflight/skeleton"
 )
 
 // AcceptanceGateInputs are the values the daemon-side accept gate inspects
 // before acceptSupervisorVerdict finalizes the task.
 type AcceptanceGateInputs struct {
 	Required      bool
-	Outputs       []AcceptanceSkeletonOutput
-	NoSkeletons   []AcceptanceSkeletonNoOutput
+	Outputs       []skeletonpreflight.Output
+	NoSkeletons   []skeletonpreflight.NoOutput
 	AcceptanceIDs []string
 }
 
-// AcceptanceGate enforces D4: an accepted verdict must be downgraded to
+// AcceptanceGate enforces : an accepted verdict must be downgraded to
 // needs_supervisor_review when required skeleton coverage is missing. The
 // supervisor is responsible for inspecting implementation_required skeletons
 // for TODO/skipped/placeholder tests; required test execution evidence comes

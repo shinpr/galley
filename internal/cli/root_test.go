@@ -12,31 +12,23 @@ import (
 	taskpkg "github.com/shinpr/galley/internal/task"
 )
 
-func TestVersionCommand(t *testing.T) {
+func TestVersionOutput(t *testing.T) {
 	t.Parallel()
-	stdout, stderr, err := executeCommand("version")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stderr != "" {
-		t.Fatalf("stderr got %q", stderr)
-	}
-	if !strings.HasPrefix(stdout, "galley dev") {
-		t.Fatalf("stdout got %q", stdout)
-	}
-}
-
-func TestVersionFlag(t *testing.T) {
-	t.Parallel()
-	stdout, stderr, err := executeCommand("--version")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stderr != "" {
-		t.Fatalf("stderr got %q", stderr)
-	}
-	if !strings.HasPrefix(stdout, "galley dev") {
-		t.Fatalf("stdout got %q", stdout)
+	for _, args := range [][]string{{"version"}, {"--version"}} {
+		args := args
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			t.Parallel()
+			stdout, stderr, err := executeCommand(args...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stderr != "" {
+				t.Fatalf("stderr got %q", stderr)
+			}
+			if !strings.HasPrefix(stdout, "galley dev") {
+				t.Fatalf("stdout got %q", stdout)
+			}
+		})
 	}
 }
 
@@ -147,21 +139,8 @@ func TestSchemaGenerateAndCheck(t *testing.T) {
 }
 
 func TestTaskRequeueText(t *testing.T) {
-	taskPath := writeCLITaskYAML(t)
-	failedPath := filepath.Join(t.TempDir(), "tasks", "failed", "task.yaml")
-	if err := os.MkdirAll(filepath.Dir(failedPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(taskPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	data = []byte(strings.Replace(string(data), `status: "queued"`, `status: "needs_supervisor_review"`, 1))
-	if err := os.WriteFile(failedPath, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	root := filepath.Dir(filepath.Dir(filepath.Dir(failedPath)))
+	root := t.TempDir()
+	failedPath := setupTaskInState(t, root, "failed", "needs_supervisor_review", nil)
 	stdout, stderr, err := executeCommand("task", "requeue", "--root", root, "--reason", "review fixed", failedPath)
 	if err != nil {
 		t.Fatal(err)
@@ -178,21 +157,8 @@ func TestTaskRequeueText(t *testing.T) {
 }
 
 func TestTaskQueueText(t *testing.T) {
-	taskPath := writeCLITaskYAML(t)
-	draftPath := filepath.Join(t.TempDir(), "tasks", "draft", "task.yaml")
-	if err := os.MkdirAll(filepath.Dir(draftPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(taskPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	data = []byte(strings.Replace(string(data), `status: "queued"`, `status: "draft"`, 1))
-	if err := os.WriteFile(draftPath, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	root := filepath.Dir(filepath.Dir(filepath.Dir(draftPath)))
+	root := t.TempDir()
+	draftPath := setupTaskInState(t, root, "draft", "draft", nil)
 	stdout, stderr, err := executeCommand("task", "queue", "--root", root, "--reason", "draft approved for daemon", draftPath)
 	if err != nil {
 		t.Fatal(err)
@@ -210,33 +176,15 @@ func TestTaskQueueText(t *testing.T) {
 
 func TestTaskListText(t *testing.T) {
 	root := t.TempDir()
-	taskPath := writeCLITaskYAML(t)
-	failedPath := filepath.Join(root, "tasks", "failed", "task.yaml")
-	if err := os.MkdirAll(filepath.Dir(failedPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(taskPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(failedPath, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := taskpkg.Load(failedPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	loaded.Status = "needs_supervisor_review"
-	loaded.Attempts = []taskpkg.Attempt{{
-		Number:            1,
-		ClaudeStatus:      "completed",
-		SupervisorVerdict: "needs_revision",
-		Summary:           "AC1 still missing",
-	}}
-	loaded.PR.URL = "https://github.com/shinpr/sandbox/pull/123"
-	if err := taskpkg.Save(failedPath, loaded); err != nil {
-		t.Fatal(err)
-	}
+	setupTaskInState(t, root, "failed", "needs_supervisor_review", func(loaded *taskpkg.Task) {
+		loaded.Attempts = []taskpkg.Attempt{{
+			Number:            1,
+			ClaudeStatus:      "completed",
+			SupervisorVerdict: "needs_revision",
+			Summary:           "AC1 still missing",
+		}}
+		loaded.PR.URL = "https://github.com/shinpr/sandbox/pull/123"
+	})
 
 	stdout, stderr, err := executeCommand("task", "list", "--root", root)
 	if err != nil {
@@ -254,48 +202,30 @@ func TestTaskListText(t *testing.T) {
 
 func TestTaskShowByIDText(t *testing.T) {
 	root := t.TempDir()
-	taskPath := writeCLITaskYAML(t)
-	failedPath := filepath.Join(root, "tasks", "failed", "task.yaml")
-	if err := os.MkdirAll(filepath.Dir(failedPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(taskPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(failedPath, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := taskpkg.Load(failedPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	loaded.Status = "failed"
-	loaded.Attempts = []taskpkg.Attempt{{
-		Number:            2,
-		ClaudeStatus:      "hard_stop",
-		SupervisorVerdict: "failed",
-		Summary:           "usage limit reached",
-		Error: &taskpkg.AttemptError{
-			Phase:   "executor",
-			Kind:    "timed_out",
-			Message: "claude -p timed out",
-		},
-	}}
-	loaded.Risks = []taskpkg.Risk{{
-		ID:         "risk-1",
-		Type:       "blocked",
-		Detail:     "Claude usage limit",
-		Mitigation: "Requeue after quota reset.",
-	}}
-	loaded.Verification.Commands = []taskpkg.VerificationCommand{{
-		Cmd:           "pnpm test",
-		Status:        "failed",
-		OutputExcerpt: "usage limit",
-	}}
-	if err := taskpkg.Save(failedPath, loaded); err != nil {
-		t.Fatal(err)
-	}
+	setupTaskInState(t, root, "failed", "failed", func(loaded *taskpkg.Task) {
+		loaded.Attempts = []taskpkg.Attempt{{
+			Number:            2,
+			ClaudeStatus:      "hard_stop",
+			SupervisorVerdict: "failed",
+			Summary:           "usage limit reached",
+			Error: &taskpkg.AttemptError{
+				Phase:   "executor",
+				Kind:    "timed_out",
+				Message: "claude -p timed out",
+			},
+		}}
+		loaded.Risks = []taskpkg.Risk{{
+			ID:         "risk-1",
+			Type:       "blocked",
+			Detail:     "Claude usage limit",
+			Mitigation: "Requeue after quota reset.",
+		}}
+		loaded.Verification.Commands = []taskpkg.VerificationCommand{{
+			Cmd:           "pnpm test",
+			Status:        "failed",
+			OutputExcerpt: "usage limit",
+		}}
+	})
 
 	stdout, stderr, err := executeCommand("task", "show", "--root", root, "task-cli-test")
 	if err != nil {
@@ -313,27 +243,9 @@ func TestTaskShowByIDText(t *testing.T) {
 
 func TestTaskShowByIDWithDots(t *testing.T) {
 	root := t.TempDir()
-	taskPath := writeCLITaskYAML(t)
-	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
-	if err := os.MkdirAll(filepath.Dir(donePath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(taskPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(donePath, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := taskpkg.Load(donePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	loaded.ID = "task.release.1"
-	loaded.Status = "accepted"
-	if err := taskpkg.Save(donePath, loaded); err != nil {
-		t.Fatal(err)
-	}
+	setupTaskInState(t, root, "done", "accepted", func(loaded *taskpkg.Task) {
+		loaded.ID = "task.release.1"
+	})
 
 	stdout, stderr, err := executeCommand("task", "show", "--root", root, "task.release.1")
 	if err != nil {
@@ -349,39 +261,21 @@ func TestTaskShowByIDWithDots(t *testing.T) {
 
 func TestTaskShowAcceptedTerminalSuppressesPriorFailure(t *testing.T) {
 	root := t.TempDir()
-	taskPath := writeCLITaskYAML(t)
-	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
-	if err := os.MkdirAll(filepath.Dir(donePath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(taskPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(donePath, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := taskpkg.Load(donePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	loaded.Status = "pr_opened"
-	loaded.PR.URL = "https://example.test/pr/1"
-	loaded.PR.Status = "open"
-	loaded.Attempts = []taskpkg.Attempt{{
-		Number:            3,
-		ClaudeStatus:      "failed",
-		SupervisorVerdict: "accepted",
-		Summary:           "executor retried after transient error",
-		Error: &taskpkg.AttemptError{
-			Phase:   "executor",
-			Kind:    "executor_failed",
-			Message: "earlier transient executor failure",
-		},
-	}}
-	if err := taskpkg.Save(donePath, loaded); err != nil {
-		t.Fatal(err)
-	}
+	setupTaskInState(t, root, "done", "pr_opened", func(loaded *taskpkg.Task) {
+		loaded.PR.URL = "https://example.test/pr/1"
+		loaded.PR.Status = "open"
+		loaded.Attempts = []taskpkg.Attempt{{
+			Number:            3,
+			ClaudeStatus:      "failed",
+			SupervisorVerdict: "accepted",
+			Summary:           "executor retried after transient error",
+			Error: &taskpkg.AttemptError{
+				Phase:   "executor",
+				Kind:    "executor_failed",
+				Message: "earlier transient executor failure",
+			},
+		}}
+	})
 
 	stdout, stderr, err := executeCommand("task", "show", "--root", root, "task-cli-test")
 	if err != nil {
@@ -439,39 +333,21 @@ func TestTaskShowAcceptedTerminalCoversPRLifecycleStatuses(t *testing.T) {
 		terminalStatus := terminalStatus
 		t.Run(terminalStatus, func(t *testing.T) {
 			root := t.TempDir()
-			taskPath := writeCLITaskYAML(t)
-			donePath := filepath.Join(root, "tasks", "done", "task.yaml")
-			if err := os.MkdirAll(filepath.Dir(donePath), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			data, err := os.ReadFile(taskPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(donePath, data, 0o600); err != nil {
-				t.Fatal(err)
-			}
-			loaded, err := taskpkg.Load(donePath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			loaded.Status = terminalStatus
-			loaded.PR.URL = "https://example.test/pr/2"
-			loaded.PR.Status = terminalStatus
-			loaded.Attempts = []taskpkg.Attempt{{
-				Number:            2,
-				ClaudeStatus:      "failed",
-				SupervisorVerdict: "accepted",
-				Summary:           "executor retried after transient error",
-				Error: &taskpkg.AttemptError{
-					Phase:   "executor",
-					Kind:    "executor_failed",
-					Message: "earlier transient executor failure",
-				},
-			}}
-			if err := taskpkg.Save(donePath, loaded); err != nil {
-				t.Fatal(err)
-			}
+			setupTaskInState(t, root, "done", terminalStatus, func(loaded *taskpkg.Task) {
+				loaded.PR.URL = "https://example.test/pr/2"
+				loaded.PR.Status = terminalStatus
+				loaded.Attempts = []taskpkg.Attempt{{
+					Number:            2,
+					ClaudeStatus:      "failed",
+					SupervisorVerdict: "accepted",
+					Summary:           "executor retried after transient error",
+					Error: &taskpkg.AttemptError{
+						Phase:   "executor",
+						Kind:    "executor_failed",
+						Message: "earlier transient executor failure",
+					},
+				}}
+			})
 
 			stdout, stderr, err := executeCommand("task", "show", "--root", root, "task-cli-test")
 			if err != nil {
@@ -502,19 +378,8 @@ func TestTaskShowAcceptedTerminalCoversPRLifecycleStatuses(t *testing.T) {
 }
 
 func TestTaskArchiveText(t *testing.T) {
-	taskPath := writeCLITaskYAML(t)
-	donePath := filepath.Join(t.TempDir(), "tasks", "done", "task.yaml")
-	if err := os.MkdirAll(filepath.Dir(donePath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(taskPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	data = []byte(strings.Replace(string(data), `status: "queued"`, `status: "accepted"`, 1))
-	if err := os.WriteFile(donePath, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	root := t.TempDir()
+	donePath := setupTaskInState(t, root, "done", "accepted", nil)
 
 	stdout, stderr, err := executeCommand("task", "archive", "--reason", "done", donePath)
 	if err != nil {
@@ -529,6 +394,26 @@ func TestTaskArchiveText(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(filepath.Dir(filepath.Dir(donePath)), "archived", "task.yaml")); err != nil {
 		t.Fatalf("archived task missing: %v", err)
 	}
+}
+
+func setupTaskInState(t *testing.T, root, state, status string, modify func(*taskpkg.Task)) string {
+	t.Helper()
+	path := filepath.Join(root, "tasks", state, "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := taskpkg.Load(writeCLITaskYAML(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Status = status
+	if modify != nil {
+		modify(&loaded)
+	}
+	if err := taskpkg.Save(path, loaded); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func TestTaskRequeueJSON(t *testing.T) {

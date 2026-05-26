@@ -31,12 +31,12 @@ func Requeue(path string, opts RequeueOptions) (RequeueResult, error) {
 	if err != nil {
 		return RequeueResult{}, err
 	}
-	if loaded.Status == "queued" {
+	if loaded.Status == StatusQueued {
 		return RequeueResult{}, fmt.Errorf("task %s is already queued", loaded.ID)
 	}
 	ResolveFileSources(path, &loaded)
 	ApplyDefaults(&loaded)
-	loaded.Status = "queued"
+	loaded.Status = StatusQueued
 	loaded.Supervisor.ReviewIterations++
 	for _, commentID := range opts.ProcessedCommentIDs {
 		if commentID != "" && !containsString(loaded.PR.ProcessedCommentIDs, commentID) {

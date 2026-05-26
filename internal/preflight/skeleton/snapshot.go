@@ -1,4 +1,4 @@
-package daemon
+package skeleton
 
 import (
 	"crypto/sha256"
@@ -137,8 +137,8 @@ func diffPreflightSnapshots(before, after map[string]preflightFileFingerprint) [
 // HashesMatchBaseline reports whether the workdir contents at every baseline
 // path still match the recorded hashes. Used by the progress detector to
 // decide whether a clean diff is genuinely a no-progress attempt or whether
-// the executor changed at least one skeleton (D5, AC-012, AC-013, AC-014).
-func HashesMatchBaseline(workDir string, baseline AcceptanceSkeletonBaseline) (bool, error) {
+// the executor changed at least one skeleton.
+func HashesMatchBaseline(workDir string, baseline Baseline) (bool, error) {
 	if len(baseline.SkeletonHashes) == 0 {
 		return true, nil
 	}

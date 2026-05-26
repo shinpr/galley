@@ -11,9 +11,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/supervisor"
 	"github.com/shinpr/galley/internal/task"
 )
+
+func runnerCommandErr(kind runner.CommandErrorKind, err error) error {
+	return &runner.CommandError{Kind: kind, Err: err}
+}
 
 // TestSupervisorRetryRecoversAfterStallOnSecondTry exercises AC-001: when the
 // first supervisor evaluation fails with an idle timeout, evaluateSupervisorWithRetry
@@ -38,7 +43,7 @@ func TestSupervisorRetryRecoversAfterStallOnSecondTry(t *testing.T) {
 			t.Fatalf("try %d: tryDir missing: %v", calls, err)
 		}
 		if calls == 1 {
-			return supervisor.Verdict{}, errors.New("command produced no output for 1s (idle timeout)")
+			return supervisor.Verdict{}, runnerCommandErr(runner.CommandErrorIdleTimeout, errors.New("command produced no output for 1s (idle timeout)"))
 		}
 		return supervisor.Verdict{Status: "accepted", Summary: "ok"}, nil
 	}
@@ -103,7 +108,7 @@ func TestSupervisorRetryExhaustedReturnsClassifiedFailure(t *testing.T) {
 	calls := 0
 	supervisorRunner = func(ctx context.Context, opts Options, evidence supervisor.Evidence, tryDir, workDir string) (supervisor.Verdict, error) {
 		calls++
-		return supervisor.Verdict{}, errors.New("command produced no output for 1s (idle timeout)")
+		return supervisor.Verdict{}, runnerCommandErr(runner.CommandErrorIdleTimeout, errors.New("command produced no output for 1s (idle timeout)"))
 	}
 
 	_, err := evaluateSupervisorWithRetry(context.Background(), Options{}, supervisor.Evidence{Task: task.Task{ID: "test"}}, attemptDir, attemptDir)
@@ -178,8 +183,8 @@ func TestSupervisorRetryMixedStallsDoNotReportSupervisorIdleTimeout(t *testing.T
 
 	stalls := []error{
 		context.DeadlineExceeded,
-		errors.New("supervisor process did not exit after cancellation"),
-		errors.New("command produced no output for 1s (idle timeout)"),
+		runnerCommandErr(runner.CommandErrorKilled, errors.New("supervisor process did not exit after cancellation")),
+		runnerCommandErr(runner.CommandErrorIdleTimeout, errors.New("command produced no output for 1s (idle timeout)")),
 	}
 	calls := 0
 	supervisorRunner = func(ctx context.Context, opts Options, evidence supervisor.Evidence, tryDir, workDir string) (supervisor.Verdict, error) {

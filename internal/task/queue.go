@@ -29,12 +29,12 @@ func Queue(path string, opts QueueOptions) (QueueResult, error) {
 	if err != nil {
 		return QueueResult{}, err
 	}
-	if loaded.Status != "draft" {
+	if !CanQueue(loaded.Status) {
 		return QueueResult{}, fmt.Errorf("task %s status %q cannot be queued with task queue; use task requeue for reviewed tasks", loaded.ID, loaded.Status)
 	}
 	ResolveFileSources(path, &loaded)
 	ApplyDefaults(&loaded)
-	loaded.Status = "queued"
+	loaded.Status = StatusQueued
 	validation := Validate(loaded)
 	if !validation.Valid() {
 		return QueueResult{}, fmt.Errorf("task validation failed: %v", validation.Errors)

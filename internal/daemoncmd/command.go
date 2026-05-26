@@ -71,17 +71,17 @@ func NewCommand(use string) *cobra.Command {
 			if pollInterval > 0 {
 				opts.PollInterval = pollInterval
 			}
-			// Daemon startup defaults (AC1/AC2/AC3). This RunE only fires
+			// Daemon startup defaults. This RunE only fires
 			// for `galley daemon run` (via the run subcommand) and for the
 			// background daemon child spawned by `galley daemon start`
 			// (parent cmd name "daemon"). The `status` and `stop`
 			// subcommands install their own RunE and never reach this
 			// branch, so they remain read-only and do not create
-			// daemon.yaml (R2). `galley daemon start` itself also calls
+			// daemon.yaml. `galley daemon start` itself also calls
 			// EnsureDefault before spawning the child so the operator sees
 			// the new file as soon as the start command returns. We then
 			// apply daemon.yaml values to any startup option the user did
-			// not explicitly set on the CLI; CLI flags always win (AC3).
+			// not explicitly set on the CLI; CLI flags always win.
 			if _, err := daemonconfig.EnsureDefault(opts.Root); err != nil {
 				return err
 			}
@@ -91,9 +91,6 @@ func NewCommand(use string) *cobra.Command {
 				if err := applyDaemonConfig(&opts, &pollInterval, cfg); err != nil {
 					return err
 				}
-			}
-			if pollInterval > 0 {
-				opts.PollInterval = pollInterval
 			}
 			daemonToken := os.Getenv(daemonctl.EnvToken)
 			if daemonToken != "" {
@@ -154,11 +151,11 @@ func NewCommand(use string) *cobra.Command {
 }
 
 // applyDaemonConfig fills daemon startup options whose flag was not explicitly
-// set with values from daemon.yaml. CLI flags always win (AC3). The supervisor
+// set with values from daemon.yaml. CLI flags always win. The supervisor
 // source is recorded as `daemon_config` whenever daemon.yaml provided the
 // resolved supervisor value, so run evidence can distinguish a CLI override
-// from a daemon.yaml default (AC8). Per-task environment.yaml
-// supervisor.default_cli overrides this later in the daemon runtime (AC4).
+// from a daemon.yaml default. Per-task environment.yaml supervisor.default_cli
+// overrides this later in the daemon runtime.
 //
 // When daemon.yaml supplies an integer concurrency value, the corresponding
 // Explicit flag is set so daemon.Options.withDefaults treats it as an
@@ -179,54 +176,50 @@ func applyDaemonConfig(opts *daemon.Options, pollInterval *time.Duration, cfg da
 		opts.Explicit.MaxConcurrentPerRepo = true
 	}
 	if !opts.Explicit.PollInterval && cfg.PollInterval != "" {
-		d, ok, err := daemonconfig.Duration(cfg.PollInterval)
-		if err != nil {
-			return fmt.Errorf("daemon.yaml poll_interval: %w", err)
-		}
-		if ok {
+		if d, ok, err := daemonConfigDuration("poll_interval", cfg.PollInterval); err != nil {
+			return err
+		} else if ok {
 			*pollInterval = d
+			opts.PollInterval = d
 		}
 	}
 	if !opts.Explicit.ClaimTTL && cfg.ClaimTTL != "" {
-		d, ok, err := daemonconfig.Duration(cfg.ClaimTTL)
-		if err != nil {
-			return fmt.Errorf("daemon.yaml claim_ttl: %w", err)
-		}
-		if ok {
+		if d, ok, err := daemonConfigDuration("claim_ttl", cfg.ClaimTTL); err != nil {
+			return err
+		} else if ok {
 			opts.ClaimTTL = d
 		}
 	}
 	if !opts.Explicit.HeartbeatInterval && cfg.HeartbeatInterval != "" {
-		d, ok, err := daemonconfig.Duration(cfg.HeartbeatInterval)
-		if err != nil {
-			return fmt.Errorf("daemon.yaml heartbeat_interval: %w", err)
-		}
-		if ok {
+		if d, ok, err := daemonConfigDuration("heartbeat_interval", cfg.HeartbeatInterval); err != nil {
+			return err
+		} else if ok {
 			opts.HeartbeatInterval = d
 		}
 	}
-	// ShutdownTimeout follows the same explicit-flag tracking as the other
-	// daemon.yaml-backed startup defaults (AC3): when the CLI flag was not
-	// changed, daemon.yaml wins; otherwise the CLI value is preserved.
 	if !opts.Explicit.ShutdownTimeout && cfg.ShutdownTimeout != "" {
-		d, ok, err := daemonconfig.Duration(cfg.ShutdownTimeout)
-		if err != nil {
-			return fmt.Errorf("daemon.yaml shutdown_timeout: %w", err)
-		}
-		if ok {
+		if d, ok, err := daemonConfigDuration("shutdown_timeout", cfg.ShutdownTimeout); err != nil {
+			return err
+		} else if ok {
 			opts.ShutdownTimeout = d
 		}
 	}
 	if !opts.Explicit.IdleTimeout && cfg.IdleTimeout != "" {
-		d, ok, err := daemonconfig.Duration(cfg.IdleTimeout)
-		if err != nil {
-			return fmt.Errorf("daemon.yaml idle_timeout: %w", err)
-		}
-		if ok {
+		if d, ok, err := daemonConfigDuration("idle_timeout", cfg.IdleTimeout); err != nil {
+			return err
+		} else if ok {
 			opts.IdleTimeout = d
 		}
 	}
 	return nil
+}
+
+func daemonConfigDuration(field, value string) (time.Duration, bool, error) {
+	d, ok, err := daemonconfig.Duration(value)
+	if err != nil {
+		return 0, false, fmt.Errorf("daemon.yaml %s: %w", field, err)
+	}
+	return d, ok, nil
 }
 
 func explicitOptionsFromFlags(cmd *cobra.Command) daemon.ExplicitOptions {
@@ -265,7 +258,7 @@ func newStartCommand(opts *daemon.Options, pidFile, logFile *string, readinessTi
 				return fmt.Errorf("start does not support --once")
 			}
 			// Ensure daemon.yaml exists under the selected root before the
-			// child daemon spawns (AC1). The background child cannot reliably
+			// child daemon spawns. The background child cannot reliably
 			// surface a creation error to the operator, and operators expect
 			// to edit daemon.yaml immediately after `galley daemon start`
 			// returns. The child still re-loads daemon.yaml so any value
@@ -326,11 +319,9 @@ func newStartCommand(opts *daemon.Options, pidFile, logFile *string, readinessTi
 			}
 			meta := daemonctl.NewPIDFile(child.Process.Pid, exe, opts.Root, append([]string{exe}, childArgs...)).WithToken(token)
 			if err := daemonctl.WritePID(paths.PIDFile, meta); err != nil {
-				// Cross-platform start cleanup: the previous SIGTERM call
-				// was a no-op on Windows (the runtime returned "signal not
-				// supported by windows") and left a stranded background
-				// daemon after WritePID failures. The build-tagged helper
-				// uses SIGTERM on Unix and TerminateProcess on Windows.
+				// Cross-platform start cleanup uses SIGTERM on Unix and
+				// TerminateProcess on Windows so a PID write failure does
+				// not leave a background daemon running.
 				_ = daemonctl.TerminateChildProcess(child.Process)
 				return err
 			}
@@ -376,12 +367,9 @@ func newStopCommand(opts *daemon.Options, pidFile *string, stopTimeout *time.Dur
 				// groups it can no longer reap. Force stop must clean those up
 				// before discarding the record; on cleanup failure surface the
 				// surviving PIDs/PGIDs and keep the PID file so a follow-up
-				// action can target the same daemon record (AC-005).
-				if force {
-					if _, err := daemonctl.CleanupRegisteredChildren(runner.ChildRegistryPath(opts.Root), *stopTimeout); err != nil {
-						fmt.Fprintf(cmd.ErrOrStderr(), "galley daemon force stop pid=%d incomplete: %v\n", status.Meta.PID, err)
-						return err
-					}
+				// action can target the same daemon record.
+				if err := cleanupOnForce(cmd, force, opts.Root, status.Meta.PID, *stopTimeout); err != nil {
+					return err
 				}
 				if err := daemonctl.RemovePID(paths.PIDFile, status.Meta.PID); err != nil {
 					return err
@@ -405,16 +393,13 @@ func newStopCommand(opts *daemon.Options, pidFile *string, stopTimeout *time.Dur
 			// process groups before reporting a stopped state or removing the
 			// PID file. The daemon intentionally puts executor and supervisor
 			// subprocesses into their own pgids, so killing only the daemon
-			// PID can orphan them (D2 / AC-004). On child cleanup failure we
+			// PID can orphan them. On child cleanup failure we
 			// surface a visible error that names the surviving PIDs/PGIDs and
-			// intentionally leave the PID file in place (AC-005) so a follow-up
+			// intentionally leave the PID file in place so a follow-up
 			// operator action can target the same daemon record instead of
 			// observing a falsely-clean stop.
-			if force {
-				if _, err := daemonctl.CleanupRegisteredChildren(runner.ChildRegistryPath(opts.Root), *stopTimeout); err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "galley daemon force stop pid=%d incomplete: %v\n", status.Meta.PID, err)
-					return err
-				}
+			if err := cleanupOnForce(cmd, force, opts.Root, status.Meta.PID, *stopTimeout); err != nil {
+				return err
 			}
 			if err := daemonctl.RemovePID(paths.PIDFile, status.Meta.PID); err != nil {
 				return err
@@ -429,6 +414,17 @@ func newStopCommand(opts *daemon.Options, pidFile *string, stopTimeout *time.Dur
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "After the stop timeout, send a verified SIGKILL to the daemon and to any known active executor or supervisor child process groups")
 	return cmd
+}
+
+func cleanupOnForce(cmd *cobra.Command, force bool, root string, pid int, stopTimeout time.Duration) error {
+	if !force {
+		return nil
+	}
+	if _, err := daemonctl.CleanupRegisteredChildren(runner.ChildRegistryPath(root), stopTimeout); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "galley daemon force stop pid=%d incomplete: %v\n", pid, err)
+		return err
+	}
+	return nil
 }
 
 func newStatusCommand(opts *daemon.Options, pidFile *string) *cobra.Command {
@@ -481,14 +477,14 @@ func newStatusCommand(opts *daemon.Options, pidFile *string) *cobra.Command {
 }
 
 func writeStatusJSON(cmd *cobra.Command, opts *daemon.Options, paths daemonctl.Paths, status *daemonctl.Status, alive, verified bool) error {
-	// AC7 / D3: daemon status intentionally does not surface daemon startup
+	// Daemon status intentionally does not surface daemon startup
 	// defaults that can be overridden by daemon.yaml or by per-repository
 	// environment.yaml. `supervisor` is omitted because a daemon-wide value
 	// would be misleading once per-task supervisor resolution exists.
 	// `max_concurrent_tasks` and `max_concurrent_per_repo` are omitted for the
 	// same reason: status can only see CLI argv, so daemon.yaml-supplied
 	// values would not be reflected accurately. Resolution evidence for an
-	// actual task is persisted in runs/<run-id>/supervisor.json (AC8).
+	// actual task is persisted in runs/<run-id>/supervisor.json.
 	payload := struct {
 		Running  bool   `json:"running"`
 		Verified bool   `json:"verified"`
@@ -507,7 +503,7 @@ func writeStatusJSON(cmd *cobra.Command, opts *daemon.Options, paths daemonctl.P
 		payload.PID = status.Meta.PID
 	}
 	enc := json.NewEncoder(cmd.OutOrStdout())
-	enc.SetIndent("", "  ")
+	enc.SetIndent("", " ")
 	return enc.Encode(payload)
 }
 

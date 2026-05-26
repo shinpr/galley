@@ -108,7 +108,7 @@ func TestLoadAcceptsTaskWithoutPRAuthorLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 	if loaded.PR.AuthorLogin != "" {
-		t.Fatalf("expected empty PR.AuthorLogin for legacy task, got %q", loaded.PR.AuthorLogin)
+		t.Fatalf("expected empty PR.AuthorLogin for task without author_login, got %q", loaded.PR.AuthorLogin)
 	}
 }
 

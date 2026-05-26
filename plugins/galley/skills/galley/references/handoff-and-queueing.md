@@ -72,8 +72,6 @@ A PR comment is treated as a Galley command when the trimmed comment body starts
 Accepted forms:
 
 - `/galley <free-form revision request>`
-- `/galley rerun <free-form revision request>`
-- `/galley requeue <free-form revision request>`
 - `/galley`
 
 The parsed text becomes a pending revision request. A bare `/galley` uses the default request text `PR comment requested another Galley run.` Use concrete revision instructions with acceptance or verification detail when the next executor pass needs specific changes.
@@ -82,7 +80,7 @@ PR comment polling scans reviewed tasks under `tasks/done` and `tasks/failed`. A
 
 Ignored forms:
 
-- Mid-line mentions such as `Looks good, /galley rerun`
+- Mid-line mentions such as `Looks good, /galley`
 - `/galley` after another non-whitespace line
 - `/galley:galley ...`
 - `/galleyfoo ...`

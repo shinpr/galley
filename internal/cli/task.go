@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +10,8 @@ import (
 
 	"github.com/shinpr/galley/internal/daemonctl"
 	"github.com/shinpr/galley/internal/galleyhome"
+	skeletonpreflight "github.com/shinpr/galley/internal/preflight/skeleton"
+	"github.com/shinpr/galley/internal/runartifact"
 	"github.com/shinpr/galley/internal/runlog"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/spf13/cobra"
@@ -55,12 +56,12 @@ func newTaskArchiveCommand() *cobra.Command {
 				if result.From != result.To {
 					fmt.Fprintf(cmd.OutOrStdout(), "moved: %s -> %s\n", result.From, result.To)
 				}
-				// Surface legacy-fallback context so operators see that the
+				// Surface lenient-fallback context so operators see that the
 				// archived file kept its pre-current-schema bytes. The JSON
 				// output already exposes Mode and Warning through
 				// ArchiveResult, so the text branch is the only place that
-				// must echo them explicitly. Modes "legacy_status_edit" and
-				// "legacy_move_unchanged" both carry a non-empty Warning;
+				// must echo them explicitly. Modes "lenient_status_edit" and
+				// "move_unreadable_unchanged" both carry a non-empty Warning;
 				// the current-schema path leaves both empty.
 				if result.Mode != "" && result.Mode != "current_schema" {
 					fmt.Fprintf(cmd.OutOrStdout(), "mode: %s\n", result.Mode)
@@ -87,7 +88,7 @@ type taskListItem struct {
 	LatestSummary string `json:"latest_summary,omitempty"`
 	// DecodeError is set on entries that could not be decoded under the
 	// current task schema. Tolerant scans (`galley task list`, `task show`'s
-	// ID lookup, daemon helper sweeps) surface these legacy or unreadable
+	// ID lookup, daemon helper sweeps) surface these strict-decode-incompatible or unreadable
 	// task files as non-fatal entries instead of failing the whole command.
 	// Active task intake (validate/queue/requeue/daemon execution) still
 	// rejects unknown fields through the strict loader.
@@ -110,7 +111,7 @@ func newTaskListCommand() *cobra.Command {
 			return renderOutput(cmd, output, items, func() error {
 				for _, item := range items {
 					if item.DecodeError != "" {
-						// Legacy/unreadable historical task files surface as
+						// Strict-decode-incompatible or unreadable task files surface as
 						// non-fatal entries so the rest of the list still
 						// renders. The "decode_error" sentinel in the
 						// status column lets shell pipelines filter these
@@ -151,16 +152,9 @@ func newTaskShowCommand() *cobra.Command {
 		Short: "Show a task summary and latest failure/review context",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			path := args[0]
-			if !strings.Contains(path, string(os.PathSeparator)) {
-				resolved, err := findTaskByID(root, path)
-				if err != nil {
-					if _, statErr := os.Stat(path); statErr != nil {
-						return fmt.Errorf("resolve %q as task ID under %s failed: %w; as file path failed: %v", path, root, err, statErr)
-					}
-				} else {
-					path = resolved
-				}
+			path, err := resolveTaskPathOrID(root, args[0])
+			if err != nil {
+				return err
 			}
 			loaded, err := task.Load(path)
 			if err != nil {
@@ -256,7 +250,7 @@ func listTaskItems(root, state string) ([]taskListItem, error) {
 			return nil, err
 		}
 		for _, path := range paths {
-			// Tolerant scan: legacy task files with unknown fields that
+			// Tolerant scan: strict-decode-incompatible task files that
 			// pre-date the current schema still render as best-effort
 			// entries. Truly unreadable files surface as decode-error
 			// entries instead of failing the whole command. Active task
@@ -294,7 +288,7 @@ func findTaskByID(root, id string) (string, error) {
 	var matches []string
 	for _, item := range items {
 		// Skip decode-error entries: tolerant scans surface unreadable
-		// historical/legacy task files but they cannot drive an ID lookup
+		// strict-decode-incompatible task files but they cannot drive an ID lookup
 		// because their ID could not be decoded.
 		if item.DecodeError != "" {
 			continue
@@ -311,6 +305,20 @@ func findTaskByID(root, id string) (string, error) {
 	default:
 		return "", fmt.Errorf("task %q is ambiguous under %s: %s", id, filepath.Join(root, "tasks"), strings.Join(matches, ", "))
 	}
+}
+
+func resolveTaskPathOrID(root, arg string) (string, error) {
+	if strings.Contains(arg, string(os.PathSeparator)) {
+		return arg, nil
+	}
+	resolved, err := findTaskByID(root, arg)
+	if err == nil {
+		return resolved, nil
+	}
+	if _, statErr := os.Stat(arg); statErr != nil {
+		return "", fmt.Errorf("resolve %q as task ID under %s failed: %w; as file path failed: %v", arg, root, err, statErr)
+	}
+	return arg, nil
 }
 
 func resolveTaskRoot(root string, explicit bool) (string, error) {
@@ -365,11 +373,7 @@ func taskFiles(dir string) ([]string, error) {
 // task would regress to "active failure" framing once cleanup ran, even
 // though the supervisor already approved the work.
 func isAcceptedTerminalStatus(status string) bool {
-	switch status {
-	case "accepted", "pr_opened", "closed", "merged":
-		return true
-	}
-	return false
+	return task.IsAcceptedTerminal(status)
 }
 
 func taskSummary(path string, loaded task.Task) taskListItem {
@@ -437,16 +441,9 @@ func newTaskRequeueCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			path := args[0]
-			if !strings.Contains(path, string(os.PathSeparator)) {
-				resolved, err := findTaskByID(resolvedRoot, path)
-				if err != nil {
-					if _, statErr := os.Stat(path); statErr != nil {
-						return fmt.Errorf("resolve %q as task ID under %s failed: %w; as file path failed: %v", path, resolvedRoot, err, statErr)
-					}
-				} else {
-					path = resolved
-				}
+			path, err := resolveTaskPathOrID(resolvedRoot, args[0])
+			if err != nil {
+				return err
 			}
 			result, err := task.Requeue(path, task.RequeueOptions{Reason: reason, Root: resolvedRoot})
 			if err != nil {
@@ -541,20 +538,6 @@ func preflightSummary(t task.Task) *preflightSummaryView {
 	return view
 }
 
-type runtimePreflightFile struct {
-	Status  string `json:"status"`
-	Outputs []struct {
-		ACID                   string `json:"ac_id"`
-		Path                   string `json:"path"`
-		Kind                   string `json:"kind"`
-		ImplementationRequired bool   `json:"implementation_required"`
-	} `json:"outputs"`
-	Error *struct {
-		Phase   string `json:"phase"`
-		Message string `json:"message"`
-	} `json:"error"`
-}
-
 // applyRuntimePreflight resolves the latest run directory for the task under
 // <root>/runs and folds the runtime preflight_result.json into the view
 // (AC-015). When no run directory exists the static declared fields are left
@@ -564,19 +547,16 @@ func applyRuntimePreflight(view *preflightSummaryView, root, taskID string) {
 	if runDir == "" {
 		return
 	}
-	if data, err := os.ReadFile(filepath.Join(runDir, "preflight_result.json")); err == nil {
-		var pf runtimePreflightFile
-		if json.Unmarshal(data, &pf) == nil {
-			view.RuntimeStatus = pf.Status
-			for _, o := range pf.Outputs {
-				view.RuntimeOutputs = append(view.RuntimeOutputs, preflightOutputView{ACID: o.ACID, Path: o.Path, Kind: o.Kind, ImplementationRequired: o.ImplementationRequired})
-			}
-			if pf.Error != nil {
-				if pf.Error.Phase != "" {
-					view.FailureSummary = pf.Error.Phase + ": " + pf.Error.Message
-				} else {
-					view.FailureSummary = pf.Error.Message
-				}
+	if pf, err := runartifact.Read[skeletonpreflight.Result](runDir, runartifact.PreflightResultFilename); err == nil && pf != nil {
+		view.RuntimeStatus = pf.Status
+		for _, o := range pf.Outputs {
+			view.RuntimeOutputs = append(view.RuntimeOutputs, preflightOutputView{ACID: o.ACID, Path: o.Path, Kind: o.Kind, ImplementationRequired: o.ImplementationRequired})
+		}
+		if pf.Error != nil {
+			if pf.Error.Phase != "" {
+				view.FailureSummary = pf.Error.Phase + ": " + pf.Error.Message
+			} else {
+				view.FailureSummary = pf.Error.Message
 			}
 		}
 	}

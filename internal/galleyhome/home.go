@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/shinpr/galley/internal/pathutil"
 )
 
 var repoKeySanitizer = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
@@ -27,10 +29,7 @@ func RepoKey(cwd string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve repo cwd: %w", err)
 	}
-	absolute = filepath.Clean(absolute)
-	if resolved, err := filepath.EvalSymlinks(absolute); err == nil {
-		absolute = filepath.Clean(resolved)
-	}
+	absolute = pathutil.CleanPhysical(absolute)
 	base := repoKeySanitizer.ReplaceAllString(filepath.Base(absolute), "-")
 	base = strings.Trim(base, "-._")
 	if base == "" {

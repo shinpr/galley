@@ -1,4 +1,4 @@
-package daemon
+package skeleton
 
 import (
 	"fmt"
@@ -9,7 +9,7 @@ import (
 
 const acceptanceSkeletonVerificationMarker = "Acceptance skeleton:"
 
-func applyAcceptanceSkeletonResultToTask(loaded *task.Task, res *AcceptanceSkeletonResult) {
+func ApplyToTask(loaded *task.Task, res *Result) {
 	if loaded == nil || res == nil || loaded.Preflight == nil || loaded.Preflight.AcceptanceSkeleton == nil {
 		return
 	}
@@ -31,7 +31,7 @@ func applyAcceptanceSkeletonResultToTask(loaded *task.Task, res *AcceptanceSkele
 	}
 }
 
-func mergeSkeletonVerification(existing, acID string, outputs []AcceptanceSkeletonOutput) string {
+func mergeSkeletonVerification(existing, acID string, outputs []Output) string {
 	var lines []string
 	for _, out := range outputs {
 		if out.ACID != acID {

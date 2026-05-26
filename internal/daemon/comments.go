@@ -51,11 +51,9 @@ func processTaskPRComments(ctx context.Context, opts Options, path string) error
 	loaded, err := task.Load(path)
 	if err != nil {
 		// PR comment processing requires modifying the task YAML (Save,
-		// Requeue). Re-marshalling a lenient-loaded legacy task would
-		// strip fields the current schema does not know about, which
-		// would silently mutate audit history. Skip the task with an
-		// operator-visible warning rather than aborting the whole
-		// polling cycle for the remaining readable tasks.
+		// Requeue). Re-marshalling a strict-decode-incompatible task would
+		// strip fields the current schema does not know about, so skip it
+		// rather than silently mutating audit history.
 		fmt.Fprintf(os.Stderr, "galley: skipping PR comment scan for unreadable task %s: %v\n", path, err)
 		return nil
 	}
@@ -65,7 +63,8 @@ func processTaskPRComments(ctx context.Context, opts Options, path string) error
 	// comment, so scanning it would only add polling latency and GitHub API
 	// load without changing observable behavior. Performing the eligibility
 	// check here (rather than after profile load or after FetchPRComments)
-	// also lets historical tasks survive without a usable repository profile.
+	// also lets closed or archived task files survive without a usable
+	// repository profile.
 	if !isActionableForPRCommentPoll(loaded) {
 		return nil
 	}
@@ -145,13 +144,7 @@ func processTaskPRComments(ctx context.Context, opts Options, path string) error
 		})
 		if err != nil {
 			applyPRCommandToLoadedTask(&loaded, command)
-			loaded.Risks = append(loaded.Risks, task.Risk{
-				ID:                   "pr-requeue-" + command.CommentID,
-				Type:                 "external_dependency",
-				Detail:               fmt.Sprintf("PR comment %s requested a rerun, but Galley could not requeue the task: %v", command.CommentID, err),
-				Mitigation:           "Resolve the queued/running task conflict or filesystem error, then run galley task requeue manually.",
-				HumanReviewSuggested: true,
-			})
+			appendRiskWithID(&loaded, "pr-requeue-"+command.CommentID, "external_dependency", fmt.Sprintf("PR comment %s requested a rerun, but Galley could not requeue the task: %v", command.CommentID, err), "Resolve the queued/running task conflict or filesystem error, then run galley task requeue manually.", true)
 			if saveErr := task.Save(path, loaded); saveErr != nil {
 				errs = append(errs, errors.Join(err, saveErr))
 				continue
@@ -190,8 +183,8 @@ func applyPRCommandToLoadedTask(loaded *task.Task, command prCommand) {
 // isActionableForPRCommentPoll reports whether the persisted task fields show
 // that the task could accept another /galley follow-up from a PR comment. The
 // gate intentionally consults only the persisted task YAML so the daemon can
-// skip non-actionable historical tasks before resolving the repository profile
-// or calling GitHub. The conditions are:
+// skip non-actionable task files before resolving the repository profile or
+// calling GitHub. The conditions are:
 //
 //  1. The task records a PR URL. PR-less tasks have no comment thread to scan.
 //  2. The PR status is "open" (case-insensitive). Merged or closed PRs cannot
@@ -207,8 +200,8 @@ func applyPRCommandToLoadedTask(loaded *task.Task, command prCommand) {
 //     non-actionable and are skipped here.
 //
 // Keeping this check ahead of loadTaskProfiles and vcs.FetchPRComments is the
-// reason the daemon no longer pays per-task latency or GitHub quota for
-// historical tasks during PR comment polling.
+// reason the daemon does not pay per-task latency or GitHub quota for
+// non-actionable tasks during PR comment polling.
 func isActionableForPRCommentPoll(loaded task.Task) bool {
 	if loaded.PR.URL == "" {
 		return false
@@ -242,13 +235,8 @@ func prCommentMatchesPRAuthor(comment vcs.PRComment, prAuthorLogin string) bool 
 
 // parsePRCommand recognises Galley PR-comment requests. The full comment body
 // is trimmed of surrounding whitespace and only the leading characters are
-// inspected. Prefixes are evaluated in this fixed order so backward-compatible
-// alias Reasons are preserved:
-//
-//  1. "/galley rerun"   (exact body or "/galley rerun "/"\n" prefix)
-//  2. "/galley requeue" (exact body or "/galley requeue "/"\n" prefix)
-//  3. "/galley "        (8-character free-form prefix: slash, galley, space)
-//  4. "/galley"         (exact body, optionally followed by a newline block)
+// inspected. A leading "/galley" marks the rest of the comment as the
+// free-form revision request.
 //
 // Once a prefix matches, the rest of the body is split into the command line
 // (the remainder of the first line after the prefix) and the trailing block
@@ -256,17 +244,13 @@ func prCommentMatchesPRAuthor(comment vcs.PRComment, prAuthorLogin string) bool 
 // and, when both are non-empty, joined with a blank line ("\n\n"). When only
 // one part is non-empty, that part becomes the Reason verbatim. An empty
 // Reason falls back to a default acknowledgement string. Bodies whose first
-// non-whitespace characters do not match one of the four prefixes are
-// rejected, so mid-line mentions ("Looks good, /galley rerun"), /galley
-// appearing only on a non-leading line, "/galley:galley ...", and
-// "/galleyfoo ..." all fail the prefix check naturally without per-line
-// scanning or code-block detection.
+// non-whitespace characters do not match "/galley" as a whole token are
+// rejected, so mid-line mentions, /galley appearing only on a non-leading
+// line, "/galley:galley ...", and "/galleyfoo ..." all fail the prefix check
+// naturally without per-line scanning or code-block detection.
 func parsePRCommand(comment vcs.PRComment) (prCommand, bool) {
 	const (
-		rerunPrefix   = "/galley rerun"
-		requeuePrefix = "/galley requeue"
-		freePrefix    = "/galley "
-		barePrefix    = "/galley"
+		prefix        = "/galley"
 		defaultReason = "PR comment requested another Galley run."
 	)
 
@@ -275,44 +259,19 @@ func parsePRCommand(comment vcs.PRComment) (prCommand, bool) {
 		return prCommand{}, false
 	}
 
-	// matchPrefix reports whether body begins with prefix as a whole token,
-	// i.e. body == prefix or body starts with prefix immediately followed by a
-	// space or newline. It returns the rest of the body after the prefix when
-	// matched. This guards against "/galleyfoo" or "/galley:galley" matching
-	// "/galley".
-	matchPrefix := func(prefix string) (string, bool) {
-		if body == prefix {
-			return "", true
-		}
-		if strings.HasPrefix(body, prefix+" ") || strings.HasPrefix(body, prefix+"\n") {
-			return body[len(prefix):], true
-		}
-		return "", false
-	}
-
-	var (
-		rest    string
-		matched bool
-	)
-	if r, ok := matchPrefix(rerunPrefix); ok {
-		rest, matched = r, true
-	} else if r, ok := matchPrefix(requeuePrefix); ok {
-		rest, matched = r, true
-	} else if strings.HasPrefix(body, freePrefix) {
-		rest, matched = body[len(freePrefix):], true
-	} else if r, ok := matchPrefix(barePrefix); ok {
-		rest, matched = r, true
-	}
-	if !matched {
+	var rest string
+	switch {
+	case body == prefix:
+	case strings.HasPrefix(body, prefix+" ") || strings.HasPrefix(body, prefix+"\n"):
+		rest = body[len(prefix):]
+	default:
 		return prCommand{}, false
 	}
 
-	// Preserve the historical reason-assembly semantics: split the rest of the
-	// body into the command line and the trailing block, TrimSpace each part
-	// separately, and join them with a blank line when both are non-empty. An
-	// empty Reason falls back to the default acknowledgement string so a bare
-	// "/galley" (or "/galley rerun" with no body) still produces a stable
-	// Reason.
+	// Split the rest of the body into the command line and the trailing block,
+	// TrimSpace each part separately, and join them with a blank line when both
+	// are non-empty. An empty Reason falls back to the default acknowledgement
+	// string so a bare "/galley" still produces a stable Reason.
 	firstLine, trailing, _ := strings.Cut(rest, "\n")
 	firstLine = strings.TrimSpace(firstLine)
 	trailing = strings.TrimSpace(trailing)

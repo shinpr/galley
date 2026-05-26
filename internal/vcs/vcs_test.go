@@ -112,18 +112,31 @@ exit 1
 
 func TestFetchPRURLForCurrentBranchReturnsErrorForOtherFailures(t *testing.T) {
 	skipPOSIXFakeGHOnWindows(t)
-	binDir := t.TempDir()
-	fakeGH := filepath.Join(binDir, "gh")
-	if err := os.WriteFile(fakeGH, []byte(`#!/bin/sh
-echo 'HTTP 502 bad gateway' >&2
+	cases := []struct {
+		name   string
+		stderr string
+	}{
+		{name: "network", stderr: "HTTP 502 bad gateway"},
+		{name: "auth", stderr: "authentication failed: refresh gh auth"},
+		{name: "incidental text", stderr: "error: no pull requests found while reading cached metadata"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			binDir := t.TempDir()
+			fakeGH := filepath.Join(binDir, "gh")
+			if err := os.WriteFile(fakeGH, []byte(`#!/bin/sh
+echo '`+tc.stderr+`' >&2
 exit 1
 `), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	if _, err := FetchPRURLForCurrentBranch(t.Context(), Binaries{}, t.TempDir(), t.TempDir()); err == nil {
-		t.Fatal("expected error for non-missing-PR failure")
+			if _, err := FetchPRURLForCurrentBranch(t.Context(), Binaries{}, t.TempDir(), t.TempDir()); err == nil {
+				t.Fatal("expected error for non-missing-PR failure")
+			}
+		})
 	}
 }
 

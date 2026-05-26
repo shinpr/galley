@@ -54,16 +54,16 @@ func captureStderr(t *testing.T, fn func()) string {
 	return buf.String()
 }
 
-// writeLegacyDaemonTaskYAML writes a task with an unknown nested field that
+// writeSchemaIncompatibleDaemonTaskYAML writes a task with an unknown nested field that
 // strict task.Load rejects. The contents otherwise resemble a done-state
 // task with a PR URL so it shows up under the daemon's PR-comment and
 // worktree-cleanup scans.
-func writeLegacyDaemonTaskYAML(t *testing.T, path, repo string) {
+func writeSchemaIncompatibleDaemonTaskYAML(t *testing.T, path, repo string) {
 	t.Helper()
-	body := `id: "task-legacy-daemon"
+	body := `id: "task-schema-incompatible-daemon"
 mode: "afk"
 status: "pr_opened"
-goal: "Legacy daemon fixture."
+goal: "Schema-incompatible daemon fixture."
 acceptance_criteria:
   - id: "AC1"
     text: "Loads."
@@ -84,11 +84,11 @@ execution_policy:
   stop_on_external_service_unavailable: false
 worktree:
   enabled: true
-  branch: "agent/task-legacy-daemon"
-  path: "../worktrees/task-legacy-daemon"
+  branch: "agent/task-schema-incompatible-daemon"
+  path: "../worktrees/task-schema-incompatible-daemon"
 supervisor:
   review_iterations: 0
-  provider: "legacy-supervisor"
+  provider: "unknown-supervisor"
 executor:
   cli: "claude"
   effort: "high"
@@ -110,7 +110,7 @@ pr:
 }
 
 // TestPollPRCommentsSkipsUnreadableTask covers AC: PR comment polling must
-// skip unreadable historical task files with operator-visible warning
+// skip strict-decode-incompatible task files with operator-visible warning
 // evidence while continuing to process readable tasks in the same sweep.
 func TestPollPRCommentsSkipsUnreadableTask(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
@@ -135,12 +135,12 @@ func TestPollPRCommentsSkipsUnreadableTask(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Sibling unreadable historical task (legacy unknown field).
-	legacyPath := filepath.Join(root, "tasks", "done", "legacy.yaml")
-	writeLegacyDaemonTaskYAML(t, legacyPath, repo)
+	// Sibling strict-decode-incompatible task with an unknown field.
+	incompatiblePath := filepath.Join(root, "tasks", "done", "decode-incompatible.yaml")
+	writeSchemaIncompatibleDaemonTaskYAML(t, incompatiblePath, repo)
 
 	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ]; then
-echo '[[{"id":42,"body":"/galley rerun tighten tests","html_url":"https://github.com/example/galley/pull/123#issuecomment-42","user":{"login":"maintainer"}}]]'
+echo '[[{"id":42,"body":"/galley tighten tests","html_url":"https://github.com/example/galley/pull/123#issuecomment-42","user":{"login":"maintainer"}}]]'
 else
 echo unexpected-gh >&2
 exit 1
@@ -155,11 +155,11 @@ fi
 		t.Fatalf("poll must not abort when a sibling task is unreadable: %v", pollErr)
 	}
 
-	// Warning evidence covers the unreadable historical task.
+	// Warning evidence covers the strict-decode-incompatible task.
 	if !strings.Contains(stderr, "skipping PR comment scan for unreadable task") {
 		t.Fatalf("expected operator-visible warning on stderr, got %q", stderr)
 	}
-	if !strings.Contains(stderr, "legacy.yaml") {
+	if !strings.Contains(stderr, "decode-incompatible.yaml") {
 		t.Fatalf("warning must name the unreadable task path, got %q", stderr)
 	}
 
@@ -178,13 +178,13 @@ fi
 	}
 
 	// Unreadable task stays untouched so the operator can inspect it.
-	if _, err := os.Stat(legacyPath); err != nil {
+	if _, err := os.Stat(incompatiblePath); err != nil {
 		t.Fatalf("unreadable task must remain in place for operator inspection: %v", err)
 	}
 }
 
 // TestCleanupWorktreesSkipsUnreadableTask covers AC: worktree cleanup must
-// skip unreadable historical task files with an operator-visible warning
+// skip strict-decode-incompatible task files with an operator-visible warning
 // while continuing to act on readable tasks in the same sweep.
 func TestCleanupWorktreesSkipsUnreadableTask(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
@@ -199,9 +199,9 @@ func TestCleanupWorktreesSkipsUnreadableTask(t *testing.T) {
 	writeDaemonTask(t, taskPath, repo)
 	doneTask, worktreePath := prepareDonePRTask(t, taskPath, repo, "open")
 
-	// Sibling unreadable historical task: cleanup must skip it.
-	legacyPath := filepath.Join(root, "tasks", "done", "legacy.yaml")
-	writeLegacyDaemonTaskYAML(t, legacyPath, repo)
+	// Sibling strict-decode-incompatible task: cleanup must skip it.
+	incompatiblePath := filepath.Join(root, "tasks", "done", "schema-incompatible.yaml")
+	writeSchemaIncompatibleDaemonTaskYAML(t, incompatiblePath, repo)
 
 	// PR state lookup always reports "open" so the readable worktree must
 	// be preserved (the existing TestCleanupWorktreesKeepsOpenPRWorktree
@@ -220,7 +220,7 @@ func TestCleanupWorktreesSkipsUnreadableTask(t *testing.T) {
 	if !strings.Contains(stderr, "skipping worktree cleanup for unreadable task") {
 		t.Fatalf("expected operator-visible warning on stderr, got %q", stderr)
 	}
-	if !strings.Contains(stderr, "legacy.yaml") {
+	if !strings.Contains(stderr, "schema-incompatible.yaml") {
 		t.Fatalf("warning must name the unreadable task path, got %q", stderr)
 	}
 
@@ -238,7 +238,7 @@ func TestCleanupWorktreesSkipsUnreadableTask(t *testing.T) {
 	}
 
 	// Unreadable file kept untouched.
-	if _, err := os.Stat(legacyPath); err != nil {
+	if _, err := os.Stat(incompatiblePath); err != nil {
 		t.Fatalf("unreadable task must remain in place: %v", err)
 	}
 }

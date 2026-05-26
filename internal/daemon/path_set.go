@@ -1,4 +1,4 @@
-// Package daemon — review-staging path set builder.
+// Package daemon contains the review-staging path set builder.
 //
 // This file owns the explicit "reviewable path set" Galley computes after an
 // executor attempt and before it captures the snapshot it hands to the
@@ -9,8 +9,7 @@
 // content that is not part of the executor's submitted change set) is
 // intentionally kept out of the path set so the supervisor diff/evidence and
 // downstream progress signals reflect only what the executor actually
-// submitted (D1 / AC1 / AC2 / AC4 / supervisor feedback on review-time
-// scope).
+// submitted.
 //
 // Forbidden-path entries are intentionally kept in the path set so the
 // existing finalize-time forbidden_paths gate still observes them; review
@@ -33,14 +32,14 @@ import (
 // path for renames/copies, the only path otherwise), normalized to slash
 // form, deduplicated, and filtered. The function drops:
 //
-//   - empty entries and entries that normalize to ".";
-//   - non-local entries (filepath.IsLocal rejects absolute paths,
-//     drive-letter paths, and any segment that backs out of cwd so the
-//     review-staging set cannot widen beyond the executor's working
-//     directory regardless of how git status formatted the entry);
-//   - destinations in excludeDestinations — these are task.files entries
-//     declared with commit:false, which Galley materializes as context-only
-//     inputs the executor reads but does not submit.
+// - empty entries and entries that normalize to ".";
+// - non-local entries (filepath.IsLocal rejects absolute paths,
+// drive-letter paths, and any segment that backs out of cwd so the
+// review-staging set cannot widen beyond the executor's working
+// directory regardless of how git status formatted the entry);
+// - destinations in excludeDestinations — these are task.files entries
+// declared with commit:false, which Galley materializes as context-only
+// inputs the executor reads but does not submit.
 //
 // The order of returned paths follows the first occurrence in the porcelain
 // stream so the staging command argv is deterministic across runs of the
@@ -167,8 +166,7 @@ func normalizeReviewablePath(p string) string {
 // of task input files declared with commit:false. These are context-only
 // inputs Galley materializes in the worktree before the executor runs;
 // review-time staging must keep them out of the supervisor diff so
-// reviewable evidence only reflects executor-produced changes (AC4 /
-// supervisor feedback on review-time scope).
+// reviewable evidence only reflects executor-produced changes.
 func nonCommittedInputDestinations(files []task.InputFile) []string {
 	var paths []string
 	for _, f := range files {

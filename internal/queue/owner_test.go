@@ -129,12 +129,12 @@ func TestRecoverInterruptedRunningRequeuesByTTLAfterStale(t *testing.T) {
 	if err := EnsureLayout(root); err != nil {
 		t.Fatal(err)
 	}
-	runningPath := writeRunningTask(t, root, "legacy.yaml")
+	runningPath := writeRunningTask(t, root, "ownerless.yaml")
 	if err := RecoverInterruptedRunning(root, func(Owner) (bool, error) { return false, nil }); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(runningPath); err != nil {
-		t.Fatalf("legacy task must remain until ClaimTTL: %v", err)
+		t.Fatalf("ownerless task must remain until ClaimTTL: %v", err)
 	}
 	old := time.Now().Add(-2 * time.Hour)
 	if err := os.Chtimes(runningPath, old, old); err != nil {
@@ -143,8 +143,8 @@ func TestRecoverInterruptedRunningRequeuesByTTLAfterStale(t *testing.T) {
 	if err := RecoverStaleClaims(root, time.Hour, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "tasks", "queued", "legacy.yaml")); err != nil {
-		t.Fatalf("expected stale legacy running task requeued by ClaimTTL: %v", err)
+	if _, err := os.Stat(filepath.Join(root, "tasks", "queued", "ownerless.yaml")); err != nil {
+		t.Fatalf("expected stale ownerless running task requeued by ClaimTTL: %v", err)
 	}
 	if _, err := os.Stat(runningPath); !os.IsNotExist(err) {
 		t.Fatalf("expected running task moved, err=%v", err)

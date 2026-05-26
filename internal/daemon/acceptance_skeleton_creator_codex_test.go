@@ -31,6 +31,7 @@ import (
 	"strings"
 	"testing"
 
+	skeletonpreflight "github.com/shinpr/galley/internal/preflight/skeleton"
 	"github.com/shinpr/galley/internal/task"
 )
 
@@ -103,7 +104,7 @@ func TestAcceptanceSkeletonPreflightCodexProviderHappyPath(t *testing.T) {
 	codexBin := fakeCodexCreator(t, manifest, `mkdir -p internal/foo
 printf 'package foo_test\n\n// TODO(galley-skeleton): implement AC1 assertion.\n' > internal/foo/foo_test.go`)
 
-	res, err, runDir := runPreflightWithOptions(t, codexPreflightTask("AC1"), AcceptanceSkeletonPreflightOptions{CodexBin: codexBin})
+	res, err, runDir := runPreflightWithOptions(t, codexPreflightTask("AC1"), skeletonpreflight.Options{CodexBin: codexBin})
 	if err != nil {
 		t.Fatalf("preflight error: %v", err)
 	}
@@ -183,7 +184,7 @@ printf 'package foo_test\n\n// TODO(galley-skeleton): implement AC1 assertion.\n
 printf '%s\n' '{"event":"assistant_message","message":'`+strconv.Quote(manifest)+`'}'
 `)
 
-	res, err, runDir := runPreflightWithOptions(t, codexPreflightTask("AC1"), AcceptanceSkeletonPreflightOptions{CodexBin: codexBin})
+	res, err, runDir := runPreflightWithOptions(t, codexPreflightTask("AC1"), skeletonpreflight.Options{CodexBin: codexBin})
 	if err != nil {
 		t.Fatalf("preflight error: %v", err)
 	}
@@ -210,7 +211,7 @@ printf 'package foo_test\n' > internal/foo/foo_test.go`
 	for _, tc := range []struct {
 		name       string
 		cli        string
-		opts       AcceptanceSkeletonPreflightOptions
+		opts       skeletonpreflight.Options
 		wantBin    string
 		wantArg1   string
 		wantInArgv string
@@ -218,14 +219,14 @@ printf 'package foo_test\n' > internal/foo/foo_test.go`
 		{
 			name:       "claude",
 			cli:        "claude",
-			opts:       AcceptanceSkeletonPreflightOptions{ClaudeBin: fakeCreator(t, resultManifest(claudeOutputs), fileWrite)},
+			opts:       skeletonpreflight.Options{ClaudeBin: fakeCreator(t, resultManifest(claudeOutputs), fileWrite)},
 			wantBin:    "claude",
 			wantInArgv: "--plugin-dir",
 		},
 		{
 			name:       "codex",
 			cli:        "codex",
-			opts:       AcceptanceSkeletonPreflightOptions{CodexBin: fakeCodexCreator(t, codexCreatorManifest(codexOutputs), fileWrite)},
+			opts:       skeletonpreflight.Options{CodexBin: fakeCodexCreator(t, codexCreatorManifest(codexOutputs), fileWrite)},
 			wantBin:    "codex",
 			wantArg1:   "exec",
 			wantInArgv: "--output-last-message",
@@ -271,7 +272,7 @@ printf 'package foo_test\n' > internal/foo/foo_test.go`
 		cli       string
 		model     string
 		effort    string
-		opts      AcceptanceSkeletonPreflightOptions
+		opts      skeletonpreflight.Options
 		wantInSeq [][2]string
 	}{
 		{
@@ -279,7 +280,7 @@ printf 'package foo_test\n' > internal/foo/foo_test.go`
 			cli:    "claude",
 			model:  "opus",
 			effort: "high",
-			opts:   AcceptanceSkeletonPreflightOptions{ClaudeBin: fakeCreator(t, resultManifest(claudeOutputs), fileWrite)},
+			opts:   skeletonpreflight.Options{ClaudeBin: fakeCreator(t, resultManifest(claudeOutputs), fileWrite)},
 			// Claude exposes --model and --effort flags directly.
 			wantInSeq: [][2]string{{"--model", "opus"}, {"--effort", "high"}},
 		},
@@ -288,7 +289,7 @@ printf 'package foo_test\n' > internal/foo/foo_test.go`
 			cli:    "codex",
 			model:  "gpt-5-codex",
 			effort: "high",
-			opts:   AcceptanceSkeletonPreflightOptions{CodexBin: fakeCodexCreator(t, codexCreatorManifest(codexOutputs), fileWrite)},
+			opts:   skeletonpreflight.Options{CodexBin: fakeCodexCreator(t, codexCreatorManifest(codexOutputs), fileWrite)},
 			// Codex exposes --model and the -c model_reasoning_effort override.
 			wantInSeq: [][2]string{{"--model", "gpt-5-codex"}, {"-c", `model_reasoning_effort="high"`}},
 		},

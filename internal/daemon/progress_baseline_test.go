@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	skeletonpreflight "github.com/shinpr/galley/internal/preflight/skeleton"
 	"github.com/shinpr/galley/internal/workspace"
 )
 
@@ -35,9 +36,9 @@ func TestProgressBaselineReportsCleanWhenSkeletonUnchanged(t *testing.T) {
 		Dirty:           true,
 		StatusPorcelain: "?? " + rel + "\n",
 	}
-	preflight := &AcceptanceSkeletonResult{
-		Baseline: AcceptanceSkeletonBaseline{
-			SkeletonHashes: []SkeletonHash{{Path: rel, SHA256: sha256Hex(t, body)}},
+	preflight := &skeletonpreflight.Result{
+		Baseline: skeletonpreflight.Baseline{
+			SkeletonHashes: []skeletonpreflight.SkeletonHash{{Path: rel, SHA256: sha256Hex(t, body)}},
 		},
 	}
 	got, err := hasNonSkeletonProgress(snapshot, work, preflight)
@@ -68,9 +69,9 @@ func TestProgressBaselineDetectsChangedSkeletonContent(t *testing.T) {
 		Dirty:           true,
 		StatusPorcelain: " M " + rel + "\n",
 	}
-	preflight := &AcceptanceSkeletonResult{
-		Baseline: AcceptanceSkeletonBaseline{
-			SkeletonHashes: []SkeletonHash{{Path: rel, SHA256: sha256Hex(t, original)}},
+	preflight := &skeletonpreflight.Result{
+		Baseline: skeletonpreflight.Baseline{
+			SkeletonHashes: []skeletonpreflight.SkeletonHash{{Path: rel, SHA256: sha256Hex(t, original)}},
 		},
 	}
 	got, err := hasNonSkeletonProgress(snapshot, work, preflight)
@@ -99,9 +100,9 @@ func TestProgressBaselineDetectsNonSkeletonFile(t *testing.T) {
 		Dirty:           true,
 		StatusPorcelain: " M internal/foo/foo.go\n?? " + skel + "\n",
 	}
-	preflight := &AcceptanceSkeletonResult{
-		Baseline: AcceptanceSkeletonBaseline{
-			SkeletonHashes: []SkeletonHash{{Path: skel, SHA256: sha256Hex(t, body)}},
+	preflight := &skeletonpreflight.Result{
+		Baseline: skeletonpreflight.Baseline{
+			SkeletonHashes: []skeletonpreflight.SkeletonHash{{Path: skel, SHA256: sha256Hex(t, body)}},
 		},
 	}
 	got, err := hasNonSkeletonProgress(snapshot, work, preflight)

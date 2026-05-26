@@ -119,13 +119,7 @@ func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task
 		return nil
 	})
 	if authorErr != nil {
-		loaded.Risks = append(loaded.Risks, task.Risk{
-			ID:                   "pr-author-lookup-" + strutil.FirstNonEmpty(loaded.ID, "task"),
-			Type:                 "external_dependency",
-			Detail:               fmt.Sprintf("Galley created the PR but could not record its author login: %v", authorErr),
-			Mitigation:           "Re-run `gh api repos/{owner}/{repo}/pulls/{number}` after the GitHub API is reachable and set pr.author_login on the task YAML, or expect Galley to reject /galley PR comments until the author is known.",
-			HumanReviewSuggested: true,
-		})
+		appendRiskWithID(loaded, "pr-author-lookup-"+strutil.FirstNonEmpty(loaded.ID, "task"), "external_dependency", fmt.Sprintf("Galley created the PR but could not record its author login: %v", authorErr), "Re-run `gh api repos/{owner}/{repo}/pulls/{number}` after the GitHub API is reachable and set pr.author_login on the task YAML, or expect Galley to reject /galley PR comments until the author is known.", true)
 		return nil
 	}
 	loaded.PR.AuthorLogin = authorLogin

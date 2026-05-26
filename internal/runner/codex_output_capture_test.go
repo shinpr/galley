@@ -97,7 +97,10 @@ func TestCodexCommandPlanMaterializesEmbeddedSchemaWhenOnlyContentAvailable(t *t
 
 func TestCodexCompatibleOutputSchemaRecursivelyRequiresObjectProperties(t *testing.T) {
 	t.Parallel()
-	body := CodexCompatibleOutputSchema(schemas.SetupResult)
+	body, err := CodexCompatibleOutputSchema(schemas.SetupResult)
+	if err != nil {
+		t.Fatalf("CodexCompatibleOutputSchema: %v", err)
+	}
 	var doc map[string]any
 	if err := json.Unmarshal([]byte(body), &doc); err != nil {
 		t.Fatalf("compatible setup schema is not valid JSON: %v", err)

@@ -1,16 +1,16 @@
-// Package daemon — progress baseline helpers.
+// Package daemon contains progress baseline helpers.
 //
 // This file owns the post-preflight content-baseline progress detection used
-// by runSupervisorLoop (D5, AC-012, AC-013, AC-014). Preflight materializes
+// by runSupervisorLoop. Preflight materializes
 // AC-linked skeleton files in the worktree before the executor runs, so every
 // attempt would otherwise see those skeleton files in the dirty diff and
 // never trigger the no-diff invariant. hasNonSkeletonProgress subtracts the
 // post-preflight skeleton files (matched by sha256) from the dirty set so:
 //
-//   - genuine non-skeleton diffs always count as progress;
-//   - executor edits to skeleton content count as progress (hash mismatch);
-//   - repeated attempts that leave preflight skeletons unchanged still trip
-//     the existing consecutive-no-diff escalation.
+// - genuine non-skeleton diffs always count as progress;
+// - executor edits to skeleton content count as progress (hash mismatch);
+// - repeated attempts that leave preflight skeletons unchanged still trip
+// the existing consecutive-no-diff escalation.
 package daemon
 
 import (
@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	skeletonpreflight "github.com/shinpr/galley/internal/preflight/skeleton"
 	"github.com/shinpr/galley/internal/workspace"
 )
 
@@ -29,7 +30,7 @@ import (
 // every changed path that is also a baseline path with matching content is
 // excluded; if anything else changed, or any skeleton path differs from
 // baseline, the attempt counts as progress.
-func hasNonSkeletonProgress(snapshot workspace.Snapshot, workDir string, preflight *AcceptanceSkeletonResult) (bool, error) {
+func hasNonSkeletonProgress(snapshot workspace.Snapshot, workDir string, preflight *skeletonpreflight.Result) (bool, error) {
 	if !snapshot.Dirty {
 		return false, nil
 	}
@@ -86,7 +87,7 @@ func changedFilesFromSnapshot(snapshot workspace.Snapshot) map[string]struct{} {
 }
 
 // parsePorcelainPaths parses `git status --porcelain` text output (no -z) and
-// returns the list of paths it reports as changed. Renames (R/C) are encoded
+// returns the list of paths it reports as changed. Renames are encoded
 // as "old -> new"; only the new path is returned.
 func parsePorcelainPaths(porcelain string) []string {
 	if porcelain == "" {

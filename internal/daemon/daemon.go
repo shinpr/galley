@@ -13,8 +13,11 @@ import (
 	"github.com/shinpr/galley/internal/galleyhome"
 	"github.com/shinpr/galley/internal/inputfiles"
 	"github.com/shinpr/galley/internal/jsonio"
+	setuppreflight "github.com/shinpr/galley/internal/preflight/setup"
+	skeletonpreflight "github.com/shinpr/galley/internal/preflight/skeleton"
 	"github.com/shinpr/galley/internal/profile"
 	"github.com/shinpr/galley/internal/queue"
+	"github.com/shinpr/galley/internal/runartifact"
 	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/internal/taskstate"
@@ -89,7 +92,7 @@ type Options struct {
 	// (cli, daemon_config, default, or environment_profile). It is set by
 	// daemon CLI wiring before Preflight and then overridden per task when an
 	// environment.yaml supervisor.default_cli wins for that task. The value is
-	// persisted to runs/<run-id>/supervisor.json as evidence (AC8).
+	// persisted to runs/<run-id>/supervisor.json as evidence.
 	SupervisorSource     string
 	ShutdownTimeout      time.Duration
 	DisableClaudeGuard   bool
@@ -127,7 +130,7 @@ type ExplicitOptions struct {
 // startup does not receive an explicit --supervisor value.
 const DefaultSupervisor = "codex"
 
-// Supervisor source labels. Persisted in run evidence (AC8) so reviewers can
+// Supervisor source labels. Persisted in run evidence so reviewers can
 // tell whether the per-task supervisor came from a repository environment
 // profile, a daemon CLI startup flag, daemon.yaml, or the built-in default.
 const (
@@ -461,8 +464,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	}
 	runID, runDir, err := initializeRunEvidence(opts.Root, runningPath, loaded, validation)
 	if err != nil {
-		appendFailureAttempt(&loaded, "run_evidence", "run_evidence_failed", err, "")
-		return taskstate.FailMove(opts.Root, runningPath, &loaded, err)
+		return failClaimedStage(opts.Root, runningPath, &loaded, "run_evidence", "run_evidence_failed", err, "")
 	}
 
 	// Profile resolution must happen before workspace.Prepare so that the
@@ -472,8 +474,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	// into runSupervisorLoop so the supervisor loop never re-loads it.
 	profiles, resolvedProfiles, err := loadAndPersistTaskProfiles(opts, &loaded, runDir)
 	if err != nil {
-		appendFailureAttempt(&loaded, "run_evidence", "run_evidence_failed", err, runDir)
-		return taskstate.FailMove(opts.Root, runningPath, &loaded, err)
+		return failClaimedStage(opts.Root, runningPath, &loaded, "run_evidence", "run_evidence_failed", err, runDir)
 	}
 
 	prepared, err := prepareClaimedWorkspace(ctx, opts, profiles, runningPath, runDir, &loaded)
@@ -482,13 +483,13 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	}
 	// Setup executor preflight runs after the worktree and input files are
 	// prepared, before acceptance skeleton preflight, and before any executor
-	// attempt (AC2, AC10). The daemon always delegates setup execution to the
+	// attempt. The daemon always delegates setup execution to the
 	// setup executor (Claude or Codex per task.executor.cli); any
 	// environment.setup plan is passed as model-visible context so the executor
 	// can try, diagnose, and repair it before returning the successful plan for
-	// Galley to persist (AC3, AC4, AC6, AC7). Setup readiness excludes
-	// acceptance skeleton obligations (AC10).
-	setupRes, setupUpdate, setupErr := SetupExecutorPreflight(ctx, SetupExecutorPreflightOptions{
+	// Galley to persist. Setup readiness excludes
+	// acceptance skeleton obligations.
+	setupRes, setupUpdate, setupErr := setuppreflight.Run(ctx, setuppreflight.Options{
 		Task:                   loaded,
 		WorkDir:                prepared.CWD,
 		RunDir:                 runDir,
@@ -496,28 +497,26 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 		ClaudeBin:              opts.ClaudeBin,
 		CodexBin:               opts.CodexBin,
 		EnvironmentProfilePath: resolvedProfiles.EnvironmentProfileFile,
+		ExecutorRunner:         setupExecutorRunner,
 	})
 	if setupErr != nil {
-		appendFailureAttempt(&loaded, SetupPhase, SetupFailedKind, setupErr, runDir)
-		return taskstate.FailMove(opts.Root, runningPath, &loaded, setupErr)
+		return failClaimedStage(opts.Root, runningPath, &loaded, setuppreflight.Phase, setuppreflight.FailedKind, setupErr, runDir)
 	}
 	// Apply setup readiness evidence (and any persisted profile change) to the
 	// running task before the implementation work order is built so the
-	// supervisor and executor share the same readiness facts (AC8).
+	// supervisor and executor share the same readiness facts.
 	applySetupResultToTask(&loaded, setupRes, setupUpdate)
 	if setupRes != nil {
 		if err := task.Save(runningPath, loaded); err != nil {
-			appendFailureAttempt(&loaded, SetupPhase, SetupFailedKind, err, runDir)
-			return taskstate.FailMove(opts.Root, runningPath, &loaded, err)
+			return failClaimedStage(opts.Root, runningPath, &loaded, setuppreflight.Phase, setuppreflight.FailedKind, err, runDir)
 		}
 	}
 	// Optional acceptance skeleton preflight runs after inputfiles.Prepare and
 	// before the first executor attempt. The stage is a no-op when the task
-	// omits preflight.acceptance_skeleton.enabled or sets it to false (R1,
-	// AC-001). When the stage fails the daemon does not run the executor and
-	// surfaces the failure through task status and run evidence (AC-007).
+	// omits preflight.acceptance_skeleton.enabled or sets it to false. When the stage fails the daemon does not run the executor and
+	// surfaces the failure through task status and run evidence.
 	if cfg := loaded.Preflight; cfg != nil && cfg.AcceptanceSkeleton.IsEnabled() {
-		res, perr := AcceptanceSkeletonPreflight(ctx, AcceptanceSkeletonPreflightOptions{
+		res, perr := skeletonpreflight.Run(ctx, skeletonpreflight.Options{
 			Task:      loaded,
 			WorkDir:   prepared.CWD,
 			RunDir:    runDir,
@@ -526,35 +525,36 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 			CodexBin:  opts.CodexBin,
 		})
 		if perr != nil {
-			appendFailureAttempt(&loaded, "acceptance_skeleton_preflight", "acceptance_skeleton_preflight_failed", perr, runDir)
-			return taskstate.FailMove(opts.Root, runningPath, &loaded, perr)
+			return failClaimedStage(opts.Root, runningPath, &loaded, "acceptance_skeleton_preflight", "acceptance_skeleton_preflight_failed", perr, runDir)
 		}
 		if res != nil {
-			applyAcceptanceSkeletonResultToTask(&loaded, res)
+			skeletonpreflight.ApplyToTask(&loaded, res)
 			if err := task.Save(runningPath, loaded); err != nil {
-				appendFailureAttempt(&loaded, "acceptance_skeleton_preflight", "acceptance_skeleton_preflight_failed", err, runDir)
-				return taskstate.FailMove(opts.Root, runningPath, &loaded, err)
+				return failClaimedStage(opts.Root, runningPath, &loaded, "acceptance_skeleton_preflight", "acceptance_skeleton_preflight_failed", err, runDir)
 			}
-			if err := copyFile(runningPath, filepath.Join(runDir, "task.effective.yaml")); err != nil {
-				appendFailureAttempt(&loaded, "run_evidence", "run_evidence_failed", err, runDir)
-				return taskstate.FailMove(opts.Root, runningPath, &loaded, err)
+			if err := copyFile(runningPath, runartifact.Path(runDir, runartifact.EffectiveTaskSnapshotFilename)); err != nil {
+				return failClaimedStage(opts.Root, runningPath, &loaded, "run_evidence", "run_evidence_failed", err, runDir)
 			}
 		}
 	}
 	return runSupervisorLoop(ctx, shutdownCtx, opts, runningPath, &loaded, prepared, profiles, runDir, runID)
 }
 
+func failClaimedStage(root, runningPath string, loaded *task.Task, phase, kind string, err error, runDir string) error {
+	appendFailureAttempt(loaded, phase, kind, err, runDir)
+	return taskstate.FailMove(root, runningPath, loaded, err)
+}
+
 // loadAndPersistTaskProfiles resolves the quality and environment profiles for
 // the claimed task and writes the run evidence file (profiles.json) into the
-// run directory. The same shape that loop.go's loadSupervisorProfiles wrote
-// previously is preserved so existing readers of profiles.json continue to
-// work.
+// run directory. The payload keeps the resolved file paths and profile bundle
+// together so evidence readers do not need to re-run profile resolution.
 func loadAndPersistTaskProfiles(opts Options, loaded *task.Task, runDir string) (profile.Bundle, resolvedProfileFiles, error) {
 	resolved, profiles, err := loadTaskProfiles(opts, loaded.Scope.CWD)
 	if err != nil {
 		return profile.Bundle{}, resolvedProfileFiles{}, err
 	}
-	if err := writeJSON(filepath.Join(runDir, "profiles.json"), struct {
+	if err := writeJSON(runartifact.Path(runDir, runartifact.ProfilesFilename), struct {
 		Resolved resolvedProfileFiles `json:"resolved"`
 		Bundle   profile.Bundle       `json:"bundle"`
 	}{Resolved: resolved, Bundle: profiles}); err != nil {
@@ -567,19 +567,18 @@ func loadAndPersistTaskProfiles(opts Options, loaded *task.Task, runDir string) 
 // so the implementation work order and supervisor evidence carry the same
 // facts. The setup outcome is also appended to task.verification.commands so
 // the task verification history and rendered PR/task output always include the
-// setup readiness fact (AC8) — including the unchanged-setup case, where no
-// environment.yaml change is recorded. When a learned plan was persisted to
-// environment.yaml the change is additionally surfaced as a Risk-style note so
-// PR/task output reflects the profile update.
-func applySetupResultToTask(loaded *task.Task, res *SetupResult, update *SetupEnvironmentUpdate) {
+// setup readiness fact. When a learned plan was persisted to environment.yaml,
+// the change is additionally surfaced as a Risk-style note so PR/task output
+// reflects the profile update.
+func applySetupResultToTask(loaded *task.Task, res *setuppreflight.Result, update *setuppreflight.EnvironmentUpdate) {
 	if loaded == nil || res == nil {
 		return
 	}
 	note := fmt.Sprintf("setup status=%s commands=%d", res.Status, len(res.Commands))
 	if res.ReadinessEvidence != "" {
-		note = note + " — " + res.ReadinessEvidence
+		note = note + " - " + res.ReadinessEvidence
 	}
-	// AC8: persist setup evidence in task.verification.commands so it shows up
+	// Persist setup evidence in task.verification.commands so it shows up
 	// in the task verification history and the rendered PR/task output. The
 	// command label is a stable pseudo-command operators can recognize even
 	// without inspecting the run directory, and the excerpt names the setup
@@ -592,7 +591,7 @@ func applySetupResultToTask(loaded *task.Task, res *SetupResult, update *SetupEn
 	excerpt := note + fmt.Sprintf(" source=%s", res.Source)
 	if update != nil && update.Changed {
 		excerpt = excerpt + fmt.Sprintf(" environment.yaml=%s (%s)", update.ProfilePath, update.Reason)
-	} else if res.Status == SetupStatusReady {
+	} else if res.Status == setuppreflight.StatusReady {
 		excerpt = excerpt + " environment.yaml=unchanged"
 	}
 	loaded.Verification.Commands = append(loaded.Verification.Commands, task.VerificationCommand{
@@ -603,11 +602,7 @@ func applySetupResultToTask(loaded *task.Task, res *SetupResult, update *SetupEn
 	if update != nil && update.Changed {
 		// Surface profile changes as a Risk-style entry so task/PR output
 		// records that environment.yaml setup was rewritten.
-		loaded.Risks = append(loaded.Risks, task.Risk{
-			ID:     fmt.Sprintf("setup-profile-updated-%d", len(loaded.Risks)+1),
-			Type:   "technical_debt",
-			Detail: fmt.Sprintf("Setup executor persisted a learned plan to %s (%s). %s", update.ProfilePath, update.Reason, note),
-		})
+		appendRisk(loaded, "setup-profile-updated", "technical_debt", fmt.Sprintf("Setup executor persisted a learned plan to %s (%s). %s", update.ProfilePath, update.Reason, note), "", false)
 	}
 }
 
@@ -615,9 +610,9 @@ func applySetupResultToTask(loaded *task.Task, res *SetupResult, update *SetupEn
 // VerificationCommand status vocabulary used by task verification history.
 func setupVerificationStatus(s string) string {
 	switch s {
-	case SetupStatusReady:
+	case setuppreflight.StatusReady:
 		return "passed"
-	case SetupStatusFailed:
+	case setuppreflight.StatusFailed:
 		return "failed"
 	default:
 		return "skipped"
@@ -654,11 +649,11 @@ func initializeRunEvidence(root, runningPath string, loaded task.Task, validatio
 	if err := os.MkdirAll(runDir, 0o700); err != nil {
 		return "", "", fmt.Errorf("create run dir %s: %w", runDir, err)
 	}
-	if err := copyFile(runningPath, filepath.Join(runDir, "task.yaml")); err != nil {
+	if err := copyFile(runningPath, runartifact.Path(runDir, runartifact.TaskSnapshotFilename)); err != nil {
 		return "", "", err
 	}
 	evidence := newValidationEvidence(loaded, validation, time.Now())
-	if err := writeJSON(filepath.Join(runDir, "validation.json"), evidence); err != nil {
+	if err := writeJSON(runartifact.Path(runDir, runartifact.ValidationFilename), evidence); err != nil {
 		return "", "", err
 	}
 	return runID, runDir, nil
@@ -686,7 +681,7 @@ func prepareClaimedWorkspace(ctx context.Context, opts Options, profiles profile
 		appendFailureAttempt(loaded, "workspace", "workspace_failed", err, runDir)
 		return workspace.Prepared{}, err
 	}
-	if err := writeJSON(filepath.Join(runDir, "workspace.json"), prepared); err != nil {
+	if err := writeJSON(runartifact.Path(runDir, runartifact.WorkspaceFilename), prepared); err != nil {
 		appendFailureAttempt(loaded, "run_evidence", "run_evidence_failed", err, runDir)
 		return workspace.Prepared{}, err
 	}
@@ -707,23 +702,17 @@ func prepareClaimedWorkspace(ctx context.Context, opts Options, profiles profile
 			_ = inputfiles.CleanupPrepared(preparedFiles)
 		}
 	}()
-	if err := writeJSON(filepath.Join(runDir, "input_files.json"), preparedFiles); err != nil {
+	if err := writeJSON(runartifact.Path(runDir, runartifact.InputFilesFilename), preparedFiles); err != nil {
 		appendFailureAttempt(loaded, "run_evidence", "run_evidence_failed", err, runDir)
 		return workspace.Prepared{}, err
 	}
 	if prepared.WorktreeReused && prepared.Dirty {
-		loaded.Risks = append(loaded.Risks, task.Risk{
-			ID:                   fmt.Sprintf("workspace-dirty-%d", len(loaded.Risks)+1),
-			Type:                 "technical_debt",
-			Detail:               "Reused worktree had uncommitted changes before executor run.",
-			Mitigation:           "Preserved existing worktree state and recorded git status porcelain in workspace.json.",
-			HumanReviewSuggested: true,
-		})
+		appendRisk(loaded, "workspace-dirty", "technical_debt", "Reused worktree had uncommitted changes before executor run.", "Preserved existing worktree state and recorded git status porcelain in workspace.json.", true)
 		if err := task.Save(runningPath, *loaded); err != nil {
 			return workspace.Prepared{}, err
 		}
 	}
-	if err := copyFile(runningPath, filepath.Join(runDir, "task.effective.yaml")); err != nil {
+	if err := copyFile(runningPath, runartifact.Path(runDir, runartifact.EffectiveTaskSnapshotFilename)); err != nil {
 		return workspace.Prepared{}, err
 	}
 	cleanupPrepared = false

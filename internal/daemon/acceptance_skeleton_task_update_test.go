@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	skeletonpreflight "github.com/shinpr/galley/internal/preflight/skeleton"
 	"github.com/shinpr/galley/internal/task"
 )
 
@@ -18,7 +19,7 @@ func TestApplyAcceptanceSkeletonResultToTaskWritesOutputsAndACVerification(t *te
 		}},
 		Preflight: &task.Preflight{AcceptanceSkeleton: &task.AcceptanceSkeletonConfig{Enabled: true}},
 	}
-	res := &AcceptanceSkeletonResult{Outputs: []AcceptanceSkeletonOutput{{
+	res := &skeletonpreflight.Result{Outputs: []skeletonpreflight.Output{{
 		ACID:                   "AC1",
 		Path:                   "internal/foo/foo_test.go",
 		Kind:                   "go-test",
@@ -28,7 +29,7 @@ func TestApplyAcceptanceSkeletonResultToTaskWritesOutputsAndACVerification(t *te
 		ImplementationRequired: true,
 	}}}
 
-	applyAcceptanceSkeletonResultToTask(&loaded, res)
+	skeletonpreflight.ApplyToTask(&loaded, res)
 
 	outputs := loaded.Preflight.AcceptanceSkeleton.Outputs
 	if len(outputs) != 1 || outputs[0].Path != "internal/foo/foo_test.go" || outputs[0].Satisfies == "" || outputs[0].IntegrationPoint == "" {
@@ -51,7 +52,7 @@ func TestApplyAcceptanceSkeletonResultToTaskPreservesDuplicatePathOutputs(t *tes
 		},
 		Preflight: &task.Preflight{AcceptanceSkeleton: &task.AcceptanceSkeletonConfig{Enabled: true}},
 	}
-	res := &AcceptanceSkeletonResult{Outputs: []AcceptanceSkeletonOutput{
+	res := &skeletonpreflight.Result{Outputs: []skeletonpreflight.Output{
 		{
 			ACID:                   "AC1",
 			Path:                   "internal/foo/foo_test.go",
@@ -72,7 +73,7 @@ func TestApplyAcceptanceSkeletonResultToTaskPreservesDuplicatePathOutputs(t *tes
 		},
 	}}
 
-	applyAcceptanceSkeletonResultToTask(&loaded, res)
+	skeletonpreflight.ApplyToTask(&loaded, res)
 
 	outputs := loaded.Preflight.AcceptanceSkeleton.Outputs
 	if len(outputs) != 2 {
@@ -144,7 +145,7 @@ func TestApplyAcceptanceSkeletonResultToTaskWithDuplicatePathsPassesTaskValidate
 		Preflight: &task.Preflight{AcceptanceSkeleton: &task.AcceptanceSkeletonConfig{Enabled: true, Mode: "skeleton"}},
 	}
 
-	res := &AcceptanceSkeletonResult{Outputs: []AcceptanceSkeletonOutput{
+	res := &skeletonpreflight.Result{Outputs: []skeletonpreflight.Output{
 		{
 			ACID:                   "AC1",
 			Path:                   "internal/foo/foo_test.go",
@@ -165,7 +166,7 @@ func TestApplyAcceptanceSkeletonResultToTaskWithDuplicatePathsPassesTaskValidate
 		},
 	}}
 
-	applyAcceptanceSkeletonResultToTask(&loaded, res)
+	skeletonpreflight.ApplyToTask(&loaded, res)
 
 	if got := len(loaded.Preflight.AcceptanceSkeleton.Outputs); got != 2 {
 		t.Fatalf("expected 2 task outputs (one per AC), got %d", got)
@@ -190,8 +191,8 @@ func TestApplyAcceptanceSkeletonResultToTaskReplacesPreviousSkeletonBlock(t *tes
 			}},
 			Preflight: &task.Preflight{AcceptanceSkeleton: &task.AcceptanceSkeletonConfig{Enabled: true}},
 		}
-		res := &AcceptanceSkeletonResult{Outputs: []AcceptanceSkeletonOutput{{ACID: "AC1", Path: "new_test.go", Purpose: "new"}}}
-		applyAcceptanceSkeletonResultToTask(&loaded, res)
+		res := &skeletonpreflight.Result{Outputs: []skeletonpreflight.Output{{ACID: "AC1", Path: "new_test.go", Purpose: "new"}}}
+		skeletonpreflight.ApplyToTask(&loaded, res)
 		got := loaded.AcceptanceCriteria[0].Verification
 		if strings.Contains(got, "stale") || strings.Count(got, "Acceptance skeleton:") != 1 || !strings.Contains(got, "new_test.go") {
 			t.Fatalf("unexpected verification for %q:\n%s", existing, got)

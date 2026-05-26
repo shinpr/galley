@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/shinpr/galley/internal/jsonio"
+	"github.com/shinpr/galley/internal/pathutil"
 )
 
 // ErrNotRunning indicates the PID file is absent or points at a dead process.
@@ -342,15 +343,5 @@ func waitExit(pid int, timeout time.Duration, action string) error {
 }
 
 func cleanPath(path string) string {
-	if path == "" {
-		return ""
-	}
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return filepath.Clean(path)
-	}
-	if evaluated, err := filepath.EvalSymlinks(abs); err == nil {
-		return evaluated
-	}
-	return filepath.Clean(abs)
+	return pathutil.CleanPhysical(path)
 }

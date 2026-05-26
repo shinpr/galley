@@ -41,10 +41,9 @@ With `pr.comments.enabled: true`, the daemon scans task files with `pr.url`, rea
 A comment is accepted when its body, after trimming surrounding whitespace, starts with `/galley`. Recognized forms are:
 
 - `/galley <free-form request>`: the text after the prefix becomes the request reason, for example `/galley fix the failing test`.
-- `/galley rerun ...` and `/galley requeue ...`: backward-compatible aliases; the alias word is stripped so the parsed reason is the same as before.
 - `/galley` alone: a no-arg requeue using the default reason.
 
-Mid-line mentions like `Looks good, /galley rerun`, a `/galley` line that appears only after the first non-whitespace line, `/galley:galley ...`, and `/galleyfoo ...` are ignored.
+Mid-line mentions like `Looks good, /galley`, a `/galley` line that appears only after the first non-whitespace line, `/galley:galley ...`, and `/galleyfoo ...` are ignored.
 
 Processed comment IDs are stored in `pr.processed_comment_ids` so commands are not applied twice.
 

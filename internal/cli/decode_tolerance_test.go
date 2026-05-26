@@ -8,15 +8,15 @@ import (
 	"testing"
 )
 
-// writeLegacyCLITaskYAML writes a task YAML containing an unknown nested
-// field (`supervisor.provider`) that pre-dates the current schema. Strict
-// Load rejects it; lenient scans surface it as a best-effort entry.
-func writeLegacyCLITaskYAML(t *testing.T, path string) {
+// writeSchemaIncompatibleCLITaskYAML writes a task YAML containing an unknown
+// nested field (`supervisor.provider`). Strict Load rejects it; lenient scans
+// surface it as a best-effort entry.
+func writeSchemaIncompatibleCLITaskYAML(t *testing.T, path string) {
 	t.Helper()
-	body := `id: "task-legacy-cli"
+	body := `id: "task-schema-incompatible-cli"
 mode: "afk"
 status: "failed"
-goal: "Legacy CLI fixture."
+goal: "Schema-incompatible CLI fixture."
 acceptance_criteria:
   - id: "AC1"
     text: "Loads."
@@ -37,11 +37,11 @@ execution_policy:
   stop_on_external_service_unavailable: false
 worktree:
   enabled: true
-  branch: "agent/task-legacy-cli"
-  path: "../repo.worktrees/task-legacy-cli"
+  branch: "agent/task-schema-incompatible-cli"
+  path: "../repo.worktrees/task-schema-incompatible-cli"
 supervisor:
   review_iterations: 0
-  provider: "legacy-supervisor"
+  provider: "unknown-supervisor"
 executor:
   cli: "claude"
   effort: "high"
@@ -72,12 +72,12 @@ func writeUnreadableTaskYAML(t *testing.T, path string) {
 	}
 }
 
-// TestTaskListSurfacesLegacyAndUnreadableEntries covers the AC requiring
-// `galley task list` to mix valid, legacy-unknown-field, and unreadable
+// TestTaskListSurfacesStrictDecodeIncompatibleAndUnreadableEntries covers the AC requiring
+// `galley task list` to mix valid, strict-decode-incompatible, and unreadable
 // task files in one command without failing.
-func TestTaskListSurfacesLegacyAndUnreadableEntries(t *testing.T) {
+func TestTaskListSurfacesStrictDecodeIncompatibleAndUnreadableEntries(t *testing.T) {
 	root := t.TempDir()
-	// Valid task under tasks/failed (legacy CLI tests put failed there).
+	// Valid task under tasks/failed.
 	validTaskPath := writeCLITaskYAML(t)
 	failedDir := filepath.Join(root, "tasks", "failed")
 	if err := os.MkdirAll(failedDir, 0o755); err != nil {
@@ -91,9 +91,9 @@ func TestTaskListSurfacesLegacyAndUnreadableEntries(t *testing.T) {
 	if err := os.WriteFile(validDest, validData, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// Legacy task with an unknown nested field.
-	legacyPath := filepath.Join(failedDir, "legacy.yaml")
-	writeLegacyCLITaskYAML(t, legacyPath)
+	// Strict-decode-incompatible task with an unknown nested field.
+	incompatiblePath := filepath.Join(failedDir, "schema-incompatible.yaml")
+	writeSchemaIncompatibleCLITaskYAML(t, incompatiblePath)
 	// Unreadable task that even LoadLenient can't decode as a Task.
 	unreadablePath := filepath.Join(failedDir, "unreadable.yaml")
 	writeUnreadableTaskYAML(t, unreadablePath)
@@ -105,8 +105,8 @@ func TestTaskListSurfacesLegacyAndUnreadableEntries(t *testing.T) {
 	if !strings.Contains(stdout, "task-cli-test") {
 		t.Fatalf("valid task missing from listing: %q", stdout)
 	}
-	if !strings.Contains(stdout, "task-legacy-cli") {
-		t.Fatalf("legacy task must render best-effort entry: %q", stdout)
+	if !strings.Contains(stdout, "task-schema-incompatible-cli") {
+		t.Fatalf("strict-decode-incompatible task must render best-effort entry: %q", stdout)
 	}
 	if !strings.Contains(stdout, "decode_error") || !strings.Contains(stdout, "unreadable.yaml") {
 		t.Fatalf("unreadable task must render a decode-error entry: %q", stdout)
@@ -121,39 +121,39 @@ func TestTaskListSurfacesLegacyAndUnreadableEntries(t *testing.T) {
 	if err := json.Unmarshal([]byte(jsonStdout), &items); err != nil {
 		t.Fatalf("parse json: %v\n%s", err, jsonStdout)
 	}
-	var sawValid, sawLegacy, sawUnreadable bool
+	var sawValid, sawIncompatible, sawUnreadable bool
 	for _, item := range items {
 		switch item.ID {
 		case "task-cli-test":
 			sawValid = true
-		case "task-legacy-cli":
-			sawLegacy = true
+		case "task-schema-incompatible-cli":
+			sawIncompatible = true
 		}
 		if item.DecodeError != "" && strings.HasSuffix(item.File, "unreadable.yaml") {
 			sawUnreadable = true
 		}
 	}
-	if !sawValid || !sawLegacy || !sawUnreadable {
-		t.Fatalf("json scan missed entries valid=%v legacy=%v unreadable=%v: %s", sawValid, sawLegacy, sawUnreadable, jsonStdout)
+	if !sawValid || !sawIncompatible || !sawUnreadable {
+		t.Fatalf("json scan missed entries valid=%v schema_incompatible=%v unreadable=%v: %s", sawValid, sawIncompatible, sawUnreadable, jsonStdout)
 	}
 }
 
-// TestTaskShowLegacyTaskByIDFails covers `galley task show <ID>` against a
-// legacy task: the ID resolves via the tolerant scan, but the strict Load
+// TestTaskShowStrictDecodeIncompatibleTaskByIDFails covers `galley task show <ID>` against a
+// strict-decode-incompatible task: the ID resolves via the tolerant scan, but the strict Load
 // inside `task show` correctly rejects it. The command must surface a
-// readable error rather than treat the legacy task as a current-schema one.
-func TestTaskShowLegacyTaskByIDFails(t *testing.T) {
+// readable error rather than treat the strict-decode-incompatible task as a current-schema one.
+func TestTaskShowStrictDecodeIncompatibleTaskByIDFails(t *testing.T) {
 	root := t.TempDir()
 	failedDir := filepath.Join(root, "tasks", "failed")
 	if err := os.MkdirAll(failedDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	legacyPath := filepath.Join(failedDir, "legacy.yaml")
-	writeLegacyCLITaskYAML(t, legacyPath)
+	incompatiblePath := filepath.Join(failedDir, "schema-incompatible.yaml")
+	writeSchemaIncompatibleCLITaskYAML(t, incompatiblePath)
 
-	_, _, err := executeCommand("task", "show", "--root", root, "task-legacy-cli")
+	_, _, err := executeCommand("task", "show", "--root", root, "task-schema-incompatible-cli")
 	if err == nil {
-		t.Fatal("expected task show to surface strict decode error for legacy task")
+		t.Fatal("expected task show to surface strict decode error for strict-decode-incompatible task")
 	}
 	if !strings.Contains(err.Error(), "provider") {
 		t.Fatalf("error should reference the unknown field: %v", err)
@@ -172,8 +172,8 @@ func TestTaskShowSkipsUnreadableEntriesDuringIDLookup(t *testing.T) {
 	}
 	// Sibling unreadable file.
 	writeUnreadableTaskYAML(t, filepath.Join(failedDir, "unreadable.yaml"))
-	// Sibling legacy file (decodes leniently with a different ID).
-	writeLegacyCLITaskYAML(t, filepath.Join(failedDir, "legacy.yaml"))
+	// Sibling schema-incompatible file (decodes leniently with a different ID).
+	writeSchemaIncompatibleCLITaskYAML(t, filepath.Join(failedDir, "schema-incompatible.yaml"))
 	// Valid task under the same directory.
 	validTaskPath := writeCLITaskYAML(t)
 	validData, err := os.ReadFile(validTaskPath)
@@ -193,30 +193,30 @@ func TestTaskShowSkipsUnreadableEntriesDuringIDLookup(t *testing.T) {
 	}
 }
 
-// TestTaskArchiveLegacyFallbackEmitsWarning covers AC: `galley task archive`
+// TestTaskArchiveStrictDecodeIncompatibleFallbackEmitsWarning covers AC: `galley task archive`
 // text output must surface ArchiveResult.Warning so operators see why the
-// legacy file was archived through the safe fallback path instead of the
+// strict-decode-incompatible file was archived through the safe fallback path instead of the
 // strict current-schema path.
-func TestTaskArchiveLegacyFallbackEmitsWarning(t *testing.T) {
+func TestTaskArchiveStrictDecodeIncompatibleFallbackEmitsWarning(t *testing.T) {
 	root := t.TempDir()
 	doneDir := filepath.Join(root, "tasks", "done")
 	if err := os.MkdirAll(doneDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	legacyPath := filepath.Join(doneDir, "legacy.yaml")
-	writeLegacyCLITaskYAML(t, legacyPath)
+	incompatiblePath := filepath.Join(doneDir, "schema-incompatible.yaml")
+	writeSchemaIncompatibleCLITaskYAML(t, incompatiblePath)
 
-	stdout, stderr, err := executeCommand("task", "archive", "--reason", "legacy cleanup", legacyPath)
+	stdout, stderr, err := executeCommand("task", "archive", "--reason", "lenient cleanup", incompatiblePath)
 	if err != nil {
-		t.Fatalf("archive must succeed for legacy task: %v", err)
+		t.Fatalf("archive must succeed for strict-decode-incompatible task: %v", err)
 	}
-	if !strings.Contains(stdout, "mode: legacy_status_edit") {
-		t.Fatalf("text output must surface legacy archive mode: stdout=%q", stdout)
+	if !strings.Contains(stdout, "mode: lenient_status_edit") {
+		t.Fatalf("text output must surface lenient archive mode: stdout=%q", stdout)
 	}
 	if !strings.Contains(stderr, "warning:") || !strings.Contains(stderr, "strict load failed") {
 		t.Fatalf("text output must surface ArchiveResult.Warning on stderr: stderr=%q", stderr)
 	}
-	archived := filepath.Join(root, "tasks", "archived", "legacy.yaml")
+	archived := filepath.Join(root, "tasks", "archived", "schema-incompatible.yaml")
 	if _, err := os.Stat(archived); err != nil {
 		t.Fatalf("archived file missing: %v", err)
 	}
@@ -231,12 +231,12 @@ func TestTaskArchiveJSONExposesModeAndWarning(t *testing.T) {
 	if err := os.MkdirAll(doneDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	legacyPath := filepath.Join(doneDir, "legacy.yaml")
-	writeLegacyCLITaskYAML(t, legacyPath)
+	incompatiblePath := filepath.Join(doneDir, "schema-incompatible.yaml")
+	writeSchemaIncompatibleCLITaskYAML(t, incompatiblePath)
 
-	stdout, _, err := executeCommand("task", "archive", "--output", "json", legacyPath)
+	stdout, _, err := executeCommand("task", "archive", "--output", "json", incompatiblePath)
 	if err != nil {
-		t.Fatalf("archive json must succeed for legacy task: %v", err)
+		t.Fatalf("archive json must succeed for strict-decode-incompatible task: %v", err)
 	}
 	var payload struct {
 		Mode    string `json:"mode"`
@@ -245,8 +245,8 @@ func TestTaskArchiveJSONExposesModeAndWarning(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
 		t.Fatalf("parse json: %v\n%s", err, stdout)
 	}
-	if payload.Mode != "legacy_status_edit" {
-		t.Fatalf("mode got %q want legacy_status_edit", payload.Mode)
+	if payload.Mode != "lenient_status_edit" {
+		t.Fatalf("mode got %q want lenient_status_edit", payload.Mode)
 	}
 	if !strings.Contains(payload.Warning, "strict load failed") {
 		t.Fatalf("warning missing: %q", payload.Warning)
@@ -273,8 +273,8 @@ func TestTaskArchiveUnreadableFallbackUsesPathLabel(t *testing.T) {
 	if !strings.Contains(stdout, "archived: "+archivedPath) {
 		t.Fatalf("text output should fall back to archived path when ID is unavailable: stdout=%q", stdout)
 	}
-	if !strings.Contains(stdout, "mode: legacy_move_unchanged") {
-		t.Fatalf("text output must surface unchanged legacy archive mode: stdout=%q", stdout)
+	if !strings.Contains(stdout, "mode: move_unreadable_unchanged") {
+		t.Fatalf("text output must surface unchanged unreadable archive mode: stdout=%q", stdout)
 	}
 	if !strings.Contains(stderr, "warning:") || !strings.Contains(stderr, "archived unchanged") {
 		t.Fatalf("text output must surface ArchiveResult.Warning on stderr: stderr=%q", stderr)

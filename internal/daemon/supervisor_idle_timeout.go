@@ -3,8 +3,9 @@ package daemon
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"time"
+
+	"github.com/shinpr/galley/internal/runner"
 )
 
 // supervisorIdleTimeoutKind is the distinct attempt-error kind recorded when a
@@ -12,7 +13,7 @@ import (
 // retries. It is intentionally separate from the generic "idle_timeout" kind
 // (used for a single executor or supervisor try) so operators and
 // `galley task show` can tell a supervisor watchdog failure apart from an
-// executor idle timeout or a task total-timeout expiry (AC2/AC4).
+// executor idle timeout or a task total-timeout expiry.
 const supervisorIdleTimeoutKind = "supervisor_idle_timeout"
 
 // supervisorIdleTimeoutError reports that the built-in supervisor subprocess
@@ -21,7 +22,7 @@ const supervisorIdleTimeoutKind = "supervisor_idle_timeout"
 // returns it instead of a plain wrapped error so the failure-reporting paths
 // (attempt error, daemon log line, `galley task show`) can describe the
 // failure as a supervisor watchdog timeout rather than the task's
-// execution_policy.timeout_ms expiring (AC2/AC3/AC4/AC5).
+// execution_policy.timeout_ms expiring.
 type supervisorIdleTimeoutError struct {
 	// Supervisor is the built-in supervisor adapter name (codex or claude).
 	Supervisor string
@@ -48,7 +49,7 @@ func (e *supervisorIdleTimeoutError) Unwrap() error { return e.Err }
 
 // supervisorName returns a stable, non-empty label for the supervisor adapter.
 func (e *supervisorIdleTimeoutError) supervisorName() string {
-	if strings.TrimSpace(e.Supervisor) == "" {
+	if e.Supervisor == "" {
 		return "unknown"
 	}
 	return e.Supervisor
@@ -58,8 +59,7 @@ func (e *supervisorIdleTimeoutError) supervisorName() string {
 // failed task attempt (task.AttemptError.Message) and surfaced by
 // `galley task show`. It names the supervisor adapter, the idle-timeout
 // duration, and the try count, explicitly distinguishes the failure from the
-// task execution_policy.timeout_ms expiring (AC4), and states the next action
-// (AC5).
+// task execution_policy.timeout_ms expiring, and states the next action.
 func (e *supervisorIdleTimeoutError) attemptErrorMessage() string {
 	return fmt.Sprintf(
 		"supervisor idle timeout: the built-in supervisor subprocess produced no output for the idle-timeout watchdog and was killed on every try "+
@@ -70,9 +70,9 @@ func (e *supervisorIdleTimeoutError) attemptErrorMessage() string {
 }
 
 // logLine builds the one-line daemon stderr report for an exhausted supervisor
-// idle timeout (AC3). It keeps the existing `galley: task <id> ...` log tone so
+// idle timeout. It keeps the existing `galley: task <id> ...` log tone so
 // daemon logs stay scannable while the fuller explanation lives in the attempt
-// error message and `galley task show` (D2/D3).
+// error message and `galley task show`.
 func (e *supervisorIdleTimeoutError) logLine(taskID string) string {
 	return fmt.Sprintf(
 		"galley: task %s failed: supervisor_idle_timeout (supervisor=%s idle_timeout=%s tries=%d/%d; requeue or adjust daemon settings)",
@@ -81,11 +81,9 @@ func (e *supervisorIdleTimeoutError) logLine(taskID string) string {
 }
 
 // isIdleTimeoutError reports whether err originates from the idle-output
-// watchdog. The runner emits "command produced no output for <d> (idle
-// timeout)"; supervisor adapters wrap it with a provider prefix, so a substring
-// match is the stable signal shared by both layers.
+// watchdog.
 func isIdleTimeoutError(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "idle timeout")
+	return errors.Is(err, runner.ErrIdleTimeout)
 }
 
 // asSupervisorIdleTimeout reports whether err is, or wraps, an exhausted

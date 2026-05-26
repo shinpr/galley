@@ -22,16 +22,11 @@ func TestParsePRCommandAcceptedForms(t *testing.T) {
 		body string
 		want string
 	}{
-		{name: "rerun alias keeps backward compatible reason", body: "/galley rerun fix X", want: "fix X"},
-		{name: "requeue alias keeps backward compatible reason", body: "/galley requeue tighten tests", want: "tighten tests"},
 		{name: "free-form request becomes the reason", body: "/galley please re-run with verbose", want: "please re-run with verbose"},
 		{name: "bare /galley falls back to default reason", body: "/galley", want: "PR comment requested another Galley run."},
 		{name: "bare /galley with body block uses block as reason", body: "/galley\n\nMore context.", want: "More context."},
-		{name: "rerun alias with leading whitespace is trimmed", body: "  \n/galley rerun fix Y", want: "fix Y"},
-		{name: "rerun alias exact body falls back to default reason", body: "/galley rerun", want: "PR comment requested another Galley run."},
-		{name: "rerun alias with same-line reason and trailing block joins with blank line", body: "/galley rerun fix X\nMore context", want: "fix X\n\nMore context"},
+		{name: "leading whitespace is trimmed", body: "  \n/galley fix Y", want: "fix Y"},
 		{name: "free-form request with same-line reason and trailing block joins with blank line", body: "/galley please fix X\nMore context", want: "please fix X\n\nMore context"},
-		{name: "requeue alias with same-line reason and trailing block joins with blank line", body: "/galley requeue tighten tests\nfocus on edge cases", want: "tighten tests\n\nfocus on edge cases"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -52,7 +47,7 @@ func TestParsePRCommandAcceptedForms(t *testing.T) {
 
 func TestParsePRCommandKeepsMultilineInstruction(t *testing.T) {
 	t.Parallel()
-	command, ok := parsePRCommand(vcs.PRComment{ID: 123, Body: "/galley rerun\nPlease update the CLI help.\nAlso keep tests passing."})
+	command, ok := parsePRCommand(vcs.PRComment{ID: 123, Body: "/galley\nPlease update the CLI help.\nAlso keep tests passing."})
 	if !ok {
 		t.Fatal("expected command")
 	}
@@ -69,8 +64,8 @@ func TestParsePRCommandRejectsNonLeadingOrMalformedBodies(t *testing.T) {
 		name string
 		body string
 	}{
-		{name: "leading prose with /galley rerun mid-line", body: "Looks good, /galley rerun fix X"},
-		{name: "/galley command on second line is ignored", body: "Plain text on the first line.\n/galley rerun fix X"},
+		{name: "leading prose with /galley mid-line", body: "Looks good, /galley fix X"},
+		{name: "/galley command on second line is ignored", body: "Plain text on the first line.\n/galley fix X"},
 		{name: "/galley:galley does not match any prefix", body: "/galley:galley do something"},
 		{name: "/galleyfoo does not match any prefix", body: "/galleyfoo bar"},
 		{name: "empty body is ignored", body: ""},
@@ -107,7 +102,7 @@ func TestPollPRCommentsRequeuesTaskOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ]; then
-	echo '[[{"id":42,"body":"/galley rerun tighten tests","html_url":"https://github.com/example/galley/pull/123#issuecomment-42","user":{"login":"maintainer"}}]]'
+	echo '[[{"id":42,"body":"/galley tighten tests","html_url":"https://github.com/example/galley/pull/123#issuecomment-42","user":{"login":"maintainer"}}]]'
 else
 echo unexpected-gh >&2
 exit 1
@@ -162,7 +157,7 @@ func TestPollPRCommentsRequeuesMemberPRAuthor(t *testing.T) {
 		t.Fatal(err)
 	}
 	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ]; then
-echo '[[{"id":78,"body":"/galley rerun please run my code","html_url":"https://github.com/example/galley/pull/123#issuecomment-78","user":{"login":"org-member"}}]]'
+echo '[[{"id":78,"body":"/galley please run my code","html_url":"https://github.com/example/galley/pull/123#issuecomment-78","user":{"login":"org-member"}}]]'
 else
 echo unexpected-gh >&2
 exit 1
@@ -260,7 +255,7 @@ func TestPollPRCommentsPostsReply(t *testing.T) {
 	}
 	marker := filepath.Join(t.TempDir(), "posted")
 	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ] && [ "$3" = "--paginate" ]; then
-echo '[[{"id":99,"body":"/galley rerun reply please","html_url":"https://github.com/example/galley/pull/123#issuecomment-99","user":{"login":"owner"}}]]'
+echo '[[{"id":99,"body":"/galley reply please","html_url":"https://github.com/example/galley/pull/123#issuecomment-99","user":{"login":"owner"}}]]'
 elif [ "$1" = "api" ]; then
 echo "$*" > `+marker+`
 cat >> `+marker+`
@@ -485,7 +480,7 @@ func TestPollPRCommentsContinuesAfterReplyFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ] && [ "$3" = "--paginate" ]; then
-echo '[[{"id":42,"body":"/galley rerun first fix","html_url":"https://github.com/example/galley/pull/123#issuecomment-42","user":{"login":"maintainer"}},{"id":43,"body":"/galley rerun second fix","html_url":"https://github.com/example/galley/pull/123#issuecomment-43","user":{"login":"maintainer"}}]]'
+echo '[[{"id":42,"body":"/galley first fix","html_url":"https://github.com/example/galley/pull/123#issuecomment-42","user":{"login":"maintainer"}},{"id":43,"body":"/galley second fix","html_url":"https://github.com/example/galley/pull/123#issuecomment-43","user":{"login":"maintainer"}}]]'
 elif [ "$1" = "api" ]; then
 echo reply-failed >&2
 exit 1
@@ -540,7 +535,7 @@ func TestPollPRCommentsRecordsFailedRequeueForManualRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ]; then
-echo '[[{"id":42,"body":"/galley rerun retry after queue clears","html_url":"https://github.com/example/galley/pull/123#issuecomment-42","user":{"login":"collab"}}]]'
+echo '[[{"id":42,"body":"/galley retry after queue clears","html_url":"https://github.com/example/galley/pull/123#issuecomment-42","user":{"login":"collab"}}]]'
 else
 echo unexpected-gh >&2
 exit 1
@@ -595,7 +590,7 @@ func TestPollPRCommentsIgnoresNonPRAuthor(t *testing.T) {
 		t.Fatal(err)
 	}
 	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ]; then
-echo '[[{"id":77,"body":"/galley rerun please run my code","html_url":"https://github.com/example/galley/pull/123#issuecomment-77","user":{"login":"org-member"}}]]'
+echo '[[{"id":77,"body":"/galley please run my code","html_url":"https://github.com/example/galley/pull/123#issuecomment-77","user":{"login":"org-member"}}]]'
 else
 echo unexpected-gh >&2
 exit 1
@@ -640,7 +635,7 @@ func TestPollPRCommentsRejectsNonAuthor(t *testing.T) {
 	}
 	marker := filepath.Join(t.TempDir(), "posted")
 	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ] && [ "$3" = "--paginate" ]; then
-echo '[[{"id":501,"body":"/galley rerun please re-run for me","html_url":"https://github.com/example/galley/pull/123#issuecomment-501","user":{"login":"other-maintainer"}}]]'
+echo '[[{"id":501,"body":"/galley please re-run for me","html_url":"https://github.com/example/galley/pull/123#issuecomment-501","user":{"login":"other-maintainer"}}]]'
 elif [ "$1" = "api" ]; then
 echo "$*" > `+marker+`
 cat >> `+marker+`
@@ -709,7 +704,7 @@ func TestPollPRCommentsRejectsWhenPRAuthorLoginEmpty(t *testing.T) {
 	}
 	marker := filepath.Join(t.TempDir(), "posted")
 	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ] && [ "$3" = "--paginate" ]; then
-echo '[[{"id":611,"body":"/galley rerun no author known","html_url":"https://github.com/example/galley/pull/123#issuecomment-611","user":{"login":"someone"}}]]'
+echo '[[{"id":611,"body":"/galley no author known","html_url":"https://github.com/example/galley/pull/123#issuecomment-611","user":{"login":"someone"}}]]'
 elif [ "$1" = "api" ]; then
 echo "$*" > `+marker+`
 cat >> `+marker+`

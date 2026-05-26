@@ -62,18 +62,15 @@ func FromTask(t task.Task) ClaudeOptions {
 		permissionMode = "bypassPermissions"
 	}
 
-	promptMode := t.Executor.PromptMode
-	if promptMode == "" {
-		promptMode = "replace"
-	}
+	common := executorOptionsFromTask(t)
 
 	return ClaudeOptions{
-		Model:          t.Executor.Model,
-		Effort:         t.Executor.Effort,
-		PromptMode:     promptMode,
-		MaxBudgetUSD:   t.Executor.MaxBudgetUSDValue(),
+		Model:          common.Model,
+		Effort:         common.Effort,
+		PromptMode:     common.PromptMode,
+		MaxBudgetUSD:   common.MaxBudgetUSD,
 		PermissionMode: permissionMode,
-		WorkDir:        t.Scope.CWD,
+		WorkDir:        common.WorkDir,
 	}
 }
 
@@ -168,20 +165,8 @@ func ClaudeShellPreview(opts ClaudeOptions) (string, []string, error) {
 }
 
 func buildClaudeArgv(opts ClaudeOptions, fileValue func(label, path string) (string, error)) ([]string, error) {
-	bin := opts.Bin
-	if bin == "" {
-		bin = "claude"
-	}
-	argv := []string{bin, "-p", "--output-format", "stream-json", "--verbose"}
-	if opts.Model != "" {
-		argv = append(argv, "--model", opts.Model)
-	}
-	if opts.Effort != "" {
-		argv = append(argv, "--effort", opts.Effort)
-	}
-	if opts.PermissionMode != "" {
-		argv = append(argv, "--permission-mode", opts.PermissionMode)
-	}
+	common := buildClaudeCommonArgs(opts)
+	argv := append(baseClaudeArgv(opts), common.Prefix...)
 	if opts.SystemPromptFile != "" || opts.SystemPrompt != "" {
 		systemPrompt := opts.SystemPrompt
 		if opts.SystemPromptFile != "" {
@@ -211,22 +196,53 @@ func buildClaudeArgv(opts ClaudeOptions, fileValue func(label, path string) (str
 		}
 		argv = append(argv, "--json-schema", schema)
 	}
+	argv = append(argv, common.Suffix...)
+	argv = append(argv, opts.Prompt)
+	return argv, nil
+}
+
+type claudeCommonArgs struct {
+	// Prefix must appear before prompt/schema routing flags; Suffix must appear
+	// after them so POSIX keeps --system-prompt and --json-schema in the
+	// historical argv position while Windows can replace those middle flags.
+	Prefix []string
+	Suffix []string
+}
+
+func buildClaudeCommonArgs(opts ClaudeOptions) claudeCommonArgs {
+	var common claudeCommonArgs
+	if opts.Model != "" {
+		common.Prefix = append(common.Prefix, "--model", opts.Model)
+	}
+	if opts.Effort != "" {
+		common.Prefix = append(common.Prefix, "--effort", opts.Effort)
+	}
+	if opts.PermissionMode != "" {
+		common.Prefix = append(common.Prefix, "--permission-mode", opts.PermissionMode)
+	}
 	if opts.SettingsFile != "" {
-		argv = append(argv, "--settings", opts.SettingsFile)
+		common.Suffix = append(common.Suffix, "--settings", opts.SettingsFile)
 	}
 	for _, dir := range opts.PluginDirs {
 		if dir != "" {
-			argv = append(argv, "--plugin-dir", dir)
+			common.Suffix = append(common.Suffix, "--plugin-dir", dir)
 		}
 	}
 	if opts.IncludeHookEvents {
-		argv = append(argv, "--include-hook-events")
+		common.Suffix = append(common.Suffix, "--include-hook-events")
 	}
 	if opts.MaxBudgetUSD > 0 {
-		argv = append(argv, "--max-budget-usd", strconv.FormatFloat(opts.MaxBudgetUSD, 'f', -1, 64))
+		common.Suffix = append(common.Suffix, "--max-budget-usd", strconv.FormatFloat(opts.MaxBudgetUSD, 'f', -1, 64))
 	}
-	argv = append(argv, opts.Prompt)
-	return argv, nil
+	return common
+}
+
+func baseClaudeArgv(opts ClaudeOptions) []string {
+	bin := opts.Bin
+	if bin == "" {
+		bin = "claude"
+	}
+	return []string{bin, "-p", "--output-format", "stream-json", "--verbose"}
 }
 
 // buildClaudeArgvWindows builds the Windows-only Claude argv. It keeps
@@ -238,20 +254,8 @@ func buildClaudeArgv(opts ClaudeOptions, fileValue func(label, path string) (str
 // The Galley Claude guard hook and the executor result validators reject
 // malformed final output, preserving the structured-output contract.
 func buildClaudeArgvWindows(opts ClaudeOptions) ([]string, string, []string, error) {
-	bin := opts.Bin
-	if bin == "" {
-		bin = "claude"
-	}
-	argv := []string{bin, "-p", "--output-format", "stream-json", "--verbose"}
-	if opts.Model != "" {
-		argv = append(argv, "--model", opts.Model)
-	}
-	if opts.Effort != "" {
-		argv = append(argv, "--effort", opts.Effort)
-	}
-	if opts.PermissionMode != "" {
-		argv = append(argv, "--permission-mode", opts.PermissionMode)
-	}
+	common := buildClaudeCommonArgs(opts)
+	argv := append(baseClaudeArgv(opts), common.Prefix...)
 	var warnings []string
 	if opts.SystemPromptFile != "" || opts.SystemPrompt != "" {
 		path, err := resolveWindowsClaudeSystemPromptFile(opts)
@@ -270,20 +274,7 @@ func buildClaudeArgvWindows(opts ClaudeOptions) ([]string, string, []string, err
 	if opts.JSONSchemaFile != "" || opts.JSONSchema != "" {
 		warnings = append(warnings, "Windows runner does not pass --json-schema on argv; Galley relies on the Claude guard hook and the executor result validators to reject malformed final output")
 	}
-	if opts.SettingsFile != "" {
-		argv = append(argv, "--settings", opts.SettingsFile)
-	}
-	for _, dir := range opts.PluginDirs {
-		if dir != "" {
-			argv = append(argv, "--plugin-dir", dir)
-		}
-	}
-	if opts.IncludeHookEvents {
-		argv = append(argv, "--include-hook-events")
-	}
-	if opts.MaxBudgetUSD > 0 {
-		argv = append(argv, "--max-budget-usd", strconv.FormatFloat(opts.MaxBudgetUSD, 'f', -1, 64))
-	}
+	argv = append(argv, common.Suffix...)
 	// The work order prompt is delivered through stdin so Galley-generated
 	// long content does not reach argv on Windows.
 	return argv, opts.Prompt, warnings, nil

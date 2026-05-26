@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -9,9 +10,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shinpr/galley/internal/executorflow"
 	"github.com/shinpr/galley/internal/inputfiles"
+	setuppreflight "github.com/shinpr/galley/internal/preflight/setup"
+	skeletonpreflight "github.com/shinpr/galley/internal/preflight/skeleton"
 	"github.com/shinpr/galley/internal/profile"
-	"github.com/shinpr/galley/internal/result"
+	"github.com/shinpr/galley/internal/runartifact"
 	"github.com/shinpr/galley/internal/runlog"
 	"github.com/shinpr/galley/internal/runner"
 	claudeguard "github.com/shinpr/galley/internal/runner/claude_guard_plugin"
@@ -27,7 +31,7 @@ import (
 // would have been driven against an empty or stale diff. The loop
 // classification path (runOneSupervisorAttempt) inspects this type to record
 // the failure with a distinct `review_staging` phase / `review_staging_failed`
-// kind instead of the generic executor failure classification (AC6).
+// kind instead of the generic executor failure classification.
 type reviewStagingError struct{ Err error }
 
 func (e *reviewStagingError) Error() string {
@@ -58,18 +62,18 @@ func asReviewStagingError(err error) (*reviewStagingError, bool) {
 //
 // The implementation runs in three steps:
 //
-//  1. Discover the dirty worktree paths via `git status --porcelain=v1 -z`
-//     after the executor returned.
-//  2. Build the explicit reviewable path set with reviewablePathsFromStatus.
-//     The builder drops empty/non-local entries, deduplicates, and excludes
-//     the supplied excludePaths (task.files entries declared with
-//     commit:false). Forbidden-path entries are intentionally kept in the
-//     set so the existing finalize-time forbidden_paths gate still observes
-//     them.
-//  3. Stage exactly that explicit path set with vcs.StagePathsForReview. The
-//     staging command runs `git add -A -- <path> [<path>...]` so the diff
-//     fields the supervisor reviews (StagedDiff / Diff in the snapshot)
-//     reflect the executor's submitted artifact and nothing else.
+// 1. Discover the dirty worktree paths via `git status --porcelain=v1 -z`
+// after the executor returned.
+// 2. Build the explicit reviewable path set with reviewablePathsFromStatus.
+// The builder drops empty/non-local entries, deduplicates, and excludes
+// the supplied excludePaths (task.files entries declared with
+// commit:false). Forbidden-path entries are intentionally kept in the
+// set so the existing finalize-time forbidden_paths gate still observes
+// them.
+// 3. Stage exactly that explicit path set with vcs.StagePathsForReview. The
+// staging command runs `git add -A -- <path> [<path>...]` so the diff
+// fields the supervisor reviews (StagedDiff / Diff in the snapshot)
+// reflect the executor's submitted artifact and nothing else.
 //
 // Tests override this seam to inject deterministic failures and to assert
 // the exclude-list contract without spawning a real git process; production
@@ -91,7 +95,7 @@ const progressNoDiffThreshold = 2
 // supervisorRetryBudget is the internal, fixed number of additional supervisor
 // evaluations Galley runs inside a single executor attempt when the supervisor
 // subprocess exits because of idle timeout, total timeout, or a forced
-// subprocess kill (D1 / AC-001 / AC-003). It is intentionally not exposed as a
+// subprocess kill. It is intentionally not exposed as a
 // CLI flag, task YAML field, or profile field; supervisor stalls are treated
 // as transient runtime failures, not user-tunable behavior.
 const supervisorRetryBudget = 2
@@ -125,22 +129,22 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 	// bundle through this function keeps the supervisor loop from
 	// double-loading the environment profile.
 	effectiveOpts := effectiveOptionsForProfiles(opts, profiles)
-	// Persist the resolved supervisor and its source as run evidence (AC8).
+	// Persist the resolved supervisor and its source as run evidence.
 	// Reviewers can then tell whether the per-task supervisor came from the
 	// repository environment profile, daemon CLI startup options, daemon.yaml,
 	// or the built-in default without re-deriving the resolution from logs.
 	if err := writeSupervisorEvidence(runDir, effectiveOpts); err != nil {
 		fmt.Fprintf(os.Stderr, "galley: write supervisor evidence for run %s failed: %v\n", runID, err)
 	}
-	preflightResult, err := LoadPreflightResult(runDir)
+	preflightResult, err := skeletonpreflight.LoadResult(runDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "galley: could not load preflight result for run %s: %v\n", runID, err)
 	}
 	// Setup result is loaded from runs/<run-id>/setup_result.json which the
 	// setup executor preflight wrote before this loop. It is appended to the
 	// implementation work order so the executor sees the readiness facts and
-	// threaded into supervisor evidence so reviewers can verify them (AC8).
-	setupResultEvidence, setupUpdateEvidence := loadSetupRunEvidence(runDir, runID)
+	// threaded into supervisor evidence so reviewers can verify them.
+	setupResultEvidence, setupUpdateEvidence := setuppreflight.LoadRunEvidence(runDir, runID)
 	promptTask := executionTask(*loaded, prepared.CWD)
 	if preflightResult != nil {
 		// Runtime obligations below are the source of truth after preflight.
@@ -157,10 +161,10 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 	}
 	prompt := task.RenderWorkOrderWithProfiles(promptTask, profiles)
 	if preflightResult != nil {
-		prompt = appendPreflightObligations(prompt, preflightResult)
+		prompt = skeletonpreflight.AppendObligations(prompt, preflightResult)
 	}
 	if setupResultEvidence != nil {
-		prompt = appendSetupReadinessObligations(prompt, setupResultEvidence, setupUpdateEvidence)
+		prompt = setuppreflight.AppendReadinessObligations(prompt, setupResultEvidence, setupUpdateEvidence)
 	}
 	budget := attemptBudget(loaded.ExecutionPolicy.LoopBudget)
 	consecutiveNoDiff := 0
@@ -177,7 +181,7 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 			Prompt:   prompt,
 		})
 		if err != nil {
-			// AC3: when an exhausted supervisor idle timeout fails the task,
+			// When an exhausted supervisor idle timeout fails the task,
 			// emit one concise line in the existing Galley log tone so the
 			// daemon log distinguishes it from a task total-timeout expiry.
 			if idle, ok := asSupervisorIdleTimeout(err); ok {
@@ -186,7 +190,7 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 			return taskstate.FailMove(opts.Root, runningPath, loaded, err)
 		}
 		mergeAttemptEvidence(loaded, review.Outcome, runID, prepared.CWD, review.AttemptDir)
-		// Progress detection (D5, AC-012, AC-013, AC-014). The dirty-diff
+		// Progress detection. The dirty-diff
 		// signal alone over-counts: preflight materialized skeleton files in
 		// the worktree before the first attempt, so every attempt would
 		// otherwise see those same skeleton files as a "diff" and never
@@ -267,7 +271,7 @@ func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) 
 	// Load the runtime preflight result before the executor attempt so the
 	// executor result and supervisor evidence share the same generated
 	// skeleton bindings.
-	preflightOutputs, err := LoadPreflightResult(req.RunDir)
+	preflightOutputs, err := skeletonpreflight.LoadResult(req.RunDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "galley: task %s attempt %d could not load preflight result: %v\n", req.Loaded.ID, req.Attempt, err)
 	}
@@ -276,7 +280,7 @@ func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) 
 		// A review-time staging failure is recorded under a distinct phase
 		// and kind so the failed task surfaces the staging-related error to
 		// the supervisor and operators instead of mis-classifying it as an
-		// executor failure (AC6).
+		// executor failure.
 		if _, ok := asReviewStagingError(err); ok {
 			appendFailureAttempt(req.Loaded, "review_staging", "review_staging_failed", err, attemptDir)
 			return attemptReview{}, err
@@ -284,7 +288,7 @@ func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) 
 		appendFailureAttempt(req.Loaded, "executor", classifyFailureKind("executor_failed", err), err, attemptDir)
 		return attemptReview{}, err
 	}
-	setupResultEvidence, setupUpdateEvidence := loadSetupRunEvidence(req.RunDir, req.RunID)
+	setupResultEvidence, setupUpdateEvidence := setuppreflight.LoadRunEvidence(req.RunDir, req.RunID)
 	evidence := supervisor.Evidence{
 		Task:                   *req.Loaded,
 		Profiles:               req.Profiles,
@@ -305,7 +309,7 @@ func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) 
 		appendSupervisorFailureAttempt(req.Loaded, outcome, err, attemptDir)
 		return attemptReview{}, err
 	}
-	if err := writeJSON(filepath.Join(attemptDir, "supervisor_verdict.json"), verdict); err != nil {
+	if err := writeJSON(runartifact.Path(attemptDir, runartifact.SupervisorVerdictFilename), verdict); err != nil {
 		appendFailureAttempt(req.Loaded, "run_evidence", "run_evidence_failed", err, attemptDir)
 		return attemptReview{}, err
 	}
@@ -325,59 +329,27 @@ type verdictApplication struct {
 
 func applySupervisorVerdict(ctx, shutdownCtx context.Context, req verdictApplication) (string, bool, error) {
 	if shutdownCtx.Err() != nil && req.Verdict.Status == "needs_revision" {
-		req.Loaded.Status = "needs_supervisor_review"
-		req.Loaded.Risks = append(req.Loaded.Risks, task.Risk{
-			ID:                   fmt.Sprintf("shutdown-%d", len(req.Loaded.Risks)+1),
-			Type:                 "partial_verification",
-			Detail:               "Shutdown was requested after an attempt that needs revision; Galley did not start another retry attempt.",
-			Mitigation:           "Review the run evidence and requeue the task when ready.",
-			HumanReviewSuggested: true,
-		})
 		fmt.Fprintf(os.Stderr, "galley: task %s stopped after attempt %d due to shutdown\n", req.Loaded.ID, req.Attempt)
-		return "", true, taskstate.Move(req.Opts.Root, req.RunningPath, "failed", req.Loaded)
+		return "", true, degradeToSupervisorReview(req, "shutdown", "Shutdown was requested after an attempt that needs revision; Galley did not start another retry attempt.", "Review the run evidence and requeue the task when ready.")
 	}
 	if shutdownCtx.Err() != nil && req.Verdict.Status == "accepted" && req.Opts.CommitOnAccept {
-		req.Loaded.Status = "needs_supervisor_review"
-		req.Loaded.Risks = append(req.Loaded.Risks, task.Risk{
-			ID:                   fmt.Sprintf("shutdown-finalize-%d", len(req.Loaded.Risks)+1),
-			Type:                 "partial_verification",
-			Detail:               "Shutdown was requested before accepted work was finalized; Galley skipped commit, push, and PR creation to avoid an interrupted external side effect.",
-			Mitigation:           "Inspect the accepted diff and requeue or finalize manually when ready.",
-			HumanReviewSuggested: true,
-		})
 		fmt.Fprintf(os.Stderr, "galley: task %s accepted during shutdown; skipped finalization\n", req.Loaded.ID)
-		return "", true, taskstate.Move(req.Opts.Root, req.RunningPath, "failed", req.Loaded)
+		return "", true, degradeToSupervisorReview(req, "shutdown-finalize", "Shutdown was requested before accepted work was finalized; Galley skipped commit, push, and PR creation to avoid an interrupted external side effect.", "Inspect the accepted diff and requeue or finalize manually when ready.")
 	}
 	if req.Verdict.Status == "needs_revision" && req.ConsecutiveNoDiff >= progressNoDiffThreshold {
-		req.Loaded.Status = "needs_supervisor_review"
-		req.Loaded.Risks = append(req.Loaded.Risks, task.Risk{
-			ID:                   fmt.Sprintf("progress-%d", len(req.Loaded.Risks)+1),
-			Type:                 "partial_verification",
-			Detail:               "Two consecutive executor attempts produced no git diff.",
-			Mitigation:           "A supervisor should inspect the task, work order, and executor logs before requeueing.",
-			HumanReviewSuggested: true,
-		})
 		fmt.Fprintf(os.Stderr, "galley: task %s stopped by progress invariant: consecutive no-diff attempts\n", req.Loaded.ID)
-		return "", true, taskstate.Move(req.Opts.Root, req.RunningPath, "failed", req.Loaded)
+		return "", true, degradeToSupervisorReview(req, "progress", "Two consecutive executor attempts produced no git diff.", "A supervisor should inspect the task, work order, and executor logs before requeueing.")
 	}
 
 	switch req.Verdict.Status {
 	case "accepted":
-		// Daemon-side acceptance gate (D4 / AC-011). When required skeleton
+		// Daemon-side acceptance gate. When required skeleton
 		// coverage or required-check evidence is missing or failed, downgrade
 		// the accepted verdict to needs_supervisor_review with a user-visible
 		// reason. The first version has no waiver mechanism.
 		if reason, ok := evaluateAcceptanceGate(req.Loaded, req.RunDir); !ok {
-			req.Loaded.Status = "needs_supervisor_review"
-			req.Loaded.Risks = append(req.Loaded.Risks, task.Risk{
-				ID:                   fmt.Sprintf("acceptance-gate-%d", len(req.Loaded.Risks)+1),
-				Type:                 "partial_verification",
-				Detail:               "Accepted verdict downgraded by acceptance skeleton gate: " + reason,
-				Mitigation:           "Inspect preflight_result.json and required verification evidence before re-finalizing.",
-				HumanReviewSuggested: true,
-			})
 			fmt.Fprintf(os.Stderr, "galley: task %s accepted-verdict downgraded by acceptance gate: %s\n", req.Loaded.ID, reason)
-			return "", true, taskstate.Move(req.Opts.Root, req.RunningPath, "failed", req.Loaded)
+			return "", true, degradeToSupervisorReview(req, "acceptance-gate", "Accepted verdict downgraded by acceptance skeleton gate: "+reason, "Inspect preflight_result.json and required verification evidence before re-finalizing.")
 		}
 		return "", true, acceptSupervisorVerdict(ctx, req.Opts, req.RunningPath, req.Loaded, req.Prepared, req.RunDir, req.Verdict)
 	case "needs_revision":
@@ -389,17 +361,15 @@ func applySupervisorVerdict(ctx, shutdownCtx context.Context, req verdictApplica
 		req.Loaded.Status = "needs_supervisor_review"
 		return "", true, taskstate.Move(req.Opts.Root, req.RunningPath, "failed", req.Loaded)
 	default:
-		req.Loaded.Status = "needs_supervisor_review"
-		req.Loaded.Risks = append(req.Loaded.Risks, task.Risk{
-			ID:                   fmt.Sprintf("supervisor-verdict-%d", len(req.Loaded.Risks)+1),
-			Type:                 "partial_verification",
-			Detail:               fmt.Sprintf("Supervisor returned unknown verdict status %q.", req.Verdict.Status),
-			Mitigation:           "Inspect supervisor_verdict.json and rerun after correcting the supervisor output.",
-			HumanReviewSuggested: true,
-		})
 		fmt.Fprintf(os.Stderr, "galley: task %s unknown supervisor verdict=%q\n", req.Loaded.ID, req.Verdict.Status)
-		return "", true, taskstate.Move(req.Opts.Root, req.RunningPath, "failed", req.Loaded)
+		return "", true, degradeToSupervisorReview(req, "supervisor-verdict", fmt.Sprintf("Supervisor returned unknown verdict status %q.", req.Verdict.Status), "Inspect supervisor_verdict.json and rerun after correcting the supervisor output.")
 	}
+}
+
+func degradeToSupervisorReview(req verdictApplication, riskPrefix, detail, mitigation string) error {
+	req.Loaded.Status = "needs_supervisor_review"
+	appendRisk(req.Loaded, riskPrefix, "partial_verification", detail, mitigation, true)
+	return taskstate.Move(req.Opts.Root, req.RunningPath, "failed", req.Loaded)
 }
 
 func acceptSupervisorVerdict(ctx context.Context, opts Options, runningPath string, loaded *task.Task, prepared workspace.Prepared, runDir string, verdict supervisor.Verdict) error {
@@ -410,24 +380,12 @@ func acceptSupervisorVerdict(ctx context.Context, opts Options, runningPath stri
 		fmt.Fprintf(os.Stderr, "galley: task %s accepted; finalizing commit/pr\n", loaded.ID)
 		if err := finalizeAcceptedChange(ctx, opts, loaded, prepared.CWD, prepared.BaseSHA, runDir); err != nil {
 			loaded.Status = "needs_supervisor_review"
-			loaded.Risks = append(loaded.Risks, task.Risk{
-				ID:                   fmt.Sprintf("finalize-%d", len(loaded.Risks)+1),
-				Type:                 "partial_verification",
-				Detail:               err.Error(),
-				Mitigation:           "The executor diff and run evidence were stored; a supervisor should inspect and finish commit or PR creation.",
-				HumanReviewSuggested: true,
-			})
+			appendRisk(loaded, "finalize", "partial_verification", err.Error(), "The executor diff and run evidence were stored; a supervisor should inspect and finish commit or PR creation.", true)
 			return taskstate.FailMove(opts.Root, runningPath, loaded, err)
 		}
 	} else if err := inputfiles.CleanupNonCommitted(prepared.CWD, loaded.Files); err != nil {
 		loaded.Status = "needs_supervisor_review"
-		loaded.Risks = append(loaded.Risks, task.Risk{
-			ID:                   fmt.Sprintf("input-file-cleanup-%d", len(loaded.Risks)+1),
-			Type:                 "partial_verification",
-			Detail:               err.Error(),
-			Mitigation:           "Remove non-committed task input files from the execution workspace before archiving or reusing it.",
-			HumanReviewSuggested: true,
-		})
+		appendRisk(loaded, "input-file-cleanup", "partial_verification", err.Error(), "Remove non-committed task input files from the execution workspace before archiving or reusing it.", true)
 		return taskstate.FailMove(opts.Root, runningPath, loaded, err)
 	}
 	loaded.Status = "accepted"
@@ -446,10 +404,9 @@ func executionTask(loaded task.Task, workDir string) task.Task {
 // evaluateSupervisorWithRetry runs the supervisor evaluation and, when the
 // supervisor subprocess fails because of idle timeout, total timeout, or a
 // forced subprocess kill, retries the same evaluation up to
-// supervisorRetryBudget additional times within the same executor attempt
-// (D1 / AC-001 / AC-002). Each try writes its artifacts under a distinct
-// supervisor-try-N subdirectory so retry evidence does not overwrite
-// previous supervisor output (R1).
+// supervisorRetryBudget additional times within the same executor attempt.
+// Each try writes its artifacts under a distinct supervisor-try-N subdirectory
+// so retry evidence remains inspectable.
 func evaluateSupervisorWithRetry(ctx context.Context, opts Options, evidence supervisor.Evidence, attemptDir, workDir string) (supervisor.Verdict, error) {
 	var lastErr error
 	idleTimeoutFailures := 0
@@ -460,13 +417,13 @@ func evaluateSupervisorWithRetry(ctx context.Context, opts Options, evidence sup
 		}
 		verdict, err := supervisorRunner(ctx, opts, evidence, tryDir, workDir)
 		if err == nil {
-			// Per-retry verdict (R1: evidence is inspectable for every try).
-			if writeErr := writeJSON(filepath.Join(tryDir, "supervisor_verdict.json"), verdict); writeErr != nil {
+			// Per-retry verdict.
+			if writeErr := writeJSON(runartifact.Path(tryDir, runartifact.SupervisorVerdictFilename), verdict); writeErr != nil {
 				return supervisor.Verdict{}, writeErr
 			}
 			// Preserve the top-level evidence path that downstream tools and
 			// existing tests rely on.
-			if writeErr := writeJSON(filepath.Join(attemptDir, "model_supervisor_verdict.json"), verdict); writeErr != nil {
+			if writeErr := writeJSON(runartifact.Path(attemptDir, runartifact.ModelSupervisorVerdictFilename), verdict); writeErr != nil {
 				return supervisor.Verdict{}, writeErr
 			}
 			if try > 1 {
@@ -477,7 +434,7 @@ func evaluateSupervisorWithRetry(ctx context.Context, opts Options, evidence sup
 		// Record the error JSON for this try so operators can inspect every
 		// retry, including the kind classification.
 		kind := classifyFailureKind("supervisor_failed", err)
-		_ = writeJSON(filepath.Join(tryDir, "supervisor_error.json"), map[string]any{
+		_ = writeJSON(runartifact.Path(tryDir, runartifact.SupervisorErrorFilename), map[string]any{
 			"try":   try,
 			"kind":  kind,
 			"error": err.Error(),
@@ -496,10 +453,10 @@ func evaluateSupervisorWithRetry(ctx context.Context, opts Options, evidence sup
 		fmt.Fprintf(os.Stderr, "galley: supervisor try %d/%d failed (%s); %d retry budget remaining\n", try, supervisorTotalAttempts, kind, supervisorTotalAttempts-try)
 	}
 	// An exhausted idle timeout is the watchdog-recoverable failure mode the
-	// user-facing reporting must distinguish from a task total-timeout expiry
-	// (AC2/AC3/AC4). Wrap it in a typed error so appendSupervisorFailureAttempt
-	// and runSupervisorLoop can stamp the distinct supervisor_idle_timeout kind
-	// and log line. Total timeout and forced-kill exhaustion keep the existing
+	// user-facing reporting must distinguish from a task total-timeout expiry.
+	// Wrap it in a typed error so appendSupervisorFailureAttempt and
+	// runSupervisorLoop can stamp the distinct supervisor_idle_timeout kind and
+	// log line. Total timeout and forced-kill exhaustion keep the existing
 	// generic wrapped error. Mixed stall causes also keep the generic path
 	// because supervisor_idle_timeout specifically means every try was killed
 	// by the idle-output watchdog.
@@ -516,7 +473,7 @@ func evaluateSupervisorWithRetry(ctx context.Context, opts Options, evidence sup
 }
 
 // isSupervisorStallError reports whether the supervisor subprocess exited
-// because of idle timeout, total timeout, or a forced subprocess kill — the
+// because of idle timeout, total timeout, or a forced subprocess kill - the
 // only failure modes that trigger an in-attempt supervisor retry. Other
 // errors (e.g. a malformed verdict or an unrecognized provider) are treated
 // as permanent so they surface immediately instead of consuming retries.
@@ -527,17 +484,9 @@ func isSupervisorStallError(err error) bool {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
-	msg := err.Error()
-	if strings.Contains(msg, "idle timeout") {
-		return true
-	}
-	if strings.Contains(msg, "timed out") {
-		return true
-	}
-	if strings.Contains(msg, "did not exit after cancellation") {
-		return true
-	}
-	if strings.Contains(msg, "signal: killed") {
+	if errors.Is(err, runner.ErrIdleTimeout) ||
+		errors.Is(err, runner.ErrTimeout) ||
+		errors.Is(err, runner.ErrKilled) {
 		return true
 	}
 	return false
@@ -560,12 +509,7 @@ type attemptOutcome struct {
 	DiffSnapshot workspace.Snapshot
 }
 
-const (
-	executorResultFilename     = "executor_result.json"
-	legacyClaudeResultFilename = "claude_result.json"
-)
-
-func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, profiles profile.Bundle, workDir, baseSHA, attemptDir, prompt, taskFile string, preflight *AcceptanceSkeletonResult) (attemptOutcome, error) {
+func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, profiles profile.Bundle, workDir, baseSHA, attemptDir, prompt, taskFile string, preflight *skeletonpreflight.Result) (attemptOutcome, error) {
 	attemptCtx := ctx
 	var cancel context.CancelFunc
 	attemptTimeout := time.Duration(loaded.ExecutionPolicy.TimeoutMS) * time.Millisecond
@@ -596,27 +540,21 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 	if err != nil {
 		return attemptOutcome{}, err
 	}
-	auditPlan := commandPlan
-	auditPlan.Env = nil
-	if err := writeJSON(filepath.Join(attemptDir, "command_plan.json"), auditPlan); err != nil {
-		return attemptOutcome{}, err
-	}
-
-	started := time.Now().UTC()
-	runResult, runErr := runner.RunCommand(attemptCtx, commandPlan, runner.RunOptions{
+	run, err := executorflow.RunCommandAttempt(attemptCtx, executorflow.CommandAttemptOptions{
+		AttemptDir:  attemptDir,
+		CommandPlan: commandPlan,
 		Timeout:     attemptTimeout,
 		IdleTimeout: opts.IdleTimeout,
 		StdoutPath:  stdoutPath,
 		StderrPath:  stderrPath,
 	})
-	completed := time.Now().UTC()
-	if err := writeJSON(filepath.Join(attemptDir, "run_result.json"), runResult); err != nil {
+	if err != nil {
 		return attemptOutcome{}, err
 	}
 
-	resultPath := filepath.Join(attemptDir, executorResultFilename)
+	resultPath := runartifact.Path(attemptDir, runartifact.ExecutorResultFilename)
 	lastMessagePath := codexLastMessagePath(cli, attemptDir)
-	claudeResult, parseErr := resolveExecutorResult(attemptCtx, opts, cli, stdoutPath, runResult.Stdout, lastMessagePath, taskFile, resultPath, workDir, profiles)
+	claudeResult, parseErr := resolveExecutorResult(attemptCtx, opts, cli, stdoutPath, run.RunResult.Stdout, lastMessagePath, taskFile, resultPath, workDir, profiles)
 	if parseErr == nil {
 		if err := writeJSON(resultPath, claudeResult); err != nil {
 			return attemptOutcome{}, err
@@ -626,13 +564,11 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 	// Stage executor-produced worktree changes before capturing the snapshot
 	// Galley hands to the supervisor. Without this step, newly-created
 	// untracked files would not appear in the staged or unstaged diff surfaces
-	// and the supervisor would receive an empty diff for new-file work (D1 /
-	// AC1 / AC2). Non-committed task input file destinations are excluded so
+	// and the supervisor would receive an empty diff for new-file work. Non-committed task input file destinations are excluded so
 	// the staged review evidence is constrained to executor-produced changes
-	// and context-only inputs do not leak into the supervisor diff (AC4 /
-	// supervisor feedback on attempt 3). Staging failure is fatal: we surface
+	// and context-only inputs do not leak into the supervisor diff. Staging failure is fatal: we surface
 	// a typed error so the caller records a `review_staging` attempt failure
-	// instead of sending an empty diff to the supervisor (AC6). The parent
+	// instead of sending an empty diff to the supervisor. The parent
 	// ctx (not attemptCtx) is used here so a staging step initiated after
 	// executor timeout still has a chance to capture worktree state and write
 	// its evidence file.
@@ -641,141 +577,28 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 		return attemptOutcome{}, &reviewStagingError{Err: err}
 	}
 
-	diffSnapshot, diffErr := workspace.CaptureSnapshotFromBase(ctx, workDir, baseSHA, workspaceOptions(opts))
-	diffDirty := false
-	diffText := ""
-	if diffErr == nil {
-		// Compute the supervisor-facing dirty signal from the submitted
-		// artifact set (branch diff + staged diff + unstaged diff), not from
-		// the raw worktree status. After review-time staging, executor-
-		// produced changes are reflected in StagedDiff while untracked
-		// entries that remain in StatusPorcelain are context-only Galley
-		// material (task.files declared commit:false, or other Galley-owned
-		// runtime context). Sourcing DiffDirty from the diff fields keeps
-		// the supervisor's progress / "has work to review" gate aligned
-		// with the submitted artifact instead of being widened by
-		// context-only worktree dirtiness (supervisor feedback on review-
-		// time scope). The raw worktree status is still persisted in
-		// git_status.json as diagnostic evidence.
-		diffDirty = diffSnapshot.BranchDiff != "" || diffSnapshot.StagedDiff != "" || diffSnapshot.UnstagedDiff != ""
-		diffText = diffSnapshot.Diff
-		if err := writeJSON(filepath.Join(attemptDir, "git_status.json"), diffSnapshot); err != nil {
-			return attemptOutcome{}, err
-		}
-		if err := os.WriteFile(filepath.Join(attemptDir, "diff.patch"), []byte(diffSnapshot.Diff), 0o600); err != nil {
-			return attemptOutcome{}, fmt.Errorf("write diff.patch: %w", err)
-		}
+	diffArtifacts, err := executorflow.CaptureDiffArtifacts(ctx, workDir, baseSHA, attemptDir, workspaceOptions(opts))
+	if err != nil {
+		return attemptOutcome{}, err
 	}
 
 	return attemptOutcome{
-		Started:      started,
-		Completed:    completed,
-		RunResult:    runResult,
-		RunErr:       runErr,
+		Started:      run.Started,
+		Completed:    run.Completed,
+		RunResult:    run.RunResult,
+		RunErr:       run.RunErr,
 		ClaudeResult: claudeResult,
 		ParseErr:     parseErr,
-		DiffDirty:    diffDirty,
-		Diff:         diffText,
-		DiffErr:      diffErr,
-		DiffSnapshot: diffSnapshot,
+		DiffDirty:    diffArtifacts.Dirty,
+		Diff:         diffArtifacts.Diff,
+		DiffErr:      diffArtifacts.Err,
+		DiffSnapshot: diffArtifacts.Snapshot,
 	}, nil
 }
 
 // codexLastMessagePath returns the attempt-scoped `--output-last-message`
 // capture path Galley requests for Codex executor runs (empty for Claude
 // because Claude streams its result directly to stdout JSONL).
-func codexLastMessagePath(cli, attemptDir string) string {
-	if cli != "codex" || attemptDir == "" {
-		return ""
-	}
-	return filepath.Join(attemptDir, runner.CodexLastMessageFilename)
-}
-
-// resolveExecutorResult resolves the structured executor result for one
-// attempt. For Claude executor runs the result lives in the JSONL stdout
-// stream; for Codex executor runs the canonical surface is the final message
-// captured by `codex exec --output-last-message`, with the JSONL stdout
-// stream as a fallback. The function intentionally returns the executor's
-// own report when it is a valid hard_stop so the daemon does not overwrite a
-// hard_stop executor judgment with fallback generated evidence — that would
-// erase the unblock instructions the supervisor needs (R2 / AC4).
-func resolveExecutorResult(ctx context.Context, opts Options, cli, stdoutPath, stdoutTail, lastMessagePath, taskFile, resultPath, workDir string, profiles profile.Bundle) (runner.ClaudeResult, error) {
-	// Codex executor: parse the captured final-message file first so completed,
-	// completed_with_risks, and hard_stop results survive when the JSONL stream
-	// is truncated or empty. A hard_stop result is preserved verbatim — the
-	// same invariant the Claude path enforces below.
-	if cli == "codex" && lastMessagePath != "" {
-		if lastResult, lastErr := runner.ExtractCodexLastMessageFile(lastMessagePath); lastErr == nil {
-			if lastResult.Status == "hard_stop" {
-				return lastResult, nil
-			}
-			generated, generatedErr := result.Complete(ctx, result.CompleteOptions{
-				TaskFile: taskFile,
-				Output:   resultPath,
-				WorkDir:  workDir,
-				Summary:  "Task implementation completed and verification evidence was recorded by Galley.",
-				Profiles: profiles,
-				GitBin:   opts.GitBin,
-			})
-			if generatedErr == nil {
-				return mergeExecutorJudgment(generated, lastResult), nil
-			}
-			return lastResult, nil
-		}
-	}
-
-	// Claude stdout normally carries the structured result. Codex stdout is a
-	// JSON event stream, so this parse is only a best-effort fallback after the
-	// Codex last-message path above; result.Complete provides the normal Codex
-	// fallback when stdout is not an executor result.
-	claudeResult, claudeErr := runner.ExtractClaudeResultFile(stdoutPath)
-	if claudeErr == nil && claudeResult.Status == "hard_stop" {
-		return claudeResult, nil
-	}
-	generated, generatedErr := result.Complete(ctx, result.CompleteOptions{
-		TaskFile: taskFile,
-		Output:   resultPath,
-		WorkDir:  workDir,
-		Summary:  "Task implementation completed and verification evidence was recorded by Galley.",
-		Profiles: profiles,
-		GitBin:   opts.GitBin,
-	})
-	if generatedErr == nil {
-		if claudeErr == nil {
-			return mergeExecutorJudgment(generated, claudeResult), nil
-		}
-		return generated, nil
-	}
-	if claudeErr == nil {
-		return claudeResult, nil
-	}
-	tailResult, tailErr := runner.ExtractClaudeResult(stdoutTail)
-	if tailErr == nil {
-		return tailResult, nil
-	}
-	return runner.ClaudeResult{}, errors.Join(
-		fmt.Errorf("verification evidence generation failed: %w", generatedErr),
-		fmt.Errorf("stdout file parse failed: %w", claudeErr),
-		fmt.Errorf("stdout tail parse failed: %w", tailErr),
-	)
-}
-
-func mergeExecutorJudgment(generated, reported runner.ClaudeResult) runner.ClaudeResult {
-	if reported.Summary != "" {
-		generated.Summary = generated.Summary + " Executor summary: " + reported.Summary
-	}
-	if len(reported.AcceptanceCriteria) > 0 {
-		generated.AcceptanceCriteria = reported.AcceptanceCriteria
-	}
-	generated.Verification = append(reported.Verification, generated.Verification...)
-	generated.Decisions = append(generated.Decisions, reported.Decisions...)
-	generated.Risks = append(generated.Risks, reported.Risks...)
-	if reported.Status == "completed_with_risks" && generated.Status == "completed" && len(reported.Risks) > 0 {
-		generated.Status = "completed_with_risks"
-	}
-	return generated
-}
-
 func markRevisionRequestsAddressed(loaded *task.Task, evidence string) {
 	for i := range loaded.RevisionRequests {
 		if loaded.RevisionRequests[i].Status == "addressed" {
@@ -802,32 +625,14 @@ func mergeAttemptEvidence(loaded *task.Task, outcome attemptOutcome, runID, work
 		OutputExcerpt: fmt.Sprintf("executor stdout/stderr captured under %s; run_result.json contains bounded tails", attemptDir),
 	})
 	if outcome.DiffErr != nil {
-		loaded.Risks = append(loaded.Risks, task.Risk{
-			ID:                   fmt.Sprintf("git-diff-%d", len(loaded.Risks)+1),
-			Type:                 "partial_verification",
-			Detail:               outcome.DiffErr.Error(),
-			Mitigation:           "Stored other run evidence; git diff evidence is unavailable.",
-			HumanReviewSuggested: true,
-		})
+		appendRisk(loaded, "git-diff", "partial_verification", outcome.DiffErr.Error(), "Stored other run evidence; git diff evidence is unavailable.", true)
 	}
 	if outcome.ParseErr != nil {
-		loaded.Risks = append(loaded.Risks, task.Risk{
-			ID:                   fmt.Sprintf("claude-result-parse-%d", len(loaded.Risks)+1),
-			Type:                 "partial_verification",
-			Detail:               outcome.ParseErr.Error(),
-			Mitigation:           "Stored raw Claude stdout and stderr for supervisor review.",
-			HumanReviewSuggested: true,
-		})
+		appendRisk(loaded, "claude-result-parse", "partial_verification", outcome.ParseErr.Error(), "Stored raw Claude stdout and stderr for supervisor review.", true)
 		return
 	}
 	if outcome.ClaudeResult.Status == "completed" && outcome.DiffErr == nil && !outcome.DiffDirty {
-		loaded.Risks = append(loaded.Risks, task.Risk{
-			ID:                   fmt.Sprintf("git-diff-empty-%d", len(loaded.Risks)+1),
-			Type:                 "partial_verification",
-			Detail:               "Executor completed but produced no git diff in the execution workspace.",
-			Mitigation:           "Stored Claude result and raw logs for supervisor review.",
-			HumanReviewSuggested: true,
-		})
+		appendRisk(loaded, "git-diff-empty", "partial_verification", "Executor completed but produced no git diff in the execution workspace.", "Stored Claude result and raw logs for supervisor review.", true)
 	}
 	for _, ac := range outcome.ClaudeResult.AcceptanceCriteria {
 		for i := range loaded.AcceptanceCriteria {
@@ -854,30 +659,17 @@ func mergeAttemptEvidence(loaded *task.Task, outcome attemptOutcome, runID, work
 		})
 	}
 	for _, claudeRisk := range outcome.ClaudeResult.Risks {
-		loaded.Risks = append(loaded.Risks, task.Risk{
-			ID:                   fmt.Sprintf("claude-risk-%d", len(loaded.Risks)+1),
-			Type:                 claudeRisk.Type,
-			Detail:               claudeRisk.Detail,
-			Mitigation:           claudeRisk.Mitigation,
-			HumanReviewSuggested: claudeRisk.NeedsHumanReview,
-		})
+		appendRisk(loaded, "claude-risk", claudeRisk.Type, claudeRisk.Detail, claudeRisk.Mitigation, claudeRisk.NeedsHumanReview)
 	}
 	if outcome.ClaudeResult.Status == "hard_stop" && outcome.ClaudeResult.HardStop != nil {
-		loaded.Risks = append(loaded.Risks, task.Risk{
-			ID:                   fmt.Sprintf("claude-hard-stop-%d", len(loaded.Risks)+1),
-			Type:                 "other",
-			Detail:               outcome.ClaudeResult.HardStop.Reason,
-			Mitigation:           strings.Join(outcome.ClaudeResult.HardStop.NeededToContinue, "; "),
-			HumanReviewSuggested: true,
-		})
+		appendRisk(loaded, "claude-hard-stop", "other", outcome.ClaudeResult.HardStop.Reason, strings.Join(outcome.ClaudeResult.HardStop.NeededToContinue, "; "), true)
 	}
 }
 
 // executorVerificationCmd returns a stable command label that identifies the
 // executor CLI used for an attempt. It is the value Galley records in
 // task.verification.commands so reviewers can tell whether the run was driven
-// by Claude or Codex from the saved task file alone. The Claude label stays
-// "claude -p" for backward compatibility with previously saved evidence.
+// by Claude or Codex from the saved task file alone.
 func executorVerificationCmd(cli string) string {
 	switch cli {
 	case "codex":
@@ -897,7 +689,7 @@ func executorAttemptError(outcome attemptOutcome, attemptDir string) *task.Attem
 }
 
 func appendSupervisorFailureAttempt(loaded *task.Task, outcome attemptOutcome, err error, attemptDir string) {
-	// AC2/AC6: an exhausted supervisor idle timeout is an infrastructure
+	// An exhausted supervisor idle timeout is an infrastructure
 	// watchdog failure, not a supervisor verdict. Record it under the distinct
 	// supervisor_idle_timeout kind with a self-explanatory message instead of
 	// the generic supervisor-failure classification.
@@ -921,15 +713,9 @@ func appendSupervisorFailureAttempt(loaded *task.Task, outcome attemptOutcome, e
 	// the executor's work. Surface it as needs_supervisor_review — consistent
 	// with the loop's other "a human should look at this" outcomes — so the
 	// task moves to failed/ with a status that signals follow-up review rather
-	// than a hard task failure (D1 / AC-001 / AC-002).
+	// than a hard task failure.
 	loaded.Status = "needs_supervisor_review"
-	loaded.Risks = append(loaded.Risks, task.Risk{
-		ID:                   fmt.Sprintf("supervisor-stall-%d", len(loaded.Risks)+1),
-		Type:                 "partial_verification",
-		Detail:               fmt.Sprintf("Supervisor evaluation failed (%s): %s", kind, err.Error()),
-		Mitigation:           "Inspect the supervisor-try-N evidence under the attempt directory and requeue the task once the supervisor backend is healthy.",
-		HumanReviewSuggested: true,
-	})
+	appendRisk(loaded, "supervisor-stall", "partial_verification", fmt.Sprintf("Supervisor evaluation failed (%s): %s", kind, err.Error()), "Inspect the supervisor-try-N evidence under the attempt directory and requeue the task once the supervisor backend is healthy.", true)
 }
 
 // appendSupervisorIdleTimeoutAttempt records the failed attempt for an
@@ -937,10 +723,10 @@ func appendSupervisorFailureAttempt(loaded *task.Task, outcome attemptOutcome, e
 // distinct supervisor_idle_timeout kind and a message that names the
 // supervisor adapter, idle-timeout duration, and try count, so the failed task
 // YAML and `galley task show` explain the failure without daemon logs
-// (AC2/AC5). The SupervisorVerdict field is set to the same infrastructure
+// . The SupervisorVerdict field is set to the same infrastructure
 // kind rather than needs_revision or accepted because no supervisor verdict
-// was produced (AC6). Task lifecycle stays identical to the existing
-// supervisor-stall path: needs_supervisor_review, then moved to failed/ (D1).
+// was produced. Task lifecycle stays identical to the existing
+// supervisor-stall path: needs_supervisor_review, then moved to failed/.
 func appendSupervisorIdleTimeoutAttempt(loaded *task.Task, outcome attemptOutcome, idle *supervisorIdleTimeoutError, attemptDir string) {
 	message := idle.attemptErrorMessage()
 	loaded.Attempts = append(loaded.Attempts, task.Attempt{
@@ -958,13 +744,7 @@ func appendSupervisorIdleTimeoutAttempt(loaded *task.Task, outcome attemptOutcom
 		},
 	})
 	loaded.Status = "needs_supervisor_review"
-	loaded.Risks = append(loaded.Risks, task.Risk{
-		ID:                   fmt.Sprintf("supervisor-idle-timeout-%d", len(loaded.Risks)+1),
-		Type:                 "partial_verification",
-		Detail:               message,
-		Mitigation:           "Inspect the supervisor-try-N evidence under the attempt directory, then requeue the task or adjust the daemon --idle-timeout or --supervisor settings.",
-		HumanReviewSuggested: true,
-	})
+	appendRisk(loaded, "supervisor-idle-timeout", "partial_verification", message, "Inspect the supervisor-try-N evidence under the attempt directory, then requeue the task or adjust the daemon --idle-timeout or --supervisor settings.", true)
 }
 
 func mergeDiscussionItems(loaded *task.Task, verdict supervisor.Verdict) {
@@ -1016,7 +796,7 @@ func applyAcceptedAcceptanceCriteria(loaded *task.Task, verdict supervisor.Verdi
 // Tasks without preflight.acceptance_skeleton enabled always pass — the
 // gate (including the required quality-check evidence gate) only activates
 // when a human opted the task into acceptance skeleton preflight via the
-// task contract (D4 / AC-001 / AC-011).
+// task contract.
 func evaluateAcceptanceGate(loaded *task.Task, runDir string) (string, bool) {
 	// Default flow: a task that omits or disables preflight.acceptance_skeleton
 	// must validate and finalize through the normal daemon path. The required
@@ -1029,7 +809,7 @@ func evaluateAcceptanceGate(loaded *task.Task, runDir string) (string, bool) {
 	if !cfg.IsEnabled() {
 		return "", true
 	}
-	// Required quality-check evidence gate (AC-011 / R6). Scoped to
+	// Required quality-check evidence gate. Scoped to
 	// preflight-enabled tasks so a supervisor cannot finalize an accepted
 	// verdict while a required profile check is missing or failed in the
 	// latest executor result. This gate is tied to enabled:true, not
@@ -1037,7 +817,7 @@ func evaluateAcceptanceGate(loaded *task.Task, runDir string) (string, bool) {
 	if reason, ok := requiredCheckEvidenceGate(loaded, runDir); !ok {
 		return reason, false
 	}
-	res, err := LoadPreflightResult(runDir)
+	res, err := skeletonpreflight.LoadResult(runDir)
 	if err != nil {
 		return fmt.Sprintf("could not read preflight_result.json: %v", err), false
 	}
@@ -1077,11 +857,11 @@ func evaluateAcceptanceGate(loaded *task.Task, runDir string) (string, bool) {
 // and verifies that every required quality-profile check has passing
 // verification evidence. It is only invoked by evaluateAcceptanceGate for
 // tasks that enabled acceptance skeleton preflight; the default daemon flow
-// never reaches it (AC-001). It also returns ("", true) when there is no run
+// never reaches it. It also returns ("", true) when there is no run
 // directory, no resolved quality profile, or no required checks.
 //
 // Gate semantics deliberately mirror preferred_commands as used by
-// result.runRequiredCheck (AC-011 / R6): preferred_commands is an ordered
+// result.runRequiredCheck: preferred_commands is an ordered
 // fallback list, not an AND-list. result.Complete runs the commands in order,
 // stops at the first that passes, and records exactly that one command's
 // evidence (or the last command's failure when every command failed). The gate
@@ -1164,14 +944,14 @@ func requiredCheckEvidenceGate(loaded *task.Task, runDir string) (string, bool) 
 }
 
 func loadRunProfiles(runDir string) (profile.Bundle, error) {
-	data, err := os.ReadFile(filepath.Join(runDir, "profiles.json"))
+	data, err := os.ReadFile(runartifact.Path(runDir, runartifact.ProfilesFilename))
 	if err != nil {
 		return profile.Bundle{}, err
 	}
 	var payload struct {
 		Bundle profile.Bundle `json:"bundle"`
 	}
-	if err := jsonDecode(data, &payload); err != nil {
+	if err := json.Unmarshal(data, &payload); err != nil {
 		return profile.Bundle{}, err
 	}
 	return payload.Bundle, nil
@@ -1193,70 +973,14 @@ func loadLatestExecutorResult(runDir string) (*runner.ClaudeResult, string, erro
 		return nil, bestDir, err
 	}
 	var res runner.ClaudeResult
-	if err := jsonDecode(data, &res); err != nil {
+	if err := json.Unmarshal(data, &res); err != nil {
 		return nil, bestDir, err
 	}
 	return &res, bestDir, nil
 }
 
 func readExecutorResultFile(attemptDir string) ([]byte, error) {
-	data, err := os.ReadFile(filepath.Join(attemptDir, executorResultFilename))
-	if err == nil {
-		return data, nil
-	}
-	if !os.IsNotExist(err) {
-		return nil, err
-	}
-	// Legacy compatibility: Galley used claude_result.json before executor
-	// results were provider-neutral. Keep this fallback while existing run
-	// evidence may still be read; remove it after the legacy artifact window ends.
-	return os.ReadFile(filepath.Join(attemptDir, legacyClaudeResultFilename))
-}
-
-// appendPreflightObligations adds runtime skeleton paths, AC bindings, kinds,
-// and purposes derived from the preflight result. The caller suppresses static
-// task-output rendering first so the executor sees a single runtime obligations
-// section.
-func appendPreflightObligations(prompt string, res *AcceptanceSkeletonResult) string {
-	if res == nil {
-		return prompt
-	}
-	var b strings.Builder
-	b.WriteString("\n## Acceptance Skeleton Obligations (Runtime)\n\n")
-	if res.Status == "failed" {
-		b.WriteString(fmt.Sprintf("Acceptance skeleton preflight failed (%s); see preflight_result.json for details.\n", preflightFailureMessage(res)))
-		return prompt + b.String()
-	}
-	if len(res.Outputs) == 0 {
-		b.WriteString("Preflight enabled with no declared outputs. Add coverage if acceptance criteria require behavior tests.\n")
-		return prompt + b.String()
-	}
-	b.WriteString("Galley pre-created the following AC-linked test skeletons in the worktree before this attempt. Read each skeleton, complete the implementation it verifies, and keep the assertions meaningful. Do not delete skeleton files, leave placeholder assertions, skip the tests, or weaken their assertions.\n\n")
-	for _, out := range res.Outputs {
-		b.WriteString(fmt.Sprintf("- AC `%s` -> `%s` (kind=%s, implementation_required=%t)\n", out.ACID, out.Path, out.Kind, out.ImplementationRequired))
-		b.WriteString(fmt.Sprintf("  Purpose: %s\n", out.Purpose))
-		if out.Satisfies != "" {
-			b.WriteString(fmt.Sprintf("  Satisfies: %s\n", out.Satisfies))
-		}
-		if out.IntegrationPoint != "" {
-			b.WriteString(fmt.Sprintf("  Integration point: %s\n", out.IntegrationPoint))
-		}
-	}
-	b.WriteString("\nCompletion obligations: every implementation_required skeleton above must be implemented and covered by the normal required verification checks before the supervisor accepts the attempt.\n")
-	return prompt + b.String()
-}
-
-func preflightFailureMessage(res *AcceptanceSkeletonResult) string {
-	if res == nil || res.Error == nil {
-		return "unknown failure"
-	}
-	if res.Error.Phase != "" && res.Error.Message != "" {
-		return res.Error.Phase + ": " + res.Error.Message
-	}
-	if res.Error.Message != "" {
-		return res.Error.Message
-	}
-	return res.Error.Phase
+	return os.ReadFile(runartifact.Path(attemptDir, runartifact.ExecutorResultFilename))
 }
 
 // prepareClaudeExecutorPlan builds the Claude executor command plan and the
@@ -1336,7 +1060,7 @@ func attemptsLeft(budget, attempt int) int {
 // writeSupervisorEvidence persists the resolved supervisor and its source for
 // a run so reviewers can verify which precedence layer (repository
 // environment profile, CLI startup flag, daemon.yaml, or built-in default)
-// determined the supervisor adapter Galley used (AC8). The function is
+// determined the supervisor adapter Galley used. The function is
 // extracted from runSupervisorLoop so it can be unit-tested without driving a
 // full task through the daemon loop.
 func writeSupervisorEvidence(runDir string, effectiveOpts Options) error {

@@ -17,9 +17,8 @@ import (
 // task validate`, `galley task queue`, `galley task requeue`, archive's
 // current-schema path, and daemon execution of a queued task. Unknown fields
 // or type mismatches surface as decode errors so a malformed active task is
-// rejected before it reaches the executor. Read-only inspection of legacy or
-// historical task files that may contain fields from previous schema
-// revisions must use LoadLenient instead.
+// rejected before it reaches the executor. Read-only inspection of strict-
+// decode-incompatible task files must use LoadLenient instead.
 func Load(path string) (Task, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -37,7 +36,7 @@ func Load(path string) (Task, error) {
 }
 
 // LoadLenient reads a task YAML file with unknown fields tolerated. It is
-// intended for read-only inspection of legacy or historical task files such
+// intended for read-only inspection of strict-decode-incompatible task files such
 // as `galley task list` and `galley task show` scans, daemon helper sweeps
 // over `tasks/done` and `tasks/failed`, and archive's safe-status fallback.
 // Callers must not use a lenient-loaded Task to overwrite the file through

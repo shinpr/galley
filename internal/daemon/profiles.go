@@ -52,25 +52,25 @@ func loadTaskProfiles(opts Options, repoCWD string) (resolvedProfileFiles, profi
 // `git worktree add` as the start-point for a brand-new task branch. The
 // resolution chain matches the daemon contract documented in the task design:
 //
-//  1. If the source repository has an origin remote, run
-//     `git fetch --no-tags --quiet origin <base>` to refresh
-//     refs/remotes/origin/<base>. A successful fetch means the remote-tracking
-//     ref now reflects the latest remote tip, so the daemon uses it as the
-//     start-point. A failed fetch is a hard error: the daemon refuses to use a
-//     possibly stale refs/remotes/origin/<base> and fails workspace
-//     preparation with a descriptive message that names the source repo path,
-//     pr.base, and the failed fetch operation. This matches the PR-review
-//     requirement that a stale remote-tracking ref must not silently anchor a
-//     new task branch behind the actual remote tip.
-//  2. If the source repository has no origin remote (origin-less local
-//     checkouts and the smoke test), fall back to refs/heads/<base>. This
-//     keeps offline/local development paths working while preserving the
-//     refresh-or-fail guarantee whenever origin is configured.
-//  3. If the resolved candidate ref does not exist (no origin and
-//     refs/heads/<base> missing, or origin successful fetch yet
-//     refs/remotes/origin/<base> still missing), the daemon fails the claimed
-//     task with a descriptive error naming both attempted refs and the source
-//     repository path.
+// 1. If the source repository has an origin remote, run
+// `git fetch --no-tags --quiet origin <base>` to refresh
+// refs/remotes/origin/<base>. A successful fetch means the remote-tracking
+// ref now reflects the latest remote tip, so the daemon uses it as the
+// start-point. A failed fetch is a hard error: the daemon refuses to use a
+// possibly stale refs/remotes/origin/<base> and fails workspace
+// preparation with a descriptive message that names the source repo path,
+// pr.base, and the failed fetch operation. This matches the PR-review
+// requirement that a stale remote-tracking ref must not silently anchor a
+// new task branch behind the actual remote tip.
+// 2. If the source repository has no origin remote (origin-less local
+// checkouts and the smoke test), fall back to refs/heads/<base>. This
+// keeps offline/local development paths working while preserving the
+// refresh-or-fail guarantee whenever origin is configured.
+// 3. If the resolved candidate ref does not exist (no origin and
+// refs/heads/<base> missing, or origin successful fetch yet
+// refs/remotes/origin/<base> still missing), the daemon fails the claimed
+// task with a descriptive error naming both attempted refs and the source
+// repository path.
 //
 // When base is empty (environment profile missing or pr.base set to empty
 // string), this returns ("", nil) so the caller passes StartPoint="" to
@@ -191,11 +191,11 @@ func effectiveOptionsForProfiles(opts Options, profiles profile.Bundle) Options 
 		if env.Worktree.Cleanup != nil {
 			effective.CleanupWorktrees = *env.Worktree.Cleanup
 		}
-		// Per-task supervisor selection (AC4 / D1): when the resolved
+		// Per-task supervisor selection: when the resolved
 		// environment.yaml declares supervisor.default_cli, the daemon uses
 		// that adapter for this task even when CLI startup options or
 		// daemon.yaml chose a different supervisor. The override is recorded
-		// as `environment_profile` in run evidence (AC8).
+		// as `environment_profile` in run evidence.
 		if env.Supervisor != nil && env.Supervisor.DefaultCLI != "" {
 			effective.Supervisor = env.Supervisor.DefaultCLI
 			effective.SupervisorSource = SupervisorSourceRepoProfile

@@ -4,16 +4,15 @@ Use this reference when running Galley from Codex CLI, especially evals or daemo
 
 ## Permission
 
-Run task authoring, validation, and queueing normally.
+Before starting a Galley daemon from Codex, decide whether the daemon command needs elevated sandbox permissions using the rule below.
 
-Use elevated sandbox permissions for `galley daemon start` or `galley daemon run --once` when the task needs paths outside the current Codex writable roots:
-
-- `scope.cwd`
-- `worktree.path`
-- required check output directories
-- git or GitHub operations used by PR automation
+Use elevated sandbox permissions for `galley daemon run`, `galley daemon run --once`, and `galley daemon start` when the task repository or configured worktree path is outside the current Codex writable roots.
 
 Sibling worktrees such as `../<repo>.worktrees/<task>` commonly need elevation during Codex evals.
+
+Reason: Galley daemon execution writes repository git metadata, sibling worktrees, run evidence, check artifacts, commits, pushes, and PR state. Outside writable roots, these writes can fail with `Operation not permitted`.
+
+Read-only commands such as `galley task validate`, `galley task show`, `galley task list`, and profile validation can run without elevation.
 
 ## Daemon Execution
 
@@ -29,5 +28,7 @@ When running the daemon from Codex, operate as a broker and carry one run to a t
 | Error | Cause | Action |
 | --- | --- | --- |
 | `operation not permitted` | Codex sandbox blocked worktree, repo, or artifact writes | Re-run the daemon command with elevated sandbox permissions. |
+| `cannot open '.git/FETCH_HEAD': Operation not permitted` | Codex sandbox blocked `git fetch` in the task repository | Re-run the daemon command with elevated sandbox permissions. |
+| `cannot lock ref ... Operation not permitted` | Codex sandbox blocked branch or worktree creation in the task repository | Re-run the daemon command with elevated sandbox permissions. |
 | task remains `queued` | daemon did not run, watched another root, or hit a claim conflict | Check `galley daemon status`, `galley task list`, and the daemon root. |
 | task remains `running` | active run or stale claim | Check the daemon log and task heartbeat; requeue after claim TTL when stale. |

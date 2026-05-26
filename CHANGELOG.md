@@ -6,6 +6,8 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.7.1 - 2026-05-26
+
 ### Changed
 
 - Existing `environment.yaml` `setup.commands[]` plans now run through the setup executor instead of a daemon-owned direct execution path. Setup failures from saved plans can therefore be diagnosed and repaired in the same executor context that learns new setup plans, while successful repaired plans are still persisted back to `environment.yaml`.

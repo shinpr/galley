@@ -368,8 +368,11 @@ func TestSetupExecutorCommandPlanClaudeAndCodex(t *testing.T) {
 	if len(codexPlan.Argv) == 0 || codexPlan.Argv[0] != "/path/to/codex" {
 		t.Fatalf("codex argv[0] got %v", codexPlan.Argv)
 	}
-	if len(codexPlan.Env) == 0 {
-		t.Fatalf("codex setup executor must run with runner restricted env")
+	if len(claudePlan.EnvAppend) != 1 || claudePlan.EnvAppend[0] != "GALLEY_CLAUDE_GUARD_MODE=setup_executor" {
+		t.Fatalf("claude setup executor guard env append got %v", claudePlan.EnvAppend)
+	}
+	if len(codexPlan.EnvAppend) != 0 {
+		t.Fatalf("codex setup executor must not carry env append entries: %v", codexPlan.EnvAppend)
 	}
 	joined := strings.Join(codexPlan.Argv, " ")
 	if !strings.Contains(joined, "--output-last-message") {

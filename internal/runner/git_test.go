@@ -1,7 +1,14 @@
 package runner
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -99,5 +106,112 @@ func TestGitArgsLongpathsFlagIsImmediatelyAfterBinary(t *testing.T) {
 	}
 	if got[3] != "-C" {
 		t.Errorf("expected subcommand selector after longpaths flag, got %q", got[3])
+	}
+}
+
+func TestProductionGitInvocationsUseGitArgs(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", ".."))
+	fset := token.NewFileSet()
+
+	var violations []string
+	err := filepath.WalkDir(repoRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			switch entry.Name() {
+			case ".git", ".claude", "node_modules", "vendor":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel, err := filepath.Rel(repoRoot, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		if rel == "internal/runner/git.go" {
+			return nil
+		}
+		file, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			return err
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			switch n := node.(type) {
+			case *ast.CallExpr:
+				if gitExecArgIndex(n) >= 0 {
+					violations = append(violations, rel+":"+fset.Position(n.Pos()).String())
+				}
+			case *ast.CompositeLit:
+				if stringSliceStartsWithGit(n) {
+					violations = append(violations, rel+":"+fset.Position(n.Pos()).String())
+				}
+			}
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan production git invocations: %v", err)
+	}
+	if len(violations) > 0 {
+		t.Fatalf("Galley-owned git invocations must use runner.GitArgs:\n%s", strings.Join(violations, "\n"))
+	}
+}
+
+func gitExecArgIndex(call *ast.CallExpr) int {
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return -1
+	}
+	pkg, ok := selector.X.(*ast.Ident)
+	if !ok || pkg.Name != "exec" {
+		return -1
+	}
+	switch selector.Sel.Name {
+	case "Command":
+		if len(call.Args) > 0 && isGitExpr(call.Args[0]) {
+			return 0
+		}
+	case "CommandContext":
+		if len(call.Args) > 1 && isGitExpr(call.Args[1]) {
+			return 1
+		}
+	}
+	return -1
+}
+
+func stringSliceStartsWithGit(lit *ast.CompositeLit) bool {
+	if len(lit.Elts) == 0 {
+		return false
+	}
+	array, ok := lit.Type.(*ast.ArrayType)
+	if !ok {
+		return false
+	}
+	elt, ok := array.Elt.(*ast.Ident)
+	if !ok || elt.Name != "string" {
+		return false
+	}
+	return isGitExpr(lit.Elts[0])
+}
+
+func isGitExpr(expr ast.Expr) bool {
+	switch e := expr.(type) {
+	case *ast.BasicLit:
+		if e.Kind != token.STRING {
+			return false
+		}
+		value, err := strconv.Unquote(e.Value)
+		return err == nil && value == "git"
+	case *ast.CallExpr:
+		selector, ok := e.Fun.(*ast.SelectorExpr)
+		return ok && selector.Sel.Name == "git"
+	default:
+		return false
 	}
 }

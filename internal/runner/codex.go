@@ -173,7 +173,6 @@ func CodexCommandPlan(opts CodexOptions) (Command, error) {
 		WorkDir:  opts.WorkDir,
 		Argv:     argv,
 		Stdin:    combined,
-		Env:      RestrictedEnv(),
 		Warnings: warnings,
 	}, nil
 }

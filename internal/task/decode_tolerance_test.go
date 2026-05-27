@@ -3,6 +3,7 @@ package task
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"go.yaml.in/yaml/v3"
@@ -173,6 +174,37 @@ func TestArchiveStrictDecodeIncompatibleUnknownFieldUsesStatusEdit(t *testing.T)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("source path should be moved, err=%v", err)
+	}
+}
+
+func TestArchiveStrictDecodeIncompatibleSkipsOpenPRCheck(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	doneDir := filepath.Join(root, "tasks", "done")
+	if err := os.MkdirAll(doneDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := writeSchemaIncompatibleTaskYAML(t, doneDir, "task.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(data)
+	body = strings.Replace(body, `url: ""`, `url: "https://github.com/example/repo/pull/1"`, 1)
+	body = strings.Replace(body, `status: ""`, `status: "open"`, 1)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Archive(path, ArchiveOptions{Reason: "schema-incompatible cleanup"})
+	if err != nil {
+		t.Fatalf("strict-decode-incompatible archive should skip non-authoritative PR open check: %v", err)
+	}
+	if result.Mode != "lenient_status_edit" {
+		t.Fatalf("mode got %q", result.Mode)
+	}
+	if _, err := os.Stat(filepath.Join(root, "tasks", "archived", "task.yaml")); err != nil {
+		t.Fatalf("archived task missing: %v", err)
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"github.com/shinpr/galley/internal/runartifact"
 	"github.com/shinpr/galley/internal/runlog"
 	"github.com/shinpr/galley/internal/task"
+	"github.com/shinpr/galley/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -47,6 +48,17 @@ func newTaskArchiveCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if result.Task.Worktree.Enabled && result.Task.Worktree.Path != "" {
+				cleanup, err := workspace.Remove(cmd.Context(), result.Task.Scope.CWD, result.Task.Worktree, workspace.Options{})
+				if err != nil {
+					return fmt.Errorf("archived task %s but failed to remove worktree %s: %w", result.To, result.Task.Worktree.Path, err)
+				}
+				result.WorktreeCleanup = &task.WorktreeCleanupResult{
+					Path:           cleanup.Path,
+					Removed:        cleanup.Removed,
+					AlreadyMissing: cleanup.AlreadyMissing,
+				}
+			}
 			return renderOutput(cmd, output, result, func() error {
 				archivedLabel := result.Task.ID
 				if archivedLabel == "" {
@@ -55,6 +67,10 @@ func newTaskArchiveCommand() *cobra.Command {
 				fmt.Fprintf(cmd.OutOrStdout(), "archived: %s\n", archivedLabel)
 				if result.From != result.To {
 					fmt.Fprintf(cmd.OutOrStdout(), "moved: %s -> %s\n", result.From, result.To)
+				}
+				if result.WorktreeCleanup != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "worktree_removed: %t\n", result.WorktreeCleanup.Removed)
+					fmt.Fprintf(cmd.OutOrStdout(), "worktree: %s\n", result.WorktreeCleanup.Path)
 				}
 				// Surface lenient-fallback context so operators see that the
 				// archived file kept its pre-current-schema bytes. The JSON

@@ -1118,7 +1118,7 @@ func TestProcessAvailableLetsClaimedTaskFinishAfterShutdown(t *testing.T) {
 		}.withDefaults())
 		done <- err
 	}()
-	waitForFile(t, started)
+	waitForFileOrDone(t, started, done)
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
@@ -1155,7 +1155,7 @@ func TestShutdownStopsBeforeRetryAttempt(t *testing.T) {
 		}.withDefaults())
 		done <- err
 	}()
-	waitForFile(t, attemptLog)
+	waitForFileOrDone(t, attemptLog, done)
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
@@ -1751,17 +1751,26 @@ func writeFakeCommand(t *testing.T, name, body string) string {
 	return commandPath
 }
 
-func waitForFile(t *testing.T, path string) {
+func waitForFileOrDone(t *testing.T, path string, done <-chan error) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.NewTimer(10 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
 	for {
 		if _, err := os.Stat(path); err == nil {
 			return
 		}
-		if time.Now().After(deadline) {
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("processAvailable returned before %s appeared: %v", path, err)
+			}
+			t.Fatalf("processAvailable completed before %s appeared", path)
+		case <-deadline.C:
 			t.Fatalf("timed out waiting for %s", path)
+		case <-ticker.C:
 		}
-		time.Sleep(5 * time.Millisecond)
 	}
 }
 

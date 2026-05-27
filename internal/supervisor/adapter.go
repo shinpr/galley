@@ -155,7 +155,6 @@ func runCodexAdapter(ctx context.Context, opts AdapterOptions, request []byte) (
 			"-",
 		},
 		Stdin: prompt,
-		Env:   runner.RestrictedEnv(),
 	}, runner.RunOptions{Timeout: opts.Timeout, IdleTimeout: opts.IdleTimeout, StdoutPath: eventsPath})
 	if err != nil {
 		return nil, fmt.Errorf("codex supervisor failed: %w", err)
@@ -222,10 +221,10 @@ func runClaudeAdapterForOS(ctx context.Context, opts AdapterOptions, request []b
 		args = append(args, "--debug-file", debugPath)
 	}
 	_, err = runner.RunCommand(ctx, runner.Command{
-		WorkDir: opts.WorkDir,
-		Argv:    args,
-		Stdin:   string(request),
-		Env:     runner.RestrictedEnv("GALLEY_CLAUDE_GUARD_MODE=supervisor"),
+		WorkDir:   opts.WorkDir,
+		Argv:      args,
+		Stdin:     string(request),
+		EnvAppend: []string{"GALLEY_CLAUDE_GUARD_MODE=supervisor"},
 	}, runner.RunOptions{Timeout: opts.Timeout, IdleTimeout: opts.IdleTimeout, StdoutPath: stdoutPath})
 	if err != nil {
 		return nil, fmt.Errorf("claude supervisor failed: %w", err)

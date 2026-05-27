@@ -136,14 +136,13 @@ func buildClaudeCreatorCommandPlan(opts Options, payload []byte) (runner.Command
 	if err != nil {
 		return runner.Command{}, creatorErr("plan built-in creator: %v", err)
 	}
-	commandPlan.Env = runner.RestrictedEnv("GALLEY_CLAUDE_GUARD_MODE=acceptance_skeleton_creator")
+	commandPlan.EnvAppend = []string{"GALLEY_CLAUDE_GUARD_MODE=acceptance_skeleton_creator"}
 	return commandPlan, nil
 }
 
 func writeBuiltinCreatorCommandPlan(runDir string, commandPlan runner.Command) *preflightErr {
 	planPath := runartifact.Path(runDir, runartifact.PreflightCreatorPlanFilename)
 	auditPlan := commandPlan
-	auditPlan.Env = nil
 	if err := jsonio.Write(planPath, auditPlan); err != nil {
 		return creatorErr("write creator command plan: %v", err)
 	}

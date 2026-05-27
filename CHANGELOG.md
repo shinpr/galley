@@ -10,6 +10,7 @@ This project follows semantic versioning.
 
 - Claude and Codex subprocesses now inherit the parent environment directly, fixing Windows runs where Galley's previous allowlist dropped required system and toolchain variables.
 - Galley-owned git invocations now enable `core.longpaths=true`, avoiding Windows MAX_PATH failures during worktree cleanup, staging, and related git operations.
+- Verification and setup output excerpts are now scrubbed to valid UTF-8 and truncated on rune boundaries, so accepted tasks with non-ASCII subprocess output no longer fail finalization with `cannot marshal invalid UTF-8 data as !!str`.
 
 ## v0.7.1 - 2026-05-26
 

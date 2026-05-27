@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/shinpr/galley/internal/profile"
 	"github.com/shinpr/galley/internal/task"
@@ -50,20 +51,49 @@ func truncateExcerpt(s string) string {
 }
 
 func truncateString(s string, max int) string {
+	// runner.tailBuffer may start mid-rune.
+	s = strings.ToValidUTF8(s, "\uFFFD")
 	if len(s) <= max {
 		return s
 	}
 	if max <= 1 {
-		return s[:max]
+		return truncateHead(s, max)
 	}
 	const marker = "..."
 	if max <= len(marker) {
-		return s[:max]
+		return truncateHead(s, max)
 	}
 	remaining := max - len(marker)
 	head := remaining / 2
 	tail := remaining - head
-	return s[:head] + marker + s[len(s)-tail:]
+	return truncateHead(s, head) + marker + truncateTail(s, tail)
+}
+
+func truncateHead(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	if n >= len(s) {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
+}
+
+func truncateTail(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	if n >= len(s) {
+		return s
+	}
+	start := len(s) - n
+	for start < len(s) && !utf8.RuneStart(s[start]) {
+		start++
+	}
+	return s[start:]
 }
 
 // DiscoverRepositorySignals returns a small set of repository setup signal

@@ -6,6 +6,8 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.7.2 - 2026-05-27
+
 ### Fixed
 
 - Claude and Codex subprocesses now inherit the parent environment directly, fixing Windows runs where Galley's previous allowlist dropped required system and toolchain variables.

@@ -6,6 +6,12 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.7.3 - 2026-05-27
+
+### Fixed
+
+- Supervisor reviews now compare behavior-changing work against an explicit behavior contract, including source/reference behavior, implementation evidence, verification evidence, negative or mixed-state coverage, and retry drift, so accepted attempts are less likely to change observable behavior while still presenting passing checks.
+
 ## v0.7.2 - 2026-05-27
 
 ### Fixed

@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/shinpr/galley/internal/jsonio"
 	"github.com/shinpr/galley/internal/profile"
@@ -269,11 +270,17 @@ func looksPOSIXCommand(command string) bool {
 }
 
 func (r verificationRun) outputExcerpt() string {
-	output := strings.TrimSpace(strings.Join([]string{r.stdout, r.stderr}, "\n"))
-	if len(output) > 2048 {
-		return output[:2048]
+	// runner.tailBuffer may start mid-rune; the excerpt is emitted as an
+	// !!str-tagged YAML scalar that fails marshal on invalid UTF-8.
+	output := strings.ToValidUTF8(strings.TrimSpace(strings.Join([]string{r.stdout, r.stderr}, "\n")), "\uFFFD")
+	if len(output) <= 2048 {
+		return output
 	}
-	return output
+	cut := 2048
+	for cut > 0 && !utf8.RuneStart(output[cut]) {
+		cut--
+	}
+	return output[:cut]
 }
 
 func gitChangedFiles(ctx context.Context, workDir, gitBin string) ([]string, error) {

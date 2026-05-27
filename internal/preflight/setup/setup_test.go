@@ -3,6 +3,7 @@ package setup
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/shinpr/galley/internal/profile"
 )
@@ -163,6 +164,25 @@ func TestNormalizeResultBoundsLargeFields(t *testing.T) {
 	}
 	if strings.HasPrefix(res.Commands[0].StdoutExcerpt, " ") || len(res.Commands[0].StdoutExcerpt) != maxResultExcerptLength {
 		t.Fatalf("stdout excerpt not normalized: %q", res.Commands[0].StdoutExcerpt)
+	}
+}
+
+func TestTruncateStringKeepsValidUTF8(t *testing.T) {
+	t.Parallel()
+	tests := map[string]string{
+		"cuts inside multi-byte rune": strings.Repeat("あ", 200),
+		"leading orphan byte":         "\x81" + strings.Repeat("a", 200),
+	}
+	for name, in := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := truncateString(in, 101)
+			if !utf8.ValidString(got) {
+				t.Fatalf("truncated string is not valid UTF-8: %q", got)
+			}
+			if len(got) > 101 {
+				t.Fatalf("truncated string exceeds budget: len=%d", len(got))
+			}
+		})
 	}
 }
 

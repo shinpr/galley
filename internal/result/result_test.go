@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/shinpr/galley/internal/profile"
 )
@@ -265,6 +267,25 @@ func slowCommand() string {
 		return "ping -n 3 127.0.0.1 > NUL"
 	}
 	return "sleep 2"
+}
+
+func TestOutputExcerptKeepsValidUTF8(t *testing.T) {
+	t.Parallel()
+	tests := map[string]string{
+		"trailing cut inside rune":      strings.Repeat("a", 2047) + "あ" + strings.Repeat("a", 100),
+		"leading orphan byte in budget": "\x81" + strings.Repeat("a", 2047),
+	}
+	for name, stdout := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := verificationRun{stdout: stdout}.outputExcerpt()
+			if !utf8.ValidString(got) {
+				t.Fatalf("excerpt is not valid UTF-8: %q", got[:min(32, len(got))])
+			}
+			if len(got) > 2048 {
+				t.Fatalf("excerpt exceeds byte budget: len=%d", len(got))
+			}
+		})
+	}
 }
 
 func runGit(t *testing.T, dir string, args ...string) {

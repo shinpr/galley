@@ -31,7 +31,6 @@ type CommandAttemptResult struct {
 
 func RunCommandAttempt(ctx context.Context, opts CommandAttemptOptions) (CommandAttemptResult, error) {
 	auditPlan := opts.CommandPlan
-	auditPlan.Env = nil
 	if err := jsonio.Write(runartifact.Path(opts.AttemptDir, runartifact.CommandPlanFilename), auditPlan); err != nil {
 		return CommandAttemptResult{}, err
 	}

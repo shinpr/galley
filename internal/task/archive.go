@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/shinpr/galley/internal/strutil"
@@ -28,8 +29,17 @@ type ArchiveResult struct {
 	//     top-level status field while preserving unknown fields.
 	//   - "move_unreadable_unchanged": fallback that copies the YAML bytes
 	//     unchanged when even safe status editing is unsafe.
-	Mode    string `json:"mode,omitempty"`
-	Warning string `json:"warning,omitempty"`
+	Mode            string                 `json:"mode,omitempty"`
+	Warning         string                 `json:"warning,omitempty"`
+	WorktreeCleanup *WorktreeCleanupResult `json:"worktree_cleanup,omitempty"`
+}
+
+// WorktreeCleanupResult records archive-time cleanup of a Galley-managed
+// task worktree without making the task package depend on workspace.
+type WorktreeCleanupResult struct {
+	Path           string `json:"path"`
+	Removed        bool   `json:"removed"`
+	AlreadyMissing bool   `json:"already_missing,omitempty"`
 }
 
 // Archive moves a completed or reviewed task into tasks/archived without
@@ -64,6 +74,9 @@ func Archive(path string, opts ArchiveOptions) (ArchiveResult, error) {
 func archiveCurrentSchema(path string, loaded Task, opts ArchiveOptions) (ArchiveResult, error) {
 	if !CanArchive(loaded.Status) {
 		return ArchiveResult{}, fmt.Errorf("task %s status %q cannot be archived", loaded.ID, loaded.Status)
+	}
+	if loaded.PR.URL != "" && strings.EqualFold(loaded.PR.Status, "open") {
+		return ArchiveResult{}, fmt.Errorf("task %s has an open PR; close or merge the PR before archiving", loaded.ID)
 	}
 	loaded.Status = StatusArchived
 	loaded.Attempts = append(loaded.Attempts, Attempt{

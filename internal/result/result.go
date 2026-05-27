@@ -277,10 +277,11 @@ func (r verificationRun) outputExcerpt() string {
 }
 
 func gitChangedFiles(ctx context.Context, workDir, gitBin string) ([]string, error) {
-	if gitBin == "" {
-		gitBin = "git"
-	}
-	cmd := exec.CommandContext(ctx, gitBin, "status", "--porcelain", "-z")
+	// Route through runner.GitArgs so this git invocation picks up
+	// `core.longpaths=true` from the shared wrapper alongside the other
+	// Galley-owned git operations (AC7/AC8).
+	argv := runner.GitArgs(gitBin, "status", "--porcelain", "-z")
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = workDir
 	output, err := cmd.Output()
 	if err != nil {

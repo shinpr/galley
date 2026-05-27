@@ -45,11 +45,14 @@ type ClaudeOptions struct {
 
 // Command is an execution plan suitable for exec.Command plus cmd.Dir.
 type Command struct {
-	WorkDir  string   `json:"work_dir"`
-	Argv     []string `json:"argv"`
-	Stdin    string   `json:"stdin,omitempty"`
-	Env      []string `json:"env,omitempty"`
-	Warnings []string `json:"warnings,omitempty"`
+	WorkDir string   `json:"work_dir"`
+	Argv    []string `json:"argv"`
+	Stdin   string   `json:"stdin,omitempty"`
+	// EnvAppend contains Galley-owned per-command environment entries. It is
+	// intentionally not serialized into command-plan evidence and never holds
+	// the parent process environment.
+	EnvAppend []string `json:"-"`
+	Warnings  []string `json:"warnings,omitempty"`
 }
 
 // FromTask maps a validated Galley task into Claude runner options.

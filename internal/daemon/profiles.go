@@ -123,13 +123,9 @@ func resolveWorktreeStartPoint(ctx context.Context, opts Options, sourceCWD, bas
 // origin-less local repositories (smoke test, fresh clones without a remote)
 // keep using the refs/heads/<base> fallback path.
 func hasOriginRemote(ctx context.Context, opts Options, sourceCWD string) bool {
-	gitBin := opts.GitBin
-	if gitBin == "" {
-		gitBin = "git"
-	}
 	_, err := runner.RunCommand(ctx, runner.Command{
 		WorkDir: "",
-		Argv:    []string{gitBin, "-C", sourceCWD, "remote", "get-url", "origin"},
+		Argv:    runner.GitArgs(opts.GitBin, "-C", sourceCWD, "remote", "get-url", "origin"),
 	}, runner.RunOptions{TailBytes: -1})
 	return err == nil
 }
@@ -141,17 +137,13 @@ func hasOriginRemote(ctx context.Context, opts Options, sourceCWD string) bool {
 // workspace preparation so the daemon refuses to anchor a new task branch on a
 // possibly stale remote-tracking ref.
 func fetchOriginRef(ctx context.Context, opts Options, sourceCWD, base string) error {
-	gitBin := opts.GitBin
-	if gitBin == "" {
-		gitBin = "git"
-	}
 	// Retry transient git fetch failures (transport hiccup, brief auth/DNS
 	// flake). The retry helper preserves the original error type so the
 	// fmt.Errorf wrap below surfaces the same value to callers.
 	err := retry.Do(ctx, func(ctx context.Context) error {
 		_, runErr := runner.RunCommand(ctx, runner.Command{
 			WorkDir: "",
-			Argv:    []string{gitBin, "-C", sourceCWD, "fetch", "--no-tags", "--quiet", "origin", base},
+			Argv:    runner.GitArgs(opts.GitBin, "-C", sourceCWD, "fetch", "--no-tags", "--quiet", "origin", base),
 		}, runner.RunOptions{TailBytes: -1})
 		return runErr
 	})
@@ -162,13 +154,9 @@ func fetchOriginRef(ctx context.Context, opts Options, sourceCWD, base string) e
 }
 
 func refExists(ctx context.Context, opts Options, sourceCWD, ref string) (bool, error) {
-	gitBin := opts.GitBin
-	if gitBin == "" {
-		gitBin = "git"
-	}
 	result, err := runner.RunCommand(ctx, runner.Command{
 		WorkDir: "",
-		Argv:    []string{gitBin, "-C", sourceCWD, "show-ref", "--verify", "--quiet", ref},
+		Argv:    runner.GitArgs(opts.GitBin, "-C", sourceCWD, "show-ref", "--verify", "--quiet", ref),
 	}, runner.RunOptions{TailBytes: -1})
 	if err != nil {
 		if result.ExitCode == 1 {

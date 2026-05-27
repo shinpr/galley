@@ -6,6 +6,11 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Fixed
+
+- Claude and Codex subprocesses now inherit the parent environment directly, fixing Windows runs where Galley's previous allowlist dropped required system and toolchain variables.
+- Galley-owned git invocations now enable `core.longpaths=true`, avoiding Windows MAX_PATH failures during worktree cleanup, staging, and related git operations.
+
 ## v0.7.1 - 2026-05-26
 
 ### Changed

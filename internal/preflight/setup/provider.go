@@ -77,7 +77,7 @@ func buildClaudeSetupExecutorCommandPlan(opts Options, payload []byte) (runner.C
 	if err != nil {
 		return runner.Command{}, fmt.Errorf("plan setup executor: %w", err)
 	}
-	commandPlan.Env = runner.RestrictedEnv("GALLEY_CLAUDE_GUARD_MODE=setup_executor")
+	commandPlan.EnvAppend = []string{"GALLEY_CLAUDE_GUARD_MODE=setup_executor"}
 	return commandPlan, nil
 }
 
@@ -107,7 +107,6 @@ func buildCodexSetupExecutorCommandPlan(opts Options, payload []byte) (runner.Co
 func writeSetupExecutorCommandPlan(runDir string, commandPlan runner.Command) error {
 	planPath := runartifact.Path(runDir, runartifact.SetupExecutorPlanFilename)
 	auditPlan := commandPlan
-	auditPlan.Env = nil
 	return jsonio.Write(planPath, auditPlan)
 }
 

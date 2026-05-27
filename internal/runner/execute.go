@@ -119,8 +119,8 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 	if command.WorkDir != "" {
 		cmd.Dir = command.WorkDir
 	}
-	if command.Env != nil {
-		cmd.Env = command.Env
+	if len(command.EnvAppend) > 0 {
+		cmd.Env = append(os.Environ(), command.EnvAppend...)
 	}
 	if command.Stdin != "" {
 		cmd.Stdin = strings.NewReader(command.Stdin)

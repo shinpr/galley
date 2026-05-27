@@ -87,10 +87,10 @@ func addPathsForOS(ctx context.Context, bins Binaries, workDir, runDir string, p
 		// from stdin so a long list of changed files never reaches argv. The
 		// NUL separator avoids any ambiguity with paths that contain LF or
 		// other whitespace characters.
-		cmd.Argv = []string{bins.git(), "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"}
+		cmd.Argv = runner.GitArgs(bins.git(), "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul")
 		cmd.Stdin = strings.Join(pathspecs, "\x00") + "\x00"
 	} else {
-		cmd.Argv = append([]string{bins.git(), "add", "-A", "--"}, pathspecs...)
+		cmd.Argv = runner.GitArgs(bins.git(), append([]string{"add", "-A", "--"}, pathspecs...)...)
 	}
 	_, err := runCommandWithEvidence(ctx, cmd, runDir, "git_add", "git add failed")
 	return err
@@ -114,7 +114,7 @@ func addPathsForOS(ctx context.Context, bins Binaries, workDir, runDir string, p
 func StatusPorcelainZ(ctx context.Context, bins Binaries, workDir string) (string, error) {
 	result, err := runner.RunCommand(ctx, runner.Command{
 		WorkDir: workDir,
-		Argv:    []string{bins.git(), "status", "--porcelain=v1", "-z", "--untracked-files=all"},
+		Argv:    runner.GitArgs(bins.git(), "status", "--porcelain=v1", "-z", "--untracked-files=all"),
 	}, runner.RunOptions{})
 	if err != nil {
 		return "", fmt.Errorf("git status --porcelain -z (review staging discovery) failed: %w", err)
@@ -183,10 +183,10 @@ func stagePathsForReviewForOS(ctx context.Context, bins Binaries, workDir, runDi
 		// long list of changed files cannot push the CreateProcess command
 		// line past the platform's argv limit. The NUL separator avoids
 		// any ambiguity with paths that contain LF or other whitespace.
-		cmd.Argv = []string{bins.git(), "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"}
+		cmd.Argv = runner.GitArgs(bins.git(), "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul")
 		cmd.Stdin = strings.Join(pathspecs, "\x00") + "\x00"
 	} else {
-		cmd.Argv = append([]string{bins.git(), "add", "-A", "--"}, pathspecs...)
+		cmd.Argv = runner.GitArgs(bins.git(), append([]string{"add", "-A", "--"}, pathspecs...)...)
 	}
 	result, err := runner.RunCommand(ctx, cmd, runner.RunOptions{
 		StdoutPath: filepath.Join(runDir, "git_add_review.stdout.log"),
@@ -245,7 +245,7 @@ func literalPathspecs(paths []string) []string {
 func Commit(ctx context.Context, bins Binaries, workDir, runDir, message string) error {
 	_, err := runCommandWithEvidence(ctx, runner.Command{
 		WorkDir: workDir,
-		Argv:    []string{bins.git(), "commit", "-m", message},
+		Argv:    runner.GitArgs(bins.git(), "commit", "-m", message),
 	}, runDir, "git_commit", "git commit failed")
 	return err
 }
@@ -254,7 +254,7 @@ func Commit(ctx context.Context, bins Binaries, workDir, runDir, message string)
 func PushCurrentBranch(ctx context.Context, bins Binaries, workDir, runDir string) error {
 	_, err := runCommandWithEvidence(ctx, runner.Command{
 		WorkDir: workDir,
-		Argv:    []string{bins.git(), "push", "-u", "origin", "HEAD"},
+		Argv:    runner.GitArgs(bins.git(), "push", "-u", "origin", "HEAD"),
 	}, runDir, "git_push", "git push failed")
 	return err
 }

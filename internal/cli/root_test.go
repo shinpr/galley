@@ -2,14 +2,17 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 
 	taskpkg "github.com/shinpr/galley/internal/task"
+	"github.com/shinpr/galley/internal/workspace"
 )
 
 func TestVersionOutput(t *testing.T) {
@@ -396,6 +399,60 @@ func TestTaskArchiveText(t *testing.T) {
 	}
 }
 
+func TestTaskArchiveRemovesManagedWorktree(t *testing.T) {
+	root := t.TempDir()
+	repo := initCLIGitRepo(t)
+	worktreePath := filepath.Join(root, "repo.worktrees", "task-cli-test")
+	prepared, err := workspace.Prepare(context.Background(), repo, taskpkg.Worktree{
+		Enabled: true,
+		Branch:  "agent/task-cli-test",
+		Path:    worktreePath,
+	}, workspace.Options{})
+	if err != nil {
+		t.Fatalf("prepare worktree: %v", err)
+	}
+	if !prepared.WorktreeCreated {
+		t.Fatalf("expected worktree to be created: %+v", prepared)
+	}
+	donePath := setupTaskInState(t, root, "done", "accepted", func(loaded *taskpkg.Task) {
+		loaded.Scope.CWD = repo
+		loaded.Worktree.Enabled = true
+		loaded.Worktree.Branch = "agent/task-cli-test"
+		loaded.Worktree.Path = worktreePath
+	})
+
+	stdout, stderr, err := executeCommand("task", "archive", "--output", "json", "--reason", "done", donePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr got %q", stderr)
+	}
+	var payload struct {
+		To              string `json:"to"`
+		WorktreeCleanup *struct {
+			Path           string `json:"path"`
+			Removed        bool   `json:"removed"`
+			AlreadyMissing bool   `json:"already_missing"`
+		} `json:"worktree_cleanup"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("parse json: %v\n%s", err, stdout)
+	}
+	if payload.WorktreeCleanup == nil {
+		t.Fatalf("json output missing worktree_cleanup: %s", stdout)
+	}
+	if payload.WorktreeCleanup.Path != worktreePath || !payload.WorktreeCleanup.Removed || payload.WorktreeCleanup.AlreadyMissing {
+		t.Fatalf("worktree cleanup got %+v", payload.WorktreeCleanup)
+	}
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Fatalf("worktree should be removed, err=%v", err)
+	}
+	if _, err := os.Stat(payload.To); err != nil {
+		t.Fatalf("archived task missing: %v", err)
+	}
+}
+
 func setupTaskInState(t *testing.T, root, state, status string, modify func(*taskpkg.Task)) string {
 	t.Helper()
 	path := filepath.Join(root, "tasks", state, "task.yaml")
@@ -679,6 +736,33 @@ pr:
 		t.Fatal(err)
 	}
 	return path
+}
+
+func initCLIGitRepo(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary required")
+	}
+	repo := t.TempDir()
+	runCLIGit(t, repo, "init")
+	runCLIGit(t, repo, "config", "user.email", "test@example.com")
+	runCLIGit(t, repo, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runCLIGit(t, repo, "add", "README.md")
+	runCLIGit(t, repo, "commit", "-m", "initial")
+	return repo
+}
+
+func runCLIGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, output)
+	}
 }
 
 func cliPromptFiles(t *testing.T) (string, string) {

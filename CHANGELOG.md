@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Fixed
+
+- Supervisor reviews now require evidence for acceptance-relevant boundary paths when a behavior-changing acceptance criterion could pass on the main path while failing a separate contract dimension.
+
 ## v0.7.3 - 2026-05-27
 
 ### Fixed

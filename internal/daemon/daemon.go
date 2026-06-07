@@ -161,33 +161,91 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 	if opts.Once {
-		var firstErr error
-		for {
-			processed, err := processQueuedTasks(ctx, opts)
-			if err != nil && firstErr == nil {
-				firstErr = err
-			}
-			if processed == 0 {
-				return firstErr
-			}
+		return runExecutionDrain(ctx, opts)
+	}
+	return runNormalDaemon(ctx, opts)
+}
+
+// runExecutionDrain implements `galley daemon run --once`. It drains eligible
+// queued work through the shared execution runner and exits once a pass claims
+// nothing, instead of becoming a long-running daemon. Normal-daemon scheduling
+// routes through the same execution runner so run-once and normal mode share
+// claim/execute behavior.
+func runExecutionDrain(ctx context.Context, opts Options) error {
+	var firstErr error
+	for {
+		processed, err := processQueuedTasks(ctx, opts)
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+		if processed == 0 {
+			return firstErr
 		}
 	}
+}
 
+// runNormalDaemon schedules the maintenance runner (PR comment polling + PR
+// worktree cleanup) and the execution runner (queued task claim + execution)
+// on independent tickers. Decoupling the two means a long executor attempt in
+// the execution runner no longer blocks the next maintenance cycle, so PR
+// comment polling continues on the configured poll interval while an attempt
+// is still running. Both runners share opts.PollInterval and stop when ctx is
+// cancelled; Run returns the context error once both have stopped.
+func runNormalDaemon(ctx context.Context, opts Options) error {
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		runMaintenanceRunner(ctx, opts)
+	}()
+	go func() {
+		defer wg.Done()
+		runExecutionRunner(ctx, opts)
+	}()
+	wg.Wait()
+	return ctx.Err()
+}
+
+// runMaintenanceRunner ticks the maintenance cycle on its own schedule,
+// independent of how long any executor attempt in the execution runner takes.
+func runMaintenanceRunner(ctx context.Context, opts Options) {
 	ticker := time.NewTicker(opts.PollInterval)
 	defer ticker.Stop()
 	for {
-		if _, err := runDaemonCycle(ctx, opts); err != nil {
-			fmt.Fprintf(os.Stderr, "galley: iteration failed: %v\n", err)
+		if err := runMaintenanceCycle(ctx, opts); err != nil {
+			fmt.Fprintf(os.Stderr, "galley: maintenance failed: %v\n", err)
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return
 		case <-ticker.C:
 		}
 	}
 }
 
-func runDaemonCycle(ctx context.Context, opts Options) (int, error) {
+// runExecutionRunner ticks queued-task execution on its own schedule. Each
+// pass blocks until its claimed task goroutines finish (see processAvailable),
+// so execution passes stay serialized while maintenance runs independently.
+func runExecutionRunner(ctx context.Context, opts Options) {
+	ticker := time.NewTicker(opts.PollInterval)
+	defer ticker.Stop()
+	for {
+		if _, err := processQueuedTasks(ctx, opts); err != nil {
+			fmt.Fprintf(os.Stderr, "galley: iteration failed: %v\n", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// runMaintenanceCycle runs PR comment polling and PR worktree cleanup. Polling
+// and cleanup stay serialized within the cycle so they do not race each other
+// over the same done/failed task file; the cycle does not touch queued-task
+// execution, which the execution runner owns.
+func runMaintenanceCycle(ctx context.Context, opts Options) error {
 	var errs []error
 	if err := pollPRComments(ctx, opts); err != nil {
 		errs = append(errs, fmt.Errorf("poll PR comments: %w", err))
@@ -195,11 +253,7 @@ func runDaemonCycle(ctx context.Context, opts Options) (int, error) {
 	if err := cleanupWorktrees(ctx, opts); err != nil {
 		errs = append(errs, fmt.Errorf("cleanup worktrees: %w", err))
 	}
-	processed, err := processQueuedTasks(ctx, opts)
-	if err != nil {
-		errs = append(errs, err)
-	}
-	return processed, errors.Join(errs...)
+	return errors.Join(errs...)
 }
 
 func processQueuedTasks(ctx context.Context, opts Options) (int, error) {

@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- The normal daemon now runs PR comment polling and PR worktree cleanup on an independent maintenance schedule, decoupled from queued task execution. A long-running executor attempt no longer blocks PR comment intake, so `/galley` comments on open PRs are picked up on the configured poll interval even while another task is still being implemented. `galley daemon run --once` is unchanged: it still drains eligible queued work and exits without becoming a long-running daemon. PR comment authorization, the actionable task scope (`pr_opened` in `tasks/done`, `needs_supervisor_review` in `tasks/failed`), requeue/`processed_comment_ids` behavior, and the no-overwrite publication/claim boundary are all preserved.
+
 ## v0.7.4 - 2026-06-03
 
 ### Fixed

@@ -94,6 +94,8 @@ Use ACs for:
 
 Write ACs as observable behavior. Include implementation-shape ACs only when the implementation itself is the requirement.
 
+Classify each item by obligation before keeping it as an AC. An AC states a required observable outcome; route how-the-code-is-built choices and out-of-scope items to `decisions` or `risks` instead. When an item is a required outcome but its verification is weak, keep it as an AC and strengthen the verification — replace text like "tests pass" with the specific command, review evidence, or profile check that proves it — rather than demoting it. State each AC as the outcome required, not as a prohibition on an internal mechanism.
+
 Prefer EARS-style wording when it fits the behavior. EARS means "Easy Approach to Requirements Syntax" and makes trigger, condition, and expected behavior explicit.
 
 | Pattern | Use For | Shape |
@@ -166,6 +168,7 @@ For each changed CLI output, JSON payload, config precedence rule, schema field,
 - stale, missing, or empty values
 - failed refreshes, failed lookups, or unavailable fallbacks
 - publication or visibility boundaries, such as when a file, status, or record becomes observable to another command, daemon loop, or user
+- concurrent or reordered execution paths, where new interleavings, races, double-processing, or lost updates become possible
 
 Cover acceptance-relevant cases in ACs. If a related case is intentionally out of scope, record the reason in `decisions`, `risks`, or the task summary. Verification should force each acceptance-relevant path when practical, or record why direct coverage is out of scope. Split separate obligations into separate ACs; keep multiple verification paths only for the same obligation.
 

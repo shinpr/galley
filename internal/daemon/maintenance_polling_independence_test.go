@@ -88,7 +88,24 @@ func TestNormalDaemonPollsPRCommentsWhileExecutorAttemptIsRunning(t *testing.T) 
 	// Arrange: a fake gh that records each comment-poll invocation so the test
 	// can prove polling runs (and repeats) before the executor exits.
 	pollLog := filepath.Join(t.TempDir(), "gh-poll.log")
-	ghBin := writeFakeCommand(t, "gh", "if [ \"$1\" = \"api\" ]; then echo poll >> "+pollLog+"; echo '[[]]'; else echo unexpected-gh >&2; exit 1; fi\n")
+	ghBin := writeFakeCommand(t, "gh", `if [ "$1" != "api" ]; then
+echo unexpected-gh "$@" >&2
+exit 1
+fi
+case "$2" in
+repos/example/galley/issues/123/comments)
+echo poll >> `+pollLog+`
+echo '[[]]'
+;;
+repos/example/galley/pulls/123)
+echo '{"state":"open","merged":false}'
+;;
+*)
+echo unexpected-gh-api "$@" >&2
+exit 1
+;;
+esac
+`)
 
 	// Act: start a normal (Once=false) daemon with a short PollInterval so the
 	// maintenance runner ticks several times during the 5s blocking executor

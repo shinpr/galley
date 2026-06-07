@@ -39,6 +39,7 @@ package daemon
 //   - A double-claim or lost task must fail the assertion.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -115,6 +116,7 @@ func TestMaintenanceRequeueAndExecutionClaimStayRaceFree(t *testing.T) {
 		resetRound()
 
 		start := make(chan struct{})
+		errs := make(chan error, 2)
 		var wg sync.WaitGroup
 		wg.Add(2)
 
@@ -126,11 +128,7 @@ func TestMaintenanceRequeueAndExecutionClaimStayRaceFree(t *testing.T) {
 				Reason:              "interleave round",
 				ProcessedCommentIDs: []string{"1"},
 			}); reqErr != nil {
-				// A failed publication leaves the done task in place; the
-				// placement assertion below still holds (live copy stays in done
-				// only because queued/running are empty). Record nothing here so
-				// the deterministic assertion catches any real loss.
-				_ = reqErr
+				errs <- fmt.Errorf("requeue failed: %w", reqErr)
 			}
 		}()
 
@@ -143,7 +141,7 @@ func TestMaintenanceRequeueAndExecutionClaimStayRaceFree(t *testing.T) {
 			for {
 				queued, qErr := queue.QueuedTasks(root)
 				if qErr != nil {
-					t.Errorf("QueuedTasks failed: %v", qErr)
+					errs <- fmt.Errorf("QueuedTasks failed: %w", qErr)
 					return
 				}
 				claimed := false
@@ -162,6 +160,12 @@ func TestMaintenanceRequeueAndExecutionClaimStayRaceFree(t *testing.T) {
 
 		close(start)
 		wg.Wait()
+		close(errs)
+		for err := range errs {
+			if err != nil {
+				t.Fatalf("round %d: %v", round, err)
+			}
+		}
 
 		// Assert exactly-once placement: the requeued task lives in exactly one of
 		// queued or running, is never double-claimed (never in both), and is never
@@ -182,6 +186,9 @@ func TestMaintenanceRequeueAndExecutionClaimStayRaceFree(t *testing.T) {
 		if live != 1 {
 			t.Fatalf("round %d: expected exactly one live copy of the task, got %d (queued=%v running=%v done=%v)",
 				round, live, queuedMatches, runningMatches, doneMatches)
+		}
+		if len(doneMatches) != 0 {
+			t.Fatalf("round %d: requeued task source remained in done after publication: %v", round, doneMatches)
 		}
 		if len(runningMatches) > 1 {
 			t.Fatalf("round %d: task was double-claimed into running: %v", round, runningMatches)
@@ -208,6 +215,9 @@ func TestMaintenanceRequeueAndExecutionClaimStayRaceFree(t *testing.T) {
 	if total := len(finalQueued) + len(finalRunning) + len(finalDone); total != 1 {
 		t.Fatalf("final placement: expected exactly one live copy, got %d (queued=%v running=%v done=%v)",
 			total, finalQueued, finalRunning, finalDone)
+	}
+	if len(finalDone) != 0 {
+		t.Fatalf("final placement: requeued task source remained in done: %v", finalDone)
 	}
 	assertGlobCount(t, runningGlob, len(finalRunning))
 }

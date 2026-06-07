@@ -8,7 +8,8 @@ This project follows semantic versioning.
 
 ### Changed
 
-- The normal daemon now runs PR comment polling and PR worktree cleanup on an independent maintenance schedule, decoupled from queued task execution. A long-running executor attempt no longer blocks PR comment intake, so `/galley` comments on open PRs are picked up on the configured poll interval even while another task is still being implemented. `galley daemon run --once` is unchanged: it still drains eligible queued work and exits without becoming a long-running daemon. PR comment authorization, the actionable task scope (`pr_opened` in `tasks/done`, `needs_supervisor_review` in `tasks/failed`), requeue/`processed_comment_ids` behavior, and the no-overwrite publication/claim boundary are all preserved.
+- The normal daemon now runs PR comment polling and PR worktree cleanup independently from queued task execution, so long executor attempts no longer block `/galley` comment intake. `galley daemon run --once` is unchanged.
+- Packaged Claude and Codex Galley plugins are now versioned as `0.1.15`: task-authoring acceptance-criteria guidance now classifies each item by obligation before keeping it as an AC, routing implementation-shape and out-of-scope items to `decisions` or `risks`, keeping a required outcome as an AC with strengthened verification instead of demoting it for weak verification text, and stating ACs as required outcomes rather than prohibitions on internal mechanisms; invariant expansion now also checks concurrent or reordered execution paths for new interleavings, races, double-processing, or lost updates.
 
 ## v0.7.4 - 2026-06-03
 

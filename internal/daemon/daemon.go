@@ -184,13 +184,8 @@ func runExecutionDrain(ctx context.Context, opts Options) error {
 	}
 }
 
-// runNormalDaemon schedules the maintenance runner (PR comment polling + PR
-// worktree cleanup) and the execution runner (queued task claim + execution)
-// on independent tickers. Decoupling the two means a long executor attempt in
-// the execution runner no longer blocks the next maintenance cycle, so PR
-// comment polling continues on the configured poll interval while an attempt
-// is still running. Both runners share opts.PollInterval and stop when ctx is
-// cancelled; Run returns the context error once both have stopped.
+// runNormalDaemon keeps maintenance responsive while task execution may block
+// for a long executor attempt.
 func runNormalDaemon(ctx context.Context, opts Options) error {
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -206,8 +201,7 @@ func runNormalDaemon(ctx context.Context, opts Options) error {
 	return ctx.Err()
 }
 
-// runMaintenanceRunner ticks the maintenance cycle on its own schedule,
-// independent of how long any executor attempt in the execution runner takes.
+// runMaintenanceRunner owns PR comment polling and PR worktree cleanup.
 func runMaintenanceRunner(ctx context.Context, opts Options) {
 	ticker := time.NewTicker(opts.PollInterval)
 	defer ticker.Stop()
@@ -223,9 +217,8 @@ func runMaintenanceRunner(ctx context.Context, opts Options) {
 	}
 }
 
-// runExecutionRunner ticks queued-task execution on its own schedule. Each
-// pass blocks until its claimed task goroutines finish (see processAvailable),
-// so execution passes stay serialized while maintenance runs independently.
+// runExecutionRunner preserves the existing serialized execution pass: each
+// pass waits for claimed tasks to finish before the next execution tick.
 func runExecutionRunner(ctx context.Context, opts Options) {
 	ticker := time.NewTicker(opts.PollInterval)
 	defer ticker.Stop()
@@ -241,10 +234,7 @@ func runExecutionRunner(ctx context.Context, opts Options) {
 	}
 }
 
-// runMaintenanceCycle runs PR comment polling and PR worktree cleanup. Polling
-// and cleanup stay serialized within the cycle so they do not race each other
-// over the same done/failed task file; the cycle does not touch queued-task
-// execution, which the execution runner owns.
+// runMaintenanceCycle keeps polling and cleanup serialized inside maintenance.
 func runMaintenanceCycle(ctx context.Context, opts Options) error {
 	var errs []error
 	if err := pollPRComments(ctx, opts); err != nil {

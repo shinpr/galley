@@ -86,7 +86,7 @@ galley daemon stop
 galley daemon run --once
 ```
 
-`galley daemon run --once` drains queued tasks once and exits. Background `galley daemon start` also performs daemon maintenance such as PR comment polling and closed or merged PR worktree cleanup according to `environment.yaml`.
+`galley daemon run --once` drains queued tasks once and exits. Background `galley daemon start` also performs daemon maintenance such as PR comment polling and closed or merged PR worktree cleanup according to `environment.yaml`. In normal (non `--once`) mode this maintenance runs on its own poll-interval schedule, independent of queued task execution, so PR comment polling and cleanup continue on the configured interval even while a long executor attempt is still running.
 
 `--root` points at the daemon root and defaults to `~/.galley`. Use `--root .agent-workflow` only for repo-local or test workflows.
 

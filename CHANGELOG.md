@@ -8,6 +8,7 @@ This project follows semantic versioning.
 
 ### Changed
 
+- The normal daemon now runs PR comment polling and PR worktree cleanup independently from queued task execution, so long executor attempts no longer block `/galley` comment intake. `galley daemon run --once` is unchanged.
 - Packaged Claude and Codex Galley plugins are now versioned as `0.1.15`: task-authoring acceptance-criteria guidance now classifies each item by obligation before keeping it as an AC, routing implementation-shape and out-of-scope items to `decisions` or `risks`, keeping a required outcome as an AC with strengthened verification instead of demoting it for weak verification text, and stating ACs as required outcomes rather than prohibitions on internal mechanisms; invariant expansion now also checks concurrent or reordered execution paths for new interleavings, races, double-processing, or lost updates.
 
 ## v0.7.4 - 2026-06-03

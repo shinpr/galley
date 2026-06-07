@@ -54,6 +54,7 @@ func TestNormalDaemonPollsPRCommentsWhileExecutorAttemptIsRunning(t *testing.T) 
 	// Arrange: Galley root + source repo.
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
+	runDaemonGit(t, repo, "branch", "-M", "main")
 	if err := queue.EnsureLayout(root); err != nil {
 		t.Fatal(err)
 	}

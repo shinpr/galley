@@ -6,6 +6,8 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.7.5 - 2026-06-07
+
 ### Changed
 
 - The normal daemon now runs PR comment polling and PR worktree cleanup independently from queued task execution, so long executor attempts no longer block `/galley` comment intake. `galley daemon run --once` is unchanged.

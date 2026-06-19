@@ -31,6 +31,8 @@ Classify each supplied file before editing:
 
 Read every `requirement_basis`, `execution_plan`, and `test_or_quality_basis` file before implementation. Extract product behavior, interface/runtime contracts, evidence contracts, non-scope constraints, quality gates, and explicit anti-goals from those files. Use `context_evidence` when it affects a changed path, local decision, or verification claim.
 
+When extracting an observable contract, preserve exact contract values when any source fixes the value as required: task text, an AC, or an input material names it as required; a public API, CLI, schema, persisted format, or test consumes it; or multiple authoritative existing examples use the same value. Contract values include field and key names, enum/status values, order-sensitive output, fallback or empty-state text, derived display rules, lifecycle negatives such as a value becoming visible only after completion, and config precedence values. Treat a change to a binding contract value as a task semantics change unless a higher-priority source requires or authorizes the new value.
+
 # Hard-Stop Conditions
 
 Return `status: "hard_stop"` when the next necessary step is blocked by one of these conditions:
@@ -101,6 +103,7 @@ Before returning the final JSON, verify:
 - Required input materials were read, or the result records why they did not affect the changed behavior.
 - Extracted work-contract obligations are implemented, explicitly out of scope by higher-priority task text, or reported as `hard_stop`.
 - The implementation preserves the requested core mechanism and observable contract.
+- Beyond the contract shape, exact observable contract values are preserved or changed only when a higher-priority source requires or authorizes the new value, with the decision recorded in `decisions` or the blocker reported as `hard_stop`.
 - Required quality profile dimensions have concrete implementation evidence.
 - Acceptance comes from substantive behavior and evidence, not placeholder plumbing, TODO-only files, hollow tests, or no-op behavior.
 - Verification evidence exercises the changed behavior. A focused selector that matches zero tests is recorded as skipped evidence, not passed evidence.

@@ -193,6 +193,8 @@ Runnable verification commands should fail when the checked condition fails. Pre
 
 For observable contracts, choose one expected contract before drafting ACs. CLI text, JSON payloads, files, logs, PR bodies, statuses, titles, and public docs should name the required fields, values, ordering, persistence, or fallback behavior. Record alternatives in `decisions` only after a behavior is chosen.
 
+Carry literal observable values into the AC text, verification, decision, or risk that owns them when any source fixes the value as required: task text, an AC, or an input material names it as required; a public API, CLI, schema, persisted format, or test consumes it; or multiple authoritative existing examples use the same value. Literal values include field and key names, enum/status values, order-sensitive output, fallback or empty-state text, derived display rules, lifecycle negatives such as a value becoming visible only after completion, and config precedence values. Treat these values as part of the contract rather than paraphrasing them into a general description.
+
 Look for:
 
 - existing repo quality profile resolved by `galley profile resolve --cwd <repo> --output json`

@@ -6,6 +6,13 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.7.6 - 2026-06-19
+
+### Changed
+
+- Task-authoring and executor guidance now preserves exact observable contract values when task text, acceptance criteria, input materials, public surfaces, tests, or authoritative existing examples make those values required.
+- Packaged Claude and Codex Galley plugins are now versioned as `0.1.16`: bundled task-authoring guidance includes the observable contract value preservation rule.
+
 ## v0.7.5 - 2026-06-07
 
 ### Changed

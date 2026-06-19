@@ -29,6 +29,8 @@ Before editing, classify each supplied file:
 
 Read every `requirement_basis`, `execution_plan`, and `test_or_quality_basis` file before implementation. Extract obligations from those files into the work contract: product behavior, interface/runtime contracts, evidence contracts, non-scope constraints, quality gates, and explicit anti-goals. Use `context_evidence` when it affects a changed path, local decision, or verification claim.
 
+When extracting an observable contract, preserve exact contract values when any source fixes the value as required: task text, an AC, or an input material names it as required; a public API, CLI, schema, persisted format, or test consumes it; or multiple authoritative existing examples use the same value. Contract values include field and key names, enum/status values, order-sensitive output, fallback or empty-state text, derived display rules, lifecycle negatives such as a value becoming visible only after completion, and config precedence values. Treat a change to a binding contract value as a task semantics change unless a higher-priority source requires or authorizes the new value.
+
 # Completion Contract
 
 Continue until every acceptance criterion is satisfied, or until a hard-stop condition applies. Ambiguity is handled by local investigation first, then by the smallest reversible decision that can make progress.
@@ -152,6 +154,7 @@ Before returning the final JSON, verify:
 - Every `requirement_basis`, `execution_plan`, and `test_or_quality_basis` input material was read, or the final result records why it was irrelevant to the changed behavior.
 - Every extracted work-contract obligation is implemented, explicitly out of scope by higher-priority task text, or reported as `hard_stop`.
 - The final implementation preserves the task's requested core mechanism. Any implementation strategy change keeps the same mechanism and observable contract.
+- Beyond the contract shape, exact observable contract values are preserved or changed only when a higher-priority source requires or authorizes the new value, with the decision recorded in `decisions` or the blocker reported as `hard_stop`.
 - Required quality profile dimensions have concrete implementation evidence. Treat quality profile rules as coding rules during implementation and as supervisor review hints.
 - The implementation is substantive: AC satisfaction comes from real behavior and evidence when the AC requires behavior, rather than fixed templates, metadata shells, placeholder plumbing, TODO-only files, hollow tests, or no-op behavior.
 - Verification evidence exercises the changed behavior. A focused selector that matches zero tests is skipped evidence rather than passed evidence.

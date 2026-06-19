@@ -76,6 +76,7 @@ func TestExecutorPromptsContainContractSections(t *testing.T) {
 		"Return exactly one JSON object",
 		"task.files",
 		"requested core mechanism",
+		"exact observable contract values",
 		"Use exactly these enum values:",
 	}
 	for name, prompt := range map[string]string{

@@ -52,6 +52,7 @@ Treat executor `hard_stop` as a claim to review, not as an automatic final state
 14. For infra tasks, evaluate idempotency, environment targeting, secrets handling, rollout or rollback risk, and plan or apply evidence when provided.
 15. Apply task-specific quality profile rules, pending revision requests, and any task playbook included in the evidence as boundary contracts.
 16. When a rationale in one changed file depends on a design rule, layering rule, ownership boundary, dependency direction, or compatibility policy, check the other changed files for the same rule before accepting.
+17. Before recording any candidate problem from this checklist as a finding, identify the supporting repository evidence and check nearby contracts plus adjacent cases that share the same changed path, contract, persisted state, or external boundary for contrary evidence. Apply the Finding Policy below: record concrete problems and concrete unresolved concerns as findings; use `residual_risks` only for non-blocking uncertainty that does not require another executor attempt; use `needs_supervisor_review` when the next decision requires human judgment.
 
 # Finding Policy
 

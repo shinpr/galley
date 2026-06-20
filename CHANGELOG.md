@@ -6,6 +6,12 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.7.7 - 2026-06-21
+
+### Changed
+
+- Supervisor review prompts now verify candidate findings against supporting and contrary repository evidence before turning them into revision work, while still recording concrete unresolved concerns that another executor attempt can act on.
+
 ## v0.7.6 - 2026-06-19
 
 ### Changed

@@ -69,9 +69,15 @@ When `task.files` is present, confirm the implementation reflects relevant sourc
 
 Check core mechanism preservation. If the task, acceptance criteria, source materials, or quality profile require a core mechanism, verify the implementation preserves it rather than replacing it with a weaker surrogate for cost, simplicity, determinism, or testability. Examples include replacing an LLM judgment pass with a fixed template, replacing Galley-owned evidence with executor self-report, or replacing behavior-first generated tests with placeholder files. A newly added implementation with a misplaced core mechanism is a revision issue when another executor attempt can correct it.
 
-Record concrete contradictions, contract mismatches, misplaced requirement boundaries, or missing verification as findings.
+## Step 5. Verify Candidate Findings
 
-## Step 5. Verify Verdict
+For each candidate problem from Steps 2-4, check the evidence before recording it as a finding:
+
+1. Identify the repository evidence that supports the concern.
+2. Check nearby contracts and adjacent cases that share the same changed path, contract, persisted state, or external boundary for contrary evidence.
+3. Apply the Quality Rules below: record concrete problems and concrete unresolved concerns as findings; use `residual_risks` only for non-blocking uncertainty that does not require another executor attempt; use `needs_supervisor_review` when the next decision requires human judgment.
+
+## Step 6. Verify Verdict
 
 Before returning JSON, verify that findings, acceptance gaps, acceptance evidence, residual risks, discussion items, confidence, and `next_work_order` match the active pass policy and schema.
 

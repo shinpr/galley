@@ -123,7 +123,7 @@ The hook fires only after the task has actually reached a published terminal sta
 
 #### Hook input
 
-Task-derived data is passed to the command as **data**, never as part of the command string. Each invocation receives:
+Task-derived data is passed to the command as data, never as part of the command string. Each invocation receives:
 
 - A single-line JSON object on stdin with these fields:
   - `task_id` — the task ID.
@@ -132,7 +132,7 @@ Task-derived data is passed to the command as **data**, never as part of the com
   - `summary` — a short human-readable summary (latest attempt summary, falling back to the latest risk detail, then the task goal), truncated to 280 runes with a trailing `…` when clipped.
   - `run_dir` — the run evidence directory for the attempt, when available.
   - `show_hint` — the inspection command an operator can run, `galley task show <task_id>`.
-- The same values mirrored as namespaced environment variables: `GALLEY_TASK_ID`, `GALLEY_TASK_STATUS`, `GALLEY_REPO`, `GALLEY_SUMMARY` (also truncated to 280 runes), and `GALLEY_RUN_DIR`. Only Galley-owned `GALLEY_*` names are produced, so task content can never determine a variable name or shadow `PATH`, `IFS`, or similar.
+- The same values mirrored as namespaced environment variables: `GALLEY_TASK_ID`, `GALLEY_TASK_STATUS`, `GALLEY_REPO`, `GALLEY_SUMMARY` (also truncated to 280 runes), and `GALLEY_RUN_DIR`.
 
 #### Timeout and failure behavior
 
@@ -140,11 +140,11 @@ The hook is best-effort and runs off the task-state critical path. A single invo
 
 #### Security boundary
 
-The `command` string is operator-owned and is the only thing placed in the shell's argument vector. Every task-derived value (id, status, repo, summary, run dir) is treated as untrusted content and is delivered exclusively through the stdin JSON and the `GALLEY_*` environment variables. Task content is never concatenated into the command string, so shell metacharacters or environment-like names in a task summary or repository path cannot alter the executed command. This is the same trust level as `setup.commands` and `required_checks`, and mirrors how the executor runners already pass untrusted prompt content via stdin. Sample hook scripts under [`scripts/notify-macos.sh`](../scripts/notify-macos.sh) and [`scripts/notify-slack.sh`](../scripts/notify-slack.sh) show how to consume the payload as data (argv values and `jq` JSON input) rather than interpolating it into a command.
+The `command` string is operator-owned and has the same trust level as `setup.commands` and `required_checks`. Task content is untrusted and is delivered only through stdin JSON and `GALLEY_*` environment variables, so task summaries or repository paths cannot change the command that Galley executes. Sample hooks under [`scripts/notify-macos.sh`](../scripts/notify-macos.sh) and [`scripts/notify-slack.sh`](../scripts/notify-slack.sh) show how to consume the payload as argv or JSON data.
 
 #### Non-goals
 
-- No built-in Slack, email, desktop, or other native notifier. Galley only runs the operator-provided command; the sample scripts are starting points, not bundled integrations.
+- No built-in Slack, email, desktop, or other native notifier. Galley only runs the operator-provided command.
 - No secrets storage. Any webhook URL, token, or credential is owned by the operator's command/environment (for example `SLACK_WEBHOOK_URL` exported for `notify-slack.sh`); Galley never holds or persists the secret.
 - No operator-tunable timeout, retries, or delivery guarantees. The hook is fire-and-forget within the fixed 30-second bound.
 

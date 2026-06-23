@@ -8,7 +8,7 @@ This project follows semantic versioning.
 
 ### Added
 
-- Opt-in, best-effort daemon notification command hook. `daemon.yaml` now accepts a `notifications` block (`enabled`, `on`, `command`) that runs an operator-owned command after a task reaches a terminal published status (default events `failed` and `needs_supervisor_review`; `accepted` and `pr_opened` are valid opt-in choices). Task data is delivered only as data — a stdin JSON object (`task_id`, `status`, `repo`, `summary`, `run_dir`, `show_hint`) and `GALLEY_*` environment variables — never concatenated into the command string. The hook is bounded by a fixed 30-second timeout and its failures are logged and swallowed without affecting task state. Sample `scripts/notify-macos.sh` and `scripts/notify-slack.sh` hooks and `docs/operations.md` document the contract; Galley ships no built-in notifier and stores no secrets.
+- Added opt-in daemon notification command hooks. `daemon.yaml` now accepts `notifications.enabled`, `notifications.on`, and `notifications.command` to run an operator-owned command after terminal task statuses, defaulting to `failed` and `needs_supervisor_review`. Hook payloads are delivered via stdin JSON and `GALLEY_*` env vars, failures are best-effort with a fixed 30s timeout, and sample macOS/Slack scripts are documented in `docs/operations.md`.
 
 ## v0.7.7 - 2026-06-21
 

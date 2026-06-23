@@ -8,7 +8,7 @@ This project follows semantic versioning.
 
 ### Added
 
-- Added opt-in daemon notification command hooks. `daemon.yaml` now accepts `notifications.enabled`, `notifications.on`, and `notifications.command` to run an operator-owned command after terminal task statuses, defaulting to `failed` and `needs_supervisor_review`. Hook payloads are delivered via stdin JSON and `GALLEY_*` env vars, failures are best-effort with a fixed 30s timeout, and sample macOS/Slack scripts are documented in `docs/operations.md`.
+- Added opt-in daemon notification command hooks. `daemon.yaml` now accepts `notifications.enabled`, `notifications.on`, and `notifications.command` to run an operator-owned command after terminal task statuses, defaulting to `failed` and `needs_supervisor_review`. Hook payloads are delivered via stdin JSON and `GALLEY_*` env vars, failures are best-effort with a fixed 30s timeout, and sample macOS/Slack scripts live under `docs/examples/notifications/`. Delivery is dispatched asynchronously so a slow or stuck notification command never delays the daemon worker or the next daemon iteration; the command stays timeout-bounded, and an unfinished delivery is lost if the daemon process exits.
 
 ## v0.7.7 - 2026-06-21
 

@@ -293,11 +293,11 @@ func marshalDocumentedDefaults() ([]byte, error) {
 	buf.WriteString("# terminal status. Set `enabled: true` and a `command` to receive alerts; the\n")
 	buf.WriteString("# command receives task data on stdin (JSON) and via GALLEY_* env vars, never\n")
 	buf.WriteString("# concatenated into the command string. See docs/operations.md and the sample\n")
-	buf.WriteString("# scripts under scripts/ (notify-macos.sh, notify-slack.sh). Example:\n")
+	buf.WriteString("# scripts under docs/examples/notifications/. Example:\n")
 	buf.WriteString("#   notifications:\n")
 	buf.WriteString("#     enabled: true\n")
 	buf.WriteString("#     on: [failed, needs_supervisor_review]\n")
-	buf.WriteString("#     command: \"/path/to/notify-slack.sh\"\n")
+	buf.WriteString("#     command: \"/path/to/docs/examples/notifications/notify-slack.sh\"\n")
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
 	if err := enc.Encode(defaults); err != nil {

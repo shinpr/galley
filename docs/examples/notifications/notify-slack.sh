@@ -5,7 +5,7 @@
 #   notifications:
 #     enabled: true
 #     on: [failed, needs_supervisor_review]
-#     command: "/absolute/path/to/notify-slack.sh"
+#     command: "/absolute/path/to/docs/examples/notifications/notify-slack.sh"
 #
 # The Slack webhook URL is owned by this script (export SLACK_WEBHOOK_URL in the
 # daemon environment); Galley never holds the secret.

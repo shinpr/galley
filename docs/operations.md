@@ -110,7 +110,7 @@ The daemon can run an opt-in, best-effort command hook after a task reaches a te
 notifications:
   enabled: true
   on: [failed, needs_supervisor_review]
-  command: "/absolute/path/to/notify-slack.sh"
+  command: "/absolute/path/to/docs/examples/notifications/notify-slack.sh"
 ```
 
 Fields:
@@ -136,17 +136,19 @@ Task-derived data is passed to the command as data, never as part of the command
 
 #### Timeout and failure behavior
 
-The hook is best-effort and runs off the task-state critical path. A single invocation is bounded by a fixed 30-second timeout (not operator-tunable in this version). A non-zero exit, start failure, timeout, or hang is logged to the daemon's stderr/log and then swallowed: it never mutates task state, never moves the task back, and never fails the daemon loop, so a broken or slow notifier cannot hide or alter the primary task outcome. Successful and failed invocations both log a line naming the task, status, and (on success) the command exit code.
+The hook is best-effort and runs off the task-state critical path. Delivery is dispatched asynchronously after the task reaches its published terminal state, so a slow or stuck notification command never delays the daemon worker that ran the task or the next daemon iteration. A single invocation is bounded by a fixed 30-second timeout (not operator-tunable in this version); on timeout the command's process group is killed, so a hanging script is terminated rather than leaking as an unmanaged long-running child. A non-zero exit, start failure, timeout, or hang is logged to the daemon's stderr/log and then swallowed: it never mutates task state, never moves the task back, never retries the task, and never fails the daemon loop, so a broken or slow notifier cannot hide or alter the primary task outcome. Successful and failed invocations both log a line naming the task, status, and (on success) the command exit code.
+
+Because delivery is asynchronous and best-effort, an in-flight notification is abandoned if the daemon process exits before it finishes, and that single delivery may be lost. This is intentional: retries and at-least-once delivery guarantees are out of scope (see [Non-goals](#non-goals)).
 
 #### Security boundary
 
-The `command` string is operator-owned and has the same trust level as `setup.commands` and `required_checks`. Task content is untrusted and is delivered only through stdin JSON and `GALLEY_*` environment variables, so task summaries or repository paths cannot change the command that Galley executes. Sample hooks under [`scripts/notify-macos.sh`](../scripts/notify-macos.sh) and [`scripts/notify-slack.sh`](../scripts/notify-slack.sh) show how to consume the payload as argv or JSON data.
+The `command` string is operator-owned and has the same trust level as `setup.commands` and `required_checks`. Task content is untrusted and is delivered only through stdin JSON and `GALLEY_*` environment variables, so task summaries or repository paths cannot change the command that Galley executes. Sample hooks under [`docs/examples/notifications/notify-macos.sh`](examples/notifications/notify-macos.sh) and [`docs/examples/notifications/notify-slack.sh`](examples/notifications/notify-slack.sh) show how to consume the payload as argv or JSON data.
 
 #### Non-goals
 
 - No built-in Slack, email, desktop, or other native notifier. Galley only runs the operator-provided command.
 - No secrets storage. Any webhook URL, token, or credential is owned by the operator's command/environment (for example `SLACK_WEBHOOK_URL` exported for `notify-slack.sh`); Galley never holds or persists the secret.
-- No operator-tunable timeout, retries, or delivery guarantees. The hook is fire-and-forget within the fixed 30-second bound.
+- No operator-tunable timeout, retries, or delivery guarantees. The hook is fire-and-forget within the fixed 30-second bound, and an unfinished delivery is lost if the daemon process exits before it completes.
 
 ### Supervisor resolution
 

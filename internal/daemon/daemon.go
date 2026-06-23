@@ -112,8 +112,9 @@ type Options struct {
 	// notify.DefaultTimeout, which is what production always uses. Tests set a
 	// short value to prove a stuck command is killed by the timeout without
 	// waiting the full default bound.
-	notifyTimeout time.Duration
-	Explicit      ExplicitOptions
+	notifyTimeout    time.Duration
+	notifyDispatcher *notificationDispatcher
+	Explicit         ExplicitOptions
 }
 
 type ExplicitOptions struct {
@@ -169,6 +170,8 @@ func Run(ctx context.Context, opts Options) error {
 	runner.SetDefaultChildRegistry(registry)
 	defer runner.SetDefaultChildRegistry(nil)
 	defer func() { _ = registry.Clear() }()
+	opts.notifyDispatcher = newNotificationDispatcher(ctx)
+	defer opts.notifyDispatcher.Wait()
 	if err := recoverInterruptedRunningTasks(opts.Root); err != nil {
 		return err
 	}
@@ -521,7 +524,8 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	// already-completed state transition. notifyTerminalPublication dispatches
 	// delivery on a detached goroutine and returns immediately, so a slow or
 	// stuck notifier cannot delay this goroutine's wg.Done() or the next daemon
-	// iteration; unfinished delivery is abandoned if the process exits.
+	// iteration. Daemon shutdown cancels any in-flight delivery and Run waits
+	// for cleanup before the process exits.
 	defer func() { notifyTerminalPublication(ctx, opts, runningPath, &runDir) }()
 
 	loaded, err := loadClaimedTask(runningPath)

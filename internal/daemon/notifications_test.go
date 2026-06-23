@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -16,22 +15,6 @@ import (
 
 func shellPath(path string) string {
 	return "'" + strings.ReplaceAll(filepath.ToSlash(path), "'", `'\''`) + "'"
-}
-
-// trackNotifications installs a WaitGroup so a test can await the asynchronous
-// delivery goroutines started by notifyTerminalPublication. The global seam is
-// reset on cleanup. These tests do not run in parallel, and notifyTerminalPublication
-// only reads the seam after confirming a configured hook, so unrelated daemon
-// tests (which leave Notifications nil) never touch it.
-func trackNotifications(t *testing.T) *sync.WaitGroup {
-	t.Helper()
-	wg := &sync.WaitGroup{}
-	notifyDeliveryTracking = wg
-	t.Cleanup(func() {
-		wg.Wait()
-		notifyDeliveryTracking = nil
-	})
-	return wg
 }
 
 func writePublishedTask(t *testing.T, root, state, base string, tk task.Task) string {
@@ -69,7 +52,7 @@ func TestNotifyTerminalPublicationFiresOnMatchingStatus(t *testing.T) {
 		Enabled: true,
 		Command: "cat > " + shellPath(marker),
 	}}
-	deliverTerminalNotification(opts, "task-a.yaml", runDir)
+	deliverTerminalNotification(context.Background(), opts, "task-a.yaml", runDir)
 	data, err := os.ReadFile(marker)
 	if err != nil {
 		t.Fatalf("hook did not run: %v", err)
@@ -85,7 +68,7 @@ func TestNotifyTerminalPublicationFiresOnNeedsSupervisorReview(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "fired")
 	writePublishedTask(t, root, "failed", "task-b.yaml", baseTask("task-b", "needs_supervisor_review"))
 	opts := Options{Root: root, Notifications: &daemonconfig.NotificationConfig{Enabled: true, Command: "touch " + shellPath(marker)}}
-	deliverTerminalNotification(opts, "task-b.yaml", "")
+	deliverTerminalNotification(context.Background(), opts, "task-b.yaml", "")
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatalf("expected hook to fire for needs_supervisor_review: %v", err)
 	}
@@ -97,7 +80,7 @@ func TestNotifyTerminalPublicationSkipsNonDefaultStatus(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "fired")
 	writePublishedTask(t, root, "done", "task-c.yaml", baseTask("task-c", "accepted"))
 	opts := Options{Root: root, Notifications: &daemonconfig.NotificationConfig{Enabled: true, Command: "touch " + shellPath(marker)}}
-	deliverTerminalNotification(opts, "task-c.yaml", "")
+	deliverTerminalNotification(context.Background(), opts, "task-c.yaml", "")
 	if _, err := os.Stat(marker); err == nil {
 		t.Fatal("hook fired for accepted under default on-list; expected skip")
 	}
@@ -109,7 +92,7 @@ func TestNotifyTerminalPublicationFiresOnOptInAccepted(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "fired")
 	writePublishedTask(t, root, "done", "task-d.yaml", baseTask("task-d", "accepted"))
 	opts := Options{Root: root, Notifications: &daemonconfig.NotificationConfig{Enabled: true, On: []string{"accepted"}, Command: "touch " + shellPath(marker)}}
-	deliverTerminalNotification(opts, "task-d.yaml", "")
+	deliverTerminalNotification(context.Background(), opts, "task-d.yaml", "")
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatalf("expected hook to fire for opt-in accepted: %v", err)
 	}
@@ -121,7 +104,7 @@ func TestNotifyTerminalPublicationSkipsWhenNotPublished(t *testing.T) {
 	root := t.TempDir()
 	marker := filepath.Join(t.TempDir(), "fired")
 	opts := Options{Root: root, Notifications: &daemonconfig.NotificationConfig{Enabled: true, Command: "touch " + shellPath(marker)}}
-	deliverTerminalNotification(opts, "missing.yaml", "")
+	deliverTerminalNotification(context.Background(), opts, "missing.yaml", "")
 	if _, err := os.Stat(marker); err == nil {
 		t.Fatal("hook fired for an unpublished task; expected skip")
 	}
@@ -133,7 +116,7 @@ func TestNotifyTerminalPublicationSwallowsHookFailure(t *testing.T) {
 	published := writePublishedTask(t, root, "failed", "task-e.yaml", baseTask("task-e", "failed"))
 	opts := Options{Root: root, Notifications: &daemonconfig.NotificationConfig{Enabled: true, Command: "exit 7"}}
 	// Must not panic.
-	deliverTerminalNotification(opts, "task-e.yaml", "")
+	deliverTerminalNotification(context.Background(), opts, "task-e.yaml", "")
 	// Task file remains exactly where it was published.
 	if _, err := os.Stat(published); err != nil {
 		t.Fatalf("published task disturbed by hook failure: %v", err)
@@ -146,9 +129,9 @@ func TestNotifyTerminalPublicationDisabled(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "fired")
 	writePublishedTask(t, root, "failed", "task-f.yaml", baseTask("task-f", "failed"))
 	// nil config
-	deliverTerminalNotification(Options{Root: root}, "task-f.yaml", "")
+	deliverTerminalNotification(context.Background(), Options{Root: root}, "task-f.yaml", "")
 	// disabled config
-	deliverTerminalNotification(Options{Root: root, Notifications: &daemonconfig.NotificationConfig{Enabled: false, Command: "touch " + shellPath(marker)}}, "task-f.yaml", "")
+	deliverTerminalNotification(context.Background(), Options{Root: root, Notifications: &daemonconfig.NotificationConfig{Enabled: false, Command: "touch " + shellPath(marker)}}, "task-f.yaml", "")
 	if _, err := os.Stat(marker); err == nil {
 		t.Fatal("disabled/nil notifications fired a hook")
 	}
@@ -166,13 +149,14 @@ func TestNotifyTerminalPublicationDoesNotBlockOnSlowCommand(t *testing.T) {
 	root := t.TempDir()
 	marker := filepath.Join(t.TempDir(), "fired")
 	writePublishedTask(t, root, "failed", "task-slow.yaml", baseTask("task-slow", "failed"))
+	dispatcher := newNotificationDispatcher(context.Background())
 	opts := Options{Root: root, Notifications: &daemonconfig.NotificationConfig{
 		Enabled: true,
 		// Sleep well past the assertion window before delivering. If delivery were
 		// synchronous, the call below would block for the full sleep.
 		Command: "sleep 2; touch " + shellPath(marker),
 	}}
-	wg := trackNotifications(t)
+	opts.notifyDispatcher = dispatcher
 
 	start := time.Now()
 	notifyTerminalPublication(context.Background(), opts, filepath.Join(root, "tasks", "running", "task-slow.yaml"), nil)
@@ -185,7 +169,7 @@ func TestNotifyTerminalPublicationDoesNotBlockOnSlowCommand(t *testing.T) {
 		t.Fatal("marker present before the slow command finished; delivery was not asynchronous")
 	}
 	// Best-effort delivery still completes once the detached goroutine finishes.
-	wg.Wait()
+	dispatcher.Wait()
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatalf("asynchronous delivery did not complete: %v", err)
 	}
@@ -201,12 +185,13 @@ func TestNotifyTerminalPublicationStuckCommandKilledByTimeout(t *testing.T) {
 	}
 	root := t.TempDir()
 	writePublishedTask(t, root, "failed", "task-stuck.yaml", baseTask("task-stuck", "failed"))
+	dispatcher := newNotificationDispatcher(context.Background())
 	opts := Options{
-		Root:          root,
-		notifyTimeout: 200 * time.Millisecond,
-		Notifications: &daemonconfig.NotificationConfig{Enabled: true, Command: "sleep 30"},
+		Root:             root,
+		notifyTimeout:    200 * time.Millisecond,
+		notifyDispatcher: dispatcher,
+		Notifications:    &daemonconfig.NotificationConfig{Enabled: true, Command: "sleep 30"},
 	}
-	wg := trackNotifications(t)
 
 	start := time.Now()
 	notifyTerminalPublication(context.Background(), opts, filepath.Join(root, "tasks", "running", "task-stuck.yaml"), nil)
@@ -215,7 +200,7 @@ func TestNotifyTerminalPublicationStuckCommandKilledByTimeout(t *testing.T) {
 	}
 
 	done := make(chan struct{})
-	go func() { wg.Wait(); close(done) }()
+	go func() { dispatcher.Wait(); close(done) }()
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):
@@ -226,7 +211,48 @@ func TestNotifyTerminalPublicationStuckCommandKilledByTimeout(t *testing.T) {
 	}
 }
 
+// Revision AC: daemon shutdown must cancel and reap an in-flight notification
+// subprocess. Delivery is still off the task iteration path, but it is not
+// detached from the daemon process lifecycle.
+func TestNotifyTerminalPublicationShutdownCancelsStuckCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a POSIX shell command")
+	}
+	root := t.TempDir()
+	writePublishedTask(t, root, "failed", "task-shutdown.yaml", baseTask("task-shutdown", "failed"))
+	ctx, cancel := context.WithCancel(context.Background())
+	dispatcher := newNotificationDispatcher(ctx)
+	opts := Options{
+		Root:             root,
+		notifyTimeout:    30 * time.Second,
+		notifyDispatcher: dispatcher,
+		Notifications:    &daemonconfig.NotificationConfig{Enabled: true, Command: "sleep 30"},
+	}
+
+	start := time.Now()
+	notifyTerminalPublication(context.Background(), opts, filepath.Join(root, "tasks", "running", "task-shutdown.yaml"), nil)
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("notifyTerminalPublication blocked for %s before shutdown", elapsed)
+	}
+	cancel()
+
+	done := make(chan struct{})
+	go func() { dispatcher.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("shutdown did not cancel and reap the notification command")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("shutdown did not bound notification cleanup: elapsed %s", elapsed)
+	}
+}
+
 func TestLatestTaskSummaryFallback(t *testing.T) {
+	withAttempt := task.Task{Goal: "g", Risks: []task.Risk{{Detail: "risky"}}, Attempts: []task.Attempt{{Summary: "first"}, {Summary: "latest"}}}
+	if got := latestTaskSummary(withAttempt); got != "latest" {
+		t.Fatalf("expected latest attempt summary, got %q", got)
+	}
 	if got := latestTaskSummary(task.Task{Goal: "g"}); got != "g" {
 		t.Fatalf("expected goal fallback, got %q", got)
 	}

@@ -93,7 +93,7 @@ func TestBuildCommandNeverConcatenatesTaskContent(t *testing.T) {
 		Summary: malicious,
 		RunDir:  "/d",
 	}
-	cmd, cleanup, err := BuildCommand("/usr/local/bin/notify.sh", ev, Options{})
+	cmd, cleanup, err := BuildCommand("/usr/local/bin/notify.sh", ev, Options{GOOS: "linux"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,11 +4,16 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/shinpr/galley/internal/daemonconfig"
 	"github.com/shinpr/galley/internal/task"
 )
+
+func shellPath(path string) string {
+	return "'" + strings.ReplaceAll(filepath.ToSlash(path), "'", `'\''`) + "'"
+}
 
 func writePublishedTask(t *testing.T, root, state, base string, tk task.Task) string {
 	t.Helper()
@@ -43,7 +48,7 @@ func TestNotifyTerminalPublicationFiresOnMatchingStatus(t *testing.T) {
 	runDir := "/galley/runs/run-1"
 	opts := Options{Root: root, Notifications: &daemonconfig.NotificationConfig{
 		Enabled: true,
-		Command: "cat > " + marker,
+		Command: "cat > " + shellPath(marker),
 	}}
 	notifyTerminalPublication(context.Background(), opts, filepath.Join(root, "tasks", "running", "task-a.yaml"), &runDir)
 	data, err := os.ReadFile(marker)
@@ -60,7 +65,7 @@ func TestNotifyTerminalPublicationFiresOnNeedsSupervisorReview(t *testing.T) {
 	root := t.TempDir()
 	marker := filepath.Join(t.TempDir(), "fired")
 	writePublishedTask(t, root, "failed", "task-b.yaml", baseTask("task-b", "needs_supervisor_review"))
-	opts := Options{Root: root, Notifications: &daemonconfig.NotificationConfig{Enabled: true, Command: "touch " + marker}}
+	opts := Options{Root: root, Notifications: &daemonconfig.NotificationConfig{Enabled: true, Command: "touch " + shellPath(marker)}}
 	notifyTerminalPublication(context.Background(), opts, filepath.Join(root, "tasks", "running", "task-b.yaml"), nil)
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatalf("expected hook to fire for needs_supervisor_review: %v", err)
@@ -72,7 +77,7 @@ func TestNotifyTerminalPublicationSkipsNonDefaultStatus(t *testing.T) {
 	root := t.TempDir()
 	marker := filepath.Join(t.TempDir(), "fired")
 	writePublishedTask(t, root, "done", "task-c.yaml", baseTask("task-c", "accepted"))
-	opts := Options{Root: root, Notifications: &daemonconfig.NotificationConfig{Enabled: true, Command: "touch " + marker}}
+	opts := Options{Root: root, Notifications: &daemonconfig.NotificationConfig{Enabled: true, Command: "touch " + shellPath(marker)}}
 	notifyTerminalPublication(context.Background(), opts, filepath.Join(root, "tasks", "running", "task-c.yaml"), nil)
 	if _, err := os.Stat(marker); err == nil {
 		t.Fatal("hook fired for accepted under default on-list; expected skip")
@@ -84,7 +89,7 @@ func TestNotifyTerminalPublicationFiresOnOptInAccepted(t *testing.T) {
 	root := t.TempDir()
 	marker := filepath.Join(t.TempDir(), "fired")
 	writePublishedTask(t, root, "done", "task-d.yaml", baseTask("task-d", "accepted"))
-	opts := Options{Root: root, Notifications: &daemonconfig.NotificationConfig{Enabled: true, On: []string{"accepted"}, Command: "touch " + marker}}
+	opts := Options{Root: root, Notifications: &daemonconfig.NotificationConfig{Enabled: true, On: []string{"accepted"}, Command: "touch " + shellPath(marker)}}
 	notifyTerminalPublication(context.Background(), opts, filepath.Join(root, "tasks", "running", "task-d.yaml"), nil)
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatalf("expected hook to fire for opt-in accepted: %v", err)
@@ -96,7 +101,7 @@ func TestNotifyTerminalPublicationFiresOnOptInAccepted(t *testing.T) {
 func TestNotifyTerminalPublicationSkipsWhenNotPublished(t *testing.T) {
 	root := t.TempDir()
 	marker := filepath.Join(t.TempDir(), "fired")
-	opts := Options{Root: root, Notifications: &daemonconfig.NotificationConfig{Enabled: true, Command: "touch " + marker}}
+	opts := Options{Root: root, Notifications: &daemonconfig.NotificationConfig{Enabled: true, Command: "touch " + shellPath(marker)}}
 	notifyTerminalPublication(context.Background(), opts, filepath.Join(root, "tasks", "running", "missing.yaml"), nil)
 	if _, err := os.Stat(marker); err == nil {
 		t.Fatal("hook fired for an unpublished task; expected skip")
@@ -124,7 +129,7 @@ func TestNotifyTerminalPublicationDisabled(t *testing.T) {
 	// nil config
 	notifyTerminalPublication(context.Background(), Options{Root: root}, filepath.Join(root, "tasks", "running", "task-f.yaml"), nil)
 	// disabled config
-	notifyTerminalPublication(context.Background(), Options{Root: root, Notifications: &daemonconfig.NotificationConfig{Enabled: false, Command: "touch " + marker}}, filepath.Join(root, "tasks", "running", "task-f.yaml"), nil)
+	notifyTerminalPublication(context.Background(), Options{Root: root, Notifications: &daemonconfig.NotificationConfig{Enabled: false, Command: "touch " + shellPath(marker)}}, filepath.Join(root, "tasks", "running", "task-f.yaml"), nil)
 	if _, err := os.Stat(marker); err == nil {
 		t.Fatal("disabled/nil notifications fired a hook")
 	}

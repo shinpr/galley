@@ -98,9 +98,59 @@ Use the installed `galley` binary for `start`, `status`, and `stop`. PID verific
 
 ### Daemon startup defaults (`daemon.yaml`)
 
-Both `galley daemon run` and `galley daemon start` create `daemon.yaml` under the selected daemon root on first use if the file does not already exist. The file holds the durable startup defaults for `supervisor`, `max_concurrent_tasks`, `max_concurrent_per_repo`, `poll_interval`, `claim_ttl`, `heartbeat_interval`, `shutdown_timeout`, and `idle_timeout`. Edit it to change daemon-wide defaults without re-specifying CLI flags. `galley daemon status` and `galley daemon stop` never create `daemon.yaml`; they are read-only.
+Both `galley daemon run` and `galley daemon start` create `daemon.yaml` under the selected daemon root on first use if the file does not already exist. The file holds the durable startup defaults for `supervisor`, `max_concurrent_tasks`, `max_concurrent_per_repo`, `poll_interval`, `claim_ttl`, `heartbeat_interval`, `shutdown_timeout`, `idle_timeout`, and the opt-in `notifications` command hook (see [Notifications](#notifications)). Edit it to change daemon-wide defaults without re-specifying CLI flags. `galley daemon status` and `galley daemon stop` never create `daemon.yaml`; they are read-only.
 
 CLI flags on `galley daemon run` or `galley daemon start` always override the matching `daemon.yaml` field for that run (including `--shutdown-timeout`). Anything you do not set on the CLI falls back to `daemon.yaml`; anything `daemon.yaml` does not set falls back to the built-in default.
+
+### Notifications
+
+The daemon can run an opt-in, best-effort command hook after a task reaches a terminal published status, so an operator running AFK tasks can be alerted (Slack, desktop notification, email, ntfy, and so on) without Galley shipping any specific notifier. Notifications are configured only in `daemon.yaml`; there is no CLI flag, because the hook is operator configuration rather than a runtime-tunable knob.
+
+```yaml
+notifications:
+  enabled: true
+  on: [failed, needs_supervisor_review]
+  command: "/absolute/path/to/docs/examples/notifications/notify-slack.sh"
+```
+
+Fields:
+
+- `enabled` (bool, default `false`): gates the hook. Notifications are opt-in. When `enabled: true`, `command` must be set; an enabled block with an empty `command` is rejected at daemon startup so a misconfiguration fails fast instead of silently never notifying.
+- `on` (list, optional): the terminal task statuses that trigger the hook. An empty or omitted list resolves to the default `[failed, needs_supervisor_review]`. The valid statuses are `failed`, `needs_supervisor_review`, `accepted`, and `pr_opened`; `accepted` and `pr_opened` are valid opt-in choices but are not on by default. An unknown status is rejected at startup.
+- `command` (string): the operator-owned shell command to run. It executes through the same cross-platform shell resolution as required checks, so macOS, Linux, and Windows are covered by one shell-selection contract.
+
+The hook fires only after the task has actually reached a published terminal state under `tasks/done` or `tasks/failed`; the status used for the `on` filter is the authoritative persisted status, not an in-memory guess. If the terminal move did not happen, no notification fires.
+
+#### Hook input
+
+Task-derived data is passed to the command as data, never as part of the command string. Each invocation receives:
+
+- A single-line JSON object on stdin with these fields:
+  - `task_id` — the task ID.
+  - `status` — the terminal published status that triggered the hook.
+  - `repo` — the task `scope.cwd`.
+  - `summary` — a short human-readable summary (latest attempt summary, falling back to the latest risk detail, then the task goal), truncated to 280 runes with a trailing `…` when clipped.
+  - `run_dir` — the run evidence directory for the attempt, when available.
+  - `show_hint` — the inspection command an operator can run, `galley task show <task_id>`.
+- The same values mirrored as namespaced environment variables: `GALLEY_TASK_ID`, `GALLEY_TASK_STATUS`, `GALLEY_REPO`, `GALLEY_SUMMARY` (also truncated to 280 runes), and `GALLEY_RUN_DIR`.
+
+#### Timeout and failure behavior
+
+The hook is best-effort and runs off the task-state critical path. Delivery is dispatched asynchronously after the task reaches its published terminal state, so a slow or stuck notification command never delays the daemon worker that ran the task or the next daemon iteration. A single invocation is bounded by a fixed 30-second timeout (not operator-tunable in this version); on timeout the command's process group is killed, so a hanging script is terminated rather than leaking as an unmanaged long-running child. During daemon shutdown, in-flight notification commands are canceled through the same process-group cleanup path before the daemon process exits. A non-zero exit, start failure, timeout, shutdown cancellation, or hang is logged to the daemon's stderr/log and then swallowed: it never mutates task state, never moves the task back, never retries the task, and never fails the daemon loop, so a broken or slow notifier cannot hide or alter the primary task outcome. Successful and failed invocations both log a line naming the task, status, and (on success) the command exit code.
+
+Because delivery is asynchronous and best-effort, an in-flight notification is canceled during daemon shutdown and that single delivery may be lost. This is intentional: retries and at-least-once delivery guarantees are out of scope (see [Non-goals](#non-goals)).
+
+For `galley daemon run --once`, normal process exit waits for any in-flight notification command to finish or hit the fixed timeout, so the once-runner does not leave notification subprocesses behind.
+
+#### Security boundary
+
+The `command` string is operator-owned and has the same trust level as `setup.commands` and `required_checks`. Task content is untrusted and is delivered only through stdin JSON and `GALLEY_*` environment variables, so task summaries or repository paths cannot change the command that Galley executes. Sample hooks under [`docs/examples/notifications/notify-macos.sh`](examples/notifications/notify-macos.sh) and [`docs/examples/notifications/notify-slack.sh`](examples/notifications/notify-slack.sh) show how to consume the payload as argv or JSON data.
+
+#### Non-goals
+
+- No built-in Slack, email, desktop, or other native notifier. Galley only runs the operator-provided command.
+- No secrets storage. Any webhook URL, token, or credential is owned by the operator's command/environment (for example `SLACK_WEBHOOK_URL` exported for `notify-slack.sh`); Galley never holds or persists the secret.
+- No operator-tunable timeout, retries, or delivery guarantees. The hook is fire-and-forget within the fixed 30-second bound, and an unfinished delivery is lost if the daemon process exits before it completes.
 
 ### Supervisor resolution
 

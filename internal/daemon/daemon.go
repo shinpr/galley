@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shinpr/galley/internal/daemonconfig"
 	"github.com/shinpr/galley/internal/galleyhome"
 	"github.com/shinpr/galley/internal/inputfiles"
 	"github.com/shinpr/galley/internal/jsonio"
@@ -101,7 +102,12 @@ type Options struct {
 	CodexBin             string
 	GitBin               string
 	GHBin                string
-	Explicit             ExplicitOptions
+	// Notifications is the opt-in, best-effort notification command hook
+	// resolved from daemon.yaml. A nil pointer disables notifications. It has
+	// no CLI flag because the hook is operator configuration, not a
+	// runtime-tunable knob.
+	Notifications *daemonconfig.NotificationConfig
+	Explicit      ExplicitOptions
 }
 
 type ExplicitOptions struct {
@@ -495,6 +501,20 @@ func gracefulTaskContext(parent context.Context, timeout time.Duration) (context
 }
 
 func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningPath string) error {
+	// runDir is captured here so the deferred terminal notification can include
+	// the run directory in its payload. It stays empty for pre-run failures
+	// (e.g. a task that fails to load or validate before run evidence exists),
+	// in which case the notification reports an empty run_dir.
+	var runDir string
+	// Fire the best-effort terminal notification hook after the task body
+	// returns. By this point every terminal publication has already happened
+	// through taskstate.Move / taskstate.FailMove, so the hook only observes a
+	// task that actually reached a published terminal state. The hook reads the
+	// published task from tasks/done|failed so a failed move (task still in
+	// running/) produces no notification, and a hook failure cannot affect the
+	// already-completed state transition.
+	defer func() { notifyTerminalPublication(ctx, opts, runningPath, &runDir) }()
+
 	loaded, err := loadClaimedTask(runningPath)
 	if err != nil {
 		return taskstate.FailMove(opts.Root, runningPath, nil, err)

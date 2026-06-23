@@ -179,3 +179,107 @@ func TestLoadRejectsNegativeMaxConcurrentPerRepo(t *testing.T) {
 		t.Fatalf("expected error for max_concurrent_per_repo: -1")
 	}
 }
+
+func TestNotificationsDefaultsResolveToDisabledWithDefaultEvents(t *testing.T) {
+	t.Parallel()
+	// Absent block: disabled, no matching.
+	var absent *NotificationConfig
+	if absent.Matches("failed") {
+		t.Fatal("nil notifications must not match any status")
+	}
+	// Enabled with empty `on` resolves to the documented default events.
+	cfg := &NotificationConfig{Enabled: true, Command: "x"}
+	if got := cfg.ResolvedOn(); len(got) != 2 || got[0] != "failed" || got[1] != "needs_supervisor_review" {
+		t.Fatalf("default events = %v, want [failed needs_supervisor_review]", got)
+	}
+	if !cfg.Matches("failed") || !cfg.Matches("needs_supervisor_review") {
+		t.Fatal("default events must match failed and needs_supervisor_review")
+	}
+	if cfg.Matches("accepted") || cfg.Matches("pr_opened") {
+		t.Fatal("accepted and pr_opened must be opt-in, not default")
+	}
+}
+
+func TestNotificationsOptInStatuses(t *testing.T) {
+	t.Parallel()
+	cfg := &NotificationConfig{Enabled: true, Command: "x", On: []string{"accepted", "pr_opened"}}
+	if !cfg.Matches("accepted") || !cfg.Matches("pr_opened") {
+		t.Fatal("explicit opt-in statuses must match")
+	}
+	if cfg.Matches("failed") {
+		t.Fatal("explicit `on` must not implicitly include defaults")
+	}
+	// Disabled never matches even with a command and events.
+	cfg.Enabled = false
+	if cfg.Matches("accepted") {
+		t.Fatal("disabled notifications must not match")
+	}
+}
+
+func TestLoadRejectsUnknownNotificationEvent(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	body := "notifications:\n  enabled: false\n  on:\n    - bogus_status\n"
+	if err := os.WriteFile(filepath.Join(root, Filename), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := Load(root)
+	if err == nil || !strings.Contains(err.Error(), "unknown event") {
+		t.Fatalf("expected unknown event rejection, got %v", err)
+	}
+}
+
+func TestLoadRejectsEnabledWithoutCommand(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	body := "notifications:\n  enabled: true\n"
+	if err := os.WriteFile(filepath.Join(root, Filename), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := Load(root)
+	if err == nil || !strings.Contains(err.Error(), "command is empty") {
+		t.Fatalf("expected enabled-without-command rejection, got %v", err)
+	}
+}
+
+func TestLoadParsesNotificationsBlock(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	body := "notifications:\n  enabled: true\n  on: [failed, accepted]\n  command: \"/bin/notify\"\n"
+	if err := os.WriteFile(filepath.Join(root, Filename), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, present, err := Load(root)
+	if err != nil || !present {
+		t.Fatalf("load failed: present=%v err=%v", present, err)
+	}
+	n := file.Notifications
+	if n == nil || !n.Enabled || n.Command != "/bin/notify" {
+		t.Fatalf("notifications parsed wrong: %#v", n)
+	}
+	if len(n.On) != 2 || n.On[0] != "failed" || n.On[1] != "accepted" {
+		t.Fatalf("notifications.on parsed wrong: %v", n.On)
+	}
+}
+
+func TestEnsureDefaultDocumentsNotificationsDisabled(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	if _, err := EnsureDefault(root); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, Filename))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	for _, want := range []string{"notifications:", "enabled: false"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("default daemon.yaml missing %q\n%s", want, content)
+		}
+	}
+	// The generated default must itself be valid (round-trips through Validate).
+	if _, _, err := Load(root); err != nil {
+		t.Fatalf("generated default daemon.yaml does not validate: %v", err)
+	}
+}

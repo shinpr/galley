@@ -46,6 +46,75 @@ type File struct {
 	HeartbeatInterval    string `yaml:"heartbeat_interval,omitempty"`
 	ShutdownTimeout      string `yaml:"shutdown_timeout,omitempty"`
 	IdleTimeout          string `yaml:"idle_timeout,omitempty"`
+	// Notifications configures the opt-in, best-effort notification command
+	// hook the daemon runs after a task reaches a terminal published status.
+	// A nil pointer (absent block) disables notifications entirely; the
+	// resolution chain has no CLI flag equivalent because the hook is operator
+	// config, not a runtime-tunable knob.
+	Notifications *NotificationConfig `yaml:"notifications,omitempty"`
+}
+
+// NotificationConfig is the daemon.yaml `notifications` block. It is operator
+// configuration at the same trust level as `setup.commands` and
+// `required_checks`: the command string is operator-owned and is never
+// interpolated with task-derived content. Task-derived data crosses into the
+// command only through stdin JSON and namespaced GALLEY_* environment
+// variables.
+type NotificationConfig struct {
+	// Enabled gates the hook. Default false (opt-in). When true, Command must
+	// be set; validation rejects enabled-without-command so a misconfiguration
+	// fails fast at daemon startup instead of silently never notifying.
+	Enabled bool `yaml:"enabled"`
+	// On lists the terminal task statuses that trigger the hook. An empty list
+	// resolves to the default [failed, needs_supervisor_review]. accepted and
+	// pr_opened are valid opt-in statuses but are not on by default.
+	On []string `yaml:"on,omitempty"`
+	// Command is the operator-configured shell command. It is executed through
+	// the same cross-platform shell resolution as required checks. Task content
+	// is never concatenated into this string.
+	Command string `yaml:"command,omitempty"`
+}
+
+// DefaultNotificationEvents is the resolved default for notifications.on when
+// the operator enables notifications without naming explicit statuses.
+func DefaultNotificationEvents() []string {
+	return []string{"failed", "needs_supervisor_review"}
+}
+
+// validNotificationEvents is the set of terminal task statuses a notification
+// hook may subscribe to. failed and needs_supervisor_review are the defaults;
+// accepted and pr_opened are valid opt-in statuses.
+var validNotificationEvents = map[string]bool{
+	"failed":                  true,
+	"needs_supervisor_review": true,
+	"accepted":                true,
+	"pr_opened":               true,
+}
+
+// ResolvedOn returns the effective notification status list, applying the
+// documented default when the operator left notifications.on empty. It returns
+// nil when the receiver is nil so callers can treat "no config" uniformly.
+func (n *NotificationConfig) ResolvedOn() []string {
+	if n == nil {
+		return nil
+	}
+	if len(n.On) == 0 {
+		return DefaultNotificationEvents()
+	}
+	return append([]string(nil), n.On...)
+}
+
+// Matches reports whether the hook is enabled and subscribes to status.
+func (n *NotificationConfig) Matches(status string) bool {
+	if n == nil || !n.Enabled || n.Command == "" {
+		return false
+	}
+	for _, e := range n.ResolvedOn() {
+		if e == status {
+			return true
+		}
+	}
+	return false
 }
 
 // Defaults returns the documented daemon startup defaults that are written to
@@ -62,6 +131,10 @@ func Defaults() File {
 		HeartbeatInterval:    "1m",
 		ShutdownTimeout:      "5m",
 		IdleTimeout:          "10m",
+		Notifications: &NotificationConfig{
+			Enabled: false,
+			On:      DefaultNotificationEvents(),
+		},
 	}
 }
 
@@ -172,6 +245,26 @@ func (f File) Validate() error {
 			return fmt.Errorf("%s must be a valid Go duration (got %q): %w", field.name, field.value, err)
 		}
 	}
+	if err := f.Notifications.validate(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validate checks the notifications block. A nil pointer (absent block) is
+// always valid: notifications are opt-in and default to disabled.
+func (n *NotificationConfig) validate() error {
+	if n == nil {
+		return nil
+	}
+	for _, event := range n.On {
+		if !validNotificationEvents[event] {
+			return fmt.Errorf("notifications.on contains unknown event %q (valid events: failed, needs_supervisor_review, accepted, pr_opened)", event)
+		}
+	}
+	if n.Enabled && n.Command == "" {
+		return errors.New("notifications.enabled is true but notifications.command is empty; set a command or disable notifications")
+	}
 	return nil
 }
 
@@ -195,6 +288,16 @@ func marshalDocumentedDefaults() ([]byte, error) {
 	buf.WriteString("# Edit these values to change daemon-wide defaults without re-specifying CLI flags.\n")
 	buf.WriteString("# CLI flags on `galley daemon run` or `galley daemon start` override the matching field.\n")
 	buf.WriteString("# Repository `environment.yaml` `supervisor.default_cli` overrides supervisor for that task only.\n")
+	buf.WriteString("#\n")
+	buf.WriteString("# notifications: opt-in, best-effort command hook run after a task reaches a\n")
+	buf.WriteString("# terminal status. Set `enabled: true` and a `command` to receive alerts; the\n")
+	buf.WriteString("# command receives task data on stdin (JSON) and via GALLEY_* env vars, never\n")
+	buf.WriteString("# concatenated into the command string. See docs/operations.md and the sample\n")
+	buf.WriteString("# scripts under scripts/ (notify-macos.sh, notify-slack.sh). Example:\n")
+	buf.WriteString("#   notifications:\n")
+	buf.WriteString("#     enabled: true\n")
+	buf.WriteString("#     on: [failed, needs_supervisor_review]\n")
+	buf.WriteString("#     command: \"/path/to/notify-slack.sh\"\n")
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
 	if err := enc.Encode(defaults); err != nil {

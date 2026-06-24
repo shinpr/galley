@@ -1505,6 +1505,44 @@ func TestCleanupWorktreesContinuesAfterTaskFailure(t *testing.T) {
 	}
 }
 
+func TestCleanupWorktreesLogsAdditionalTaskFailures(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	if err := queue.EnsureLayout(root); err != nil {
+		t.Fatal(err)
+	}
+
+	firstFailingPath := filepath.Join(root, "tasks", "done", "a-failing.yaml")
+	writeDaemonTask(t, firstFailingPath, repo)
+	prepareDonePRTask(t, firstFailingPath, repo, "merged")
+	pointWorktreeAtSourceRepo(t, firstFailingPath, repo)
+
+	secondFailingPath := filepath.Join(root, "tasks", "done", "b-failing.yaml")
+	writeDaemonTask(t, secondFailingPath, repo)
+	prepareDonePRTask(t, secondFailingPath, repo, "merged")
+	pointWorktreeAtSourceRepo(t, secondFailingPath, repo)
+
+	ghBin, marker := writeFailIfInvokedGH(t)
+
+	var cleanupErr error
+	stderr := captureStderr(t, func() {
+		cleanupErr = cleanupWorktrees(context.Background(), Options{Root: root, GHBin: ghBin}.withDefaults())
+	})
+	if cleanupErr == nil {
+		t.Fatal("expected the first contextualized failure to be returned")
+	}
+	if !strings.Contains(cleanupErr.Error(), firstFailingPath) {
+		t.Fatalf("returned error must keep the first failing task, got %q", cleanupErr)
+	}
+	if !strings.Contains(stderr, "galley: additional worktree cleanup failure:") {
+		t.Fatalf("stderr must log additional cleanup failures, got %q", stderr)
+	}
+	if !strings.Contains(stderr, secondFailingPath) {
+		t.Fatalf("stderr must name the second failing task, got %q", stderr)
+	}
+	assertGHNotInvoked(t, marker)
+}
+
 // pointWorktreeAtSourceRepo rewrites a done task's managed worktree path to the
 // source repository so workspace.Remove refuses to remove it, producing a
 // deterministic actionable cleanup failure for AC5/AC6.

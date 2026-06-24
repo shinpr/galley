@@ -21,8 +21,12 @@ func cleanupWorktrees(ctx context.Context, opts Options) error {
 	}
 	var firstErr error
 	for _, path := range matches {
-		if err := cleanupTaskWorktree(ctx, opts, path); err != nil && firstErr == nil {
-			firstErr = err
+		if err := cleanupTaskWorktree(ctx, opts, path); err != nil {
+			if firstErr == nil {
+				firstErr = err
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "galley: additional worktree cleanup failure: %v\n", err)
 		}
 	}
 	return firstErr

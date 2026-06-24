@@ -88,6 +88,8 @@ galley daemon run --once
 
 `galley daemon run --once` drains queued tasks once and exits. Background `galley daemon start` also performs daemon maintenance such as PR comment polling and closed or merged PR worktree cleanup according to `environment.yaml`. In normal (non `--once`) mode this maintenance runs on its own poll-interval schedule, independent of queued task execution, so PR comment polling and cleanup continue on the configured interval even while a long executor attempt is still running.
 
+When a done task already records a final `pr.status` of `merged` or `closed`, worktree cleanup acts on that persisted status directly and does not query GitHub for live PR state, so already-final historical tasks no longer turn a GitHub read failure into a recurring maintenance error. Tasks that still record `pr.status: open` are refreshed from GitHub so a PR that closed or merged after Galley last persisted it is still cleaned up. Per-task cleanup failures are reported with the task file or id plus the PR URL and resolved worktree path, and the sweep continues to the remaining done tasks before surfacing the first such failure.
+
 `--root` points at the daemon root and defaults to `~/.galley`. Use `--root .agent-workflow` only for repo-local or test workflows.
 
 `galley daemon start` launches the daemon in the background. It writes a PID file and appends stdout and stderr to a log file. By default those files are under `~/.galley`; override them with `--pid-file` and `--log-file`.

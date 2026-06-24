@@ -6,6 +6,12 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.8.1 - 2026-06-24
+
+### Fixed
+
+- Daemon worktree cleanup now uses persisted final `pr.status` for already-final done tasks instead of refreshing PR state from GitHub, preventing historical tasks from causing recurring maintenance failures. Open PR tasks still refresh live state, and cleanup failures now include task, PR, and worktree context while the sweep continues to later tasks.
+
 ## v0.8.0 - 2026-06-23
 
 ### Added

@@ -15,6 +15,10 @@ It runs Claude Code or Codex in a git worktree, records evidence for each attemp
 
 Galley is for tasks where the output should be inspectable later: the request, scope, checks, diffs, and supervisor verdict stay on disk.
 
+Galley builds Galley: roughly half of this repository's merged implementation PRs were created from Galley-managed task branches.
+
+[Browse Galley-built PRs](https://github.com/shinpr/galley/pulls?q=is%3Apr+is%3Amerged+head%3Aagent)
+
 ## Quick Start
 
 Use the Galley skill to set up each repository. It installs or verifies the CLI, prepares repository profiles, drafts valid task YAML, and queues tasks only after approval.

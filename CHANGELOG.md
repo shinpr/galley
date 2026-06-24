@@ -6,9 +6,11 @@ This project follows semantic versioning.
 
 ## Unreleased
 
-### Changed
+## v0.8.1 - 2026-06-24
 
-- Daemon worktree cleanup no longer queries GitHub for done tasks that already record a final `pr.status` of `merged` or `closed`: it acts on the persisted final status to remove a still-present managed worktree or reconcile an already-absent one, so already-final historical tasks no longer turn a GitHub read failure into a recurring maintenance error. Tasks that still record `pr.status: open` continue to fetch live PR state, keeping open-PR worktrees and removing PRs that closed or merged after Galley last persisted the task. Per-task cleanup failures now carry the task file or id plus the PR URL and resolved worktree path, and the sweep continues past a failing task before returning the first contextualized failure.
+### Fixed
+
+- Daemon worktree cleanup now uses persisted final `pr.status` for already-final done tasks instead of refreshing PR state from GitHub, preventing historical tasks from causing recurring maintenance failures. Open PR tasks still refresh live state, and cleanup failures now include task, PR, and worktree context while the sweep continues to later tasks.
 
 ## v0.8.0 - 2026-06-23
 

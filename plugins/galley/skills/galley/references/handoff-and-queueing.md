@@ -33,7 +33,7 @@ galley daemon status --output json
 
 If the daemon is already running, compare it with the approved execution settings. Surface mismatches that affect the user-visible plan, such as supervisor provider or PR automation. If the daemon is not running, ask whether to start it after queueing or only queue the task. Explain the main choices:
 
-- supervisor: `codex` by default, or `claude` when the user wants Claude review.
+- supervisor: `claude` by default, or `codex` when the user wants Codex review.
 - PR automation, PR comment handling, base branch, and worktree cleanup come from the repository `environment.yaml`.
 - execution mode: `galley daemon start` for background execution, or `galley daemon run --once` for one queue drain.
 - concurrency: use defaults for ordinary tasks; increase parallelism when the user explicitly asks for it.
@@ -129,4 +129,4 @@ For a single drain:
 galley daemon run --once
 ```
 
-Add `--supervisor claude` when the user selected Claude review. Add `--supervisor codex` only when the user wants the default Codex review choice to be explicit. Keep PR and cleanup behavior in the repository environment profile.
+Add `--supervisor codex` when the user selected Codex review. Add `--supervisor claude` only when the user wants the default Claude review choice to be explicit. Keep PR and cleanup behavior in the repository environment profile.

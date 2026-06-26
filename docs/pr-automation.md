@@ -32,7 +32,7 @@ Origin-less local checkouts fall back to `refs/heads/<pr.base>`. The start point
 
 Galley renders each acceptance criterion in `pr_body.md` using the supervisor verdict, so accepted ACs read as `Status: satisfied` and any IDs the supervisor flagged in `acceptance_gaps` read as `Status: partially_satisfied`.
 
-Generated PR titles preserve the task goal up to a rune budget set close to GitHub's 256-byte PR title limit. When truncation is required, Galley cuts at the last whitespace inside that rune budget, enforces the 256-byte PR title limit on a valid UTF-8 boundary, and appends a single `…` so reviewers can tell the title was shortened.
+Generated PR titles preserve the task goal up to GitHub's title limit. When truncation is required, Galley cuts on a valid UTF-8 boundary and appends `…`.
 
 ## PR Comment Requeueing
 
@@ -49,7 +49,7 @@ Processed comment IDs are stored in `pr.processed_comment_ids` so commands are n
 
 ## Comment Replies
 
-With `pr.comments.reply: true`, Galley posts a concise acknowledgement comment after handling a Galley command. The reply does not quote the original request body; the parsed request text is preserved on the requeued task as a `RevisionRequest` entry so the executor still receives the user's intent on the next attempt.
+With `pr.comments.reply: true`, Galley posts a concise acknowledgement comment after handling a Galley command. The parsed request is preserved on the requeued task for the next executor attempt.
 
 Reply forms:
 

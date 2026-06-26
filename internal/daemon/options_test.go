@@ -20,7 +20,7 @@ func TestWithDefaultsAppliesIdleTimeout(t *testing.T) {
 	}
 }
 
-func TestPreflightDefaultsSupervisorToCodex(t *testing.T) {
+func TestPreflightDefaultsSupervisorToClaude(t *testing.T) {
 	t.Parallel()
 	opts, err := Preflight(Options{Root: t.TempDir()})
 	if err != nil {

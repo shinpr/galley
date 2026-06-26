@@ -23,7 +23,7 @@ func TestEnsureDefaultCreatesFileWithDocumentedDefaults(t *testing.T) {
 	}
 	content := string(data)
 	for _, want := range []string{
-		"supervisor: codex",
+		"supervisor: claude",
 		"max_concurrent_tasks: 1",
 		"max_concurrent_per_repo: 1",
 		"poll_interval: 10s",

@@ -121,7 +121,7 @@ run evidence + git diff
 - **Task YAML**: trusted local input describing the goal, acceptance criteria, scope, executor, verification, worktree, and PR behavior. See [docs/task-yaml.md](docs/task-yaml.md).
 - **Quality profile**: optional repository expectations for required checks, review dimensions, evidence, and pass policy. See [docs/profiles.md](docs/profiles.md).
 - **Environment profile**: optional repository defaults for command names, executor choice, local constraints, PR behavior, and cleanup policy. See [docs/profiles.md](docs/profiles.md).
-- **Executor**: Claude Code or Codex backend that implements the task. New tasks use `environment.yaml` `executor.default_cli` when configured, otherwise Codex.
+- **Executor**: Claude Code or Codex backend that implements the task. New tasks use `environment.yaml` `executor.default_cli` when configured, otherwise Claude.
 - **Supervisor**: Claude or Codex backend that reviews the result against acceptance criteria, required checks, and recorded evidence.
 - **Worktree**: isolated git checkout used for AFK execution so the source repository stays clean.
 - **Evidence**: files under `runs/<run-id>/` that make each attempt auditable after the fact.

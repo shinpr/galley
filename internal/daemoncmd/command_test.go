@@ -127,7 +127,7 @@ func TestRunOnceCreatesDaemonYAML(t *testing.T) {
 	if err != nil {
 		t.Fatalf("daemon.yaml not created: %v", err)
 	}
-	for _, want := range []string{"supervisor: codex", "poll_interval: 10s", "shutdown_timeout: 5m"} {
+	for _, want := range []string{"supervisor: claude", "poll_interval: 10s", "shutdown_timeout: 5m"} {
 		if !strings.Contains(string(data), want) {
 			t.Fatalf("daemon.yaml missing %q\ncontent: %s", want, string(data))
 		}

@@ -123,7 +123,7 @@ func (n *NotificationConfig) Matches(status string) bool {
 func Defaults() File {
 	one := 1
 	return File{
-		Supervisor:           "codex",
+		Supervisor:           "claude",
 		MaxConcurrentTasks:   &one,
 		MaxConcurrentPerRepo: &one,
 		PollInterval:         "10s",

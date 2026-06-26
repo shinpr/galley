@@ -9,7 +9,7 @@
 //  1. Daemon CLI startup options (explicit flags on `galley daemon run` or
 //     `galley daemon start`).
 //  2. daemon.yaml under the selected daemon root.
-//  3. Built-in defaults (Codex supervisor and the other documented daemon
+//  3. Built-in defaults (Claude supervisor and the other documented daemon
 //     defaults).
 //
 // Repository-level `environment.yaml` supervisor.default_cli is a *task-level*

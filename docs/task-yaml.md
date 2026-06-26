@@ -40,9 +40,9 @@ worktree:
 supervisor:
   review_iterations: 0
 executor:
-  cli: "codex"
+  cli: "claude"
   effort: "high"
-  prompt_profile: "codex-executor-v1"
+  prompt_profile: "codexized-claude-executor-v1"
   prompt_mode: "replace"
 decisions: []
 risks: []
@@ -88,12 +88,12 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 - `execution_policy.stop_on_destructive_operation`: stop when the task would require out-of-scope destructive work.
 - `execution_policy.stop_on_missing_secret`: stop when a required secret is unavailable and cannot be replaced by safe local evidence.
 - `execution_policy.stop_on_external_service_unavailable`: stop when a required external service is unavailable and the task cannot proceed with local substitutes.
-- `executor.cli`: selects the executor backend. Accepts `claude` (Claude Code) or `codex` (`codex exec`). The daemon dispatches the implementation attempt through the matching binary and persists per-attempt evidence under `runs/<run-id>/attempt-N/` for both. New task authoring resolves this value from `environment.yaml` `executor.default_cli` when present and uses Claude when no environment default is configured; an explicit task YAML value is still authoritative for that task. The Codex executor uses a Codex-specific executor prompt that preserves the same task/result contract as the Claude executor prompt.
-- `executor.model`: optional model override for the executor command. Omit it to use the selected CLI's configured default model; write it only when you want to pin a model name. Available model names depend on the user's account, provider, CLI configuration, and CLI version, so a pinned value should be smoke-tested when in doubt.
-- `executor.effort`: model effort hint for the executor command. Claude accepts `low`, `medium`, `high`, `xhigh`, or `max`; Codex accepts `low`, `medium`, or `high`. For `codex`, effort is delivered via `-c model_reasoning_effort="<value>"` because `codex exec` does not expose a top-level `--effort` flag and `-c` expects TOML-style values.
+- `executor.cli`: selects `claude` (Claude Code) or `codex` (`codex exec`). New task authoring uses `environment.yaml` `executor.default_cli` when present, otherwise Claude. An explicit task YAML value is authoritative for that task.
+- `executor.model`: optional model override. Omit it to use the selected CLI's configured default model.
+- `executor.effort`: model effort hint. Claude accepts `low`, `medium`, `high`, `xhigh`, or `max`; Codex accepts `low`, `medium`, or `high`.
 - `executor.prompt_profile`: prompt profile name recorded for evidence.
-- `executor.prompt_mode`: `replace` or `append`. For `codex`, both modes currently produce the same effective prompt ordering because Galley concatenates the system prompt and work order through `codex exec` stdin; `append` is accepted for schema compatibility and recorded as an informational warning.
-- `executor.max_budget_usd`: optional non-negative execution budget hint. Claude honors this hint via its CLI flag, so explicit Claude tasks may set it when a per-run ceiling is useful. `codex exec` has no equivalent flag; Codex tasks may still carry an explicit value for audit, but new Codex skeletons omit it to avoid implying an enforced cost limit.
+- `executor.prompt_mode`: `replace` or `append`.
+- `executor.max_budget_usd`: optional non-negative execution budget hint. Claude tasks can use it as a per-run ceiling; Codex has no equivalent enforced flag.
 
 ## Permissions
 
@@ -105,7 +105,7 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 
 For AFK implementation tasks, prefer `sandbox-full-access` with an isolated worktree. Use `read-only` for investigation or review tasks.
 
-`scope.permission` is an authority intent passed into the executor workflow. Actual isolation comes from the worktree, `scope.forbidden_paths`, the executor CLI sandbox, and local OS or container controls. `scope.allowed_paths` describes the expected implementation area and input-file destinations; supervisor-accepted scope expansion can still be committed when it stays outside `scope.forbidden_paths`.
+`scope.permission` is an authority intent passed into the executor workflow. Actual isolation comes from the worktree, `scope.forbidden_paths`, the executor CLI sandbox, and local OS controls.
 
 ## Input Files
 
@@ -153,7 +153,7 @@ Example:
 
 ## Acceptance Skeleton Preflight
 
-`preflight.acceptance_skeleton` is an optional stage that runs after input files are prepared and before the first executor attempt. When enabled, Galley runs the built-in test creator, writes AC-linked test skeletons in the worktree, records `runs/<run-id>/preflight_result.json` as the runtime source of truth, updates the running task with the generated skeleton metadata, and adds a skeleton-obligations section to the executor work order.
+`preflight.acceptance_skeleton` is an optional stage that creates AC-linked test skeletons before the first executor attempt. When enabled, Galley records the result and adds skeleton obligations to the executor work order.
 
 New task skeletons include the stage in its default disabled state:
 
@@ -182,11 +182,11 @@ preflight:
         implementation_required: true
 ```
 
-The built-in creator reads the task, ACs, allowed paths, resolved profiles, and task input files such as design docs or work plans; writes AC-linked test skeleton files; and returns a manifest. Galley validates that manifest, writes `preflight_result.json`, updates the running task file with generated `outputs[]`, and annotates each AC's `verification` with the skeleton path, what it satisfies, and the integration point before the executor starts. Generated paths must be relative, inside the effective allowed paths, outside `scope.forbidden_paths`, and backed by real files already written by the creator.
+The built-in creator writes AC-linked skeleton files and returns a manifest. Generated paths must be relative, inside the effective allowed paths, outside `scope.forbidden_paths`, and backed by real files.
 
-The skeleton creator follows the task implementation executor backend: it selects its provider from `executor.cli` and reuses the task `executor.model` and `executor.effort` settings, so the creator and the implementation attempt run on the same backend. A `claude` task runs the creator through Claude Code; a `codex` task runs it through `codex exec`. Both providers produce the same manifest contract and the same persisted preflight evidence. The daemon supervisor backend (`--supervisor`) controls only review and is independent from acceptance skeleton creator provider selection.
+The skeleton creator follows `executor.cli` and reuses `executor.model` and `executor.effort`. The daemon supervisor backend controls only review.
 
-Required-check acceptance gate semantics: this gate is part of the acceptance skeleton stage and runs only when `preflight.acceptance_skeleton.enabled: true` — tasks that omit or disable the section keep the pre-feature accepted-verdict behavior. For preflight-enabled tasks, an accepted verdict is downgraded to `needs_supervisor_review` when a required quality-profile check has no passing verification evidence. `preferred_commands` is treated as an **ordered fallback list**, mirroring how `result.Complete` runs them: the commands run in order, the first that passes is recorded, and only that command's evidence is kept (or the last failure when every command failed). The gate therefore considers a required check satisfied when *any* of its `preferred_commands` has a passing entry, failed when none passed but at least one has a failed entry, and missing only when there is no evidence for any of its commands (which happens when no executor result was produced, e.g. a hard stop). Requiring every fallback command to have evidence would contradict the fallback semantics and is intentionally not done.
+When this stage is enabled, required quality-profile checks must have passing verification evidence before an accepted verdict can stay accepted. `preferred_commands` are ordered fallbacks: the first passing command satisfies the check.
 
 `required: false` relaxes AC coverage only: Galley no longer requires every AC to have an output or a `no_skeletons[]` reason. It does not disable required quality-check gating.
 
@@ -222,9 +222,4 @@ Requeue is useful for transient failures such as usage limits or temporary servi
 
 ## Lenient Task YAML Handling
 
-Galley distinguishes read-only inspection from active intake when handling task YAML left over from earlier schema revisions:
-
-- Read-only helpers tolerate strict-decode-incompatible files. `galley task list`, `galley task show <ID>`, the daemon's PR comment polling sweep, and the daemon's worktree cleanup sweep all scan task YAML through a lenient loader that accepts unknown fields. An unreadable file surfaces as a non-fatal entry with `status: decode_error` (text output) or a `decode_error` field (JSON output); daemon helper sweeps log a `galley: skipping ... unreadable task <path>: <reason>` warning to stderr and keep processing the remaining readable tasks. Active task intake and execution still use the strict loader: `galley task validate`, `galley task queue`, `galley task requeue`, and daemon execution of a queued task continue to reject unknown fields or type mismatches so a malformed active task cannot reach the executor.
-- `galley task archive` archives strict-decode-incompatible files without normalizing them to the current schema. When strict load succeeds, archive keeps its current-schema behavior: status is set to `archived`, an audit attempt is appended, and the result is rewritten through the current schema. When strict load fails but the document still parses as a YAML mapping, archive falls back to a `yaml.Node` round-trip that only updates the top-level `status` field and retains unknown fields, although YAML formatting may be normalized by reserialization; the `ArchiveResult.Mode` is `lenient_status_edit`. When even safe status editing is unsafe, archive moves the file unchanged so it leaves normal scans; the `ArchiveResult.Mode` is `move_unreadable_unchanged`. Both fallback modes return a populated `ArchiveResult.Warning`, and the `galley task archive` text output echoes the mode on stdout and the warning on stderr so operators can see which fallback archived the file.
-
-Strict-decode-incompatible files are therefore non-fatal for the list/show/helper scans and archive, while validate/queue/requeue/daemon execution still require current-schema task YAML.
+Read-only commands tolerate older task files with unknown fields so operators can still inspect or archive them. Active intake stays strict: `validate`, `queue`, `requeue`, and daemon execution reject unknown fields or type mismatches before work reaches an executor.

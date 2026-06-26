@@ -61,7 +61,7 @@ galley task archive ~/.galley/tasks/done/TASK.yaml
 
 `galley task list` shows task state, status, PR URL, latest verdict, and latest summary across the workflow root.
 
-`galley task show` accepts a task file or task ID and prints the latest attempt, supervisor verdict, risk, and failed verification context. Once a task reaches an accepted terminal status (`accepted`, `pr_opened`, `closed`, or `merged`), the last attempt's executor status and error fields are relabeled under the `prior_attempt_*` prefix so they read as audit history rather than an active failure even after the daemon's PR cleanup loop transitions the task.
+`galley task show` accepts a task file or task ID and prints the latest attempt, supervisor verdict, risk, and failed verification context. Accepted terminal tasks show prior attempt errors as audit history, not active failures.
 
 `galley task requeue` accepts a task ID or task file, returns a reviewed task from `tasks/failed`, `tasks/done`, or `tasks/running` to `tasks/queued`, records an optional reason, and increments `supervisor.review_iterations`.
 
@@ -86,9 +86,9 @@ galley daemon stop
 galley daemon run --once
 ```
 
-`galley daemon run --once` drains queued tasks once and exits. Background `galley daemon start` also performs daemon maintenance such as PR comment polling and closed or merged PR worktree cleanup according to `environment.yaml`. In normal (non `--once`) mode this maintenance runs on its own poll-interval schedule, independent of queued task execution, so PR comment polling and cleanup continue on the configured interval even while a long executor attempt is still running.
+`galley daemon run --once` drains queued tasks once and exits. Background `galley daemon start` also performs daemon maintenance such as PR comment polling and closed or merged PR worktree cleanup according to `environment.yaml`.
 
-When a done task already records a final `pr.status` of `merged` or `closed`, worktree cleanup acts on that persisted status directly and does not query GitHub for live PR state, so already-final historical tasks no longer turn a GitHub read failure into a recurring maintenance error. Tasks that still record `pr.status: open` are refreshed from GitHub so a PR that closed or merged after Galley last persisted it is still cleaned up. Per-task cleanup failures are reported with the task file or id plus the PR URL and resolved worktree path, and the sweep continues to the remaining done tasks before surfacing the first such failure.
+For PR automation and cleanup details, see [pr-automation.md](pr-automation.md).
 
 `--root` points at the daemon root and defaults to `~/.galley`. Use `--root .agent-workflow` only for repo-local or test workflows.
 
@@ -100,13 +100,13 @@ Use the installed `galley` binary for `start`, `status`, and `stop`. PID verific
 
 ### Daemon startup defaults (`daemon.yaml`)
 
-Both `galley daemon run` and `galley daemon start` create `daemon.yaml` under the selected daemon root on first use if the file does not already exist. The file holds the durable startup defaults for `supervisor`, `max_concurrent_tasks`, `max_concurrent_per_repo`, `poll_interval`, `claim_ttl`, `heartbeat_interval`, `shutdown_timeout`, `idle_timeout`, and the opt-in `notifications` command hook (see [Notifications](#notifications)). Edit it to change daemon-wide defaults without re-specifying CLI flags. `galley daemon status` and `galley daemon stop` never create `daemon.yaml`; they are read-only.
+Both `galley daemon run` and `galley daemon start` create `daemon.yaml` under the selected daemon root on first use. The file holds durable startup defaults such as `supervisor`, concurrency, polling, timeout, and notification settings. `galley daemon status` and `galley daemon stop` are read-only.
 
 CLI flags on `galley daemon run` or `galley daemon start` always override the matching `daemon.yaml` field for that run (including `--shutdown-timeout`). Anything you do not set on the CLI falls back to `daemon.yaml`; anything `daemon.yaml` does not set falls back to the built-in default.
 
 ### Notifications
 
-The daemon can run an opt-in, best-effort command hook after a task reaches a terminal published status, so an operator running AFK tasks can be alerted (Slack, desktop notification, email, ntfy, and so on) without Galley shipping any specific notifier. Notifications are configured only in `daemon.yaml`; there is no CLI flag, because the hook is operator configuration rather than a runtime-tunable knob.
+The daemon can run an opt-in, best-effort command hook after a task reaches a terminal published status. Notifications are configured only in `daemon.yaml`.
 
 ```yaml
 notifications:
@@ -117,11 +117,9 @@ notifications:
 
 Fields:
 
-- `enabled` (bool, default `false`): gates the hook. Notifications are opt-in. When `enabled: true`, `command` must be set; an enabled block with an empty `command` is rejected at daemon startup so a misconfiguration fails fast instead of silently never notifying.
-- `on` (list, optional): the terminal task statuses that trigger the hook. An empty or omitted list resolves to the default `[failed, needs_supervisor_review]`. The valid statuses are `failed`, `needs_supervisor_review`, `accepted`, and `pr_opened`; `accepted` and `pr_opened` are valid opt-in choices but are not on by default. An unknown status is rejected at startup.
-- `command` (string): the operator-owned shell command to run. It executes through the same cross-platform shell resolution as required checks, so macOS, Linux, and Windows are covered by one shell-selection contract.
-
-The hook fires only after the task has actually reached a published terminal state under `tasks/done` or `tasks/failed`; the status used for the `on` filter is the authoritative persisted status, not an in-memory guess. If the terminal move did not happen, no notification fires.
+- `enabled` (bool, default `false`): gates the hook. When `true`, `command` must be set.
+- `on` (list, optional): terminal task statuses that trigger the hook. Empty means `[failed, needs_supervisor_review]`.
+- `command` (string): the operator-owned shell command to run.
 
 #### Hook input
 
@@ -138,21 +136,17 @@ Task-derived data is passed to the command as data, never as part of the command
 
 #### Timeout and failure behavior
 
-The hook is best-effort and runs off the task-state critical path. Delivery is dispatched asynchronously after the task reaches its published terminal state, so a slow or stuck notification command never delays the daemon worker that ran the task or the next daemon iteration. A single invocation is bounded by a fixed 30-second timeout (not operator-tunable in this version); on timeout the command's process group is killed, so a hanging script is terminated rather than leaking as an unmanaged long-running child. During daemon shutdown, in-flight notification commands are canceled through the same process-group cleanup path before the daemon process exits. A non-zero exit, start failure, timeout, shutdown cancellation, or hang is logged to the daemon's stderr/log and then swallowed: it never mutates task state, never moves the task back, never retries the task, and never fails the daemon loop, so a broken or slow notifier cannot hide or alter the primary task outcome. Successful and failed invocations both log a line naming the task, status, and (on success) the command exit code.
-
-Because delivery is asynchronous and best-effort, an in-flight notification is canceled during daemon shutdown and that single delivery may be lost. This is intentional: retries and at-least-once delivery guarantees are out of scope (see [Non-goals](#non-goals)).
-
-For `galley daemon run --once`, normal process exit waits for any in-flight notification command to finish or hit the fixed timeout, so the once-runner does not leave notification subprocesses behind.
+The hook is best-effort and never changes task state. It runs asynchronously, has a fixed 30-second timeout, and logs failures without retrying delivery. During daemon shutdown, in-flight notifications may be canceled.
 
 #### Security boundary
 
-The `command` string is operator-owned and has the same trust level as `setup.commands` and `required_checks`. Task content is untrusted and is delivered only through stdin JSON and `GALLEY_*` environment variables, so task summaries or repository paths cannot change the command that Galley executes. Sample hooks under [`docs/examples/notifications/notify-macos.sh`](examples/notifications/notify-macos.sh) and [`docs/examples/notifications/notify-slack.sh`](examples/notifications/notify-slack.sh) show how to consume the payload as argv or JSON data.
+The `command` string is operator-owned. Task content is untrusted and is delivered only through stdin JSON and `GALLEY_*` environment variables. Sample hooks live under [`docs/examples/notifications/`](examples/notifications/).
 
 #### Non-goals
 
 - No built-in Slack, email, desktop, or other native notifier. Galley only runs the operator-provided command.
 - No secrets storage. Any webhook URL, token, or credential is owned by the operator's command/environment (for example `SLACK_WEBHOOK_URL` exported for `notify-slack.sh`); Galley never holds or persists the secret.
-- No operator-tunable timeout, retries, or delivery guarantees. The hook is fire-and-forget within the fixed 30-second bound, and an unfinished delivery is lost if the daemon process exits before it completes.
+- No operator-tunable timeout, retries, or delivery guarantees.
 
 ### Supervisor resolution
 
@@ -163,7 +157,7 @@ The `command` string is operator-owned and has the same trust level as `setup.co
 3. The `supervisor` field in `daemon.yaml`.
 4. The built-in default (`claude`).
 
-`galley daemon status` (text and `--output json`) intentionally does not display daemon startup-default fields it cannot read accurately. The single `supervisor` field is omitted because `environment.yaml` can override the supervisor per task, and a daemon-wide value would be misleading. `max_concurrent_tasks` and `max_concurrent_per_repo` are omitted because `status` only inspects the daemon's PID argv and cannot see `daemon.yaml`-supplied values. The supervisor that actually ran a task, and the layer that selected it (`environment_profile`, `cli`, `daemon_config`, or `default`), are persisted to `runs/<run-id>/supervisor.json` as review evidence; the running daemon's effective concurrency comes from `daemon.yaml` and CLI argv directly.
+`galley daemon status` omits startup defaults it cannot report accurately, such as effective supervisor and concurrency. The supervisor that actually ran a task is persisted to `runs/<run-id>/supervisor.json`.
 
 On Unix, foreground and background daemons use the same shutdown path. On `SIGINT` or `SIGTERM`, Galley stops claiming new queued tasks, lets active attempts finish until the shutdown timeout, records evidence, and avoids starting another retry attempt after shutdown is requested.
 
@@ -173,7 +167,7 @@ Windows has no SIGTERM equivalent that can be delivered to a console-less backgr
 
 - `galley daemon status` uses `OpenProcess` + `GetExitCodeProcess` to verify the recorded PID instead of the Unix `signal(0)` probe. `STILL_ACTIVE` (Windows exit code 259) reports alive; any other exit code reports stopped.
 - `galley daemon stop` terminates the daemon PID directly. Active executor/supervisor attempts running under that daemon do not get a chance to record graceful-shutdown evidence on Windows; the next daemon startup recovers any interrupted running task.
-- `galley daemon stop --force` still re-verifies process identity and terminates the daemon plus every recorded executor/supervisor child. On Windows the child-cleanup loop degrades to PID-level termination because Galley only creates Unix process groups via `Setpgid`; a child PID that has already spawned its own descendants will not have those descendants killed by the daemon cleanup path. Operators that rely on grandchild cleanup should use a Windows job object or the OS task manager.
+- `galley daemon stop --force` terminates the daemon plus every recorded executor/supervisor child. On Windows, descendant processes spawned by those children may require OS-level cleanup.
 - For a graceful shutdown on Windows, run `galley daemon run` in the foreground and stop it with `Ctrl+C`. The foreground daemon shutdown path is the same on every OS: it stops claiming new tasks, lets active attempts finish until `--shutdown-timeout`, and records evidence.
 
 ## Force Stop
@@ -189,13 +183,16 @@ A force kill can interrupt an active attempt; the next daemon startup recovers t
 
 ## Timeouts
 
-Galley uses two timeout concepts. `--idle-timeout` is an idle-output watchdog for executor and built-in supervisor subprocesses: when a subprocess produces no stdout or stderr for that duration, Galley terminates it and records an idle-timeout failure. `execution_policy.timeout_ms` bounds the total wall-clock duration of one executor attempt.
+Galley uses two timeout concepts:
+
+- `--idle-timeout`: kills executor or built-in supervisor subprocesses that stop producing output.
+- `execution_policy.timeout_ms`: bounds the total wall-clock duration of one executor attempt.
 
 Executor idle timeouts are recorded as `error_kind: idle_timeout` and as `idle_timed_out: true` in run evidence, then the task loop continues according to the task loop budget.
 
 Built-in supervisor subprocess failures caused by idle timeout, total timeout, or forced kill are retried up to two additional times inside the same executor attempt. Each try writes evidence under `runs/<run-id>/attempt-N/supervisor-try-<M>/`.
 
-If every supervisor try is killed by the idle-output watchdog, Galley records the failed attempt as `error_phase: supervisor` and `error_kind: supervisor_idle_timeout`; `galley task show` includes the supervisor name, idle-timeout duration, and try count. This is not `execution_policy.timeout_ms` expiring, and the retry policy and final failed task state are unchanged. Requeue the task, or adjust `--idle-timeout` / `--supervisor` if the supervisor backend needs it.
+If every supervisor try is killed by the idle-output watchdog, Galley records `error_phase: supervisor` and `error_kind: supervisor_idle_timeout`. Requeue the task, or adjust `--idle-timeout` / `--supervisor`.
 
 ## Operational Notes
 

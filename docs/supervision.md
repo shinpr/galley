@@ -8,13 +8,13 @@ For newly authored tasks, Galley resolves the executor in this order:
 
 1. an explicit executor choice during task authoring
 2. `environment.yaml` `executor.default_cli`
-3. Codex
+3. Claude
 
 The generated task records the selected backend in `executor.cli`. After that, the task YAML is authoritative: existing tasks keep their configured executor unless the task file is edited.
 
 Galley supports Claude Code and Codex as executor backends. Acceptance skeleton preflight, structured executor results, run evidence, and supervisor review use the same contracts across both backends.
 
-The executor backend in `executor.cli` also drives acceptance skeleton preflight: when `preflight.acceptance_skeleton.enabled` is true, the built-in skeleton creator runs through the same backend (and the same `executor.model`/`executor.effort` settings) as the implementation attempt. A Codex task creates skeletons with Codex; a Claude task creates them with Claude Code.
+The executor backend in `executor.cli` also drives acceptance skeleton preflight. A Codex task creates skeletons with Codex; a Claude task creates them with Claude Code.
 
 See [task-yaml.md](task-yaml.md) for the full `executor` block and [../examples/afk-task-codex.yaml](../examples/afk-task-codex.yaml) for a Codex task example.
 
@@ -24,7 +24,7 @@ Supervisor review defaults to Claude. Use `--supervisor codex` to select Codex i
 
 Both supervisor backends use the same verdict contract, retry budget, and evidence layout. Repository-specific PR behavior, comment polling, and worktree cleanup live in the environment profile resolved from `scope.cwd`.
 
-Supervisor selection controls only review. It is independent from the executor backend in `executor.cli`, which drives the implementation attempt and acceptance skeleton preflight. A task can run a Codex executor and acceptance skeleton creator while a Claude supervisor reviews the result, or the reverse.
+Supervisor selection controls only review. It is independent from the executor backend in `executor.cli`.
 
 ## Acceptance Requirements
 
@@ -57,4 +57,4 @@ For implementation tasks, the supervisor should reject a no-diff result unless t
 
 `completed_with_risks` means the executor believes the implementation is coherent, but verification limits, assumptions, or residual risks still need supervisor attention.
 
-Hard-stop conditions are defined in the executor prompts at [prompts/claude-executor-full.md](../prompts/claude-executor-full.md) and [prompts/codex-executor-full.md](../prompts/codex-executor-full.md). In short, hard stops are reserved for blockers such as missing required secrets, inaccessible required systems, contradictory acceptance criteria, out-of-scope destructive actions, unreadable required files, or runtime failures that leave no useful next step.
+Hard stops are reserved for blockers such as missing required secrets, inaccessible required systems, contradictory acceptance criteria, out-of-scope destructive actions, unreadable required files, or runtime failures that leave no useful next step.

@@ -224,8 +224,8 @@ Required checks are Galley-owned commands, not merely executor guidance. Set `en
 For each required check, record why it is required:
 
 ```markdown
-- tests: `pnpm test -- metadata-filter` from package.json scripts and changed TypeScript code path.
-- typecheck: `pnpm run type-check` from CI workflow.
+- tests: `<repo test command>` from CI, README, or existing test docs for the changed behavior.
+- static-check: `<repo static check command>` from CI, README, or existing quality docs.
 - accessibility: left out because this task has no UI surface.
 ```
 

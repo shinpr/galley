@@ -31,7 +31,7 @@ After the user answers:
 - If references are provided with all three items, read them before asking task-design questions.
 - If a reference answer only provides a path or content, ask for the missing destination and commit policy before continuing.
 - If the user says none, proceed with the request text and repository evidence.
-- If a provided path cannot be read, ask for usable content or a different path before relying on that source.
+- If a provided path cannot be read, record the risk and ask for usable content or a different path before relying on that source.
 - Carry each completed reference file into task direction and YAML as `files[].source`, `files[].destination`, and `files[].commit`.
 
 If the user's answer includes references but is missing destination or commit policy, ask this compact follow-up:
@@ -101,6 +101,7 @@ Before discussing Galley runtime settings or writing task YAML, present the prop
 - task essence
 - AC direction
 - key design decisions to encode
+- verification proof strategy for behavior-changing ACs
 - execution target repository, implementation boundaries, allowed paths, and protected paths
 - reference files and commit policy
 - reference file execution-workspace destinations
@@ -112,6 +113,7 @@ Use a direct approval question, not an open-ended label:
 Task direction:
 - Goal: <goal>
 - Acceptance criteria direction: <AC summary>
+- Verification proof strategy: <primary failure modes, boundaries, state, and residuals for behavior-changing ACs>
 - Execution target repository: <absolute repo path>
 - Implementation boundaries: <included behavior/areas>
 - Allowed paths: <paths needed for edits and reference-file destinations>
@@ -207,7 +209,7 @@ Common shapes:
 acceptance_criteria:
   - id: AC1
     text: "Observable requirement."
-    verification: "Command, test, review evidence, or manual evidence source."
+    verification: "Command, test, review evidence, or manual evidence source; include proof obligation when behavior changes."
     status: pending
 
 decisions:
@@ -227,7 +229,7 @@ risks:
 
 verification:
   commands:
-    - cmd: npm test
+    - cmd: "<repo test command>"
       status: pending
       output_excerpt: ""
 ```
@@ -287,6 +289,7 @@ Task content:
 | --- | --- |
 | Goal | <goal> |
 | Acceptance criteria | <AC IDs and short summaries> |
+| Verification proof / residuals | <primary failure mode, boundary, state, and residual per behavior-changing AC, or none> |
 | Execution boundary | repo `<scope.cwd>`; allowed paths `<paths>`; protected paths `<paths>` |
 | Reference files | <none, or source -> destination with commit policy> |
 | Quality basis | <profile, CI command, repo doc, or inferred domain gate> |

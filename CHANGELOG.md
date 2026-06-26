@@ -9,6 +9,8 @@ This project follows semantic versioning.
 ### Changed
 
 - Restored Claude as the unset default backend for both the implementation executor and the daemon supervisor. New task skeletons emit `executor.cli: claude` when neither `--executor-cli` nor `environment.yaml` `executor.default_cli` is set, and the daemon resolves the built-in supervisor default to `claude` when `--supervisor`, `daemon.yaml`, and repository `supervisor.default_cli` are all unset. Explicit `--executor-cli codex`, `executor.default_cli: codex`, `--supervisor codex`, and existing Codex task examples remain fully supported; schemas still accept both `claude` and `codex`.
+- Packaged Claude and Codex Galley plugins are now versioned as `0.1.17`: task-authoring and profile guidance improves AC proof obligations, reference-file responsibility boundaries, and language-neutral examples.
+- Runtime executor, setup, and acceptance-skeleton prompts improve AC proof-detail handling and language-neutral examples.
 
 ## v0.8.1 - 2026-06-24
 

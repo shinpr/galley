@@ -29,27 +29,17 @@ Use the essence to shape `goal`, ACs, risks, and verification. Record the surfac
 
 ## Reference Files
 
-Use `files[]` for implementation reference material the executor should receive in the worktree.
+Use `files[]` for implementation reference material the executor should receive in the worktree, such as specs, plans, issue exports, review notes, logs, screenshots, API contracts, schema excerpts, fixtures, migration notes, or design handoff text.
 
-Examples:
-
-- product spec, work plan, implementation plan, task brief, PRD
-- API contract, schema excerpt, fixture, migration note
-- review feedback, bug report, stack trace, error log
-- screenshot, accessibility report, visual QA note
-- design handoff text, Figma export, copy deck
-
-For each reference file, decide:
+For each reference file, set:
 
 | Question | Guidance |
 | --- | --- |
 | Why is this file needed? | Record the reason in `description`. |
-| Where should it be copied? | Use a relative `destination` under `scope.allowed_paths`, such as `docs/galley-inputs/<name>`. |
-| Should it be committed? | Use `commit: false` for context-only specs, logs, screenshots, and temporary plans. Use `commit: true` only when the file is intended to become part of the repository output. |
+| Where should it be copied? | Choose an execution-workspace destination the executor can read. |
+| Should it be committed? | Treat specs, logs, screenshots, and temporary plans as context-only by default. Include a supplied file in the final branch only when the user intends it to become repository output. |
 
-When the user supplies reference files and has not stated commit policy, ask explicitly. Recommend context-only for specs, work plans, logs, screenshots, issue exports, and review notes. Use `commit: true` only after the user confirms the supplied file should become part of the branch output.
-
-For Galley task authoring, read supplied reference files after the reference-file intake is complete: path/content, execution-workspace destination, and commit policy are known. Use the content to extract goal, ACs, implementation boundaries, allowed/protected paths, risks, and verification signals before drafting. When a supplied path is unreadable, record the risk and ask for usable content or a usable path.
+Task authoring owns intake timing, missing-detail prompts, and unreadable-path handling. Use completed reference content to extract goal, ACs, boundaries, risks, and verification signals before drafting.
 
 ## Goal Quality
 
@@ -58,7 +48,7 @@ A Galley task goal should be one observable outcome.
 Good goal:
 
 ```text
-Add metadata filtering to the MCP search tool so CLI and MCP callers can restrict results by file metadata.
+Add result filtering so callers can restrict returned records by approved attributes.
 ```
 
 Weak goal:
@@ -110,7 +100,7 @@ Task YAML AC format:
 ```yaml
 - id: AC1
   text: <observable behavior or constraint>
-  verification: <verification method, evidence source, or runnable command when one is known>
+  verification: <verification method or evidence source; for behavior changes, include the proof obligation; see Proof-Oriented Verification>
   status: pending
 ```
 
@@ -118,8 +108,8 @@ Good AC:
 
 ```yaml
 - id: AC1
-  text: When CLI search receives one or more metadata filters, the system shall apply those filters before maxFiles truncation and return only matching files.
-  verification: pnpm test -- metadata-filter
+  text: When a request includes one or more approved filters, the system shall apply those filters before limiting results and return only matching records.
+  verification: "<repo test command>; claim: filters apply before limiting; primary failure mode: unfiltered or post-limit results are returned; boundary: observable result set; state: records include mixed attributes -> filtered request runs -> only matching records remain; residual: none."
   status: pending
 ```
 
@@ -127,16 +117,16 @@ Additional EARS examples:
 
 ```yaml
 - id: AC2
-  text: While the search index contains files with mixed metadata, the system shall preserve existing unfiltered ranking behavior when no metadata filter is provided.
-  verification: pnpm test -- metadata-filter
+  text: While stored records contain mixed attributes, the system shall preserve existing ordering behavior when no filter is provided.
+  verification: "<repo test command>; claim: unfiltered requests preserve ordering; primary failure mode: default ordering changes without a filter; boundary: observable result ordering; state: mixed records exist -> unfiltered request runs -> existing ordering remains; residual: none."
   status: pending
 - id: AC3
-  text: If an MCP caller sends a numeric or boolean metadata filter value, then the system shall validate and compare it according to the documented metadata contract.
-  verification: pnpm test -- metadata-filter
+  text: If a caller sends a typed filter value, then the system shall validate and compare it according to the documented contract.
+  verification: "<repo test command>; claim: typed filter values follow the documented contract; primary failure mode: typed values are compared with the wrong semantics; boundary: request validation and comparison; state: typed filter input -> validation and comparison run -> documented match result; residual: none."
   status: pending
 - id: AC4
-  text: The CLI help shall document the metadata filter flag with one valid example.
-  verification: pnpm start -- --help
+  text: The user-facing documentation shall describe the filter option with one valid example.
+  verification: <repo documentation check>
   status: pending
 ```
 
@@ -170,9 +160,36 @@ For each changed CLI output, JSON payload, config precedence rule, schema field,
 - publication or visibility boundaries, such as when a file, status, or record becomes observable to another command, daemon loop, or user
 - concurrent or reordered execution paths, where new interleavings, races, double-processing, or lost updates become possible
 
-Cover acceptance-relevant cases in ACs. If a related case is intentionally out of scope, record the reason in `decisions`, `risks`, or the task summary. Verification should force each acceptance-relevant path when practical, or record why direct coverage is out of scope. Split separate obligations into separate ACs; keep multiple verification paths only for the same obligation.
+Cover acceptance-relevant cases and behavior-determining paths in ACs. If a related case or path is intentionally out of scope, record the reason in `decisions`, `risks`, or the task summary. Verification should force each acceptance-relevant path when practical, or record why direct coverage is out of scope. Split separate obligations into separate ACs; keep multiple verification paths only for the same obligation.
 
 For bug-fix or behavior-correction tasks, define the smallest reproducing state before finalizing ACs. Include the prior state that makes the bug observable, such as stale local or remote state, cached or generated artifacts, persisted records, existing resources, configuration values, previous run state, or saved history. At least one AC or verification item should prove the fix in that reproducing state.
+
+### Proof-Oriented Verification
+
+For behavior-changing ACs, write the proof obligation into `verification` so the executor and supervisor can judge whether evidence proves the claim, not only whether a command ran.
+
+Encode proof details inside the `verification` string as labeled clauses: `claim: ...; primary failure mode: ...; boundary: ...; state: ...; residual: ...`.
+
+Include these fields when relevant:
+
+| Field | Use |
+| --- | --- |
+| `claim` | Observable behavior the AC promises. |
+| `primary failure mode` | Wrong behavior that should make the check fail. |
+| `boundary` | Public or integration boundary the evidence exercises, such as CLI command, API handler, persisted file, UI flow, daemon lifecycle, or in-process unit. |
+| `state` | Before -> action -> after assertion for state-changing claims; use `N/A` for stateless claims. |
+| `residual` | Acceptance-relevant case left unproven, or `none`. |
+
+Route safe residuals to `risks`. Ask a blocking task question when the residual changes whether the task is safe to queue.
+
+Compact example:
+
+```yaml
+- id: AC1
+  text: When a context-only reference file is copied into the worktree, the final PR shall exclude that file from the committed diff.
+  verification: "Focused queue/final-diff test; claim: context-only inputs inform execution but are not committed; primary failure mode: context-only file appears in final diff; boundary: task file -> worktree copy -> final diff; state: input copied -> executor completes -> diff excludes input; residual: none."
+  status: pending
+```
 
 ## Quality Criteria Sources
 
@@ -194,6 +211,20 @@ Runnable verification commands should fail when the checked condition fails. Pre
 For observable contracts, choose one expected contract before drafting ACs. CLI text, JSON payloads, files, logs, PR bodies, statuses, titles, and public docs should name the required fields, values, ordering, persistence, or fallback behavior. Record alternatives in `decisions` only after a behavior is chosen.
 
 Carry literal observable values into the AC text, verification, decision, or risk that owns them when any source fixes the value as required: task text, an AC, or an input material names it as required; a public API, CLI, schema, persisted format, or test consumes it; or multiple authoritative existing examples use the same value. Literal values include field and key names, enum/status values, order-sensitive output, fallback or empty-state text, derived display rules, lifecycle negatives such as a value becoming visible only after completion, and config precedence values. Treat these values as part of the contract rather than paraphrasing them into a general description.
+
+Before validation, rewrite draft wording that would make the executor guess:
+
+| Draft wording | Required form |
+| --- | --- |
+| undecided `optional` behavior | selected choice, omitted behavior, or named condition that enables it |
+| `as needed` / `if needed` | trigger condition plus required action |
+| `existing behavior` | observable behavior plus source path, test, command output, or public contract |
+| `related files` | concrete paths, globs, or search hints |
+| `placeholder` | exact temporary value or behavior, replacement owner, and verification expectation |
+| required `TBD` | blocking unresolved item with needed input |
+| `appropriate` / `proper` | measurable criterion or checklist |
+
+When multiple valid choices remain, record the selected choice in `decisions` or write a deterministic decision rule. Record only execution-safe uncertainty in `risks`.
 
 Look for:
 
@@ -230,12 +261,12 @@ For non-trivial implementation tasks, include concrete investigation targets in 
 
 Good targets:
 
-- `src/server/index.ts` - request parsing and validation
-- `src/vectordb/index.ts` - search ordering, filtering, and maxFiles behavior
-- `tests/search.test.ts` - current regression patterns
-- `package.json` - available test/typecheck commands
+- `<request parsing path>` - request parsing and validation
+- `<domain storage/query path>` - ordering, filtering, and limit behavior
+- `<relevant regression test path>` - current regression patterns
+- `<build/test manifest>` - available test, build, or static-check commands
 
-List specific paths or files as investigation targets when they can be inferred, such as `src/server/index.ts` for request parsing.
+List specific paths or files as investigation targets when they can be inferred, such as the path that owns request parsing.
 
 ## Question Strategy
 
@@ -282,7 +313,7 @@ Before validation, the authored file should answer:
 - Which source files or references informed it?
 - Which reference files will be copied into the worktree, and will they be committed?
 - What exact ACs define done?
-- Which checks or evidence will prove each AC?
+- Which checks or evidence will prove each AC, including proof obligations for behavior-changing ACs?
 - What paths may the executor change?
 - What existing quality/profile guidance was used?
-- Which assumptions remain?
+- Which choices, unresolved items, and execution-safe residuals remain?

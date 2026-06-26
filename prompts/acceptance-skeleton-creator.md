@@ -125,8 +125,8 @@ Use repository evidence and environment profile to select the highest-value skel
 
 Lane definitions:
 
-- `unit`: single function/class/module behavior, fast and isolated.
-- `integration`: in-process component/module/API/data interaction with mocked or local dependencies.
+- `unit`: a single function, module, or equivalent isolated unit of behavior, fast and isolated.
+- `integration`: in-process interaction between components, modules, or local data/dependencies.
 - `fixture-e2e`: browser or CLI journey with deterministic fixtures, mocked backend, or fixture-driven state.
 - `service-integration-e2e`: end-to-end journey requiring a runnable local stack, real database persistence, transactional consistency, real queue/event behavior, or contract with a local service stub.
 
@@ -190,7 +190,7 @@ Use this shape:
   "outputs": [
     {
       "ac_id": "AC1",
-      "path": "tests/example.integration.test.ts",
+      "path": "<repo-conventional integration test path>",
       "kind": "integration",
       "purpose": "Verify the user-visible behavior required by AC1.",
       "satisfies": "AC1 observable outcome covered by this skeleton.",
@@ -201,7 +201,7 @@ Use this shape:
   "no_skeletons": [
     {
       "ac_id": "AC2",
-      "reason": "Existing test tests/example.test.ts already covers the observable behavior; an additional skeleton would duplicate coverage."
+      "reason": "Existing test <relevant existing test path> already covers the observable behavior; an additional skeleton would duplicate coverage."
     }
   ]
 }

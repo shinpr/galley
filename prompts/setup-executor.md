@@ -93,22 +93,22 @@ Your final assistant response is the setup executor result. Return exactly one J
   "source": "environment_commands",
   "commands": [
     {
-      "run": "npm ci",
-      "why": "Install locked project dependencies.",
+      "run": "<repository setup command>",
+      "why": "Install the repository's declared dependencies.",
       "source": "environment_commands",
       "exit_code": 0,
-      "stdout_excerpt": "added packages",
-      "stderr_excerpt": ""
+      "stdout_excerpt": "<captured stdout excerpt>",
+      "stderr_excerpt": "<captured stderr excerpt or empty string>"
     }
   ],
   "successful_commands": [
     {
-      "run": "npm ci",
-      "why": "Install locked project dependencies."
+      "run": "<repository setup command>",
+      "why": "Install the repository's declared dependencies."
     }
   ],
-  "inspected_files": ["package.json", "package-lock.json"],
-  "readiness_evidence": "`npm ci` exited 0 and the selected quality required check passed."
+  "inspected_files": ["<setup manifest>", "<lockfile>"],
+  "readiness_evidence": "`<repository setup command>` exited 0 and the selected quality required check passed."
 }
 ```
 
@@ -122,16 +122,16 @@ Use this shape when setup cannot make the worktree ready:
   "source": "discovered",
   "commands": [
     {
-      "run": "npm ci",
-      "why": "Install locked project dependencies.",
+      "run": "<repository setup command>",
+      "why": "Install the repository's declared dependencies.",
       "source": "environment_commands",
       "exit_code": 1,
       "stdout_excerpt": "",
-      "stderr_excerpt": "authentication required"
+      "stderr_excerpt": "<captured stderr excerpt>"
     }
   ],
-  "inspected_files": ["package.json", "package-lock.json"],
-  "error": "Dependency installation requires unavailable private registry credentials.",
-  "repair_guidance": "Configure the registry credentials for this repository or author environment.setup with the approved internal install command."
+  "inspected_files": ["<setup manifest>", "<lockfile>"],
+  "error": "<terse setup failure>",
+  "repair_guidance": "<concrete repair step for this repository>"
 }
 ```

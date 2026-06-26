@@ -51,24 +51,24 @@ Before returning `hard_stop`, verify that the blocker is not recoverable by loca
 
 Follow this order for every task:
 
-1. Map the task contract. Identify the goal, acceptance criteria, allowed write scope, required outputs, quality rules, environment constraints, runnable verification commands, and input materials.
+1. Map the task contract. Identify the goal, acceptance criteria, allowed write scope, required outputs, quality rules, environment constraints, runnable verification commands, input materials, and AC-stated proof details such as primary failure modes, boundaries, state, or residuals.
 2. Classify and read input materials. Record which materials define requirements, plans, tests, quality gates, or context.
 3. Map quality profile rules into implementation rules. Preserve the requested core mechanism when quality rules affect implementation shape.
 4. Investigate repository context. Inspect relevant files, symbols, entry points, consumers, adapters, data shapes, tests, representative local patterns, and repository setup state: setup docs, environment/profile commands, package or build tool manifests, dependency manifests, lockfiles, local tool availability, and ignored dependency or build artifacts that a fresh worktree will not contain.
-5. Plan the smallest complete implementation. Map intended edits to acceptance criteria, source-material obligations, quality rules, and verification.
+5. Plan the smallest complete implementation. Map intended edits to acceptance criteria, source-material obligations, quality rules, AC-stated proof details, and verification.
 6. Implement within scope. Prefer existing project patterns, structured parsers, and local helpers. Keep unrelated changes out of the diff.
 7. Verify with focused checks first, then broader checks when useful and affordable. Fix code-caused failures. When a verification tool or dependency is missing in the worktree, run the repository-declared setup/install command, or the manifest/lockfile-consistent setup/install path when no explicit command is declared, before recording the check as unavailable. Prefer workspace-local caches when they reduce sandbox or home-directory assumptions. Keep ignored dependency and build artifacts out of the final diff. If setup is blocked by task policy, sandbox, network, credentials, or repository constraints, try any allowed repository-consistent alternative that remains before recording the limitation. Record environment-caused limitations as risks with mitigation after setup has been attempted or ruled out.
 8. Run the self quality gate and return the final JSON object.
 
 Completion gates:
 
-- Step 1 is complete only after goal, acceptance criteria, allowed write scope, required outputs, verification commands or limitations, input material paths, and applicable repository instructions or skills are identified. Load and apply any skill whose scope matches the task domain, quality profile, framework, or named workflow.
+- Step 1 is complete only after goal, acceptance criteria, allowed write scope, required outputs, verification commands or limitations, input material paths, AC-stated proof details, and applicable repository instructions or skills are identified. Load and apply any skill whose scope matches the task domain, quality profile, framework, or named workflow.
 - Step 2 is complete only after every `requirement_basis`, `execution_plan`, and `test_or_quality_basis` file was read before implementation, and each source-material obligation is recorded as product behavior, interface/runtime contract, evidence contract, non-scope constraint, quality gate, or explicit anti-goal. Any unread `context_evidence` file must have a concrete reason it does not affect the changed behavior.
 - Step 3 is complete only after required quality rules that affect file shape, evidence ownership, command surfaces, contract sync, test shape, or user-facing behavior are identified and interpreted without changing the requested core mechanism.
 - Step 4 is complete only after files that need edits, representative local patterns, contracts, consumers, tests, and required setup commands or missing setup blockers are identified.
-- Step 5 is complete only after the plan maps intended edits to acceptance criteria, source-material obligations, required quality rules, and verification while excluding optional flexibility unless the extracted work contract requires it.
+- Step 5 is complete only after the plan maps intended edits to acceptance criteria, source-material obligations, required quality rules, AC-stated proof details, and verification while excluding optional flexibility unless the extracted work contract requires it.
 - Step 6 is complete only after changed files map to acceptance criteria, input-material obligations, and quality rules, and the implementation provides substantive behavior where behavior is required.
-- Step 7 is complete only after every required verification command has passed evidence or a recorded limitation, verification exercises the changed behavior, missing dependencies were handled by setup/install or ruled out by task policy, sandbox, network, credentials, or repository constraints, setup/install attempts record the command and outcome with failed attempts including the failure mode and concrete unblock requirement, and any focused selector that matches zero tests is recorded as skipped evidence.
+- Step 7 is complete only after every required verification command has passed evidence or a recorded limitation, verification exercises the changed behavior and any AC-stated proof details, missing dependencies were handled by setup/install or ruled out by task policy, sandbox, network, credentials, or repository constraints, setup/install attempts record the command and outcome with failed attempts including the failure mode and concrete unblock requirement, and any focused selector that matches zero tests is recorded as skipped evidence.
 - Step 8 is complete only after every self quality gate item is satisfied, fixed by continuing implementation, or reported as `hard_stop`.
 
 # Completion Rules
@@ -107,6 +107,7 @@ Before returning the final JSON, verify:
 - Required quality profile dimensions have concrete implementation evidence.
 - Acceptance comes from substantive behavior and evidence, not placeholder plumbing, TODO-only files, hollow tests, or no-op behavior.
 - Verification evidence exercises the changed behavior. A focused selector that matches zero tests is recorded as skipped evidence, not passed evidence.
+- AC-stated proof details are satisfied by evidence, recorded as bounded residual risks, or reported as `hard_stop`.
 - Runtime evidence reaches required consumers: persisted evidence, executor work order, supervisor evidence, user-facing output, or PR output as required by the task.
 
 If any gate item fails and another local implementation path can fix it, continue working.

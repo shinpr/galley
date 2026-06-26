@@ -67,11 +67,11 @@ Register the workflow steps before implementation. When TodoWrite is available, 
 
 ## Step 1. Map Task Contract [BLOCKING]
 
-Read the task YAML or work order and extract goal, acceptance criteria, allowed paths, AC verification guidance, quality profile, environment profile, required output files, runnable verification commands from profiles or repo docs, allowed write scope, and every input material Galley placed in the workspace. Inspect applicable repository-local instructions and skills. Load a skill when its scope matches the task domain, quality profile, framework, or named workflow.
+Read the task YAML or work order and extract goal, acceptance criteria, allowed paths, AC verification guidance, quality profile, environment profile, required output files, runnable verification commands from profiles or repo docs, allowed write scope, and every input material Galley placed in the workspace. When AC verification names proof details such as a primary failure mode, boundary, state, or residual, treat them as part of the work contract. Inspect applicable repository-local instructions and skills. Load a skill when its scope matches the task domain, quality profile, framework, or named workflow.
 
 Completion gate:
 
-- Goal, ACs, allowed write scope, and required outputs are identified.
+- Goal, ACs, allowed write scope, required outputs, and AC-stated proof details are identified.
 - Verification commands or verification limitations are identified.
 - Every input material path is listed for Step 2 classification.
 - Applicable repository instructions or skills are identified.
@@ -112,6 +112,7 @@ Build a compact plan for implementation, verification, and final self quality ga
 Completion gate:
 
 - Plan maps intended edits to ACs, source-material obligations, and required quality rules.
+- Plan preserves AC-stated proof details, including primary failure modes, boundaries, state, and residuals.
 - Plan preserves the requested core mechanism.
 - Plan excludes optional flexibility, future extensibility, configuration convenience, and broader design unless the extracted work contract requires them.
 
@@ -132,6 +133,7 @@ Completion gate:
 
 - Every required verification command has passed evidence or a recorded limitation.
 - Verification evidence exercises the changed behavior.
+- Verification evidence addresses AC-stated proof details, or the unmet proof detail is recorded as a risk or `hard_stop`.
 - Treat missing dependencies as verification limitations only after setup/install was attempted or ruled out by task policy, sandbox, network, credentials, or repository constraints.
 - Setup/install attempts record the command and outcome; failed attempts include the failure mode and concrete unblock requirement.
 - A focused selector that matches zero tests is recorded as skipped evidence rather than passed evidence.
@@ -158,6 +160,7 @@ Before returning the final JSON, verify:
 - Required quality profile dimensions have concrete implementation evidence. Treat quality profile rules as coding rules during implementation and as supervisor review hints.
 - The implementation is substantive: AC satisfaction comes from real behavior and evidence when the AC requires behavior, rather than fixed templates, metadata shells, placeholder plumbing, TODO-only files, hollow tests, or no-op behavior.
 - Verification evidence exercises the changed behavior. A focused selector that matches zero tests is skipped evidence rather than passed evidence.
+- AC-stated proof details are satisfied by evidence, recorded as bounded residual risks, or reported as `hard_stop`.
 - Runtime evidence reaches every required consumer: persisted evidence, executor work order, supervisor evidence, user-facing output, or PR output as required by the task.
 
 If any gate item fails and another local implementation path can fix it, continue working. If the failure is caused by an infeasible or conflicting requirement, return `hard_stop`.

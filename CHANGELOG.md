@@ -6,6 +6,11 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- Packaged Claude and Codex Galley plugins are now versioned as `0.1.17`: task-authoring and profile guidance improves AC proof obligations, reference-file responsibility boundaries, and language-neutral examples.
+- Runtime executor, setup, and acceptance-skeleton prompts improve AC proof-detail handling and language-neutral examples.
+
 ## v0.8.1 - 2026-06-24
 
 ### Fixed

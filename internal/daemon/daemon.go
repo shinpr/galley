@@ -141,7 +141,7 @@ type ExplicitOptions struct {
 
 // DefaultSupervisor is the built-in supervisor adapter used when daemon
 // startup does not receive an explicit --supervisor value.
-const DefaultSupervisor = "codex"
+const DefaultSupervisor = "claude"
 
 // Supervisor source labels. Persisted in run evidence so reviewers can
 // tell whether the per-task supervisor came from a repository environment

@@ -9,7 +9,7 @@
 //  1. Daemon CLI startup options (explicit flags on `galley daemon run` or
 //     `galley daemon start`).
 //  2. daemon.yaml under the selected daemon root.
-//  3. Built-in defaults (Codex supervisor and the other documented daemon
+//  3. Built-in defaults (Claude supervisor and the other documented daemon
 //     defaults).
 //
 // Repository-level `environment.yaml` supervisor.default_cli is a *task-level*
@@ -123,7 +123,7 @@ func (n *NotificationConfig) Matches(status string) bool {
 func Defaults() File {
 	one := 1
 	return File{
-		Supervisor:           "codex",
+		Supervisor:           "claude",
 		MaxConcurrentTasks:   &one,
 		MaxConcurrentPerRepo: &one,
 		PollInterval:         "10s",

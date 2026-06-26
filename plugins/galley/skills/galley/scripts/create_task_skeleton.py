@@ -304,7 +304,7 @@ def executor_default_from_environment(path: pathlib.Path) -> str | None:
 def resolved_executor_cli(explicit_cli: str | None, root: pathlib.Path, cwd: pathlib.Path) -> str:
     if explicit_cli:
         return explicit_cli
-    return executor_default_from_environment(environment_profile_path(root, cwd)) or "codex"
+    return executor_default_from_environment(environment_profile_path(root, cwd)) or "claude"
 
 
 def executor_defaults(cli: str) -> dict[str, Any]:
@@ -443,7 +443,7 @@ def main() -> int:
     parser.add_argument(
         "--executor-cli",
         choices=sorted(VALID_EXECUTOR_CLIS),
-        help="Implementation executor backend for this task. Defaults to environment.executor.default_cli, then codex.",
+        help="Implementation executor backend for this task. Defaults to environment.executor.default_cli, then claude.",
     )
     parser.add_argument("--loop-budget", default=10, type=parse_nonnegative_int, help="Integer >= 0; 0 means unlimited.")
     parser.add_argument("--allowed-path", action="append", default=None, help="Relative path allowed for edits. Repeatable.")

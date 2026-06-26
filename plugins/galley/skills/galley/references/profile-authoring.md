@@ -17,8 +17,8 @@ The daemon resolves repository profiles from `scope.cwd` and the Galley root.
 
 Backend defaults are intentionally separate:
 
-- Implementation executor default: stored in `environment.yaml` as `executor.default_cli`; unset resolves to Codex when a new task is authored.
-- Review supervisor default: optionally stored in `environment.yaml` as `supervisor.default_cli`; unset falls back to daemon startup state and then Codex.
+- Implementation executor default: stored in `environment.yaml` as `executor.default_cli`; unset resolves to Claude when a new task is authored.
+- Review supervisor default: optionally stored in `environment.yaml` as `supervisor.default_cli`; unset falls back to daemon startup state and then Claude.
 
 Use the bundled schemas as the profile field contract:
 
@@ -111,7 +111,7 @@ Environment profile questions:
 
 1. What is the target repo absolute path?
 2. Which discovered commands are available and safe to run repeatedly?
-3. Which implementation executor should new tasks use by default: `claude`, `codex`, or unset so authoring resolves to Codex?
+3. Which implementation executor should new tasks use by default: `claude`, `codex`, or unset so authoring resolves to Claude?
 4. Should this repository set a review supervisor default: `claude`, `codex`, or unset so daemon startup state decides?
 5. Which discovered setup commands should prepare a fresh task worktree before implementation, if they are known?
 6. Does the repo require local services: DB, Docker, Redis, browser, dev server, Figma MCP, Playwright, cloud CLI?

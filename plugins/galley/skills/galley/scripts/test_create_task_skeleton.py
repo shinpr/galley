@@ -208,9 +208,9 @@ def main() -> int:
     assert_not_matches(yaml_text, r"^    required:", "required in default skeleton")
     assert_not_matches(yaml_text, r"^    allowed_paths:", "allowed_paths in default skeleton")
     assert_not_matches(yaml_text, r"^    mode:", "mode in default skeleton")
-    if generated_executor_cli(yaml_text) != "codex":
-        raise SystemExit("regression: unset environment executor default should generate executor.cli: codex")
-    assert_not_matches(yaml_text, r"^  max_budget_usd:", "max_budget_usd for Codex skeletons")
+    if generated_executor_cli(yaml_text) != "claude":
+        raise SystemExit("regression: unset environment executor default should generate executor.cli: claude")
+    assert_contains(yaml_text, "\n  max_budget_usd:", "max_budget_usd for Claude skeletons")
 
     with tempfile.TemporaryDirectory() as tmp:
         tmpdir = pathlib.Path(tmp)

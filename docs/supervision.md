@@ -20,7 +20,7 @@ See [task-yaml.md](task-yaml.md) for the full `executor` block and [../examples/
 
 ## Supervisors
 
-Supervisor review defaults to Codex. Use `--supervisor claude` to select Claude instead, or `--supervisor codex` to be explicit.
+Supervisor review defaults to Claude. Use `--supervisor codex` to select Codex instead, or `--supervisor claude` to be explicit.
 
 Both supervisor backends use the same verdict contract, retry budget, and evidence layout. Repository-specific PR behavior, comment polling, and worktree cleanup live in the environment profile resolved from `scope.cwd`.
 

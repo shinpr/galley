@@ -63,7 +63,7 @@ func TestStatusJSONReportsRoot(t *testing.T) {
 	}
 }
 
-func TestDaemonHelpReportsCodexSupervisorDefault(t *testing.T) {
+func TestDaemonHelpReportsClaudeSupervisorDefault(t *testing.T) {
 	t.Parallel()
 	cmd := NewCommand("daemon")
 	var stdout bytes.Buffer
@@ -74,7 +74,7 @@ func TestDaemonHelpReportsCodexSupervisorDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(stdout.String(), "defaults to "+daemon.DefaultSupervisor) {
-		t.Fatalf("help output missing codex supervisor default: %q", stdout.String())
+		t.Fatalf("help output missing claude supervisor default: %q", stdout.String())
 	}
 }
 

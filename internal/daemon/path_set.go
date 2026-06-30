@@ -37,6 +37,9 @@ import (
 // drive-letter paths, and any segment that backs out of cwd so the
 // review-staging set cannot widen beyond the executor's working
 // directory regardless of how git status formatted the entry);
+// - staged-only deletions, which are already visible in the staged diff and
+// would fail if re-added. Unstaged deletions are intentionally kept so review
+// staging still stages them;
 // - destinations in excludeDestinations — these are task.files entries
 // declared with commit:false, which Galley materializes as context-only
 // inputs the executor reads but does not submit.
@@ -49,8 +52,13 @@ func reviewablePathsFromStatus(statusZ string, excludeDestinations []string) []s
 	raw := parseStatusPorcelainZ(statusZ)
 	seen := make(map[string]bool, len(raw))
 	var result []string
-	for _, p := range raw {
-		clean := normalizeReviewablePath(p)
+	for _, entry := range raw {
+		// Already-staged deletions remain visible in the staged diff and do
+		// not need another git add.
+		if isStagedOnlyDeletion(entry.X, entry.Y) {
+			continue
+		}
+		clean := normalizeReviewablePath(entry.Path)
 		if clean == "" {
 			continue
 		}
@@ -74,25 +82,36 @@ func reviewablePathsFromStatus(statusZ string, excludeDestinations []string) []s
 	return result
 }
 
+// statusEntry is one parsed `git status --porcelain=v1` change: the two
+// status bytes (X is the index/staged status, Y is the worktree status) and
+// the reviewable path (the new path for renames/copies, the only path
+// otherwise). Retaining X and Y lets the path-set builder distinguish a
+// staged-only deletion from an unstaged deletion without re-parsing.
+type statusEntry struct {
+	X, Y byte
+	Path string
+}
+
 // parseStatusPorcelainZ parses NUL-separated `git status --porcelain=v1 -z`
-// output into the ordered list of paths the executor changed. Each entry has
+// output into the ordered list of changes the executor made. Each entry has
 // the byte layout "XY<sp>path<NUL>" for regular changes; rename/copy entries
 // (X or Y in {R,C}) append a second "<sp>oldpath<NUL>" token after the new
 // path. The parser yields only the new path so the staged review set tracks
-// the post-rename surface git presents to a reviewer.
+// the post-rename surface git presents to a reviewer, and preserves the X/Y
+// status bytes so callers can tell staged-only deletions apart.
 //
 // Malformed tails (a header without its NUL-terminated path) cause the
 // parser to stop where it can no longer be sure of the next path boundary;
 // returning a partial path would risk staging unrelated content.
-func parseStatusPorcelainZ(s string) []string {
-	var paths []string
+func parseStatusPorcelainZ(s string) []statusEntry {
+	var entries []statusEntry
 	rest := s
 	for len(rest) > 0 {
 		// Each entry begins with two status bytes and a separator before the
 		// path. Anything shorter is a malformed tail; stop instead of
 		// returning a partial path.
 		if len(rest) < 4 {
-			return paths
+			return entries
 		}
 		x := rest[0]
 		y := rest[1]
@@ -102,7 +121,7 @@ func parseStatusPorcelainZ(s string) []string {
 		rest = rest[3:]
 		idx := strings.IndexByte(rest, 0)
 		if idx < 0 {
-			return paths
+			return entries
 		}
 		path := rest[:idx]
 		rest = rest[idx+1:]
@@ -113,21 +132,28 @@ func parseStatusPorcelainZ(s string) []string {
 			idx2 := strings.IndexByte(rest, 0)
 			if idx2 < 0 {
 				if path != "" {
-					paths = append(paths, path)
+					entries = append(entries, statusEntry{X: x, Y: y, Path: path})
 				}
-				return paths
+				return entries
 			}
 			rest = rest[idx2+1:]
 		}
 		if path != "" {
-			paths = append(paths, path)
+			entries = append(entries, statusEntry{X: x, Y: y, Path: path})
 		}
 	}
-	return paths
+	return entries
 }
 
 func isRenameOrCopyStatus(c byte) bool {
 	return c == 'R' || c == 'C'
+}
+
+// isStagedOnlyDeletion reports a deletion that is already fully staged
+// (`D `). Unstaged deletions (` D`) are not matched because git add still
+// needs to stage them.
+func isStagedOnlyDeletion(x, y byte) bool {
+	return x == 'D' && y == ' '
 }
 
 // normalizedPathSet returns the set of worktree-relative paths in `paths`,

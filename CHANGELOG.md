@@ -10,6 +10,10 @@ This project follows semantic versioning.
 
 - Treat `scope.allowed_paths` as expected implementation scope and review baseline instead of a hard stop. Executors may make minimal required outside-allowed changes, must still avoid `scope.forbidden_paths`, and must report those changes in `scope_expansions`.
 
+### Fixed
+
+- Fixed Galley review staging and accepted-task finalization failing when an executor had already staged a file deletion. Staged deletions are now preserved in review evidence and final commits without being re-added.
+
 ## v0.8.2 - 2026-06-27
 
 ### Changed

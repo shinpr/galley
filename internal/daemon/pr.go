@@ -52,8 +52,12 @@ func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task
 	}
 	if snapshot.StatusPorcelain != "" {
 		commitMessage := fmt.Sprintf("galley: %s", strutil.FirstNonEmpty(loaded.ID, "accepted task"))
-		if err := vcs.AddPaths(ctx, vcsBinaries(opts), workDir, runDir, parsePorcelainPaths(snapshot.StatusPorcelain)); err != nil {
-			return err
+		// Skip git add when only already-staged deletions remain; they are
+		// still committed from the index.
+		if addPaths := addEligiblePorcelainPaths(snapshot.StatusPorcelain); len(addPaths) > 0 {
+			if err := vcs.AddPaths(ctx, vcsBinaries(opts), workDir, runDir, addPaths); err != nil {
+				return err
+			}
 		}
 		if err := vcs.Commit(ctx, vcsBinaries(opts), workDir, runDir, commitMessage); err != nil {
 			return err

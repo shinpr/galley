@@ -89,6 +89,12 @@ func changedFilesFromSnapshot(snapshot workspace.Snapshot) map[string]struct{} {
 // parsePorcelainPaths parses `git status --porcelain` text output (no -z) and
 // returns the list of paths it reports as changed. Renames are encoded
 // as "old -> new"; only the new path is returned.
+//
+// This is the change-visibility parser: it is consumed by progress detection,
+// the finalize-time forbidden_paths gate, and scope-expansion reporting, so
+// it must keep reporting every changed path (including staged-only deletions).
+// Finalization uses addEligiblePorcelainPaths instead when it needs the subset
+// safe to pass to git add.
 func parsePorcelainPaths(porcelain string) []string {
 	if porcelain == "" {
 		return nil
@@ -97,6 +103,38 @@ func parsePorcelainPaths(porcelain string) []string {
 	for _, raw := range strings.Split(porcelain, "\n") {
 		line := strings.TrimRight(raw, "\r")
 		if len(line) < 4 {
+			continue
+		}
+		// Porcelain format: XY<space>path[ -> renamed]
+		body := line[3:]
+		if idx := strings.Index(body, " -> "); idx >= 0 {
+			body = body[idx+4:]
+		}
+		body = strings.TrimSpace(body)
+		// Quoted paths may appear when filenames contain unusual characters.
+		body = strings.Trim(body, `"`)
+		if body == "" {
+			continue
+		}
+		paths = append(paths, body)
+	}
+	return paths
+}
+
+// addEligiblePorcelainPaths returns the changed paths finalization should pass
+// to `git add`, excluding staged-only deletions that are already in the index.
+// Unstaged deletions stay eligible so finalization still stages them.
+func addEligiblePorcelainPaths(porcelain string) []string {
+	if porcelain == "" {
+		return nil
+	}
+	var paths []string
+	for _, raw := range strings.Split(porcelain, "\n") {
+		line := strings.TrimRight(raw, "\r")
+		if len(line) < 4 {
+			continue
+		}
+		if isStagedOnlyDeletion(line[0], line[1]) {
 			continue
 		}
 		// Porcelain format: XY<space>path[ -> renamed]

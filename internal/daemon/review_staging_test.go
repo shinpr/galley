@@ -111,6 +111,74 @@ func TestRunOnceAcceptedFinalizationCommitsStagedNewFile(t *testing.T) {
 	}
 }
 
+// TestRunOnceAcceptedFinalizationCommitsStagedOnlyDeletion pins AC1+AC3 for a
+// staged-only deletion. The fake executor stages the deletion of a tracked
+// file with `git rm` and submits no other change. Before the fix, review
+// staging ran `git add -A -- <deleted path>` and failed with "pathspec did not
+// match any files", so the attempt never reached the supervisor. After the
+// fix, review staging skips the already-staged deletion (it stays visible in
+// the captured attempt diff), the supervisor accepts the dirty diff, and
+// finalization commits the deletion without re-adding it.
+func TestRunOnceAcceptedFinalizationCommitsStagedOnlyDeletion(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	runDaemonGit(t, t.TempDir(), "init", "--bare", remote)
+	runDaemonGit(t, repo, "remote", "add", "origin", remote)
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+	// Executor stages a deletion of the tracked README.md and nothing else.
+	// `git rm` removes it from both the worktree and the index, producing a
+	// "D " staged-only deletion in git status.
+	claudeBin := writeFakeClaude(t, "git rm README.md\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"README.md\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	ghBin := writeFakeCommand(t, "gh", "echo https://github.com/example/galley/pull/999\n")
+	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonTask(t, taskPath, repo)
+
+	if err := Run(context.Background(), Options{
+		Root:               root,
+		SystemPromptFile:   promptPath,
+		JSONSchemaFile:     schemaPath,
+		Supervisor:         "claude",
+		ClaudeBin:          claudeBin,
+		Once:               true,
+		MaxConcurrentTasks: 1,
+		OpenPR:             true,
+		PRBase:             "main",
+		GHBin:              ghBin,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// AC1: the staged deletion must remain visible in the captured attempt
+	// diff even though review staging did not re-add it.
+	diff := string(mustReadSingleGlob(t, filepath.Join(root, "runs", "*", "attempt-1", "diff.patch")))
+	if !strings.Contains(diff, "README.md") || !strings.Contains(diff, "deleted file mode") {
+		t.Fatalf("attempt diff.patch missing staged deletion of README.md:\n%s", diff)
+	}
+
+	doneTask, err := task.Load(filepath.Join(root, "tasks", "done", "task.yaml"))
+	if err != nil {
+		t.Fatalf("task did not reach done/: %v", err)
+	}
+	if doneTask.Status != "pr_opened" {
+		t.Fatalf("status got %q want pr_opened", doneTask.Status)
+	}
+	worktreePath := taskWorktreePath(repo, doneTask.Worktree.Path)
+	// AC3: the final commit must record the deletion and HEAD must no longer
+	// contain README.md.
+	nameStatus := string(mustCommandOutput(t, "git", "-C", worktreePath, "show", "--name-status", "--format=", "HEAD"))
+	if !strings.Contains(nameStatus, "D\tREADME.md") {
+		t.Fatalf("final commit does not record README.md deletion:\n%s", nameStatus)
+	}
+	tree := string(mustCommandOutput(t, "git", "-C", worktreePath, "ls-tree", "-r", "--name-only", "HEAD"))
+	if strings.Contains(tree, "README.md") {
+		t.Fatalf("README.md still present in HEAD tree after staged deletion was finalized:\n%s", tree)
+	}
+}
+
 // TestRunOnceAcceptedFinalizationExcludesNonCommittedInputFile pins AC4:
 // review-time staging must not cause a commit:false input file to be
 // committed. After the executor (without running `git add`) introduces a

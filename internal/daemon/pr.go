@@ -52,11 +52,8 @@ func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task
 	}
 	if snapshot.StatusPorcelain != "" {
 		commitMessage := fmt.Sprintf("galley: %s", strutil.FirstNonEmpty(loaded.ID, "accepted task"))
-		// Only pass add-eligible paths to git add. Staged-only deletions are
-		// already in the index, so re-adding them would fail with a pathspec
-		// error; they still reach the commit because they remain staged. When
-		// every change is a staged-only deletion the add list is empty, so
-		// skip git add entirely and commit the already-staged diff.
+		// Skip git add when only already-staged deletions remain; they are
+		// still committed from the index.
 		if addPaths := addEligiblePorcelainPaths(snapshot.StatusPorcelain); len(addPaths) > 0 {
 			if err := vcs.AddPaths(ctx, vcsBinaries(opts), workDir, runDir, addPaths); err != nil {
 				return err

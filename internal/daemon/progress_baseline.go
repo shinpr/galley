@@ -121,15 +121,9 @@ func parsePorcelainPaths(porcelain string) []string {
 	return paths
 }
 
-// addEligiblePorcelainPaths parses `git status --porcelain` text output (no
-// -z) and returns the changed paths that finalization should pass to
-// `git add`. It mirrors parsePorcelainPaths but drops staged-only deletions
-// (index status 'D', clean worktree status): such a path exists in neither the
-// worktree nor the index, so `git add <path>` would fail with "pathspec did
-// not match any files". The deletion is already staged, so it stays in the
-// committed diff without being re-added. Every other change kind — including
-// unstaged deletions, which git add must still stage — is returned so the
-// accepted staged diff is committed in full.
+// addEligiblePorcelainPaths returns the changed paths finalization should pass
+// to `git add`, excluding staged-only deletions that are already in the index.
+// Unstaged deletions stay eligible so finalization still stages them.
 func addEligiblePorcelainPaths(porcelain string) []string {
 	if porcelain == "" {
 		return nil

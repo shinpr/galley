@@ -37,13 +37,9 @@ import (
 // drive-letter paths, and any segment that backs out of cwd so the
 // review-staging set cannot widen beyond the executor's working
 // directory regardless of how git status formatted the entry);
-// - staged-only deletions (index status 'D', clean worktree status):
-// the file no longer exists in the worktree or the index, so passing it
-// to `git add` fails with "pathspec did not match any files". The
-// deletion is already staged, so it stays in the captured attempt diff
-// (git diff --cached) without being re-added. Unstaged deletions are
-// intentionally kept so review staging still stages them and the deleted
-// file appears in the submitted diff;
+// - staged-only deletions, which are already visible in the staged diff and
+// would fail if re-added. Unstaged deletions are intentionally kept so review
+// staging still stages them;
 // - destinations in excludeDestinations — these are task.files entries
 // declared with commit:false, which Galley materializes as context-only
 // inputs the executor reads but does not submit.
@@ -57,9 +53,8 @@ func reviewablePathsFromStatus(statusZ string, excludeDestinations []string) []s
 	seen := make(map[string]bool, len(raw))
 	var result []string
 	for _, entry := range raw {
-		// Staged-only deletions are already submitted work; sending the
-		// deleted path to git add fails with a pathspec error. Skip it from
-		// the staging set; the staged deletion remains in the captured diff.
+		// Already-staged deletions remain visible in the staged diff and do
+		// not need another git add.
 		if isStagedOnlyDeletion(entry.X, entry.Y) {
 			continue
 		}
@@ -154,16 +149,9 @@ func isRenameOrCopyStatus(c byte) bool {
 	return c == 'R' || c == 'C'
 }
 
-// isStagedOnlyDeletion reports whether a `git status` porcelain XY pair
-// describes a deletion that is already fully staged: index status 'D' with a
-// clean (space) worktree status. Such a path exists in neither the worktree
-// nor the index, so passing it to `git add` fails with "pathspec did not
-// match any files". The staged deletion is already part of the index and the
-// captured diff, so Galley skips it when building a `git add` pathspec list
-// while still leaving it visible to reviewers and present in the final
-// commit. An unstaged deletion (worktree status 'D', e.g. " D") is
-// intentionally NOT matched: git add must still stage it so the deletion
-// appears in the submitted diff.
+// isStagedOnlyDeletion reports a deletion that is already fully staged
+// (`D `). Unstaged deletions (` D`) are not matched because git add still
+// needs to stage them.
 func isStagedOnlyDeletion(x, y byte) bool {
 	return x == 'D' && y == ' '
 }

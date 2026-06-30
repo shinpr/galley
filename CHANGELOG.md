@@ -6,6 +6,8 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.8.3 - 2026-06-30
+
 ### Changed
 
 - Treat `scope.allowed_paths` as expected implementation scope and review baseline instead of a hard stop. Executors may make minimal required outside-allowed changes, must still avoid `scope.forbidden_paths`, and must report those changes in `scope_expansions`.

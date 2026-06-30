@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Fixed
+
+- Fixed Galley review staging and accepted-task finalization failing when an executor had already staged a file deletion. Staged deletions are now preserved in review evidence and final commits without being re-added.
+
 ## v0.8.2 - 2026-06-27
 
 ### Changed

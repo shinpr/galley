@@ -41,6 +41,41 @@ func TestReviewablePathsFromStatusKeepsModifiedAddedDeletedAndUntracked(t *testi
 	}
 }
 
+// TestReviewablePathsFromStatusSkipsStagedOnlyDeletion pins AC1: a staged-only
+// deletion (index status 'D', clean worktree status — porcelain "D ") must not
+// enter the reviewable path set, because `git add` on a path that exists in
+// neither the worktree nor the index fails with "pathspec did not match any
+// files". The deletion is already staged, so it stays visible in the captured
+// diff without being re-added. Other change kinds in the same status output
+// are still staged.
+func TestReviewablePathsFromStatusSkipsStagedOnlyDeletion(t *testing.T) {
+	statusZ := porcelainEntry("D ", "src/staged-deleted.go") +
+		porcelainEntry("A ", "src/added.go") +
+		porcelainEntry(" M", "src/touched.go")
+
+	got := reviewablePathsFromStatus(statusZ, nil)
+	want := []string{"src/added.go", "src/touched.go"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("reviewablePathsFromStatus = %v, want %v (staged-only deletion must be skipped)", got, want)
+	}
+}
+
+// TestReviewablePathsFromStatusKeepsUnstagedDeletion pins AC2: an unstaged
+// deletion (worktree status 'D' with a clean index — porcelain " D") must
+// remain in the reviewable set so review staging stages the deletion and the
+// deleted file appears in the submitted diff. Only the staged-only deletion in
+// the same output is dropped; the unstaged deletion is preserved.
+func TestReviewablePathsFromStatusKeepsUnstagedDeletion(t *testing.T) {
+	statusZ := porcelainEntry(" D", "src/unstaged-deleted.go") +
+		porcelainEntry("D ", "src/staged-deleted.go")
+
+	got := reviewablePathsFromStatus(statusZ, nil)
+	want := []string{"src/unstaged-deleted.go"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("reviewablePathsFromStatus = %v, want %v (unstaged deletion must be kept, staged-only deletion dropped)", got, want)
+	}
+}
+
 // TestReviewablePathsFromStatusDedupesAndDropsEmpty pins the dedupe and
 // trimming behavior. Repeated porcelain entries for the same logical path
 // (which can arise when git reports rename source/destination separately

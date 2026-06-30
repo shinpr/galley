@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Fixed
+
+- Galley review staging and accepted-change finalization no longer fail when an executor has already staged a file deletion. A staged-only deletion (git status `D `) exists in neither the worktree nor the index, so passing it to `git add` failed with "pathspec did not match any files"; Galley now skips already-staged deletions when building `git add` pathspec lists while keeping them visible in the captured attempt diff and present in the final commit. Unstaged deletions are still staged for review, and the commit:false input exclusion and forbidden-path gate behavior are unchanged.
+
 ## v0.8.2 - 2026-06-27
 
 ### Changed

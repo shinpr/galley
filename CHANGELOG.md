@@ -11,6 +11,7 @@ This project follows semantic versioning.
 ### Changed
 
 - Treat `scope.allowed_paths` as expected implementation scope and review baseline instead of a hard stop. Executors may make minimal required outside-allowed changes, must still avoid `scope.forbidden_paths`, and must report those changes in `scope_expansions`.
+- Packaged Claude and Codex Galley plugins are now versioned as `0.1.18`: task-authoring guidance now treats `scope.allowed_paths` as expected implementation scope and supervisor review context while preserving `scope.forbidden_paths` as the protected path boundary.
 
 ### Fixed
 

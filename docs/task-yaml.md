@@ -74,7 +74,7 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 - `goal`: concise objective for the work.
 - `acceptance_criteria[]`: observable completion requirements with stable IDs such as `AC1`.
 - `files[]`: optional user-supplied files to place in the execution workspace.
-- `scope`: repository path, allowed/forbidden paths, and permission level.
+- `scope`: repository path, expected implementation paths, protected paths, and permission level.
 - `execution_policy`: attempt budget, timeout, and escalation behavior.
 - `worktree`: isolated branch and sibling worktree location for AFK execution.
 - `supervisor`: review loop settings.
@@ -106,6 +106,8 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 For AFK implementation tasks, prefer `sandbox-full-access` with an isolated worktree. Use `read-only` for investigation or review tasks.
 
 `scope.permission` is an authority intent passed into the executor workflow. Actual isolation comes from the worktree, `scope.forbidden_paths`, the executor CLI sandbox, and local OS controls.
+
+`scope.allowed_paths` is the expected implementation scope and review baseline. Executors should stay inside it when the task can be completed there, but a required acceptance criterion or pending revision request may justify a minimal outside-allowed change. Those changes are reported as scope expansions for supervisor and PR review. Each reported expansion path is a POSIX-style worktree-relative clean file path, or the smallest segment-aware directory prefix that covers multiple required outside-allowed changed files. `scope.forbidden_paths` remains the protected path boundary.
 
 ## Input Files
 

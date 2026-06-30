@@ -37,8 +37,14 @@ func TestMergeExecutorJudgmentPreservesSemanticAcceptance(t *testing.T) {
 			Notes:    "implemented",
 		}},
 		Verification: []runner.ClaudeVerification{},
-		Decisions:    []runner.ClaudeDecision{},
-		Risks:        []runner.ClaudeRisk{},
+		ScopeExpansions: []runner.ClaudeScopeExpansion{{
+			Path:              "outside",
+			Reason:            "needed for revision",
+			LinkedRequirement: "revision:pr-comment-1",
+			Minimality:        "one directory",
+		}},
+		Decisions: []runner.ClaudeDecision{},
+		Risks:     []runner.ClaudeRisk{},
 	}
 
 	merged := mergeExecutorJudgment(generated, reported)
@@ -47,6 +53,9 @@ func TestMergeExecutorJudgmentPreservesSemanticAcceptance(t *testing.T) {
 	}
 	if len(merged.Verification) != 1 || merged.Verification[0].Command != "go test ./..." {
 		t.Fatalf("verification got %#v", merged.Verification)
+	}
+	if len(merged.ScopeExpansions) != 1 || merged.ScopeExpansions[0].Path != "outside" {
+		t.Fatalf("scope expansions got %#v", merged.ScopeExpansions)
 	}
 }
 

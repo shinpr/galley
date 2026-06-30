@@ -78,7 +78,7 @@ if [ ! -f setup.sentinel ]; then
   exit 98
 fi
 echo change > daemon-output.txt
-echo '{"status":"completed","summary":"done","files_modified":["daemon-output.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"decisions":[],"risks":[]}'
+echo '{"status":"completed","summary":"done","files_modified":["daemon-output.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}'
 `)
 
 	// Environment profile carries the prior setup plan as context, but the

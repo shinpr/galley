@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"strings"
 )
 
@@ -16,6 +17,7 @@ type ClaudeResult struct {
 	FilesModified      []string                    `json:"files_modified"`
 	AcceptanceCriteria []ClaudeAcceptanceCriterion `json:"acceptance_criteria"`
 	Verification       []ClaudeVerification        `json:"verification"`
+	ScopeExpansions    []ClaudeScopeExpansion      `json:"scope_expansions"`
 	Decisions          []ClaudeDecision            `json:"decisions"`
 	Risks              []ClaudeRisk                `json:"risks"`
 	HardStop           *ClaudeHardStop             `json:"hard_stop,omitempty"`
@@ -35,6 +37,14 @@ type ClaudeVerification struct {
 	Status        string `json:"status"`
 	Reason        string `json:"reason"`
 	OutputExcerpt string `json:"output_excerpt"`
+}
+
+// ClaudeScopeExpansion records a deliberate change outside task.scope.allowed_paths.
+type ClaudeScopeExpansion struct {
+	Path              string `json:"path"`
+	Reason            string `json:"reason"`
+	LinkedRequirement string `json:"linked_requirement"`
+	Minimality        string `json:"minimality"`
 }
 
 // ClaudeDecision records one decision reported by Claude.
@@ -134,6 +144,9 @@ func (r ClaudeResult) Validate() error {
 	if r.Verification == nil {
 		return fmt.Errorf("Claude result verification is required")
 	}
+	if r.ScopeExpansions == nil {
+		return fmt.Errorf("Claude result scope_expansions is required")
+	}
 	if r.Decisions == nil {
 		return fmt.Errorf("Claude result decisions is required")
 	}
@@ -170,6 +183,23 @@ func (r ClaudeResult) Validate() error {
 		}
 		if verification.Reason == "" {
 			return fmt.Errorf("Claude verification[%d].reason is required", i)
+		}
+	}
+	for i, expansion := range r.ScopeExpansions {
+		if expansion.Path == "" {
+			return fmt.Errorf("Claude scope_expansions[%d].path is required", i)
+		}
+		if !validScopeExpansionPath(expansion.Path) {
+			return fmt.Errorf("Claude scope_expansions[%d].path must be a clean relative path", i)
+		}
+		if expansion.Reason == "" {
+			return fmt.Errorf("Claude scope_expansions[%d].reason is required", i)
+		}
+		if expansion.LinkedRequirement == "" {
+			return fmt.Errorf("Claude scope_expansions[%d].linked_requirement is required", i)
+		}
+		if expansion.Minimality == "" {
+			return fmt.Errorf("Claude scope_expansions[%d].minimality is required", i)
 		}
 	}
 	for i, decision := range r.Decisions {
@@ -213,6 +243,28 @@ func (r ClaudeResult) Validate() error {
 		}
 	}
 	return nil
+}
+
+func validScopeExpansionPath(p string) bool {
+	if p == "" ||
+		strings.HasPrefix(p, "/") ||
+		strings.HasPrefix(p, "//") ||
+		strings.Contains(p, "\\") ||
+		strings.Contains(p, "//") ||
+		strings.HasSuffix(p, "/") ||
+		hasWindowsDrivePrefix(p) {
+		return false
+	}
+	clean := path.Clean(p)
+	return clean != "." && clean == p && !strings.HasPrefix(clean, "../") && clean != ".."
+}
+
+func hasWindowsDrivePrefix(p string) bool {
+	if len(p) < 2 || p[1] != ':' {
+		return false
+	}
+	c := p[0]
+	return ('A' <= c && c <= 'Z') || ('a' <= c && c <= 'z')
 }
 
 func parseClaudeResult(text string) (ClaudeResult, bool) {

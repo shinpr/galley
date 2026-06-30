@@ -84,6 +84,7 @@ func mergeExecutorJudgment(generated, reported runner.ClaudeResult) runner.Claud
 		generated.AcceptanceCriteria = reported.AcceptanceCriteria
 	}
 	generated.Verification = append(reported.Verification, generated.Verification...)
+	generated.ScopeExpansions = append(generated.ScopeExpansions, reported.ScopeExpansions...)
 	generated.Decisions = append(generated.Decisions, reported.Decisions...)
 	generated.Risks = append(generated.Risks, reported.Risks...)
 	if reported.Status == "completed_with_risks" && generated.Status == "completed" && len(reported.Risks) > 0 {

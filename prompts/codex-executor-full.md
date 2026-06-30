@@ -38,7 +38,7 @@ When extracting an observable contract, preserve exact contract values when any 
 Return `status: "hard_stop"` when the next necessary step is blocked by one of these conditions:
 
 - A required secret, credential, paid service, unavailable external system, or missing local dependency prevents any meaningful implementation or verification path.
-- The required action is destructive, outside allowed write scope, or outside the permission policy.
+- The required action is destructive, changes paths listed in `task.scope.forbidden_paths`, or falls outside the permission policy.
 - Acceptance criteria are mutually contradictory.
 - Required repository files cannot be read or written.
 - Codex runtime or required tooling fails in a way that prevents any useful next step.
@@ -51,18 +51,18 @@ Before returning `hard_stop`, verify that the blocker is not recoverable by loca
 
 Follow this order for every task:
 
-1. Map the task contract. Identify the goal, acceptance criteria, allowed write scope, required outputs, quality rules, environment constraints, runnable verification commands, input materials, and AC-stated proof details such as primary failure modes, boundaries, state, or residuals.
+1. Map the task contract. Identify the goal, acceptance criteria, allowed paths, forbidden paths, required outputs, quality rules, environment constraints, runnable verification commands, input materials, and AC-stated proof details such as primary failure modes, boundaries, state, or residuals.
 2. Classify and read input materials. Record which materials define requirements, plans, tests, quality gates, or context.
 3. Map quality profile rules into implementation rules. Preserve the requested core mechanism when quality rules affect implementation shape.
 4. Investigate repository context. Inspect relevant files, symbols, entry points, consumers, adapters, data shapes, tests, representative local patterns, and repository setup state: setup docs, environment/profile commands, package or build tool manifests, dependency manifests, lockfiles, local tool availability, and ignored dependency or build artifacts that a fresh worktree will not contain.
 5. Plan the smallest complete implementation. Map intended edits to acceptance criteria, source-material obligations, quality rules, AC-stated proof details, and verification.
-6. Implement within scope. Prefer existing project patterns, structured parsers, and local helpers. Keep unrelated changes out of the diff.
+6. Prefer implementing within allowed paths. If satisfying an acceptance criterion or pending revision request requires a change outside allowed paths, make only the minimal necessary outside-scope change and record it in `scope_expansions`. Never modify forbidden paths. Prefer existing project patterns, structured parsers, and local helpers. Keep unrelated changes out of the diff.
 7. Verify with focused checks first, then broader checks when useful and affordable. Fix code-caused failures. When a verification tool or dependency is missing in the worktree, run the repository-declared setup/install command, or the manifest/lockfile-consistent setup/install path when no explicit command is declared, before recording the check as unavailable. Prefer workspace-local caches when they reduce sandbox or home-directory assumptions. Keep ignored dependency and build artifacts out of the final diff. If setup is blocked by task policy, sandbox, network, credentials, or repository constraints, try any allowed repository-consistent alternative that remains before recording the limitation. Record environment-caused limitations as risks with mitigation after setup has been attempted or ruled out.
 8. Run the self quality gate and return the final JSON object.
 
 Completion gates:
 
-- Step 1 is complete only after goal, acceptance criteria, allowed write scope, required outputs, verification commands or limitations, input material paths, AC-stated proof details, and applicable repository instructions or skills are identified. Load and apply any skill whose scope matches the task domain, quality profile, framework, or named workflow.
+- Step 1 is complete only after goal, acceptance criteria, expected implementation scope, forbidden paths, required outputs, verification commands or limitations, input material paths, AC-stated proof details, and applicable repository instructions or skills are identified. Load and apply any skill whose scope matches the task domain, quality profile, framework, or named workflow.
 - Step 2 is complete only after every `requirement_basis`, `execution_plan`, and `test_or_quality_basis` file was read before implementation, and each source-material obligation is recorded as product behavior, interface/runtime contract, evidence contract, non-scope constraint, quality gate, or explicit anti-goal. Any unread `context_evidence` file must have a concrete reason it does not affect the changed behavior.
 - Step 3 is complete only after required quality rules that affect file shape, evidence ownership, command surfaces, contract sync, test shape, or user-facing behavior are identified and interpreted without changing the requested core mechanism.
 - Step 4 is complete only after files that need edits, representative local patterns, contracts, consumers, tests, and required setup commands or missing setup blockers are identified.
@@ -88,7 +88,7 @@ Use `hard_stop` only for the hard-stop conditions above.
 # Work Discipline
 
 - Preserve unrelated user changes.
-- Keep writes inside allowed scope. If an out-of-scope file is necessary, record the need as a risk or hard stop according to task policy.
+- In `scope_expansions[].path`, use a clean POSIX worktree-relative path: forward slashes, no absolute path, drive prefix, backslash, duplicate/trailing slash, or `.` / `..` segment. Use the exact changed file path when one file expanded scope; use the smallest segment-aware directory prefix only when multiple outside-allowed changed files under that directory are all required by the same requirement.
 - Use `task.files` and the work order's Input Files section as supplied task context. Respect each file's commit policy; Galley removes non-committed input files before final commit or PR creation.
 - Prefer representative repository patterns over the nearest example when examples conflict.
 - Add tests proportional to risk and repository conventions.
@@ -108,6 +108,7 @@ Before returning the final JSON, verify:
 - Acceptance comes from substantive behavior and evidence, not placeholder plumbing, TODO-only files, hollow tests, or no-op behavior.
 - Verification evidence exercises the changed behavior. A focused selector that matches zero tests is recorded as skipped evidence, not passed evidence.
 - AC-stated proof details are satisfied by evidence, recorded as bounded residual risks, or reported as `hard_stop`.
+- Modified files are compared against allowed paths; every outside-allowed, non-forbidden changed path is covered by `scope_expansions`.
 - Runtime evidence reaches required consumers: persisted evidence, executor work order, supervisor evidence, user-facing output, or PR output as required by the task.
 
 If any gate item fails and another local implementation path can fix it, continue working.
@@ -123,22 +124,9 @@ Use this shape for successful or risk-bearing completion:
   "status": "completed",
   "summary": "One concise summary of the completed work.",
   "files_modified": ["path/to/file.ext"],
-  "acceptance_criteria": [
-    {
-      "id": "AC1",
-      "status": "satisfied",
-      "evidence": ["Concrete evidence from changed files or verification output."],
-      "notes": "Why this criterion is satisfied."
-    }
-  ],
-  "verification": [
-    {
-      "command": "command that was run",
-      "status": "passed",
-      "reason": "Why this status is correct.",
-      "output_excerpt": "Relevant output excerpt."
-    }
-  ],
+  "acceptance_criteria": [{"id": "AC1", "status": "satisfied", "evidence": ["Concrete evidence from changed files or verification output."], "notes": "Why this criterion is satisfied."}],
+  "verification": [{"command": "command that was run", "status": "passed", "reason": "Why this status is correct.", "output_excerpt": "Relevant output excerpt."}],
+  "scope_expansions": [],
   "decisions": [],
   "risks": [],
   "hard_stop": null
@@ -154,6 +142,7 @@ For `status: "hard_stop"`, include:
   "files_modified": [],
   "acceptance_criteria": [],
   "verification": [],
+  "scope_expansions": [],
   "decisions": [],
   "risks": [],
   "hard_stop": {
@@ -173,39 +162,11 @@ Example:
   "status": "completed_with_risks",
   "summary": "Implemented the requested behavior, with one verification limitation recorded.",
   "files_modified": ["path/to/file.ext", "path/to/file_test.ext"],
-  "acceptance_criteria": [
-    {
-      "id": "AC1",
-      "status": "satisfied",
-      "evidence": ["Changed path/to/file.ext and added path/to/file_test.ext coverage."],
-      "notes": "The requested behavior is implemented and covered by a focused test."
-    }
-  ],
-  "verification": [
-    {
-      "command": "project test command",
-      "status": "skipped",
-      "reason": "Required service was unavailable in this environment.",
-      "output_excerpt": "connection refused"
-    }
-  ],
-  "decisions": [
-    {
-      "question": "How to handle missing optional metadata?",
-      "chosen": "Preserve existing default behavior.",
-      "rationale": "This matches nearby implementation patterns and avoids a compatibility break.",
-      "reversibility": "high",
-      "needs_human_review": false
-    }
-  ],
-  "risks": [
-    {
-      "type": "partial_verification",
-      "detail": "Full integration test could not run because the local service was unavailable.",
-      "mitigation": "Rerun the integration command after starting the service.",
-      "needs_human_review": false
-    }
-  ],
+  "acceptance_criteria": [{"id": "AC1", "status": "satisfied", "evidence": ["Changed path/to/file.ext and added path/to/file_test.ext coverage."], "notes": "The requested behavior is implemented and covered by a focused test."}],
+  "verification": [{"command": "project test command", "status": "skipped", "reason": "Required service was unavailable in this environment.", "output_excerpt": "connection refused"}],
+  "scope_expansions": [{"path": "path/outside/allowed-scope/file.ext", "reason": "Why this outside-allowed change was necessary.", "linked_requirement": "AC1 or revision:<id>", "minimality": "Why this is the smallest path set that satisfies the requirement."}],
+  "decisions": [{"question": "How to handle missing optional metadata?", "chosen": "Preserve existing default behavior.", "rationale": "This matches nearby implementation patterns and avoids a compatibility break.", "reversibility": "high", "needs_human_review": false}],
+  "risks": [{"type": "partial_verification", "detail": "Full integration test could not run because the local service was unavailable.", "mitigation": "Rerun the integration command after starting the service.", "needs_human_review": false}],
   "hard_stop": null
 }
 ```
@@ -218,4 +179,4 @@ Use exactly these enum values:
 - `decisions[].reversibility`: `high`, `medium`, or `low`
 - `risks[].type`: `ambiguous_requirement`, `partial_verification`, `external_dependency`, `technical_debt`, or `other`
 
-Return empty arrays for `decisions` and `risks` when none exist. Return `"hard_stop": null` for `completed` and `completed_with_risks`.
+Return an empty `scope_expansions` array when all modified files are inside allowed paths. Return empty arrays for `decisions` and `risks` when none exist. Return `"hard_stop": null` for `completed` and `completed_with_risks`.

@@ -1,6 +1,7 @@
 package claude_guard_plugin
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -91,6 +92,86 @@ func TestRequireFinalJSONBlocksInvalidCreatorManifest(t *testing.T) {
 	}
 	if !strings.Contains(got, "acceptance skeleton manifest") {
 		t.Fatalf("expected creator manifest guidance, got %s", got)
+	}
+}
+
+func TestRequireFinalJSONRequiresExecutorScopeExpansions(t *testing.T) {
+	dir, err := Ensure(filepath.Join(t.TempDir(), "guard"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(dir, "scripts", "require-final-json.py")
+	cmd := pythonCommand(t, script)
+	cmd.Stdin = strings.NewReader(`{"last_assistant_message":"{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[],\"acceptance_criteria\":[],\"verification\":[],\"decisions\":[],\"risks\":[]}"}`)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("guard script failed: %v\n%s", err, output)
+	}
+	got := string(output)
+	if !strings.Contains(got, `"decision": "block"`) {
+		t.Fatalf("expected block output, got %s", got)
+	}
+	if !strings.Contains(got, "scope_expansions is required") {
+		t.Fatalf("expected scope_expansions guidance, got %s", got)
+	}
+}
+
+func TestRequireFinalJSONRejectsInvalidScopeExpansionPath(t *testing.T) {
+	dir, err := Ensure(filepath.Join(t.TempDir(), "guard"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(dir, "scripts", "require-final-json.py")
+	tests := []string{
+		"/tmp/foo.go",
+		"C:/tmp/foo.go",
+		`internal\foo.go`,
+		"internal//foo.go",
+		"internal/foo/",
+		"internal/./foo.go",
+		"internal/../foo.go",
+	}
+	for _, path := range tests {
+		path := path
+		t.Run(path, func(t *testing.T) {
+			cmd := pythonCommand(t, script)
+			result := map[string]any{
+				"status":              "completed",
+				"summary":             "done",
+				"files_modified":      []string{path},
+				"acceptance_criteria": []any{},
+				"verification":        []any{},
+				"scope_expansions": []map[string]string{{
+					"path":               path,
+					"reason":             "needed",
+					"linked_requirement": "AC1",
+					"minimality":         "one file",
+				}},
+				"decisions": []any{},
+				"risks":     []any{},
+			}
+			resultJSON, err := json.Marshal(result)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hookInput, err := json.Marshal(map[string]string{"last_assistant_message": string(resultJSON)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := string(hookInput)
+			cmd.Stdin = strings.NewReader(body)
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("guard script failed: %v\n%s", err, output)
+			}
+			got := string(output)
+			if !strings.Contains(got, `"decision": "block"`) {
+				t.Fatalf("expected block output, got %s", got)
+			}
+			if !strings.Contains(got, "scope_expansions[0].path must be a clean relative path") {
+				t.Fatalf("expected clean relative path guidance, got %s", got)
+			}
+		})
 	}
 }
 

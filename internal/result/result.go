@@ -117,6 +117,7 @@ func Complete(ctx context.Context, opts CompleteOptions) (runner.ClaudeResult, e
 		FilesModified:      files,
 		AcceptanceCriteria: criteria,
 		Verification:       verification,
+		ScopeExpansions:    []runner.ClaudeScopeExpansion{},
 		Decisions:          []runner.ClaudeDecision{},
 		Risks:              risks,
 	}

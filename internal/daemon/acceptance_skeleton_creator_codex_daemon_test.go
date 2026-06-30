@@ -45,7 +45,7 @@ func TestRunOnceAcceptanceSkeletonCreatorRoutesCodexProvider(t *testing.T) {
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
 
 	creatorManifest := `{"outputs":[{"ac_id":"AC1","path":"internal/foo/foo_test.go","kind":"go-test","purpose":"verify AC1","satisfies":"AC1 observable behavior","integration_point":"executor completes this skeleton before acceptance","implementation_required":true}],"no_skeletons":[]}`
-	executorResult := `{"status":"completed","summary":"codex done","files_modified":["daemon-output.txt","internal/foo/foo_test.go"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"decisions":[],"risks":[]}`
+	executorResult := `{"status":"completed","summary":"codex done","files_modified":["daemon-output.txt","internal/foo/foo_test.go"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}`
 
 	// One fake `codex` binary serves both the acceptance skeleton creator and
 	// the implementation executor. It branches on the combined stdin prompt:

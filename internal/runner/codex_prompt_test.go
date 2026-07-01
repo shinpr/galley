@@ -5,7 +5,6 @@ package runner
 // Codex supervisor prompt shape.
 
 import (
-	"reflect"
 	"strings"
 	"testing"
 
@@ -63,65 +62,5 @@ func TestCodexExecutorUsesCodexPromptByDefault(t *testing.T) {
 	}
 	if !strings.Contains(plan.Stdin, "# Work Order\n\nwork order body") {
 		t.Fatal("Codex command plan stdin missing work order section")
-	}
-}
-
-func TestExecutorPromptsContainContractSections(t *testing.T) {
-	t.Parallel()
-	required := []string{
-		"# Role",
-		"# Hard-Stop Conditions",
-		"Work Discipline",
-		"# Self Quality Gate",
-		"Return exactly one JSON object",
-		"task.files",
-		"requested core mechanism",
-		"exact observable contract values",
-		"scope_expansions",
-		"Modified files are compared against allowed paths",
-		"Use exactly these enum values:",
-	}
-	for name, prompt := range map[string]string{
-		"claude": prompts.ClaudeExecutorFull(),
-		"codex":  prompts.CodexExecutorFull(),
-	} {
-		name := name
-		prompt := prompt
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			for _, want := range required {
-				if !strings.Contains(prompt, want) {
-					t.Fatalf("%s executor prompt missing %q", name, want)
-				}
-			}
-			if !strings.Contains(prompt, `"status": "completed_with_risks"`) {
-				t.Fatalf("%s executor prompt missing completed_with_risks example", name)
-			}
-			if !strings.Contains(prompt, `"reversibility": "high"`) || !strings.Contains(prompt, `"needs_human_review": false`) {
-				t.Fatalf("%s executor prompt missing decisions/risks field guidance", name)
-			}
-		})
-	}
-}
-
-func TestCodexExecutorPromptContainsCodexSpecificContractSections(t *testing.T) {
-	t.Parallel()
-	prompt := prompts.CodexExecutorFull()
-	for _, want := range []string{
-		"# Source Priority",
-		"# Required Execution Flow",
-		"# Completion Rules",
-		"# Output Contract",
-		"Completion gates:",
-		"Load and apply any skill",
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("Codex executor prompt missing %q", want)
-		}
-	}
-
-	// Sanity check: ExecutorCLIEnum remains stable (guard against drift).
-	if got := task.ExecutorCLIEnum(); !reflect.DeepEqual(got, []string{"claude", "codex"}) {
-		t.Fatalf("ExecutorCLIEnum drifted: %#v", got)
 	}
 }

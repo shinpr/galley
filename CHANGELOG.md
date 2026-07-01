@@ -6,6 +6,13 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.8.4 - 2026-07-01
+
+### Changed
+
+- Supervisor review prompts now centralize acceptance-contract judgment in the shared contract, require authoritative-source evidence for represented identifier-backed data sets and mappings, and keep Claude/Codex provider prompts focused on runtime guidance.
+- Removed brittle prompt-body section tests, keeping runner and adapter tests focused on prompt routing, embedding, and schema delivery.
+
 ## v0.8.3 - 2026-07-01
 
 ### Changed

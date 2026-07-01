@@ -6,29 +6,20 @@ This project follows semantic versioning.
 
 ## Unreleased
 
-## v0.8.4 - 2026-07-01
-
-### Changed
-
-- Removed `executor.max_budget_usd` from the active task contract and executor runners. Galley no longer emits Claude Code `--max-budget-usd`, and new task skeletons, schemas, examples, and docs no longer expose the field.
-- Task YAML loading now decodes known fields and ignores unknown fields at runtime. Malformed YAML, incompatible top-level shape, and known-field type mismatches still fail validation, queueing, requeueing, and daemon execution.
-- Executor result resolution now requires a valid structured executor JSON result from the normal executor output surfaces instead of synthesizing fallback completion evidence.
-- Executor prompts now define `files_modified` as the final worktree changed-file set submitted for supervisor review, so `scope_expansions` coverage includes earlier-attempt changes still present in the current diff.
-- Packaged Claude and Codex Galley plugins are now versioned as `0.1.19`: bundled task schemas and skeleton generation no longer expose `executor.max_budget_usd`.
-
-### Fixed
-
-- Codex executor result parse failures now keep the `--output-last-message` parse error in the final diagnostic instead of reporting only stdout parse failures.
-
-## v0.8.3 - 2026-06-30
+## v0.8.3 - 2026-07-01
 
 ### Changed
 
 - Treat `scope.allowed_paths` as expected implementation scope and review baseline instead of a hard stop. Executors may make minimal required outside-allowed changes, must still avoid `scope.forbidden_paths`, and must report those changes in `scope_expansions`.
-- Packaged Claude and Codex Galley plugins are now versioned as `0.1.18`: task-authoring guidance now treats `scope.allowed_paths` as expected implementation scope and supervisor review context while preserving `scope.forbidden_paths` as the protected path boundary.
+- Removed `executor.max_budget_usd` from the active task contract and executor runners. Galley no longer emits Claude Code `--max-budget-usd`, and new task skeletons, schemas, examples, and docs no longer expose the field.
+- Task YAML loading now decodes known fields and ignores unknown fields at runtime. Malformed YAML, incompatible top-level shape, and known-field type mismatches still fail validation, queueing, requeueing, and daemon execution.
+- Executor result resolution now requires a valid structured executor JSON result from the normal executor output surfaces instead of synthesizing fallback completion evidence.
+- Executor prompts now define `files_modified` as the final worktree changed-file set submitted for supervisor review, so `scope_expansions` coverage includes earlier-attempt changes still present in the current diff.
+- Packaged Claude and Codex Galley plugins are now versioned as `0.1.19`: task-authoring guidance now treats `scope.allowed_paths` as expected implementation scope and supervisor review context while preserving `scope.forbidden_paths` as the protected path boundary; bundled task schemas and skeleton generation no longer expose `executor.max_budget_usd`.
 
 ### Fixed
 
+- Codex executor result parse failures now keep the `--output-last-message` parse error in the final diagnostic instead of reporting only stdout parse failures.
 - Fixed Galley review staging and accepted-task finalization failing when an executor had already staged a file deletion. Staged deletions are now preserved in review evidence and final commits without being re-added.
 
 ## v0.8.2 - 2026-06-27

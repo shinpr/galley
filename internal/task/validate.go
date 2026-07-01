@@ -283,9 +283,6 @@ func validateExecutor(result *ValidationResult, t Task) {
 	} else {
 		require(result, slices.Contains(validPromptModes, t.Executor.PromptMode), "executor.prompt_mode must be one of: %s", strings.Join(validPromptModes, ", "))
 	}
-	if t.Executor.MaxBudgetUSD != nil {
-		require(result, *t.Executor.MaxBudgetUSD >= 0, "executor.max_budget_usd cannot be negative")
-	}
 }
 
 func validatePreflight(result *ValidationResult, t Task) {

@@ -54,10 +54,9 @@ func captureStderr(t *testing.T, fn func()) string {
 	return buf.String()
 }
 
-// writeSchemaIncompatibleDaemonTaskYAML writes a task with an unknown nested field that
-// strict task.Load rejects. The contents otherwise resemble a done-state
-// task with a PR URL so it shows up under the daemon's PR-comment and
-// worktree-cleanup scans.
+// writeSchemaIncompatibleDaemonTaskYAML writes a task with an unknown nested
+// field. Runtime task loading ignores it; the contents otherwise resemble a
+// done-state task with a PR URL so it shows up under daemon scans.
 func writeSchemaIncompatibleDaemonTaskYAML(t *testing.T, path, repo string) {
 	t.Helper()
 	body := `id: "task-schema-incompatible-daemon"
@@ -109,10 +108,7 @@ pr:
 	}
 }
 
-// TestPollPRCommentsSkipsUnreadableTask covers AC: PR comment polling must
-// skip strict-decode-incompatible task files with operator-visible warning
-// evidence while continuing to process readable tasks in the same sweep.
-func TestPollPRCommentsSkipsUnreadableTask(t *testing.T) {
+func TestPollPRCommentsProcessesUnknownFieldTask(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	if err := queue.EnsureLayout(root); err != nil {
@@ -135,7 +131,7 @@ func TestPollPRCommentsSkipsUnreadableTask(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Sibling strict-decode-incompatible task with an unknown field.
+	// Sibling task with an unknown field.
 	incompatiblePath := filepath.Join(root, "tasks", "done", "decode-incompatible.yaml")
 	writeSchemaIncompatibleDaemonTaskYAML(t, incompatiblePath, repo)
 
@@ -152,15 +148,11 @@ fi
 		pollErr = pollPRComments(context.Background(), Options{Root: root, GHBin: ghBin}.withDefaults())
 	})
 	if pollErr != nil {
-		t.Fatalf("poll must not abort when a sibling task is unreadable: %v", pollErr)
+		t.Fatalf("poll must not abort when a sibling task has unknown fields: %v", pollErr)
 	}
 
-	// Warning evidence covers the strict-decode-incompatible task.
-	if !strings.Contains(stderr, "skipping PR comment scan for unreadable task") {
-		t.Fatalf("expected operator-visible warning on stderr, got %q", stderr)
-	}
-	if !strings.Contains(stderr, "decode-incompatible.yaml") {
-		t.Fatalf("warning must name the unreadable task path, got %q", stderr)
+	if stderr != "" {
+		t.Fatalf("unknown-field task should not emit decode warning, got %q", stderr)
 	}
 
 	// Readable task continues processing: it was requeued and the source
@@ -177,16 +169,12 @@ fi
 		t.Fatalf("readable task processed comments got %#v", requeued.PR.ProcessedCommentIDs)
 	}
 
-	// Unreadable task stays untouched so the operator can inspect it.
-	if _, err := os.Stat(incompatiblePath); err != nil {
-		t.Fatalf("unreadable task must remain in place for operator inspection: %v", err)
+	if _, err := os.Stat(incompatiblePath); !os.IsNotExist(err) {
+		t.Fatalf("unknown-field task should be requeued, err=%v", err)
 	}
 }
 
-// TestCleanupWorktreesSkipsUnreadableTask covers AC: worktree cleanup must
-// skip strict-decode-incompatible task files with an operator-visible warning
-// while continuing to act on readable tasks in the same sweep.
-func TestCleanupWorktreesSkipsUnreadableTask(t *testing.T) {
+func TestCleanupWorktreesProcessesUnknownFieldTask(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	if err := queue.EnsureLayout(root); err != nil {
@@ -199,14 +187,14 @@ func TestCleanupWorktreesSkipsUnreadableTask(t *testing.T) {
 	writeDaemonTask(t, taskPath, repo)
 	doneTask, worktreePath := prepareDonePRTask(t, taskPath, repo, "open")
 
-	// Sibling strict-decode-incompatible task: cleanup must skip it.
+	// Sibling task with an unknown field.
 	incompatiblePath := filepath.Join(root, "tasks", "done", "schema-incompatible.yaml")
 	writeSchemaIncompatibleDaemonTaskYAML(t, incompatiblePath, repo)
 
 	// PR state lookup always reports "open" so the readable worktree must
 	// be preserved (the existing TestCleanupWorktreesKeepsOpenPRWorktree
 	// asserts the open-state contract). Coupling that assertion with the
-	// new skip warning proves cleanup continued past the unreadable file.
+	// unknown field proves cleanup continues without decode noise.
 	ghBin := writeFakeCommand(t, "gh", "echo '{\"state\":\"open\",\"merged\":false}'\n")
 
 	var cleanupErr error
@@ -214,14 +202,11 @@ func TestCleanupWorktreesSkipsUnreadableTask(t *testing.T) {
 		cleanupErr = cleanupWorktrees(context.Background(), Options{Root: root, GHBin: ghBin}.withDefaults())
 	})
 	if cleanupErr != nil {
-		t.Fatalf("cleanup must not abort when a sibling task is unreadable: %v", cleanupErr)
+		t.Fatalf("cleanup must not abort when a sibling task has unknown fields: %v", cleanupErr)
 	}
 
-	if !strings.Contains(stderr, "skipping worktree cleanup for unreadable task") {
-		t.Fatalf("expected operator-visible warning on stderr, got %q", stderr)
-	}
-	if !strings.Contains(stderr, "schema-incompatible.yaml") {
-		t.Fatalf("warning must name the unreadable task path, got %q", stderr)
+	if stderr != "" {
+		t.Fatalf("unknown-field task should not emit decode warning, got %q", stderr)
 	}
 
 	// Readable task still processed: open PR keeps its worktree and PR
@@ -237,8 +222,7 @@ func TestCleanupWorktreesSkipsUnreadableTask(t *testing.T) {
 		t.Fatalf("readable task PR status got %q want %q", reloaded.PR.Status, doneTask.PR.Status)
 	}
 
-	// Unreadable file kept untouched.
 	if _, err := os.Stat(incompatiblePath); err != nil {
-		t.Fatalf("unreadable task must remain in place: %v", err)
+		t.Fatalf("unknown-field task should remain because PR is open: %v", err)
 	}
 }

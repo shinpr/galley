@@ -69,7 +69,7 @@ func TestDaemonDispatchesSelectedExecutorBinary(t *testing.T) {
 			claudeExecMarker := filepath.Join(markerDir, "claude-exec.marker")
 			codexExecMarker := filepath.Join(markerDir, "codex-exec.marker")
 
-			executorResult := `{"status":"completed","summary":"done","files_modified":["daemon-output.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"decisions":[],"risks":[]}`
+			executorResult := `{"status":"completed","summary":"done","files_modified":["daemon-output.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}`
 
 			// The supervisor branch in writeFakeClaude exits before running
 			// body, so the executor marker only fires when claude is invoked

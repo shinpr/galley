@@ -129,7 +129,6 @@ func buildClaudeCreatorCommandPlan(opts Options, payload []byte) (runner.Command
 		JSONSchema:     schemas.AcceptanceSkeletonManifest,
 		PromptMode:     "replace",
 		PermissionMode: "bypassPermissions",
-		MaxBudgetUSD:   opts.Task.Executor.MaxBudgetUSDValue(),
 		PluginDirs:     []string{guardDir},
 		AttemptDir:     opts.RunDir,
 	})

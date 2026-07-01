@@ -47,7 +47,8 @@ func RenderWorkOrderWithProfiles(t Task, profiles profile.Bundle) string {
 
 	fmt.Fprintf(&b, "\n## Required Behavior\n\n")
 	fmt.Fprintf(&b, "- Read relevant files before editing.\n")
-	fmt.Fprintf(&b, "- Keep edits inside allowed paths.\n")
+	fmt.Fprintf(&b, "- Treat allowed paths as the expected implementation scope. Make an outside-allowed edit only when the extracted work contract or a pending revision request requires it; keep it minimal and record it as a scope expansion.\n")
+	fmt.Fprintf(&b, "- Treat forbidden paths as protected.\n")
 	fmt.Fprintf(&b, "- If requirements are ambiguous, choose the smallest reversible implementation, record the decision, and continue.\n")
 	fmt.Fprintf(&b, "- Run the highest-value verification available in this environment.\n")
 	fmt.Fprintf(&b, "- Return exactly one JSON object matching the configured schema.\n")

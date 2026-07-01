@@ -3,7 +3,7 @@
   "title": "Galley Claude Executor Result",
   "type": "object",
   "additionalProperties": false,
-  "required": ["status", "summary", "files_modified", "acceptance_criteria", "verification", "decisions", "risks"],
+  "required": ["status", "summary", "files_modified", "acceptance_criteria", "verification", "scope_expansions", "decisions", "risks"],
   "allOf": [
     {
       "if": {
@@ -69,6 +69,25 @@
           },
           "reason": { "type": "string" },
           "output_excerpt": { "type": "string" }
+        }
+      }
+    },
+    "scope_expansions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "reason", "linked_requirement", "minimality"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(?!/)(?!//)(?![A-Za-z]:)(?!.*\\\\)(?!.*//)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:^|/)\\.(?:/|$))(?!.*//$)(?!.*\\/$).+",
+            "description": "POSIX-style worktree-relative clean file path, or the smallest segment-aware directory prefix covering multiple required outside-allowed changed files."
+          },
+          "reason": { "type": "string", "minLength": 1 },
+          "linked_requirement": { "type": "string", "minLength": 1 },
+          "minimality": { "type": "string", "minLength": 1 }
         }
       }
     },

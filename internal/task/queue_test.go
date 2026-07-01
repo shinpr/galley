@@ -102,54 +102,6 @@ func TestQueuePreservesOmittedExecutorModel(t *testing.T) {
 	}
 }
 
-func TestQueuePreservesOmittedCodexSkeletonMaxBudgetUSD(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	draftPath := filepath.Join(root, "tasks", "draft", "task.yaml")
-	if err := os.MkdirAll(filepath.Dir(draftPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	path := writeTaskYAML(t, "loop_budget: 3")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	data = []byte(strings.ReplaceAll(string(data), "  model: \"opus\"\n", ""))
-	data = []byte(strings.ReplaceAll(string(data), "  cli: \"claude\"\n", "  cli: \"codex\"\n"))
-	data = []byte(strings.ReplaceAll(string(data), "  prompt_profile: \"codexized-claude-executor-v1\"\n", "  prompt_profile: \"codex-executor-v1\"\n"))
-	data = []byte(strings.ReplaceAll(string(data), "  max_budget_usd: 0\n", ""))
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	loaded.Status = "draft"
-	if loaded.Executor.MaxBudgetUSD != nil {
-		t.Fatalf("test fixture should omit executor.max_budget_usd, got %#v", loaded.Executor.MaxBudgetUSD)
-	}
-	if err := Save(draftPath, loaded); err != nil {
-		t.Fatal(err)
-	}
-
-	result, err := Queue(draftPath, QueueOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Task.Executor.MaxBudgetUSD != nil {
-		t.Fatalf("queued Codex skeleton budget got %#v, want omitted", result.Task.Executor.MaxBudgetUSD)
-	}
-	queuedPath := filepath.Join(root, "tasks", "queued", "task.yaml")
-	saved, err := os.ReadFile(queuedPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(saved), "max_budget_usd:") {
-		t.Fatalf("queued Codex skeleton should omit executor.max_budget_usd, got:\n%s", string(saved))
-	}
-}
-
 func TestQueueCopiesExternalDraftIntoRoot(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

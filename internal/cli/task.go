@@ -102,12 +102,9 @@ type taskListItem struct {
 	PRURL         string `json:"pr_url,omitempty"`
 	LatestVerdict string `json:"latest_verdict,omitempty"`
 	LatestSummary string `json:"latest_summary,omitempty"`
-	// DecodeError is set on entries that could not be decoded under the
-	// current task schema. Tolerant scans (`galley task list`, `task show`'s
-	// ID lookup, daemon helper sweeps) surface these strict-decode-incompatible or unreadable
-	// task files as non-fatal entries instead of failing the whole command.
-	// Active task intake (validate/queue/requeue/daemon execution) still
-	// rejects unknown fields through the strict loader.
+	// DecodeError is set on entries whose known fields could not be decoded.
+	// Unknown fields are ignored by task.Load; malformed known fields or
+	// invalid top-level YAML still surface as non-fatal entries in scans.
 	DecodeError string `json:"decode_error,omitempty"`
 }
 
@@ -127,13 +124,10 @@ func newTaskListCommand() *cobra.Command {
 			return renderOutput(cmd, output, items, func() error {
 				for _, item := range items {
 					if item.DecodeError != "" {
-						// Strict-decode-incompatible or unreadable task files surface as
-						// non-fatal entries so the rest of the list still
-						// renders. The "decode_error" sentinel in the
-						// status column lets shell pipelines filter these
-						// entries explicitly. The file path is the third
-						// column (matching the readable layout) and the
-						// decode error message follows.
+						// Unreadable task files surface as non-fatal entries
+						// so the rest of the list still renders. The
+						// "decode_error" sentinel in the status column lets
+						// shell pipelines filter these entries explicitly.
 						fmt.Fprintf(cmd.OutOrStdout(), "%s\tdecode_error\t%s\t%s\n", item.State, item.File, item.DecodeError)
 						continue
 					}
@@ -266,13 +260,10 @@ func listTaskItems(root, state string) ([]taskListItem, error) {
 			return nil, err
 		}
 		for _, path := range paths {
-			// Tolerant scan: strict-decode-incompatible task files that
-			// pre-date the current schema still render as best-effort
-			// entries. Truly unreadable files surface as decode-error
-			// entries instead of failing the whole command. Active task
-			// intake paths (validate/queue/requeue/daemon execution) still
-			// use the strict Load.
-			loaded, err := task.LoadLenient(path)
+			// Tolerant scan: unknown fields are ignored, while malformed known
+			// fields or invalid YAML surface as decode-error entries instead
+			// of failing the whole command.
+			loaded, err := task.Load(path)
 			if err != nil {
 				items = append(items, taskListItem{
 					State:       currentState,
@@ -303,9 +294,8 @@ func findTaskByID(root, id string) (string, error) {
 	}
 	var matches []string
 	for _, item := range items {
-		// Skip decode-error entries: tolerant scans surface unreadable
-		// strict-decode-incompatible task files but they cannot drive an ID lookup
-		// because their ID could not be decoded.
+		// Skip decode-error entries: they cannot drive an ID lookup because
+		// their ID could not be decoded.
 		if item.DecodeError != "" {
 			continue
 		}

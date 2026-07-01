@@ -74,7 +74,7 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 - `goal`: concise objective for the work.
 - `acceptance_criteria[]`: observable completion requirements with stable IDs such as `AC1`.
 - `files[]`: optional user-supplied files to place in the execution workspace.
-- `scope`: repository path, allowed/forbidden paths, and permission level.
+- `scope`: repository path, expected implementation paths, protected paths, and permission level.
 - `execution_policy`: attempt budget, timeout, and escalation behavior.
 - `worktree`: isolated branch and sibling worktree location for AFK execution.
 - `supervisor`: review loop settings.
@@ -93,7 +93,6 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 - `executor.effort`: model effort hint. Claude accepts `low`, `medium`, `high`, `xhigh`, or `max`; Codex accepts `low`, `medium`, or `high`.
 - `executor.prompt_profile`: prompt profile name recorded for evidence.
 - `executor.prompt_mode`: `replace` or `append`.
-- `executor.max_budget_usd`: optional non-negative execution budget hint. Claude tasks can use it as a per-run ceiling; Codex has no equivalent enforced flag.
 
 ## Permissions
 
@@ -106,6 +105,8 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 For AFK implementation tasks, prefer `sandbox-full-access` with an isolated worktree. Use `read-only` for investigation or review tasks.
 
 `scope.permission` is an authority intent passed into the executor workflow. Actual isolation comes from the worktree, `scope.forbidden_paths`, the executor CLI sandbox, and local OS controls.
+
+`scope.allowed_paths` is the expected implementation scope and review baseline. Executors should stay inside it when the task can be completed there, but a required acceptance criterion or pending revision request may justify a minimal outside-allowed change. Those changes are reported as scope expansions for supervisor and PR review. Each reported expansion path is a POSIX-style worktree-relative clean file path, or the smallest segment-aware directory prefix that covers multiple required outside-allowed changed files. `scope.forbidden_paths` remains the protected path boundary.
 
 ## Input Files
 
@@ -220,6 +221,6 @@ galley task requeue TASK_ID --reason "retry after transient failure"
 
 Requeue is useful for transient failures such as usage limits or temporary service errors.
 
-## Lenient Task YAML Handling
+## Task YAML Decoding
 
-Read-only commands tolerate older task files with unknown fields so operators can still inspect or archive them. Active intake stays strict: `validate`, `queue`, `requeue`, and daemon execution reject unknown fields or type mismatches before work reaches an executor.
+Galley decodes known task YAML fields and ignores unknown fields at runtime. Malformed YAML, incompatible top-level shape, and type mismatches in known fields still fail validation, queueing, requeueing, and daemon execution.

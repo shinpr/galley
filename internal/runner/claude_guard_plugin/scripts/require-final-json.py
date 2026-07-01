@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import json
 import os
+import posixpath
+import re
 import sys
 
 
@@ -8,22 +10,9 @@ RESULT_TEMPLATE = """{
   "status": "completed",
   "summary": "One concise summary of the completed work.",
   "files_modified": ["path/to/file.ext"],
-  "acceptance_criteria": [
-    {
-      "id": "AC1",
-      "status": "satisfied",
-      "evidence": ["Concrete evidence from changed files or verification output."],
-      "notes": "Why this criterion is satisfied."
-    }
-  ],
-  "verification": [
-    {
-      "command": "command that was run",
-      "status": "passed",
-      "reason": "Why this status is correct.",
-      "output_excerpt": "Relevant output excerpt."
-    }
-  ],
+  "acceptance_criteria": [{"id": "AC1", "status": "satisfied", "evidence": ["Concrete evidence from changed files or verification output."], "notes": "Why this criterion is satisfied."}],
+  "verification": [{"command": "command that was run", "status": "passed", "reason": "Why this status is correct.", "output_excerpt": "Relevant output excerpt."}],
+  "scope_expansions": [],
   "decisions": [],
   "risks": []
 }"""
@@ -33,12 +22,7 @@ SUPERVISOR_TEMPLATE = """{
   "summary": "One concise review summary.",
   "acceptance_gaps": [],
   "reviewed_files": ["path/to/file.ext"],
-  "acceptance_evidence": [
-    {
-      "ac_id": "AC1",
-      "evidence": ["Concrete evidence from changed files or verification output."]
-    }
-  ],
+  "acceptance_evidence": [{"ac_id": "AC1", "evidence": ["Concrete evidence from changed files or verification output."]}],
   "findings": [],
   "residual_risks": [],
   "discussion_items": [],
@@ -48,15 +32,7 @@ SUPERVISOR_TEMPLATE = """{
 
 CREATOR_TEMPLATE = """{
   "outputs": [
-    {
-      "ac_id": "AC1",
-      "path": "tests/example.integration.test.ts",
-      "kind": "integration",
-      "purpose": "Verify the user-visible behavior required by AC1.",
-      "satisfies": "AC1 observable outcome covered by this skeleton.",
-      "integration_point": "Executor completes this skeleton while implementing the feature.",
-      "implementation_required": true
-    }
+    {"ac_id": "AC1", "path": "tests/example.integration.test.ts", "kind": "integration", "purpose": "Verify the user-visible behavior required by AC1.", "satisfies": "AC1 observable outcome covered by this skeleton.", "integration_point": "Executor completes this skeleton while implementing the feature.", "implementation_required": true}
   ],
   "no_skeletons": []
 }"""
@@ -64,20 +40,10 @@ CREATOR_TEMPLATE = """{
 SETUP_EXECUTOR_TEMPLATE = """{
   "status": "ready",
   "commands": [
-    {
-      "run": "setup command that was run",
-      "why": "Why this command is part of setup",
-      "source": "environment_commands",
-      "exit_code": 0,
-      "stdout_excerpt": "Short relevant output excerpt",
-      "stderr_excerpt": ""
-    }
+    {"run": "setup command that was run", "why": "Why this command is part of setup", "source": "environment_commands", "exit_code": 0, "stdout_excerpt": "Short relevant output excerpt", "stderr_excerpt": ""}
   ],
   "successful_commands": [
-    {
-      "run": "setup command that should be persisted",
-      "why": "Why this command makes the worktree ready"
-    }
+    {"run": "setup command that should be persisted", "why": "Why this command makes the worktree ready"}
   ],
   "inspected_files": ["package.json"],
   "readiness_evidence": "The setup command and a representative required check passed."
@@ -140,11 +106,29 @@ def require_array(value, name):
         raise ValueError(f"{name} must be an array")
 
 
+def require_clean_relative_path(value, name):
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{name} must be a non-empty string")
+    clean = posixpath.normpath(value)
+    if (
+        value.startswith("/")
+        or "\\" in value
+        or "//" in value
+        or value.endswith("/")
+        or re.match(r"^[A-Za-z]:", value)
+        or clean != value
+        or clean == "."
+        or clean == ".."
+        or clean.startswith("../")
+    ):
+        raise ValueError(f"{name} must be a clean relative path")
+
+
 def validate_result(result):
     require_object(result, "result")
     if result.get("status") not in {"completed", "completed_with_risks", "hard_stop"}:
         raise ValueError("status must be completed, completed_with_risks, or hard_stop")
-    for field in ["summary", "files_modified", "acceptance_criteria", "verification", "decisions", "risks"]:
+    for field in ["summary", "files_modified", "acceptance_criteria", "verification", "scope_expansions", "decisions", "risks"]:
         if field not in result:
             raise ValueError(f"{field} is required")
     if not isinstance(result["summary"], str) or not result["summary"].strip():
@@ -152,6 +136,7 @@ def validate_result(result):
     require_array(result["files_modified"], "files_modified")
     require_array(result["acceptance_criteria"], "acceptance_criteria")
     require_array(result["verification"], "verification")
+    require_array(result["scope_expansions"], "scope_expansions")
     require_array(result["decisions"], "decisions")
     require_array(result["risks"], "risks")
 
@@ -171,6 +156,15 @@ def validate_result(result):
                 raise ValueError(f"verification[{index}].{field} is required")
         if verification.get("status") not in {"passed", "failed", "skipped"}:
             raise ValueError(f"verification[{index}].status is invalid")
+
+    for index, expansion in enumerate(result["scope_expansions"]):
+        require_object(expansion, f"scope_expansions[{index}]")
+        for field in ["path", "reason", "linked_requirement", "minimality"]:
+            if field not in expansion:
+                raise ValueError(f"scope_expansions[{index}].{field} is required")
+            if not isinstance(expansion[field], str) or not expansion[field].strip():
+                raise ValueError(f"scope_expansions[{index}].{field} must be a non-empty string")
+        require_clean_relative_path(expansion["path"], f"scope_expansions[{index}].path")
 
     for index, decision in enumerate(result["decisions"]):
         require_object(decision, f"decisions[{index}]")

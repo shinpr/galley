@@ -77,6 +77,8 @@ func TestExecutorPromptsContainContractSections(t *testing.T) {
 		"task.files",
 		"requested core mechanism",
 		"exact observable contract values",
+		"scope_expansions",
+		"Modified files are compared against allowed paths",
 		"Use exactly these enum values:",
 	}
 	for name, prompt := range map[string]string{

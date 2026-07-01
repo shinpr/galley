@@ -53,12 +53,12 @@ import (
 
 // codexAcceptedExecutorResult is the executor result JSON line that fakes the
 // Codex executor reporting a clean "completed" attempt to the supervisor.
-const codexAcceptedExecutorResult = `{"status":"completed","summary":"codex done","files_modified":["daemon-output.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"decisions":[],"risks":[]}`
+const codexAcceptedExecutorResult = `{"status":"completed","summary":"codex done","files_modified":["daemon-output.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}`
 
 // codexRiskyExecutorResult mirrors the Claude completed_with_risks path that
 // writeFakeClaude's supervisor block maps to needs_revision, exercising the
 // in-loop retry semantics for the Codex executor.
-const codexRiskyExecutorResult = `{"status":"completed_with_risks","summary":"codex risky","files_modified":["retry.marker"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"decisions":[],"risks":[{"type":"partial_verification","detail":"needs retry","mitigation":"retry with corrective work order","needs_human_review":true}]}`
+const codexRiskyExecutorResult = `{"status":"completed_with_risks","summary":"codex risky","files_modified":["retry.marker"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[{"type":"partial_verification","detail":"needs retry","mitigation":"retry with corrective work order","needs_human_review":true}]}`
 
 // TestCodexExecutorSuccessProducesParityRunEvidence asserts the AC4 happy
 // path: a Codex task that succeeds writes the same per-attempt evidence

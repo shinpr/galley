@@ -73,7 +73,7 @@ func newDaemonRetryTask(t *testing.T) (root, taskPath string, repo string) {
 func TestDaemonSupervisorStallRetryRecoversWithinSameAttempt(t *testing.T) {
 	root, taskPath, _ := newDaemonRetryTask(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
 	codexBin := writeStallThenAcceptCodexSupervisor(t)
 	setLoopBudget(t, taskPath, 3)
 
@@ -148,7 +148,7 @@ func TestDaemonSupervisorStallRetryRecoversWithinSameAttempt(t *testing.T) {
 func TestDaemonSupervisorStallExhaustsRetryBudget(t *testing.T) {
 	root, taskPath, _ := newDaemonRetryTask(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
 	codexBin := writeAlwaysStallCodexSupervisor(t)
 	setLoopBudget(t, taskPath, 3)
 

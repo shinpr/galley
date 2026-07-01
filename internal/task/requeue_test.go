@@ -100,8 +100,7 @@ func TestRequeuePreservesPRAuthorLogin(t *testing.T) {
 
 func TestLoadAcceptsTaskWithoutPRAuthorLogin(t *testing.T) {
 	t.Parallel()
-	// Older task YAML written before PR.AuthorLogin existed must still
-	// decode cleanly under strict KnownFields parsing.
+	// Older task YAML written before PR.AuthorLogin existed must still decode.
 	taskPath := writeTaskYAML(t, "loop_budget: 3")
 	loaded, err := Load(taskPath)
 	if err != nil {

@@ -34,16 +34,13 @@ const CodexLastMessageFilename = "codex.last-message.txt"
 // dedicated --system-prompt flag.
 //
 // The argv we build is constrained by the upstream `codex exec` CLI surface:
-//   - reasoning effort is delivered through the generic `-c model_reasoning_effort=...`
-//     config override because `codex exec` rejects an `--effort` flag;
-//   - executor.max_budget_usd is recorded as a warning only because `codex exec`
-//     does not expose any per-invocation USD budget control.
+// reasoning effort is delivered through the generic `-c model_reasoning_effort=...`
+// config override because `codex exec` rejects an `--effort` flag.
 type CodexOptions struct {
 	Bin                   string
 	Model                 string
 	Effort                string
 	PromptMode            string
-	MaxBudgetUSD          float64
 	Sandbox               string
 	WorkDir               string
 	SystemPromptFile      string
@@ -76,12 +73,11 @@ func CodexFromTask(t task.Task) CodexOptions {
 	common := executorOptionsFromTask(t)
 
 	return CodexOptions{
-		Model:        common.Model,
-		Effort:       common.Effort,
-		PromptMode:   common.PromptMode,
-		MaxBudgetUSD: common.MaxBudgetUSD,
-		Sandbox:      sandbox,
-		WorkDir:      common.WorkDir,
+		Model:      common.Model,
+		Effort:     common.Effort,
+		PromptMode: common.PromptMode,
+		Sandbox:    sandbox,
+		WorkDir:    common.WorkDir,
 	}
 }
 
@@ -382,13 +378,6 @@ func codexWarnings(opts CodexOptions) []string {
 	}
 	if opts.Sandbox == "danger-full-access" {
 		warnings = append(warnings, "Codex sandbox is danger-full-access; use only inside an isolated sandbox/worktree")
-	}
-	if opts.MaxBudgetUSD > 0 {
-		// `codex exec` has no --max-budget-usd flag and no config key that maps
-		// to a per-invocation USD ceiling. The task-level executor.max_budget_usd
-		// hint is therefore informational for Codex runs; surface that fact so
-		// operators do not assume the CLI is enforcing the cap.
-		warnings = append(warnings, "executor.max_budget_usd has no effect on codex exec; the value is recorded for audit only")
 	}
 	return warnings
 }

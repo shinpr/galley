@@ -9,8 +9,8 @@ import (
 )
 
 // writeSchemaIncompatibleCLITaskYAML writes a task YAML containing an unknown
-// nested field (`supervisor.provider`). Strict Load rejects it; lenient scans
-// surface it as a best-effort entry.
+// nested field (`supervisor.provider`). Runtime task loading ignores it and
+// decodes the known fields.
 func writeSchemaIncompatibleCLITaskYAML(t *testing.T, path string) {
 	t.Helper()
 	body := `id: "task-schema-incompatible-cli"
@@ -63,7 +63,7 @@ pr:
 
 // writeUnreadableTaskYAML writes a file that fails even lenient YAML
 // decoding because the top-level shape is incompatible with a Task struct
-// (a top-level scalar). LoadLenient errors with a decode error so the CLI
+// (a top-level scalar). Load errors with a decode error so the CLI
 // must record a non-fatal decode-error entry instead of aborting.
 func writeUnreadableTaskYAML(t *testing.T, path string) {
 	t.Helper()
@@ -72,10 +72,7 @@ func writeUnreadableTaskYAML(t *testing.T, path string) {
 	}
 }
 
-// TestTaskListSurfacesStrictDecodeIncompatibleAndUnreadableEntries covers the AC requiring
-// `galley task list` to mix valid, strict-decode-incompatible, and unreadable
-// task files in one command without failing.
-func TestTaskListSurfacesStrictDecodeIncompatibleAndUnreadableEntries(t *testing.T) {
+func TestTaskListSurfacesUnknownFieldAndUnreadableEntries(t *testing.T) {
 	root := t.TempDir()
 	// Valid task under tasks/failed.
 	validTaskPath := writeCLITaskYAML(t)
@@ -91,10 +88,10 @@ func TestTaskListSurfacesStrictDecodeIncompatibleAndUnreadableEntries(t *testing
 	if err := os.WriteFile(validDest, validData, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// Strict-decode-incompatible task with an unknown nested field.
+	// Task with an unknown nested field.
 	incompatiblePath := filepath.Join(failedDir, "schema-incompatible.yaml")
 	writeSchemaIncompatibleCLITaskYAML(t, incompatiblePath)
-	// Unreadable task that even LoadLenient can't decode as a Task.
+	// Unreadable task that cannot decode as a Task.
 	unreadablePath := filepath.Join(failedDir, "unreadable.yaml")
 	writeUnreadableTaskYAML(t, unreadablePath)
 
@@ -106,7 +103,7 @@ func TestTaskListSurfacesStrictDecodeIncompatibleAndUnreadableEntries(t *testing
 		t.Fatalf("valid task missing from listing: %q", stdout)
 	}
 	if !strings.Contains(stdout, "task-schema-incompatible-cli") {
-		t.Fatalf("strict-decode-incompatible task must render best-effort entry: %q", stdout)
+		t.Fatalf("unknown-field task must render best-effort entry: %q", stdout)
 	}
 	if !strings.Contains(stdout, "decode_error") || !strings.Contains(stdout, "unreadable.yaml") {
 		t.Fatalf("unreadable task must render a decode-error entry: %q", stdout)
@@ -138,11 +135,7 @@ func TestTaskListSurfacesStrictDecodeIncompatibleAndUnreadableEntries(t *testing
 	}
 }
 
-// TestTaskShowStrictDecodeIncompatibleTaskByIDFails covers `galley task show <ID>` against a
-// strict-decode-incompatible task: the ID resolves via the tolerant scan, but the strict Load
-// inside `task show` correctly rejects it. The command must surface a
-// readable error rather than treat the strict-decode-incompatible task as a current-schema one.
-func TestTaskShowStrictDecodeIncompatibleTaskByIDFails(t *testing.T) {
+func TestTaskShowUnknownFieldTaskByIDSucceeds(t *testing.T) {
 	root := t.TempDir()
 	failedDir := filepath.Join(root, "tasks", "failed")
 	if err := os.MkdirAll(failedDir, 0o755); err != nil {
@@ -151,12 +144,12 @@ func TestTaskShowStrictDecodeIncompatibleTaskByIDFails(t *testing.T) {
 	incompatiblePath := filepath.Join(failedDir, "schema-incompatible.yaml")
 	writeSchemaIncompatibleCLITaskYAML(t, incompatiblePath)
 
-	_, _, err := executeCommand("task", "show", "--root", root, "task-schema-incompatible-cli")
-	if err == nil {
-		t.Fatal("expected task show to surface strict decode error for strict-decode-incompatible task")
+	stdout, stderr, err := executeCommand("task", "show", "--root", root, "task-schema-incompatible-cli")
+	if err != nil {
+		t.Fatalf("task show should ignore unknown fields: %v\nstderr=%q", err, stderr)
 	}
-	if !strings.Contains(err.Error(), "provider") {
-		t.Fatalf("error should reference the unknown field: %v", err)
+	if !strings.Contains(stdout, "id: task-schema-incompatible-cli") {
+		t.Fatalf("unexpected stdout: %q", stdout)
 	}
 }
 
@@ -172,7 +165,7 @@ func TestTaskShowSkipsUnreadableEntriesDuringIDLookup(t *testing.T) {
 	}
 	// Sibling unreadable file.
 	writeUnreadableTaskYAML(t, filepath.Join(failedDir, "unreadable.yaml"))
-	// Sibling schema-incompatible file (decodes leniently with a different ID).
+	// Sibling file with an unknown field and a different ID.
 	writeSchemaIncompatibleCLITaskYAML(t, filepath.Join(failedDir, "schema-incompatible.yaml"))
 	// Valid task under the same directory.
 	validTaskPath := writeCLITaskYAML(t)
@@ -193,11 +186,7 @@ func TestTaskShowSkipsUnreadableEntriesDuringIDLookup(t *testing.T) {
 	}
 }
 
-// TestTaskArchiveStrictDecodeIncompatibleFallbackEmitsWarning covers AC: `galley task archive`
-// text output must surface ArchiveResult.Warning so operators see why the
-// strict-decode-incompatible file was archived through the safe fallback path instead of the
-// strict current-schema path.
-func TestTaskArchiveStrictDecodeIncompatibleFallbackEmitsWarning(t *testing.T) {
+func TestTaskArchiveUnknownFieldUsesCurrentSchemaMode(t *testing.T) {
 	root := t.TempDir()
 	doneDir := filepath.Join(root, "tasks", "done")
 	if err := os.MkdirAll(doneDir, 0o755); err != nil {
@@ -208,13 +197,13 @@ func TestTaskArchiveStrictDecodeIncompatibleFallbackEmitsWarning(t *testing.T) {
 
 	stdout, stderr, err := executeCommand("task", "archive", "--reason", "lenient cleanup", incompatiblePath)
 	if err != nil {
-		t.Fatalf("archive must succeed for strict-decode-incompatible task: %v", err)
+		t.Fatalf("archive must succeed for unknown-field task: %v", err)
 	}
-	if !strings.Contains(stdout, "mode: lenient_status_edit") {
-		t.Fatalf("text output must surface lenient archive mode: stdout=%q", stdout)
+	if strings.Contains(stdout, "mode: lenient_status_edit") {
+		t.Fatalf("unknown-field archive should use current schema mode: stdout=%q", stdout)
 	}
-	if !strings.Contains(stderr, "warning:") || !strings.Contains(stderr, "strict load failed") {
-		t.Fatalf("text output must surface ArchiveResult.Warning on stderr: stderr=%q", stderr)
+	if stderr != "" {
+		t.Fatalf("unknown-field archive should not warn: stderr=%q", stderr)
 	}
 	archived := filepath.Join(root, "tasks", "archived", "schema-incompatible.yaml")
 	if _, err := os.Stat(archived); err != nil {
@@ -222,10 +211,7 @@ func TestTaskArchiveStrictDecodeIncompatibleFallbackEmitsWarning(t *testing.T) {
 	}
 }
 
-// TestTaskArchiveJSONExposesModeAndWarning ensures the structured channel
-// agrees with the text branch: JSON consumers also see Mode and Warning so
-// automation (CI, the daemon supervisor) can react without parsing text.
-func TestTaskArchiveJSONExposesModeAndWarning(t *testing.T) {
+func TestTaskArchiveJSONUsesCurrentSchemaForUnknownField(t *testing.T) {
 	root := t.TempDir()
 	doneDir := filepath.Join(root, "tasks", "done")
 	if err := os.MkdirAll(doneDir, 0o755); err != nil {
@@ -236,7 +222,7 @@ func TestTaskArchiveJSONExposesModeAndWarning(t *testing.T) {
 
 	stdout, _, err := executeCommand("task", "archive", "--output", "json", incompatiblePath)
 	if err != nil {
-		t.Fatalf("archive json must succeed for strict-decode-incompatible task: %v", err)
+		t.Fatalf("archive json must succeed for unknown-field task: %v", err)
 	}
 	var payload struct {
 		Mode    string `json:"mode"`
@@ -245,11 +231,11 @@ func TestTaskArchiveJSONExposesModeAndWarning(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
 		t.Fatalf("parse json: %v\n%s", err, stdout)
 	}
-	if payload.Mode != "lenient_status_edit" {
-		t.Fatalf("mode got %q want lenient_status_edit", payload.Mode)
+	if payload.Mode != "current_schema" {
+		t.Fatalf("mode got %q want current_schema", payload.Mode)
 	}
-	if !strings.Contains(payload.Warning, "strict load failed") {
-		t.Fatalf("warning missing: %q", payload.Warning)
+	if payload.Warning != "" {
+		t.Fatalf("warning got %q", payload.Warning)
 	}
 }
 

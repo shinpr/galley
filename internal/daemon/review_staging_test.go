@@ -23,7 +23,7 @@ func TestRunOnceStagesNewUntrackedFileBeforeSupervisorReview(t *testing.T) {
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
 	// Fake executor writes an untracked file but does NOT call `git add`.
-	claudeBin := writeFakeClaude(t, "echo executor-output > new-untracked-file.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"new-untracked-file.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	claudeBin := writeFakeClaude(t, "echo executor-output > new-untracked-file.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"new-untracked-file.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -73,7 +73,7 @@ func TestRunOnceAcceptedFinalizationCommitsStagedNewFile(t *testing.T) {
 	// Fake executor writes the file but does NOT call `git add`; the fake
 	// claude supervisor accepts any diff_dirty=true attempt that does not
 	// report parse/hard_stop/empty diff.
-	claudeBin := writeFakeClaude(t, "echo daemon-output-content > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	claudeBin := writeFakeClaude(t, "echo daemon-output-content > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
 	ghBin := writeFakeCommand(t, "gh", "echo https://github.com/example/galley/pull/555\n")
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
@@ -129,7 +129,7 @@ func TestRunOnceAcceptedFinalizationCommitsStagedOnlyDeletion(t *testing.T) {
 	// Executor stages a deletion of the tracked README.md and nothing else.
 	// `git rm` removes it from both the worktree and the index, producing a
 	// "D " staged-only deletion in git status.
-	claudeBin := writeFakeClaude(t, "git rm README.md\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"README.md\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	claudeBin := writeFakeClaude(t, "git rm README.md\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"README.md\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
 	ghBin := writeFakeCommand(t, "gh", "echo https://github.com/example/galley/pull/999\n")
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
@@ -195,7 +195,7 @@ func TestRunOnceAcceptedFinalizationExcludesNonCommittedInputFile(t *testing.T) 
 	if err := os.WriteFile(inputPath, []byte("design note from plan\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
 	ghBin := writeFakeCommand(t, "gh", "echo https://github.com/example/galley/pull/777\n")
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
@@ -264,7 +264,7 @@ func TestRunOnceAcceptedFinalizationDetectsForbiddenPathAfterStaging(t *testing.
 	runDaemonGit(t, repo, "remote", "add", "origin", remote)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
 	// Executor writes a file under a forbidden directory (no `git add`).
-	claudeBin := writeFakeClaude(t, "mkdir -p secret\necho secret > secret/leak.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"secret/leak.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	claudeBin := writeFakeClaude(t, "mkdir -p secret\necho secret > secret/leak.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"secret/leak.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
 	ghBin := writeFakeCommand(t, "gh", "echo https://github.com/example/galley/pull/888\n")
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
@@ -332,7 +332,7 @@ func TestRunOnceReviewStagingFailureRecordsAttemptErrorBeforeSupervisor(t *testi
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -415,7 +415,7 @@ func TestRunOnceReviewStagingExcludesNonCommittedInputFromAttemptDiff(t *testing
 	// Fake executor writes a separate untracked output and does NOT call
 	// `git add`. The commit:false input file is placed by Galley earlier in
 	// preparation; the executor never touches it.
-	claudeBin := writeFakeClaude(t, "echo executor-output > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	claudeBin := writeFakeClaude(t, "echo executor-output > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -493,7 +493,7 @@ func TestRunOnceReviewStagingDoesNotPresentContextInputAsSubmittedDiff(t *testin
 		t.Fatal(err)
 	}
 	// Fake executor does not modify any file; it only emits a result JSON.
-	claudeBin := writeFakeClaude(t, "echo '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"no diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	claudeBin := writeFakeClaude(t, "echo '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"no diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
 		t.Fatal(err)

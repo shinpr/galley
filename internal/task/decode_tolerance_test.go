@@ -56,9 +56,8 @@ func findScalarValue(node any, key, want string) bool {
 }
 
 // writeSchemaIncompatibleTaskYAML writes a task YAML file that contains a field
-// (`supervisor.provider`) the current Task schema does not declare. It
-// preserves the rest of the current-schema fields so the only reason strict
-// Load fails is the unknown nested field.
+// (`supervisor.provider`) the current Task schema does not declare. Runtime
+// loading ignores that field and decodes the known task fields.
 func writeSchemaIncompatibleTaskYAML(t *testing.T, dir, baseName string) string {
 	t.Helper()
 	path := filepath.Join(dir, baseName)
@@ -111,33 +110,19 @@ pr:
 	return path
 }
 
-// TestLoadRejectsStrictDecodeIncompatibleUnknownNestedField guards AC4 strictness: active task
-// intake must still reject strict-decode-incompatible unknown nested fields.
-func TestLoadRejectsStrictDecodeIncompatibleUnknownNestedField(t *testing.T) {
+func TestLoadDecodesUnknownNestedField(t *testing.T) {
 	t.Parallel()
 	path := writeSchemaIncompatibleTaskYAML(t, t.TempDir(), "task.yaml")
-	if _, err := Load(path); err == nil {
-		t.Fatal("expected strict Load to reject strict-decode-incompatible unknown nested field")
-	}
-}
-
-// TestLoadLenientDecodesStrictDecodeIncompatibleUnknownNestedField covers the tolerant read
-// API used by scans (list/show/helper sweeps).
-func TestLoadLenientDecodesStrictDecodeIncompatibleUnknownNestedField(t *testing.T) {
-	t.Parallel()
-	path := writeSchemaIncompatibleTaskYAML(t, t.TempDir(), "task.yaml")
-	loaded, err := LoadLenient(path)
+	loaded, err := Load(path)
 	if err != nil {
-		t.Fatalf("lenient load failed: %v", err)
+		t.Fatal(err)
 	}
 	if loaded.ID != "task-schema-incompatible-1" || loaded.Status != "failed" {
-		t.Fatalf("lenient load fields: %#v", loaded)
+		t.Fatalf("loaded fields: %#v", loaded)
 	}
 }
 
-// TestArchiveStrictDecodeIncompatibleUnknownFieldUsesStatusEdit covers AC6 path 2: editable
-// top-level status, unknown fields retained across YAML reserialization.
-func TestArchiveStrictDecodeIncompatibleUnknownFieldUsesStatusEdit(t *testing.T) {
+func TestArchiveUnknownFieldUsesCurrentSchemaPath(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	doneDir := filepath.Join(root, "tasks", "done")
@@ -149,7 +134,7 @@ func TestArchiveStrictDecodeIncompatibleUnknownFieldUsesStatusEdit(t *testing.T)
 	if err != nil {
 		t.Fatalf("archive failed: %v", err)
 	}
-	if result.Mode != "lenient_status_edit" {
+	if result.Mode != "current_schema" {
 		t.Fatalf("mode got %q", result.Mode)
 	}
 	archivedPath := filepath.Join(root, "tasks", "archived", "task.yaml")
@@ -161,23 +146,18 @@ func TestArchiveStrictDecodeIncompatibleUnknownFieldUsesStatusEdit(t *testing.T)
 		t.Fatal(err)
 	}
 	body := string(data)
-	// Verify the unknown field "provider" was retained by checking
-	// the value appears under a "provider:" key. Exact YAML lexical
-	// formatting (quoting style, indentation) is not asserted: yaml.Node
-	// round-tripping may normalize scalar style and indentation, but the
-	// observable contract is that no unknown field is lost.
 	if !lenientArchiveStatusIs(body, "archived") {
 		t.Fatalf("archived YAML missing status=archived: %q", body)
 	}
-	if !lenientArchiveKeyHasValue(body, "provider", "unknown-supervisor") {
-		t.Fatalf("unknown field provider must be preserved: %q", body)
+	if lenientArchiveKeyHasValue(body, "provider", "unknown-supervisor") {
+		t.Fatalf("unknown field provider should be ignored by struct round-trip: %q", body)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("source path should be moved, err=%v", err)
 	}
 }
 
-func TestArchiveStrictDecodeIncompatibleSkipsOpenPRCheck(t *testing.T) {
+func TestArchiveUnknownFieldStillEnforcesOpenPRCheck(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	doneDir := filepath.Join(root, "tasks", "done")
@@ -196,15 +176,12 @@ func TestArchiveStrictDecodeIncompatibleSkipsOpenPRCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := Archive(path, ArchiveOptions{Reason: "schema-incompatible cleanup"})
-	if err != nil {
-		t.Fatalf("strict-decode-incompatible archive should skip non-authoritative PR open check: %v", err)
+	_, err = Archive(path, ArchiveOptions{Reason: "schema-incompatible cleanup"})
+	if err == nil {
+		t.Fatal("expected open PR archive rejection")
 	}
-	if result.Mode != "lenient_status_edit" {
-		t.Fatalf("mode got %q", result.Mode)
-	}
-	if _, err := os.Stat(filepath.Join(root, "tasks", "archived", "task.yaml")); err != nil {
-		t.Fatalf("archived task missing: %v", err)
+	if !strings.Contains(err.Error(), "open PR") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -218,9 +195,8 @@ func TestArchiveUnreadableMovesUnchangedWhenStatusEditUnsafe(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(doneDir, "broken.yaml")
-	// A top-level sequence rather than a mapping: strict Load fails, and
-	// editTopLevelStatus refuses to edit it. Archive must move the file
-	// unchanged.
+	// A top-level sequence rather than a mapping cannot decode as a Task, and
+	// editTopLevelStatus refuses to edit it. Archive must move the file unchanged.
 	if err := os.WriteFile(path, []byte("- not-a-task\n- another\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -266,9 +242,7 @@ func TestArchiveStrictDecodeIncompatibleRefusesDestinationConflict(t *testing.T)
 	}
 }
 
-// TestRequeueRejectsStrictDecodeIncompatibleTask covers AC5: requeue of a
-// strict-decode-incompatible task fails clearly and leaves the file untouched.
-func TestRequeueRejectsStrictDecodeIncompatibleTask(t *testing.T) {
+func TestRequeueUnknownFieldIgnoresField(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	failedDir := filepath.Join(root, "tasks", "failed")
@@ -276,21 +250,18 @@ func TestRequeueRejectsStrictDecodeIncompatibleTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := writeSchemaIncompatibleTaskYAML(t, failedDir, "task.yaml")
-	original, err := os.ReadFile(path)
+	result, err := Requeue(path, RequeueOptions{Root: root})
+	if err != nil {
+		t.Fatalf("requeue failed: %v", err)
+	}
+	data, err := os.ReadFile(result.To)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Requeue(path, RequeueOptions{Root: root}); err == nil {
-		t.Fatal("expected requeue to reject strict-decode-incompatible task")
+	if strings.Contains(string(data), "provider:") {
+		t.Fatalf("unknown field should be ignored in requeued struct output: %s", data)
 	}
-	after, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("strict-decode-incompatible task must not be removed: %v", err)
-	}
-	if string(after) != string(original) {
-		t.Fatalf("strict-decode-incompatible task must not be modified by requeue")
-	}
-	if _, err := os.Stat(filepath.Join(root, "tasks", "queued", "task.yaml")); !os.IsNotExist(err) {
-		t.Fatalf("requeue must not publish a queued copy of a strict-decode-incompatible task, err=%v", err)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("source path should be moved, err=%v", err)
 	}
 }

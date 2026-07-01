@@ -69,7 +69,7 @@ func TestCodexCommandPlanRecordsOutputSchemaAndLastMessage(t *testing.T) {
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
 
-	executorResult := `{"status":"completed","summary":"codex done","files_modified":["daemon-output.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"decisions":[],"risks":[]}`
+	executorResult := `{"status":"completed","summary":"codex done","files_modified":["daemon-output.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}`
 	claudeBin := writeFakeClaude(t, "exit 1\n")
 	codexBin := writeFakeCodexCapturingExecutor(t, executorResult, "", "echo change > daemon-output.txt\n")
 
@@ -131,7 +131,7 @@ func TestCodexCommandPlanMaterializesEmbeddedSchemaWhenNoFileProvided(t *testing
 	repo := initDaemonGitRepo(t)
 	promptPath, _ := writeDaemonPromptFiles(t)
 
-	executorResult := `{"status":"completed","summary":"codex done","files_modified":["daemon-output.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"decisions":[],"risks":[]}`
+	executorResult := `{"status":"completed","summary":"codex done","files_modified":["daemon-output.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}`
 	claudeBin := writeFakeClaude(t, "exit 1\n")
 	codexBin := writeFakeCodexCapturingExecutor(t, executorResult, "", "echo change > daemon-output.txt\n")
 
@@ -187,7 +187,7 @@ func TestCodexExecutorLastMessageJSONReachesClaudeResult(t *testing.T) {
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
 
-	executorResult := `{"status":"completed","summary":"codex last-message summary","files_modified":["daemon-output.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"decisions":[],"risks":[]}`
+	executorResult := `{"status":"completed","summary":"codex last-message summary","files_modified":["daemon-output.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}`
 	// The fake executor writes the result to --output-last-message and emits a
 	// non-result line on stdout so the test only passes when the daemon parses
 	// the last-message file rather than relying on stdout JSONL.
@@ -257,7 +257,7 @@ func TestCodexExecutorHardStopFromLastMessageIsPreserved(t *testing.T) {
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
 
-	hardStopResult := `{"status":"hard_stop","summary":"codex hard stop","files_modified":[],"acceptance_criteria":[],"verification":[],"decisions":[],"risks":[],"hard_stop":{"reason":"required secret missing","attempted":["checked env"],"needed_to_continue":["set FOO_TOKEN"]}}`
+	hardStopResult := `{"status":"hard_stop","summary":"codex hard stop","files_modified":[],"acceptance_criteria":[],"verification":[],"scope_expansions":[],"decisions":[],"risks":[],"hard_stop":{"reason":"required secret missing","attempted":["checked env"],"needed_to_continue":["set FOO_TOKEN"]}}`
 	claudeBin := writeFakeClaude(t, "exit 1\n")
 	codexBin := writeFakeCommand(t, "codex", `lastmsg=""
 while [ "$#" -gt 0 ]; do

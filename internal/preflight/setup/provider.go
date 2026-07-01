@@ -70,7 +70,6 @@ func buildClaudeSetupExecutorCommandPlan(opts Options, payload []byte) (runner.C
 		JSONSchema:     schemas.SetupResult,
 		PromptMode:     "replace",
 		PermissionMode: "bypassPermissions",
-		MaxBudgetUSD:   opts.Task.Executor.MaxBudgetUSDValue(),
 		PluginDirs:     []string{guardDir},
 		AttemptDir:     opts.RunDir,
 	})

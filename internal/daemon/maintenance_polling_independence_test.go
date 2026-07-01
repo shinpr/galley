@@ -66,7 +66,7 @@ func TestNormalDaemonPollsPRCommentsWhileExecutorAttemptIsRunning(t *testing.T) 
 	executorStarted := filepath.Join(t.TempDir(), "executor-started")
 	claudeBin := writeFakeClaude(t, "touch "+executorStarted+"\nsleep 5\n"+
 		"echo change > daemon-output.txt\n"+
-		"echo '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+		"echo '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
 	writeDaemonTask(t, filepath.Join(root, "tasks", "queued", "blocking.yaml"), repo)
 
 	// Arrange: an actionable open-PR task in tasks/done whose PR comments must be

@@ -188,21 +188,10 @@ Use this shape:
 ```json
 {
   "outputs": [
-    {
-      "ac_id": "AC1",
-      "path": "<repo-conventional integration test path>",
-      "kind": "integration",
-      "purpose": "Verify the user-visible behavior required by AC1.",
-      "satisfies": "AC1 observable outcome covered by this skeleton.",
-      "integration_point": "Executor completes the placeholders in this test while implementing the feature.",
-      "implementation_required": true
-    }
+    {"ac_id": "AC1", "path": "<repo-conventional integration test path>", "kind": "integration", "purpose": "Verify the user-visible behavior required by AC1.", "satisfies": "AC1 observable outcome covered by this skeleton.", "integration_point": "Executor completes the placeholders in this test while implementing the feature.", "implementation_required": true}
   ],
   "no_skeletons": [
-    {
-      "ac_id": "AC2",
-      "reason": "Existing test <relevant existing test path> already covers the observable behavior; an additional skeleton would duplicate coverage."
-    }
+    {"ac_id": "AC2", "reason": "Existing test <relevant existing test path> already covers the observable behavior; an additional skeleton would duplicate coverage."}
   ]
 }
 ```

@@ -92,20 +92,10 @@ Your final assistant response is the setup executor result. Return exactly one J
   "status": "ready",
   "source": "environment_commands",
   "commands": [
-    {
-      "run": "<repository setup command>",
-      "why": "Install the repository's declared dependencies.",
-      "source": "environment_commands",
-      "exit_code": 0,
-      "stdout_excerpt": "<captured stdout excerpt>",
-      "stderr_excerpt": "<captured stderr excerpt or empty string>"
-    }
+    {"run": "<repository setup command>", "why": "Install the repository's declared dependencies.", "source": "environment_commands", "exit_code": 0, "stdout_excerpt": "<captured stdout excerpt>", "stderr_excerpt": "<captured stderr excerpt or empty string>"}
   ],
   "successful_commands": [
-    {
-      "run": "<repository setup command>",
-      "why": "Install the repository's declared dependencies."
-    }
+    {"run": "<repository setup command>", "why": "Install the repository's declared dependencies."}
   ],
   "inspected_files": ["<setup manifest>", "<lockfile>"],
   "readiness_evidence": "`<repository setup command>` exited 0 and the selected quality required check passed."
@@ -121,14 +111,7 @@ Use this shape when setup cannot make the worktree ready:
   "status": "failed",
   "source": "discovered",
   "commands": [
-    {
-      "run": "<repository setup command>",
-      "why": "Install the repository's declared dependencies.",
-      "source": "environment_commands",
-      "exit_code": 1,
-      "stdout_excerpt": "",
-      "stderr_excerpt": "<captured stderr excerpt>"
-    }
+    {"run": "<repository setup command>", "why": "Install the repository's declared dependencies.", "source": "environment_commands", "exit_code": 1, "stdout_excerpt": "", "stderr_excerpt": "<captured stderr excerpt>"}
   ],
   "inspected_files": ["<setup manifest>", "<lockfile>"],
   "error": "<terse setup failure>",

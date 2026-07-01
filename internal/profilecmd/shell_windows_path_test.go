@@ -1,4 +1,4 @@
-package result
+package profilecmd
 
 import (
 	"os"
@@ -652,64 +652,6 @@ func TestShellArgvForOSWindowsExplicitBashErrorsWhenOnlyNonStandardBashOnPath(t 
 			}
 			if len(argv) > 0 && argv[0] == tc.pathBash {
 				t.Fatalf("resolver must NOT return the rejected PATH entry %q as argv[0]; got argv %#v", tc.pathBash, argv)
-			}
-		})
-	}
-}
-
-// AC6: Required-check run evidence and failure reasons must record both
-// the resolved shell kind and the executable path. This covers explicit
-// shell_path, auto-resolved Git Bash on Windows, and cmd.exe fallback.
-func TestVerificationEvidenceRecordsResolvedShellKindAndExecutablePath(t *testing.T) {
-	cases := []struct {
-		name      string
-		run       verificationRun
-		wantShell string
-		wantBin   string
-		failure   bool
-	}{
-		{
-			name:      "ExplicitCustomBashPasses",
-			run:       verificationRun{command: "go test ./...", shell: "bash", shellBin: `C:\custom\bash.exe`},
-			wantShell: "shell=bash",
-			wantBin:   `bin=C:\custom\bash.exe`,
-		},
-		{
-			name:      "ExplicitCustomPowerShellPasses",
-			run:       verificationRun{command: "Get-Item .", shell: "powershell", shellBin: `C:\tools\powershell.exe`},
-			wantShell: "shell=powershell",
-			wantBin:   `bin=C:\tools\powershell.exe`,
-		},
-		{
-			name:      "AutoResolvedGitBashFails",
-			run:       verificationRun{command: "grep -F ok proof.txt", shell: "bash", shellBin: `C:\Program Files\Git\bin\bash.exe`, err: os.ErrPermission},
-			wantShell: "shell=bash",
-			wantBin:   `bin=C:\Program Files\Git\bin\bash.exe`,
-			failure:   true,
-		},
-		{
-			name:      "CmdFallbackFails",
-			run:       verificationRun{command: "grep -F ok proof.txt", shell: "cmd", shellBin: "cmd.exe", err: os.ErrPermission},
-			wantShell: "shell=cmd",
-			wantBin:   "bin=cmd.exe",
-			failure:   true,
-		},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			reason := tc.run.reason()
-			if !strings.Contains(reason, tc.wantShell) {
-				t.Fatalf("reason missing %q: %q", tc.wantShell, reason)
-			}
-			if !strings.Contains(reason, tc.wantBin) {
-				t.Fatalf("reason missing %q: %q", tc.wantBin, reason)
-			}
-			if tc.failure && !strings.Contains(reason, "failed") {
-				t.Fatalf("failure reason should mark the run as failed, got %q", reason)
-			}
-			if !tc.failure && !strings.Contains(reason, "passed") {
-				t.Fatalf("passing reason should mark the run as passed, got %q", reason)
 			}
 		})
 	}

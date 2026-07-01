@@ -127,7 +127,6 @@ func executorSchema() map[string]any {
 			"effort":         stringSchema("minLength", 1),
 			"prompt_profile": stringSchema("minLength", 1),
 			"prompt_mode":    enumSchema(validPromptModes),
-			"max_budget_usd": map[string]any{"type": "number", "minimum": 0},
 		}),
 		func(m map[string]any) {
 			m["allOf"] = []any{

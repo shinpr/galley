@@ -35,10 +35,6 @@ func cleanupWorktrees(ctx context.Context, opts Options) error {
 func cleanupTaskWorktree(ctx context.Context, opts Options, path string) error {
 	loaded, err := task.Load(path)
 	if err != nil {
-		// Worktree cleanup updates task.Status/PR.Status via task.Save.
-		// Re-marshalling a strict-decode-incompatible task would strip fields
-		// the current schema does not know about, so skip it and keep the
-		// cleanup loop moving.
 		fmt.Fprintf(os.Stderr, "galley: skipping worktree cleanup for unreadable task %s: %v\n", path, err)
 		return nil
 	}

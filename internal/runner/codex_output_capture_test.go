@@ -186,7 +186,7 @@ func TestExtractCodexLastMessageFileParsesCompletedResult(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "codex.last-message.txt")
-	body := `{"status":"completed","summary":"codex done","files_modified":["a"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["e"],"notes":"n"}],"verification":[],"decisions":[],"risks":[]}`
+	body := `{"status":"completed","summary":"codex done","files_modified":["a"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["e"],"notes":"n"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}`
 	if err := os.WriteFile(path, []byte(body+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +204,7 @@ func TestExtractCodexLastMessageFileParsesHardStopResult(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "codex.last-message.txt")
-	body := `{"status":"hard_stop","summary":"blocked","files_modified":[],"acceptance_criteria":[],"verification":[],"decisions":[],"risks":[],"hard_stop":{"reason":"missing dep","attempted":["installed dep"],"needed_to_continue":["network access"]}}`
+	body := `{"status":"hard_stop","summary":"blocked","files_modified":[],"acceptance_criteria":[],"verification":[],"scope_expansions":[],"decisions":[],"risks":[],"hard_stop":{"reason":"missing dep","attempted":["installed dep"],"needed_to_continue":["network access"]}}`
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}

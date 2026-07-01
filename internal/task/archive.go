@@ -22,11 +22,12 @@ type ArchiveResult struct {
 	From string `json:"from"`
 	To   string `json:"to"`
 	// Mode records which archive path actually ran. Operators consume it to
-	// understand why an archived strict-decode-incompatible task may be missing the audit
+	// understand why an archived unreadable task may be missing the audit
 	// append-attempt or a freshly normalized status line.
-	//   - "current_schema": strict load + append-attempt path (default).
-	//   - "lenient_status_edit": lenient YAML round-trip that only updates the
-	//     top-level status field while preserving unknown fields.
+	//   - "current_schema": normal load + append-attempt path (default).
+	//   - "lenient_status_edit": YAML-node round-trip used when Task decoding
+	//     fails but the document is still a mapping whose top-level status can
+	//     be updated without struct re-marshalling.
 	//   - "move_unreadable_unchanged": fallback that copies the YAML bytes
 	//     unchanged when even safe status editing is unsafe.
 	Mode            string                 `json:"mode,omitempty"`
@@ -46,29 +47,25 @@ type WorktreeCleanupResult struct {
 // overwriting an existing destination. Archive prioritizes removing the file
 // from normal operational scans whenever the move is safe:
 //
-//  1. When the task YAML loads under the current strict schema, archive keeps
-//     the historical behavior: it sets status to "archived", appends an
-//     audit attempt, and writes the updated YAML at the archived path.
-//  2. When strict loading fails because of unknown fields but the file still
-//     parses as a YAML mapping, archive falls back to a yaml.Node round-trip
-//     that only updates the top-level `status` field. Unknown fields are
-//     retained instead of being dropped; no attempt is appended because the
-//     append would require re-marshalling the full Task struct and could
-//     silently drop fields the current schema does not know about.
+//  1. When the task YAML loads, archive keeps the historical behavior: it sets
+//     status to "archived", appends an audit attempt, and writes the updated
+//     YAML at the archived path.
+//  2. When loading fails but the file still parses as a YAML mapping, archive
+//     falls back to a yaml.Node round-trip that only updates the top-level
+//     `status` field. No attempt is appended because the file cannot be safely
+//     represented as a Task.
 //  3. When even safe status editing is unsafe (the YAML cannot be parsed as a
 //     mapping or the top-level status value is not a scalar), archive moves
 //     the file unchanged to the archived path and surfaces a warning.
 //
 // Archive fails only when the destination move itself cannot proceed safely,
-// such as a duplicate destination or filesystem error. Strict-decode-
-// incompatible task YAML is never migrated, normalized, or rewritten through
-// the current Task struct.
+// such as a duplicate destination or filesystem error.
 func Archive(path string, opts ArchiveOptions) (ArchiveResult, error) {
-	loaded, strictErr := Load(path)
-	if strictErr == nil {
+	loaded, loadErr := Load(path)
+	if loadErr == nil {
 		return archiveCurrentSchema(path, loaded, opts)
 	}
-	return archiveStrictDecodeIncompatible(path, opts, strictErr)
+	return archiveUnreadable(path, opts, loadErr)
 }
 
 func archiveCurrentSchema(path string, loaded Task, opts ArchiveOptions) (ArchiveResult, error) {
@@ -100,7 +97,7 @@ func archiveCurrentSchema(path string, loaded Task, opts ArchiveOptions) (Archiv
 	return ArchiveResult{Task: loaded, From: path, To: nextPath, Mode: "current_schema"}, nil
 }
 
-func archiveStrictDecodeIncompatible(path string, opts ArchiveOptions, strictErr error) (ArchiveResult, error) {
+func archiveUnreadable(path string, opts ArchiveOptions, loadErr error) (ArchiveResult, error) {
 	_ = opts // reason is not appended; no struct round-trip is safe.
 	data, readErr := os.ReadFile(path)
 	if readErr != nil {
@@ -109,8 +106,7 @@ func archiveStrictDecodeIncompatible(path string, opts ArchiveOptions, strictErr
 	nextPath := siblingTaskPath(path, "archived")
 
 	// Try the safe top-level status edit via a yaml.Node round-trip. This
-	// preserves every other top-level key (including unknown ones) exactly as
-	// authored.
+	// preserves the rest of the YAML document exactly as authored.
 	if updated, ok, editErr := editTopLevelStatus(data, "archived"); ok && editErr == nil {
 		if nextPath == path {
 			// In-place lenient edit: overwrite the existing file. Lossy struct
@@ -131,7 +127,7 @@ func archiveStrictDecodeIncompatible(path string, opts ArchiveOptions, strictErr
 			From:    path,
 			To:      nextPath,
 			Mode:    "lenient_status_edit",
-			Warning: fmt.Sprintf("strict load failed (%v); archived with safe top-level status edit only", strictErr),
+			Warning: fmt.Sprintf("task load failed (%v); archived with safe top-level status edit only", loadErr),
 		}, nil
 	} else if editErr != nil {
 		// editTopLevelStatus reported an editing-unsafe condition (not a YAML
@@ -144,9 +140,9 @@ func archiveStrictDecodeIncompatible(path string, opts ArchiveOptions, strictErr
 	// touching its bytes. Destination conflicts and filesystem errors still
 	// surface so operators can resolve them.
 	if nextPath == path {
-		// Cannot improve on the current location; report the strict error so
+		// Cannot improve on the current location; report the load error so
 		// the operator knows the file remained where it was.
-		return ArchiveResult{}, fmt.Errorf("archive %s: cannot move strict-decode-incompatible file to a separate archived directory and status editing is unsafe: %w", path, strictErr)
+		return ArchiveResult{}, fmt.Errorf("archive %s: cannot move unreadable file to a separate archived directory and status editing is unsafe: %w", path, loadErr)
 	}
 	if err := moveYAMLNoOverwrite(path, nextPath, data); err != nil {
 		return ArchiveResult{}, err
@@ -157,7 +153,7 @@ func archiveStrictDecodeIncompatible(path string, opts ArchiveOptions, strictErr
 		From:    path,
 		To:      nextPath,
 		Mode:    "move_unreadable_unchanged",
-		Warning: fmt.Sprintf("strict load failed (%v); archived unchanged because safe status editing was not possible", strictErr),
+		Warning: fmt.Sprintf("task load failed (%v); archived unchanged because safe status editing was not possible", loadErr),
 	}, nil
 }
 

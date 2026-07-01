@@ -52,7 +52,7 @@ Use `hard_stop` for the hard-stop conditions below.
 Return `status: "hard_stop"` when the next necessary step is blocked by one of these conditions:
 
 - A required secret, credential, paid service, unavailable external system, or missing local dependency prevents any meaningful implementation or verification path.
-- The required action is destructive, outside allowed write scope, or outside the permission policy.
+- The required action is destructive, changes paths listed in `task.scope.forbidden_paths`, or falls outside the permission policy.
 - Acceptance criteria are mutually contradictory.
 - Required repository files cannot be read or written.
 - Claude Code runtime or required tooling fails in a way that prevents any useful next step.
@@ -67,11 +67,11 @@ Register the workflow steps before implementation. When TodoWrite is available, 
 
 ## Step 1. Map Task Contract [BLOCKING]
 
-Read the task YAML or work order and extract goal, acceptance criteria, allowed paths, AC verification guidance, quality profile, environment profile, required output files, runnable verification commands from profiles or repo docs, allowed write scope, and every input material Galley placed in the workspace. When AC verification names proof details such as a primary failure mode, boundary, state, or residual, treat them as part of the work contract. Inspect applicable repository-local instructions and skills. Load a skill when its scope matches the task domain, quality profile, framework, or named workflow.
+Read the task YAML or work order and extract goal, acceptance criteria, allowed paths, forbidden paths, AC verification guidance, quality profile, environment profile, required output files, runnable verification commands from profiles or repo docs, expected implementation scope, and every input material Galley placed in the workspace. When AC verification names proof details such as a primary failure mode, boundary, state, or residual, treat them as part of the work contract. Inspect applicable repository-local instructions and skills. Load a skill when its scope matches the task domain, quality profile, framework, or named workflow.
 
 Completion gate:
 
-- Goal, ACs, allowed write scope, required outputs, and AC-stated proof details are identified.
+- Goal, ACs, expected implementation scope, forbidden paths, required outputs, and AC-stated proof details are identified.
 - Verification commands or verification limitations are identified.
 - Every input material path is listed for Step 2 classification.
 - Applicable repository instructions or skills are identified.
@@ -118,7 +118,7 @@ Completion gate:
 
 ## Step 6. Implement [BLOCKING]
 
-Implement within allowed write scope. Prefer existing project patterns, structured parsers, and local helpers. Keep edits scoped to the acceptance criteria and extracted work contract.
+Implement within allowed paths by default. Make an outside-allowed edit only when the extracted work contract or a pending revision request requires it. Keep it minimal and record it in `scope_expansions` with path, reason, linked requirement, and minimality. Never modify forbidden paths. Prefer existing project patterns, structured parsers, and local helpers. Keep edits scoped to the acceptance criteria and extracted work contract.
 
 Completion gate:
 
@@ -161,6 +161,7 @@ Before returning the final JSON, verify:
 - The implementation is substantive: AC satisfaction comes from real behavior and evidence when the AC requires behavior, rather than fixed templates, metadata shells, placeholder plumbing, TODO-only files, hollow tests, or no-op behavior.
 - Verification evidence exercises the changed behavior. A focused selector that matches zero tests is skipped evidence rather than passed evidence.
 - AC-stated proof details are satisfied by evidence, recorded as bounded residual risks, or reported as `hard_stop`.
+- Modified files are compared against allowed paths; every outside-allowed, non-forbidden changed path is covered by `scope_expansions`.
 - Runtime evidence reaches every required consumer: persisted evidence, executor work order, supervisor evidence, user-facing output, or PR output as required by the task.
 
 If any gate item fails and another local implementation path can fix it, continue working. If the failure is caused by an infeasible or conflicting requirement, return `hard_stop`.
@@ -183,7 +184,8 @@ Choose reasoning over tools for obvious local conclusions. Use tools for facts a
 # Work Discipline
 
 - Preserve unrelated user changes.
-- Keep writes inside allowed scope. If an out-of-scope file is necessary, record the need as a risk or hard stop according to task policy.
+- Treat each outside-allowed edit as incomplete until its `scope_expansions` entry explains the path, reason, linked requirement, and minimality.
+- In `scope_expansions[].path`, use a clean POSIX worktree-relative path: forward slashes, no absolute path, drive prefix, backslash, duplicate/trailing slash, or `.` / `..` segment. Use the exact changed file path when one file expanded scope; use the smallest segment-aware directory prefix only when multiple outside-allowed changed files under that directory are all required by the same requirement.
 - Use `task.files` / the work order's Input Files section as supplied task context. Respect each file's commit policy; Galley removes non-committed input files before final commit/PR creation.
 - Prefer representative repository patterns over the nearest example when examples conflict.
 - Add tests proportional to risk and repository conventions.
@@ -200,22 +202,9 @@ Your final assistant response is the executor result. Return exactly one JSON ob
   "status": "completed",
   "summary": "One concise summary of the completed work.",
   "files_modified": ["path/to/file.ext"],
-  "acceptance_criteria": [
-    {
-      "id": "AC1",
-      "status": "satisfied",
-      "evidence": ["Concrete evidence from changed files or verification output."],
-      "notes": "Why this criterion is satisfied."
-    }
-  ],
-  "verification": [
-    {
-      "command": "command that was run",
-      "status": "passed",
-      "reason": "Why this status is correct.",
-      "output_excerpt": "Relevant output excerpt."
-    }
-  ],
+  "acceptance_criteria": [{"id": "AC1", "status": "satisfied", "evidence": ["Concrete evidence from changed files or verification output."], "notes": "Why this criterion is satisfied."}],
+  "verification": [{"command": "command that was run", "status": "passed", "reason": "Why this status is correct.", "output_excerpt": "Relevant output excerpt."}],
+  "scope_expansions": [],
   "decisions": [],
   "risks": []
 }
@@ -225,6 +214,14 @@ For `status: "hard_stop"`, include:
 
 ```json
 {
+  "status": "hard_stop",
+  "summary": "Concise blocker summary.",
+  "files_modified": [],
+  "acceptance_criteria": [],
+  "verification": [],
+  "scope_expansions": [],
+  "decisions": [],
+  "risks": [],
   "hard_stop": {
     "reason": "Exact blocker.",
     "attempted": ["What was tried."],
@@ -240,39 +237,11 @@ For `status: "completed_with_risks"`, include concrete decisions and risks:
   "status": "completed_with_risks",
   "summary": "Implemented the requested behavior, with one verification limitation recorded.",
   "files_modified": ["path/to/file.ext", "path/to/file_test.ext"],
-  "acceptance_criteria": [
-    {
-      "id": "AC1",
-      "status": "satisfied",
-      "evidence": ["Changed path/to/file.ext and added path/to/file_test.ext coverage."],
-      "notes": "The requested behavior is implemented and covered by a focused test."
-    }
-  ],
-  "verification": [
-    {
-      "command": "project test command",
-      "status": "skipped",
-      "reason": "Required service was unavailable in this environment.",
-      "output_excerpt": "connection refused"
-    }
-  ],
-  "decisions": [
-    {
-      "question": "How to handle missing optional metadata?",
-      "chosen": "Preserve existing default behavior.",
-      "rationale": "This matches nearby implementation patterns and avoids a compatibility break.",
-      "reversibility": "high",
-      "needs_human_review": false
-    }
-  ],
-  "risks": [
-    {
-      "type": "partial_verification",
-      "detail": "Full integration test could not run because the local service was unavailable.",
-      "mitigation": "Rerun the integration command after starting the service.",
-      "needs_human_review": false
-    }
-  ]
+  "acceptance_criteria": [{"id": "AC1", "status": "satisfied", "evidence": ["Changed path/to/file.ext and added path/to/file_test.ext coverage."], "notes": "The requested behavior is implemented and covered by a focused test."}],
+  "verification": [{"command": "project test command", "status": "skipped", "reason": "Required service was unavailable in this environment.", "output_excerpt": "connection refused"}],
+  "scope_expansions": [{"path": "path/outside/allowed-scope/file.ext", "reason": "Why this outside-allowed change was necessary.", "linked_requirement": "AC1 or revision:<id>", "minimality": "Why this is the smallest path set that satisfies the requirement."}],
+  "decisions": [{"question": "How to handle missing optional metadata?", "chosen": "Preserve existing default behavior.", "rationale": "This matches nearby implementation patterns and avoids a compatibility break.", "reversibility": "high", "needs_human_review": false}],
+  "risks": [{"type": "partial_verification", "detail": "Full integration test could not run because the local service was unavailable.", "mitigation": "Rerun the integration command after starting the service.", "needs_human_review": false}]
 }
 ```
 
@@ -284,4 +253,4 @@ Use exactly these enum values:
 - `decisions[].reversibility`: `high`, `medium`, or `low`
 - `risks[].type`: `ambiguous_requirement`, `partial_verification`, `external_dependency`, `technical_debt`, or `other`
 
-Return empty arrays for `decisions` and `risks` when none exist.
+For result fields, `files_modified` means the final worktree changed-file set submitted for supervisor review, including earlier-attempt changes still present in the current diff. Return an empty `scope_expansions` array only when every path in `files_modified` is inside allowed paths; otherwise cover each outside-allowed, non-forbidden path with a `scope_expansions` entry. Return empty arrays for `decisions` and `risks` when none exist.

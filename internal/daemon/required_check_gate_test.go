@@ -39,11 +39,10 @@ func writeAttemptResultFile(t *testing.T, runDir string, n int, filename string,
 }
 
 // TestRequiredCheckEvidenceGateFallbackSemantics verifies that a required
-// check with multiple preferred commands is satisfied when *any* preferred
-// command has passing evidence — matching result.runRequiredCheck which stops
-// at the first passing command and records only that one. A multi-command
-// check must not be downgraded just because later fallback commands have no
-// recorded evidence.
+// check with multiple preferred commands is satisfied when any preferred
+// command has passing evidence. Preferred commands are fallback candidates, so
+// a multi-command check must not be downgraded just because later fallback
+// commands have no recorded evidence.
 func TestRequiredCheckEvidenceGateFallbackSemantics(t *testing.T) {
 	t.Parallel()
 	runDir := t.TempDir()
@@ -82,7 +81,8 @@ func TestRequiredCheckEvidenceGateFailsWhenNoPass(t *testing.T) {
 
 // TestRequiredCheckEvidenceGateFailsWhenNoEvidence verifies the gate
 // downgrades when there is no verification evidence at all for a required
-// check (e.g. the executor hard-stopped before result.Complete ran).
+// check, for example because the executor hard-stopped before recording
+// verification evidence.
 func TestRequiredCheckEvidenceGateFailsWhenNoEvidence(t *testing.T) {
 	t.Parallel()
 	runDir := t.TempDir()

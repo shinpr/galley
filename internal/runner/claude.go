@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 
 	"github.com/shinpr/galley/internal/task"
@@ -26,7 +25,6 @@ type ClaudeOptions struct {
 	Model             string
 	Effort            string
 	PromptMode        string
-	MaxBudgetUSD      float64
 	PermissionMode    string
 	WorkDir           string
 	SystemPromptFile  string
@@ -71,7 +69,6 @@ func FromTask(t task.Task) ClaudeOptions {
 		Model:          common.Model,
 		Effort:         common.Effort,
 		PromptMode:     common.PromptMode,
-		MaxBudgetUSD:   common.MaxBudgetUSD,
 		PermissionMode: permissionMode,
 		WorkDir:        common.WorkDir,
 	}
@@ -233,9 +230,6 @@ func buildClaudeCommonArgs(opts ClaudeOptions) claudeCommonArgs {
 	}
 	if opts.IncludeHookEvents {
 		common.Suffix = append(common.Suffix, "--include-hook-events")
-	}
-	if opts.MaxBudgetUSD > 0 {
-		common.Suffix = append(common.Suffix, "--max-budget-usd", strconv.FormatFloat(opts.MaxBudgetUSD, 'f', -1, 64))
 	}
 	return common
 }

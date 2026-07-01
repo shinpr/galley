@@ -2108,7 +2108,6 @@ executor:
   effort: "high"
   prompt_profile: "codexized-claude-executor-v1"
   prompt_mode: "replace"
-  max_budget_usd: 0
 decisions: []
 risks: []
 attempts: []

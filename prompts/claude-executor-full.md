@@ -118,7 +118,7 @@ Completion gate:
 
 ## Step 6. Implement [BLOCKING]
 
-Prefer implementing within allowed paths. If satisfying an acceptance criterion or pending revision request requires a change outside allowed paths, make only the minimal necessary outside-scope change and record it in `scope_expansions`. Never modify forbidden paths. Prefer existing project patterns, structured parsers, and local helpers. Keep edits scoped to the acceptance criteria and extracted work contract.
+Implement within allowed paths by default. Make an outside-allowed edit only when the extracted work contract or a pending revision request requires it. Keep it minimal and record it in `scope_expansions` with path, reason, linked requirement, and minimality. Never modify forbidden paths. Prefer existing project patterns, structured parsers, and local helpers. Keep edits scoped to the acceptance criteria and extracted work contract.
 
 Completion gate:
 
@@ -184,6 +184,7 @@ Choose reasoning over tools for obvious local conclusions. Use tools for facts a
 # Work Discipline
 
 - Preserve unrelated user changes.
+- Treat each outside-allowed edit as incomplete until its `scope_expansions` entry explains the path, reason, linked requirement, and minimality.
 - In `scope_expansions[].path`, use a clean POSIX worktree-relative path: forward slashes, no absolute path, drive prefix, backslash, duplicate/trailing slash, or `.` / `..` segment. Use the exact changed file path when one file expanded scope; use the smallest segment-aware directory prefix only when multiple outside-allowed changed files under that directory are all required by the same requirement.
 - Use `task.files` / the work order's Input Files section as supplied task context. Respect each file's commit policy; Galley removes non-committed input files before final commit/PR creation.
 - Prefer representative repository patterns over the nearest example when examples conflict.
@@ -252,4 +253,4 @@ Use exactly these enum values:
 - `decisions[].reversibility`: `high`, `medium`, or `low`
 - `risks[].type`: `ambiguous_requirement`, `partial_verification`, `external_dependency`, `technical_debt`, or `other`
 
-Return an empty `scope_expansions` array when all modified files are inside allowed paths. Return empty arrays for `decisions` and `risks` when none exist.
+For result fields, `files_modified` means the final worktree changed-file set submitted for supervisor review, including earlier-attempt changes still present in the current diff. Return an empty `scope_expansions` array only when every path in `files_modified` is inside allowed paths; otherwise cover each outside-allowed, non-forbidden path with a `scope_expansions` entry. Return empty arrays for `decisions` and `risks` when none exist.

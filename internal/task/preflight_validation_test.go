@@ -43,7 +43,6 @@ func baseValidPreflightTask(t *testing.T) Task {
 			Effort:        "high",
 			PromptProfile: "p",
 			PromptMode:    "replace",
-			MaxBudgetUSD:  float64Ptr(1),
 		},
 	}
 }

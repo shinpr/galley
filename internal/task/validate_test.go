@@ -130,13 +130,6 @@ func TestValidateStructuralRejectsInvalidCases(t *testing.T) {
 			want: "executor.prompt_mode must be one of",
 		},
 		{
-			name: "negative explicit executor budget",
-			mutate: func(task *Task) {
-				task.Executor.MaxBudgetUSD = float64Ptr(-1)
-			},
-			want: "executor.max_budget_usd cannot be negative",
-		},
-		{
 			name: "duplicate ac id",
 			mutate: func(task *Task) {
 				task.AcceptanceCriteria = append(task.AcceptanceCriteria, task.AcceptanceCriteria[0])
@@ -387,8 +380,4 @@ func validTask(t *testing.T) Task {
 			PromptMode:    "replace",
 		},
 	}
-}
-
-func float64Ptr(v float64) *float64 {
-	return &v
 }

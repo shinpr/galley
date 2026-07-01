@@ -95,7 +95,7 @@ func TestLoadAndValidateDefaultsLoopBudget(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsUnknownField(t *testing.T) {
+func TestLoadIgnoresUnknownField(t *testing.T) {
 	t.Parallel()
 	path := writeTaskYAML(t, "loop_budget: 3")
 	data, err := os.ReadFile(path)
@@ -106,12 +106,12 @@ func TestLoadRejectsUnknownField(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = Load(path)
-	if err == nil {
-		t.Fatal("expected error")
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "field unknown_field not found") {
-		t.Fatalf("unexpected error: %v", err)
+	if loaded.ID != "task-load-test" {
+		t.Fatalf("id got %q", loaded.ID)
 	}
 }
 
@@ -176,70 +176,6 @@ func TestSaveOmitsEmptyExecutorModel(t *testing.T) {
 	}
 }
 
-func TestSavePreservesOmittedExecutorMaxBudgetUSD(t *testing.T) {
-	t.Parallel()
-	path := writeTaskYAML(t, "loop_budget: 3")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	data = []byte(strings.ReplaceAll(string(data), "  max_budget_usd: 0\n", ""))
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	loaded, err := Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if loaded.Executor.MaxBudgetUSD != nil {
-		t.Fatalf("omitted executor.max_budget_usd loaded as %#v", loaded.Executor.MaxBudgetUSD)
-	}
-	loaded.Executor.CLI = "codex"
-	loaded.Executor.Model = ""
-	loaded.Executor.Effort = "high"
-	loaded.Executor.PromptProfile = "codex-executor-v1"
-
-	if err := Save(path, loaded); err != nil {
-		t.Fatal(err)
-	}
-	saved, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(saved), "max_budget_usd:") {
-		t.Fatalf("omitted executor.max_budget_usd should stay omitted, got:\n%s", string(saved))
-	}
-}
-
-func TestSaveRoundTripsExplicitPositiveExecutorMaxBudgetUSD(t *testing.T) {
-	t.Parallel()
-	path := writeTaskYAML(t, "loop_budget: 3")
-	loaded, err := Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	loaded.Executor.MaxBudgetUSD = float64Ptr(4.5)
-
-	if err := Save(path, loaded); err != nil {
-		t.Fatal(err)
-	}
-	roundTripped, err := Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if roundTripped.Executor.MaxBudgetUSD == nil || *roundTripped.Executor.MaxBudgetUSD != 4.5 {
-		t.Fatalf("explicit executor.max_budget_usd did not round trip: %#v", roundTripped.Executor.MaxBudgetUSD)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), "max_budget_usd: 4.5") {
-		t.Fatalf("explicit executor.max_budget_usd should be saved, got:\n%s", string(data))
-	}
-}
-
 func writeTaskYAML(t *testing.T, loopBudgetLine string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -278,7 +214,6 @@ executor:
   effort: "high"
   prompt_profile: "codexized-claude-executor-v1"
   prompt_mode: "replace"
-  max_budget_usd: 0
 decisions: []
 risks: []
 attempts: []

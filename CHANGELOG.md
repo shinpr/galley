@@ -6,6 +6,20 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.8.4 - 2026-07-01
+
+### Changed
+
+- Removed `executor.max_budget_usd` from the active task contract and executor runners. Galley no longer emits Claude Code `--max-budget-usd`, and new task skeletons, schemas, examples, and docs no longer expose the field.
+- Task YAML loading now decodes known fields and ignores unknown fields at runtime. Malformed YAML, incompatible top-level shape, and known-field type mismatches still fail validation, queueing, requeueing, and daemon execution.
+- Executor result resolution now requires a valid structured executor JSON result from the normal executor output surfaces instead of synthesizing fallback completion evidence.
+- Executor prompts now define `files_modified` as the final worktree changed-file set submitted for supervisor review, so `scope_expansions` coverage includes earlier-attempt changes still present in the current diff.
+- Packaged Claude and Codex Galley plugins are now versioned as `0.1.19`: bundled task schemas and skeleton generation no longer expose `executor.max_budget_usd`.
+
+### Fixed
+
+- Codex executor result parse failures now keep the `--output-last-message` parse error in the final diagnostic instead of reporting only stdout parse failures.
+
 ## v0.8.3 - 2026-06-30
 
 ### Changed

@@ -554,7 +554,7 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 
 	resultPath := runartifact.Path(attemptDir, runartifact.ExecutorResultFilename)
 	lastMessagePath := codexLastMessagePath(cli, attemptDir)
-	claudeResult, parseErr := resolveExecutorResult(attemptCtx, opts, cli, stdoutPath, run.RunResult.Stdout, lastMessagePath, taskFile, resultPath, workDir, profiles)
+	claudeResult, parseErr := resolveExecutorResult(cli, stdoutPath, run.RunResult.Stdout, lastMessagePath)
 	if parseErr == nil {
 		if err := writeJSON(resultPath, claudeResult); err != nil {
 			return attemptOutcome{}, err
@@ -860,18 +860,12 @@ func evaluateAcceptanceGate(loaded *task.Task, runDir string) (string, bool) {
 // never reaches it. It also returns ("", true) when there is no run
 // directory, no resolved quality profile, or no required checks.
 //
-// Gate semantics deliberately mirror preferred_commands as used by
-// result.runRequiredCheck: preferred_commands is an ordered
-// fallback list, not an AND-list. result.Complete runs the commands in order,
-// stops at the first that passes, and records exactly that one command's
-// evidence (or the last command's failure when every command failed). The gate
-// therefore treats a required check as satisfied when *any* of its preferred
-// commands has a passing verification entry, as failed when none passed but at
-// least one has a failed entry, and as missing only when there is no evidence
-// at all for any of its preferred commands (which happens when no result was
-// produced — e.g. an executor hard stop). Requiring every preferred command to
-// have evidence would contradict the fallback semantics and would always
-// downgrade multi-command checks even when the first command passed.
+// Gate semantics deliberately mirror preferred_commands: they are an ordered
+// fallback list, not an AND-list. The gate therefore treats a required check as
+// satisfied when any preferred command has passing verification evidence, as
+// failed when none passed but at least one failed, and as missing only when no
+// preferred command has evidence. Requiring evidence for every preferred command
+// would downgrade multi-command checks even when the first command passed.
 func requiredCheckEvidenceGate(loaded *task.Task, runDir string) (string, bool) {
 	if runDir == "" {
 		return "", true

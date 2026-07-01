@@ -93,7 +93,6 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 - `executor.effort`: model effort hint. Claude accepts `low`, `medium`, `high`, `xhigh`, or `max`; Codex accepts `low`, `medium`, or `high`.
 - `executor.prompt_profile`: prompt profile name recorded for evidence.
 - `executor.prompt_mode`: `replace` or `append`.
-- `executor.max_budget_usd`: optional non-negative execution budget hint. Claude tasks can use it as a per-run ceiling; Codex has no equivalent enforced flag.
 
 ## Permissions
 
@@ -222,6 +221,6 @@ galley task requeue TASK_ID --reason "retry after transient failure"
 
 Requeue is useful for transient failures such as usage limits or temporary service errors.
 
-## Lenient Task YAML Handling
+## Task YAML Decoding
 
-Read-only commands tolerate older task files with unknown fields so operators can still inspect or archive them. Active intake stays strict: `validate`, `queue`, `requeue`, and daemon execution reject unknown fields or type mismatches before work reaches an executor.
+Galley decodes known task YAML fields and ignores unknown fields at runtime. Malformed YAML, incompatible top-level shape, and type mismatches in known fields still fail validation, queueing, requeueing, and daemon execution.

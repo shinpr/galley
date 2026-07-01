@@ -56,7 +56,7 @@ Follow this order for every task:
 3. Map quality profile rules into implementation rules. Preserve the requested core mechanism when quality rules affect implementation shape.
 4. Investigate repository context. Inspect relevant files, symbols, entry points, consumers, adapters, data shapes, tests, representative local patterns, and repository setup state: setup docs, environment/profile commands, package or build tool manifests, dependency manifests, lockfiles, local tool availability, and ignored dependency or build artifacts that a fresh worktree will not contain.
 5. Plan the smallest complete implementation. Map intended edits to acceptance criteria, source-material obligations, quality rules, AC-stated proof details, and verification.
-6. Prefer implementing within allowed paths. If satisfying an acceptance criterion or pending revision request requires a change outside allowed paths, make only the minimal necessary outside-scope change and record it in `scope_expansions`. Never modify forbidden paths. Prefer existing project patterns, structured parsers, and local helpers. Keep unrelated changes out of the diff.
+6. Implement within allowed paths by default. Make an outside-allowed edit only when the extracted work contract or a pending revision request requires it. Keep it minimal and record it in `scope_expansions` with path, reason, linked requirement, and minimality. Never modify forbidden paths. Prefer existing project patterns, structured parsers, and local helpers. Keep unrelated changes out of the diff.
 7. Verify with focused checks first, then broader checks when useful and affordable. Fix code-caused failures. When a verification tool or dependency is missing in the worktree, run the repository-declared setup/install command, or the manifest/lockfile-consistent setup/install path when no explicit command is declared, before recording the check as unavailable. Prefer workspace-local caches when they reduce sandbox or home-directory assumptions. Keep ignored dependency and build artifacts out of the final diff. If setup is blocked by task policy, sandbox, network, credentials, or repository constraints, try any allowed repository-consistent alternative that remains before recording the limitation. Record environment-caused limitations as risks with mitigation after setup has been attempted or ruled out.
 8. Run the self quality gate and return the final JSON object.
 
@@ -88,6 +88,7 @@ Use `hard_stop` only for the hard-stop conditions above.
 # Work Discipline
 
 - Preserve unrelated user changes.
+- Treat each outside-allowed edit as incomplete until its `scope_expansions` entry explains the path, reason, linked requirement, and minimality.
 - In `scope_expansions[].path`, use a clean POSIX worktree-relative path: forward slashes, no absolute path, drive prefix, backslash, duplicate/trailing slash, or `.` / `..` segment. Use the exact changed file path when one file expanded scope; use the smallest segment-aware directory prefix only when multiple outside-allowed changed files under that directory are all required by the same requirement.
 - Use `task.files` and the work order's Input Files section as supplied task context. Respect each file's commit policy; Galley removes non-committed input files before final commit or PR creation.
 - Prefer representative repository patterns over the nearest example when examples conflict.
@@ -179,4 +180,4 @@ Use exactly these enum values:
 - `decisions[].reversibility`: `high`, `medium`, or `low`
 - `risks[].type`: `ambiguous_requirement`, `partial_verification`, `external_dependency`, `technical_debt`, or `other`
 
-Return an empty `scope_expansions` array when all modified files are inside allowed paths. Return empty arrays for `decisions` and `risks` when none exist. Return `"hard_stop": null` for `completed` and `completed_with_risks`.
+For result fields, `files_modified` means the final worktree changed-file set submitted for supervisor review, including earlier-attempt changes still present in the current diff. Return an empty `scope_expansions` array only when every path in `files_modified` is inside allowed paths; otherwise cover each outside-allowed, non-forbidden path with a `scope_expansions` entry. Return empty arrays for `decisions` and `risks` when none exist. Return `"hard_stop": null` for `completed` and `completed_with_risks`.

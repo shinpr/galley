@@ -21,7 +21,6 @@ func TestClaudeArgvReplacePrompt(t *testing.T) {
 		PermissionMode:   "acceptEdits",
 		SystemPromptFile: promptPath,
 		JSONSchemaFile:   schemaPath,
-		MaxBudgetUSD:     5,
 		PluginDirs:       []string{"/tmp/galley-guard"},
 		Prompt:           "do the work",
 	}, "linux")
@@ -38,7 +37,6 @@ func TestClaudeArgvReplacePrompt(t *testing.T) {
 		"--system-prompt", "system prompt",
 		"--json-schema", `{"type":"object"}`,
 		"--plugin-dir", "/tmp/galley-guard",
-		"--max-budget-usd", "5",
 		"do the work",
 	}
 	if !reflect.DeepEqual(argv, want) {
@@ -107,40 +105,6 @@ func TestClaudeCommandPlanUsesEmbeddedPromptAndSchemaByDefault(t *testing.T) {
 			t.Fatalf("argv missing %q", want)
 		}
 	}
-}
-
-func TestClaudeFromTaskUsesExplicitExecutorBudget(t *testing.T) {
-	t.Parallel()
-	budget := 6.25
-	tk := task.Task{
-		Scope: task.Scope{
-			CWD:        "/tmp/project",
-			Permission: "edit",
-		},
-		Executor: task.Executor{
-			CLI:           "claude",
-			Effort:        "high",
-			PromptProfile: "codexized-claude-executor-v1",
-			PromptMode:    "replace",
-			MaxBudgetUSD:  &budget,
-		},
-	}
-	opts := FromTask(tk)
-	opts.SystemPrompt = "system"
-	opts.JSONSchema = `{"type":"object"}`
-	opts.Prompt = "do the work"
-
-	command, err := ClaudeCommandPlanForOS(opts, "linux")
-	if err != nil {
-		t.Fatal(err)
-	}
-	argv := command.Argv
-	for i := 0; i < len(argv)-1; i++ {
-		if argv[i] == "--max-budget-usd" && argv[i+1] == "6.25" {
-			return
-		}
-	}
-	t.Fatalf("explicit task budget did not reach Claude argv: %#v", argv)
 }
 
 func TestClaudeArgvRejectsUnknownPromptMode(t *testing.T) {
@@ -255,7 +219,6 @@ func TestClaudeCommandPlanWindowsRoutesPromptThroughStdinAndFile(t *testing.T) {
 		JSONSchema:     jsonSchema,
 		Prompt:         workOrder,
 		AttemptDir:     attemptDir,
-		MaxBudgetUSD:   5,
 	}, "windows")
 	if err != nil {
 		t.Fatal(err)

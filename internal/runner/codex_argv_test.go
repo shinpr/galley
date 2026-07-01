@@ -2,9 +2,8 @@ package runner
 
 // AC: AC2/AC3 — The Codex command plan must build an argv that the local
 // `codex exec` CLI actually accepts. The upstream CLI does not expose a
-// top-level `--effort` flag and has no `--max-budget-usd` flag at all, so the
-// runner must avoid emitting those flags. Effort is delivered through the
-// generic config override surface and max_budget_usd is recorded as a warning.
+// top-level `--effort` flag, so the runner must avoid emitting it. Effort is
+// delivered through the generic config override surface.
 
 import (
 	"strings"
@@ -14,8 +13,6 @@ import (
 func TestCodexArgvDoesNotEmitUnsupportedFlags(t *testing.T) {
 	t.Parallel()
 	base := minimalCodexTask()
-	budget := 4.0
-	base.Executor.MaxBudgetUSD = &budget
 	opts := CodexFromTask(base)
 	opts.Bin = "/usr/local/bin/codex"
 	opts.WorkDir = "/tmp/codex-argv"
@@ -26,7 +23,7 @@ func TestCodexArgvDoesNotEmitUnsupportedFlags(t *testing.T) {
 		t.Fatalf("CodexCommandPlan: %v", err)
 	}
 
-	for _, bad := range []string{"--effort", "--max-budget-usd"} {
+	for _, bad := range []string{"--effort"} {
 		for _, a := range plan.Argv {
 			if a == bad {
 				t.Fatalf("argv contains unsupported flag %q; full argv=%v", bad, plan.Argv)
@@ -74,18 +71,6 @@ func TestCodexArgvDoesNotEmitUnsupportedFlags(t *testing.T) {
 		t.Fatalf("argv must end with the `-` stdin marker; full argv=%v", plan.Argv)
 	}
 
-	// max_budget_usd has no Codex CLI equivalent, so the runner must surface
-	// a warning rather than silently dropping the value.
-	var sawBudgetWarning bool
-	for _, w := range plan.Warnings {
-		if strings.Contains(w, "max_budget_usd") {
-			sawBudgetWarning = true
-			break
-		}
-	}
-	if !sawBudgetWarning {
-		t.Fatalf("expected a max_budget_usd informational warning, got %#v", plan.Warnings)
-	}
 }
 
 func TestCodexArgvWarnsWhenPromptModeAppendIsFlattened(t *testing.T) {

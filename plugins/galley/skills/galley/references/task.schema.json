@@ -268,10 +268,6 @@
           "minLength": 1,
           "type": "string"
         },
-        "max_budget_usd": {
-          "minimum": 0,
-          "type": "number"
-        },
         "model": {
           "minLength": 1,
           "type": "string"

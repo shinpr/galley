@@ -1,15 +1,33 @@
-package result
+package profilecmd
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/shinpr/galley/internal/profile"
 )
 
 // This test file compiles on every OS and passes an explicit goos value into
 // shellArgvForOS.
+
+var (
+	lookPath = exec.LookPath
+	statFile = os.Stat
+)
+
+func shellArgvForOS(goos, command, scratchDir, configuredShell, configuredShellPath string) ([]string, func(), string, error) {
+	return ShellArgvForOSWithResolver(goos, command, scratchDir, profile.RequiredCheckEnvironment{
+		Shell:     configuredShell,
+		ShellPath: configuredShellPath,
+	}, Resolver{
+		LookPath: lookPath,
+		StatFile: statFile,
+	})
+}
 
 // TestShellArgvForOSWindowsUsesScriptFile pins AC5 for required quality-profile
 // checks: Windows verification commands use a single .cmd script execution

@@ -129,7 +129,7 @@ func TestRunOnceAcceptedFinalizationCommitsStagedOnlyDeletion(t *testing.T) {
 	// Executor stages a deletion of the tracked README.md and nothing else.
 	// `git rm` removes it from both the worktree and the index, producing a
 	// "D " staged-only deletion in git status.
-	claudeBin := writeFakeClaude(t, "git rm README.md\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"README.md\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"decisions\":[],\"risks\":[]}'\n")
+	claudeBin := writeFakeClaude(t, "git rm README.md\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"README.md\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
 	ghBin := writeFakeCommand(t, "gh", "echo https://github.com/example/galley/pull/999\n")
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {

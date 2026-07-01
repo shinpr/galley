@@ -50,10 +50,6 @@ func tasksWithPR(root string) ([]string, error) {
 func processTaskPRComments(ctx context.Context, opts Options, path string) error {
 	loaded, err := task.Load(path)
 	if err != nil {
-		// PR comment processing requires modifying the task YAML (Save,
-		// Requeue). Re-marshalling a strict-decode-incompatible task would
-		// strip fields the current schema does not know about, so skip it
-		// rather than silently mutating audit history.
 		fmt.Fprintf(os.Stderr, "galley: skipping PR comment scan for unreadable task %s: %v\n", path, err)
 		return nil
 	}

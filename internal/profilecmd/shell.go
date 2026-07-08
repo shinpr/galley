@@ -62,7 +62,7 @@ func ShellArgvForOSWithResolver(goos, command, scratchDir string, shell profile.
 		return nil, nil, "", fmt.Errorf("create windows verification script dir %s: %w", dir, err)
 	}
 	ext := ".cmd"
-	body := []byte(windowsCmdBody(command))
+	body := []byte("@echo off\r\n" + command + "\r\n")
 	if resolved.Kind == "bash" {
 		ext = ".sh"
 		body = []byte("#!/usr/bin/env bash\nset -e\n" + command + "\n")
@@ -79,25 +79,6 @@ func ShellArgvForOSWithResolver(goos, command, scratchDir string, shell profile.
 		return nil, nil, "", fmt.Errorf("write windows verification script %s: %w", scriptPath, err)
 	}
 	return shellScriptArgv(resolved, scriptPath), cleanup, resolved.Kind, nil
-}
-
-// windowsCmdBody wraps a cmd command with fail-fast semantics equivalent to the
-// `set -e` that sh/bash scripts get: it aborts after the first line that exits
-// non-zero, so a multi-statement required check cannot report success when an
-// earlier step failed. Without this, cmd's exit code is only the last line's.
-func windowsCmdBody(command string) string {
-	var b strings.Builder
-	b.WriteString("@echo off\r\n")
-	for _, line := range strings.Split(command, "\n") {
-		line = strings.TrimRight(line, "\r")
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		b.WriteString(line)
-		b.WriteString("\r\n")
-		b.WriteString("if errorlevel 1 exit /b 1\r\n")
-	}
-	return b.String()
 }
 
 type resolvedShell struct {

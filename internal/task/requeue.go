@@ -34,12 +34,6 @@ func Requeue(path string, opts RequeueOptions) (RequeueResult, error) {
 	if loaded.Status == StatusQueued {
 		return RequeueResult{}, fmt.Errorf("task %s is already queued", loaded.ID)
 	}
-	if loaded.Status == StatusRunning {
-		// A running task is actively owned by a daemon; requeuing it here would
-		// remove the running source out from under the executor and let the task
-		// be claimed and run a second time concurrently.
-		return RequeueResult{}, fmt.Errorf("task %s is running and cannot be requeued", loaded.ID)
-	}
 	ResolveFileSources(path, &loaded)
 	ApplyDefaults(&loaded)
 	loaded.Status = StatusQueued

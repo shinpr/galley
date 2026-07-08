@@ -97,7 +97,19 @@ func buildBuiltinCreatorCommandPlan(opts Options, payload []byte) (runner.Comman
 	if task.ExecutorProvider(opts.Task) == "codex" {
 		return buildCodexCreatorCommandPlan(opts, payload)
 	}
-	return buildClaudeCreatorCommandPlan(opts, payload)
+	cmd, perr := buildClaudeCreatorCommandPlan(opts, payload)
+	if perr != nil {
+		return runner.Command{}, perr
+	}
+	// glm redirects the skeleton creator to GLM's endpoint like any executor role.
+	if opts.Task.Executor.CLI == "glm" {
+		token, terr := runner.ResolveGLMToken(opts.GLMAuthToken)
+		if terr != nil {
+			return runner.Command{}, creatorErr("%v", terr)
+		}
+		runner.RedirectClaudeToGLM(&cmd, token)
+	}
+	return cmd, nil
 }
 
 // buildClaudeCreatorCommandPlan builds the Claude provider creator command

@@ -46,66 +46,70 @@ func captureLines(t *testing.T, path string) []string {
 	return lines
 }
 
-func TestWorkspacePrepareGitInvocationsCarryLongpathsFlag(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("uses POSIX shell fake git binary")
-	}
-	binDir := t.TempDir()
-	repoDir := t.TempDir()
-	capture := filepath.Join(t.TempDir(), "git.args")
-	fakeGit := writeFakeGit(t, binDir, capture)
-
-	// Prepare on an empty repo with a missing worktree path; the fake git
-	// will return exit 1 on the very first invocation (show-ref or
-	// worktree add). The captured argv is what we assert on.
-	_, _ = Prepare(context.Background(), repoDir, task.Worktree{
-		Enabled: true,
-		Branch:  "agent/longpaths",
-		Path:    filepath.Join(t.TempDir(), "workspace"),
-	}, Options{GitBin: fakeGit})
-	lines := captureLines(t, capture)
+func assertLongpathsFlagPresent(t *testing.T, label string, lines []string) {
+	t.Helper()
 	if len(lines) == 0 {
-		t.Fatal("expected fake git to be invoked at least once")
+		t.Fatalf("expected fake git to be invoked at least once for %s", label)
 	}
 	for _, line := range lines {
 		if !strings.Contains(line, "-c core.longpaths=true") {
-			t.Errorf("workspace.Prepare git invocation missing longpaths flag: %q", line)
+			t.Errorf("%s git invocation missing longpaths flag: %q", label, line)
 		}
 	}
 }
 
-func TestWorkspaceRemoveGitInvocationsCarryLongpathsFlag(t *testing.T) {
+// TestWorkspaceGitInvocationsCarryLongpathsFlag drives workspace.Prepare and
+// workspace.Remove through a capturing fake git and asserts every argv built
+// through the shared runner.GitArgs wrapper carries `-c core.longpaths=true`,
+// even for the worktree create/remove operations that previously failed on
+// Windows MAX_PATH boundaries.
+func TestWorkspaceGitInvocationsCarryLongpathsFlag(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses POSIX shell fake git binary")
 	}
-	binDir := t.TempDir()
-	repoDir := t.TempDir()
-	capture := filepath.Join(t.TempDir(), "git.args")
-	fakeGit := writeFakeGit(t, binDir, capture)
-
-	// Materialize a sibling worktree path so Remove() reaches the
-	// validateCleanupPath / git worktree remove path with fakeGit.
-	parent := filepath.Dir(repoDir)
-	worktreeDir := filepath.Join(parent, filepath.Base(repoDir)+".worktrees", "remove-target")
-	if err := os.MkdirAll(worktreeDir, 0o755); err != nil {
-		t.Fatalf("mkdir worktree path: %v", err)
+	cases := []struct {
+		name string
+		run  func(t *testing.T, git string)
+	}{
+		{
+			name: "Prepare",
+			run: func(t *testing.T, git string) {
+				// Prepare on an empty repo with a missing worktree path; the
+				// fake git returns exit 1 on the first invocation. The captured
+				// argv is what we assert on.
+				_, _ = Prepare(context.Background(), t.TempDir(), task.Worktree{
+					Enabled: true,
+					Branch:  "agent/longpaths",
+					Path:    filepath.Join(t.TempDir(), "workspace"),
+				}, Options{GitBin: git})
+			},
+		},
+		{
+			name: "Remove",
+			run: func(t *testing.T, git string) {
+				// Materialize a sibling worktree path so Remove() reaches the
+				// validateCleanupPath / git worktree remove path with the fake git.
+				repoDir := t.TempDir()
+				parent := filepath.Dir(repoDir)
+				worktreeDir := filepath.Join(parent, filepath.Base(repoDir)+".worktrees", "remove-target")
+				if err := os.MkdirAll(worktreeDir, 0o755); err != nil {
+					t.Fatalf("mkdir worktree path: %v", err)
+				}
+				_, _ = Remove(context.Background(), repoDir, task.Worktree{
+					Enabled: true,
+					Branch:  "agent/remove-longpaths",
+					Path:    worktreeDir,
+				}, Options{GitBin: git})
+			},
+		},
 	}
-	_, _ = Remove(context.Background(), repoDir, task.Worktree{
-		Enabled: true,
-		Branch:  "agent/remove-longpaths",
-		Path:    worktreeDir,
-	}, Options{GitBin: fakeGit})
-	lines := captureLines(t, capture)
-	if len(lines) == 0 {
-		t.Fatal("expected fake git to be invoked at least once")
-	}
-	for _, line := range lines {
-		if !strings.Contains(line, "-c core.longpaths=true") {
-			t.Errorf("workspace.Remove git invocation missing longpaths flag: %q", line)
-		}
-		if !strings.Contains(line, "worktree remove") && !strings.Contains(line, "rev-parse") {
-			// Either is fine, just sanity check the captured shape.
-			continue
-		}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			capture := filepath.Join(t.TempDir(), "git.args")
+			fakeGit := writeFakeGit(t, t.TempDir(), capture)
+			tc.run(t, fakeGit)
+			assertLongpathsFlagPresent(t, tc.name, captureLines(t, capture))
+		})
 	}
 }

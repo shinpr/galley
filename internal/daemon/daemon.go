@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -102,6 +103,12 @@ type Options struct {
 	CodexBin             string
 	GitBin               string
 	GHBin                string
+	// GLMAuthToken is the Z.ai API token used when a task selects executor.cli
+	// "glm". It is resolved from daemon.yaml (glm_api_key) and injected only
+	// into the executor child environment as ANTHROPIC_AUTH_TOKEN; it never
+	// reaches argv or run evidence. Empty means GLM is not configured, which is
+	// only an error when a task actually requests executor.cli "glm".
+	GLMAuthToken string
 	// Notifications is the opt-in, best-effort notification command hook
 	// resolved from daemon.yaml. A nil pointer disables notifications. It has
 	// no CLI flag because the hook is operator configuration, not a
@@ -278,8 +285,15 @@ func processQueuedTasks(ctx context.Context, opts Options) (int, error) {
 // Preflight resolves daemon options and verifies startup prerequisites.
 func Preflight(opts Options) (Options, error) {
 	opts = opts.withDefaults()
-	if opts.Supervisor != "codex" && opts.Supervisor != "claude" {
-		return Options{}, fmt.Errorf("supervisor must be one of: codex, claude")
+	if !daemonconfig.IsValidSupervisor(opts.Supervisor) {
+		return Options{}, fmt.Errorf("supervisor must be one of: %s", strings.Join(daemonconfig.SupervisorCLIs(), ", "))
+	}
+	// glm rides the Claude binary, so a glm supervisor needs the same token as a
+	// glm executor. Fail fast at startup rather than at first review.
+	if opts.Supervisor == "glm" {
+		if _, err := runner.ResolveGLMToken(opts.GLMAuthToken); err != nil {
+			return Options{}, fmt.Errorf("supervisor is \"glm\": %w", err)
+		}
 	}
 	if err := queue.EnsureLayout(opts.Root); err != nil {
 		return Options{}, err
@@ -563,6 +577,15 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 		return failClaimedStage(opts.Root, runningPath, &loaded, "run_evidence", "run_evidence_failed", err, runDir)
 	}
 
+	// A per-task environment.yaml supervisor.default_cli: glm override bypasses
+	// startup Preflight, so validate the token here — before setup/executor —
+	// rather than failing at the supervisor call after a full attempt ran.
+	if effectiveOptionsForProfiles(opts, profiles).Supervisor == "glm" {
+		if _, tokenErr := runner.ResolveGLMToken(opts.GLMAuthToken); tokenErr != nil {
+			return failClaimedStage(opts.Root, runningPath, &loaded, "supervisor_preflight", "supervisor_config_failed", fmt.Errorf("supervisor is \"glm\": %w", tokenErr), runDir)
+		}
+	}
+
 	prepared, err := prepareClaimedWorkspace(ctx, opts, profiles, runningPath, runDir, &loaded)
 	if err != nil {
 		return taskstate.FailMove(opts.Root, runningPath, &loaded, err)
@@ -582,6 +605,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 		Profiles:               profiles,
 		ClaudeBin:              opts.ClaudeBin,
 		CodexBin:               opts.CodexBin,
+		GLMAuthToken:           opts.GLMAuthToken,
 		EnvironmentProfilePath: resolvedProfiles.EnvironmentProfileFile,
 		ExecutorRunner:         setupExecutorRunner,
 	})
@@ -603,12 +627,13 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	// surfaces the failure through task status and run evidence.
 	if cfg := loaded.Preflight; cfg != nil && cfg.AcceptanceSkeleton.IsEnabled() {
 		res, perr := skeletonpreflight.Run(ctx, skeletonpreflight.Options{
-			Task:      loaded,
-			WorkDir:   prepared.CWD,
-			RunDir:    runDir,
-			Profiles:  profiles,
-			ClaudeBin: opts.ClaudeBin,
-			CodexBin:  opts.CodexBin,
+			Task:         loaded,
+			WorkDir:      prepared.CWD,
+			RunDir:       runDir,
+			Profiles:     profiles,
+			ClaudeBin:    opts.ClaudeBin,
+			CodexBin:     opts.CodexBin,
+			GLMAuthToken: opts.GLMAuthToken,
 		})
 		if perr != nil {
 			return failClaimedStage(opts.Root, runningPath, &loaded, "acceptance_skeleton_preflight", "acceptance_skeleton_preflight_failed", perr, runDir)

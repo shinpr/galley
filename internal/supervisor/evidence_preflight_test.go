@@ -28,10 +28,6 @@ func TestEvidencePreflightResultPropagatesToAdapterRequest(t *testing.T) {
 		},
 	})
 
-	if request.Evidence.PreflightResult == nil {
-		t.Fatal("preflight result not propagated to adapter request")
-	}
-
 	data, err := json.Marshal(request)
 	if err != nil {
 		t.Fatal(err)

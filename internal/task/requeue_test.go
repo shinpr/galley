@@ -65,7 +65,7 @@ func TestRequeueMovesFailedTaskToQueued(t *testing.T) {
 	}
 }
 
-func TestRequeueRejectsRunningTask(t *testing.T) {
+func TestRequeueAllowsRunningTask(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	runningPath := filepath.Join(root, "tasks", "running", "task.yaml")
@@ -80,12 +80,25 @@ func TestRequeueRejectsRunningTask(t *testing.T) {
 	if err := Save(runningPath, loaded); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Requeue(runningPath, RequeueOptions{}); err == nil {
-		t.Fatal("expected requeue of running task to be rejected")
+	// Requeuing a running task is a manual operator action; it is permitted and
+	// the operator owns any double-run consequence.
+	result, err := Requeue(runningPath, RequeueOptions{})
+	if err != nil {
+		t.Fatalf("requeue of running task should be allowed: %v", err)
 	}
-	// The running source must remain untouched for the owning daemon.
-	if _, err := os.Stat(runningPath); err != nil {
-		t.Fatalf("running source must be preserved: %v", err)
+	queuedPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	if result.To != queuedPath {
+		t.Fatalf("to got %q, want %q", result.To, queuedPath)
+	}
+	requeued, err := Load(queuedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requeued.Status != "queued" {
+		t.Fatalf("requeued running task got status=%q", requeued.Status)
+	}
+	if _, err := os.Stat(runningPath); !os.IsNotExist(err) {
+		t.Fatalf("running path should be moved, err=%v", err)
 	}
 }
 

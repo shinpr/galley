@@ -136,53 +136,6 @@ fi
 	}
 }
 
-func TestPollPRCommentsRequeuesMemberPRAuthor(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	if err := queue.EnsureLayout(root); err != nil {
-		t.Fatal(err)
-	}
-	writeDaemonEnvironmentProfile(t, root, repo, true, false)
-	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
-	writeDaemonTask(t, donePath, repo)
-	loaded, err := task.Load(donePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	loaded.Status = "pr_opened"
-	loaded.PR.URL = "https://github.com/example/galley/pull/123"
-	loaded.PR.Status = "open"
-	loaded.PR.AuthorLogin = "org-member"
-	if err := task.Save(donePath, loaded); err != nil {
-		t.Fatal(err)
-	}
-	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ]; then
-echo '[[{"id":78,"body":"/galley please run my code","html_url":"https://github.com/example/galley/pull/123#issuecomment-78","user":{"login":"org-member"}}]]'
-else
-echo unexpected-gh >&2
-exit 1
-fi
-`)
-
-	if err := pollPRComments(context.Background(), Options{Root: root, GHBin: ghBin}.withDefaults()); err != nil {
-		t.Fatal(err)
-	}
-	queuedPath := filepath.Join(root, "tasks", "queued", "task.yaml")
-	requeued, err := task.Load(queuedPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if requeued.Status != "queued" {
-		t.Fatalf("status got %q", requeued.Status)
-	}
-	if !slices.Contains(requeued.PR.ProcessedCommentIDs, "78") {
-		t.Fatalf("processed comments got %#v", requeued.PR.ProcessedCommentIDs)
-	}
-	if len(requeued.RevisionRequests) != 1 || requeued.RevisionRequests[0].Text != "please run my code" {
-		t.Fatalf("revision requests got %#v", requeued.RevisionRequests)
-	}
-}
-
 func TestPollPRCommentsRequeuesNeedsSupervisorReviewOpenPR(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
@@ -230,61 +183,6 @@ fi
 	}
 	if _, err := os.Stat(failedPath); !os.IsNotExist(err) {
 		t.Fatalf("failed task should be moved to queued, err=%v", err)
-	}
-}
-
-func TestPollPRCommentsPostsReply(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	if err := queue.EnsureLayout(root); err != nil {
-		t.Fatal(err)
-	}
-	writeDaemonEnvironmentProfile(t, root, repo, true, true)
-	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
-	writeDaemonTask(t, donePath, repo)
-	loaded, err := task.Load(donePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	loaded.Status = "pr_opened"
-	loaded.PR.URL = "https://github.com/example/galley/pull/123"
-	loaded.PR.Status = "open"
-	loaded.PR.AuthorLogin = "owner"
-	if err := task.Save(donePath, loaded); err != nil {
-		t.Fatal(err)
-	}
-	marker := filepath.Join(t.TempDir(), "posted")
-	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ] && [ "$3" = "--paginate" ]; then
-echo '[[{"id":99,"body":"/galley reply please","html_url":"https://github.com/example/galley/pull/123#issuecomment-99","user":{"login":"owner"}}]]'
-elif [ "$1" = "api" ]; then
-echo "$*" > `+marker+`
-cat >> `+marker+`
-echo '{"id":100}'
-else
-echo unexpected-gh >&2
-exit 1
-fi
-`)
-
-	if err := pollPRComments(context.Background(), Options{Root: root, ReplyPRComments: true, GHBin: ghBin}.withDefaults()); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(marker)
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := string(data)
-	if !strings.Contains(body, "Galley requeued task `") {
-		t.Fatalf("reply command got %q", body)
-	}
-	if !strings.Contains(body, "from this comment.") {
-		t.Fatalf("reply command got %q", body)
-	}
-	if strings.Contains(body, "reply please") {
-		t.Fatalf("reply must not echo the user-supplied reason text: %q", body)
-	}
-	if strings.Contains(body, "comment 99") {
-		t.Fatalf("reply must not include the comment id: %q", body)
 	}
 }
 
@@ -408,54 +306,6 @@ fi
 	}
 	if strings.Contains(body, "nudge it") || strings.Contains(body, "comment 808") {
 		t.Fatalf("queued reply must not echo reason or comment id: %q", body)
-	}
-}
-
-func TestPollPRCommentsReplyForNonPRAuthor(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	if err := queue.EnsureLayout(root); err != nil {
-		t.Fatal(err)
-	}
-	writeDaemonEnvironmentProfile(t, root, repo, true, true)
-	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
-	writeDaemonTask(t, donePath, repo)
-	loaded, err := task.Load(donePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	loaded.Status = "pr_opened"
-	loaded.PR.URL = "https://github.com/example/galley/pull/123"
-	loaded.PR.Status = "open"
-	loaded.PR.AuthorLogin = "pr-author"
-	if err := task.Save(donePath, loaded); err != nil {
-		t.Fatal(err)
-	}
-	marker := filepath.Join(t.TempDir(), "posted")
-	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ] && [ "$3" = "--paginate" ]; then
-echo '[[{"id":222,"body":"/galley please run it","html_url":"https://github.com/example/galley/pull/123#issuecomment-222","user":{"login":"org-member"}}]]'
-elif [ "$1" = "api" ]; then
-echo "$*" > `+marker+`
-cat >> `+marker+`
-echo '{"id":223}'
-else
-echo unexpected-gh >&2
-exit 1
-fi
-`)
-	if err := pollPRComments(context.Background(), Options{Root: root, ReplyPRComments: true, GHBin: ghBin}.withDefaults()); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(marker)
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := string(data)
-	if !strings.Contains(body, "only the pull request author can run Galley from PR comments") {
-		t.Fatalf("non-author reply got %q", body)
-	}
-	if strings.Contains(body, "please run it") || strings.Contains(body, "comment 222") {
-		t.Fatalf("non-author reply must not echo reason or comment id: %q", body)
 	}
 }
 

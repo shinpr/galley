@@ -88,9 +88,9 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 - `execution_policy.stop_on_destructive_operation`: stop when the task would require out-of-scope destructive work.
 - `execution_policy.stop_on_missing_secret`: stop when a required secret is unavailable and cannot be replaced by safe local evidence.
 - `execution_policy.stop_on_external_service_unavailable`: stop when a required external service is unavailable and the task cannot proceed with local substitutes.
-- `executor.cli`: selects `claude` (Claude Code) or `codex` (`codex exec`). New task authoring uses `environment.yaml` `executor.default_cli` when present, otherwise Claude. An explicit task YAML value is authoritative for that task.
+- `executor.cli`: selects `claude` (Claude Code), `codex` (`codex exec`), or `glm`. `glm` runs the `claude` binary against GLM's Z.ai endpoint, so it needs `claude` on PATH and a `glm_api_key` in `daemon.yaml`. New task authoring uses `environment.yaml` `executor.default_cli` when present, otherwise Claude. An explicit task YAML value is authoritative for that task.
 - `executor.model`: optional model override. Omit it to use the selected CLI's configured default model.
-- `executor.effort`: model effort hint. Claude accepts `low`, `medium`, `high`, `xhigh`, or `max`; Codex accepts `low`, `medium`, or `high`.
+- `executor.effort`: model effort hint. Claude and `glm` accept `low`, `medium`, `high`, `xhigh`, or `max`; Codex accepts `low`, `medium`, or `high`.
 - `executor.prompt_profile`: prompt profile name recorded for evidence.
 - `executor.prompt_mode`: `replace` or `append`.
 

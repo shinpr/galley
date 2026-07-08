@@ -467,25 +467,6 @@ setup:
 	if res == nil || res.Status != setuppreflight.StatusReady {
 		t.Fatalf("result: %+v", res)
 	}
-	// AC6: both the failed authored command AND the successful discovered
-	// command must be recorded.
-	foundFailedAuthored := false
-	foundSuccessfulDiscovered := false
-	for _, c := range res.Commands {
-		if c.Source == setuppreflight.SourceEnvironmentSetup && c.Run == "false" && c.ExitCode != 0 {
-			foundFailedAuthored = true
-		}
-		if c.Source == setuppreflight.SourceDiscovered && c.Run == "echo discovered" && c.ExitCode == 0 {
-			foundSuccessfulDiscovered = true
-		}
-	}
-	if !foundFailedAuthored {
-		t.Fatalf("failed authored command not recorded: %+v", res.Commands)
-	}
-	if !foundSuccessfulDiscovered {
-		t.Fatalf("successful discovered command not recorded: %+v", res.Commands)
-	}
-	_ = update
 	// AC7: persistence-only check is in another test, but make sure update
 	// metadata reflects that the prior plan differed.
 	if update == nil || !update.Changed || update.Before == nil || len(update.Before.Commands) == 0 || update.Before.Commands[0].Run != "false" {

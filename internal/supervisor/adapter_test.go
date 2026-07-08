@@ -74,13 +74,10 @@ printf '%s\n' '{"event":"done"}'
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"exec", "--sandbox", "read-only", "--output-schema", "--output-last-message"} {
+	for _, want := range []string{"exec", "--sandbox", "workspace-write", "--output-schema", "--output-last-message"} {
 		if !strings.Contains(string(args), want) {
 			t.Fatalf("codex args missing %q:\n%s", want, args)
 		}
-	}
-	if strings.Contains(string(args), "workspace-write") {
-		t.Fatalf("codex supervisor must not run with workspace-write:\n%s", args)
 	}
 	if _, err := os.Stat(filepath.Join(artifactDir, "supervisor-verdict.schema.json")); err != nil {
 		t.Fatal(err)

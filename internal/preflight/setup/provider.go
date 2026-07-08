@@ -43,7 +43,18 @@ func BuildExecutorCommandPlan(opts Options, payload []byte) (runner.Command, str
 		return cmd, provider, err
 	default:
 		cmd, err := buildClaudeSetupExecutorCommandPlan(opts, payload)
-		return cmd, "claude", err
+		if err != nil {
+			return runner.Command{}, "claude", err
+		}
+		// glm redirects the setup executor to GLM's endpoint like any executor role.
+		if opts.Task.Executor.CLI == "glm" {
+			token, terr := runner.ResolveGLMToken(opts.GLMAuthToken)
+			if terr != nil {
+				return runner.Command{}, "claude", terr
+			}
+			runner.RedirectClaudeToGLM(&cmd, token)
+		}
+		return cmd, "claude", nil
 	}
 }
 

@@ -254,13 +254,40 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "cli": {
+                "const": "glm"
+              }
+            },
+            "required": [
+              "cli"
+            ]
+          },
+          "then": {
+            "properties": {
+              "effort": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ],
+                "type": "string"
+              }
+            }
+          }
         }
       ],
       "properties": {
         "cli": {
           "enum": [
             "claude",
-            "codex"
+            "codex",
+            "glm"
           ],
           "type": "string"
         },

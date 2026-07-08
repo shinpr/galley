@@ -112,13 +112,14 @@ var supervisorRunner = defaultSupervisorRunner
 
 func defaultSupervisorRunner(ctx context.Context, opts Options, evidence supervisor.Evidence, tryDir, workDir string) (supervisor.Verdict, error) {
 	return supervisor.RunAdapter(ctx, supervisor.AdapterOptions{
-		Provider:    opts.Supervisor,
-		WorkDir:     workDir,
-		Timeout:     time.Duration(evidence.Task.ExecutionPolicy.TimeoutMS) * time.Millisecond,
-		IdleTimeout: opts.IdleTimeout,
-		ArtifactDir: tryDir,
-		ClaudeBin:   opts.ClaudeBin,
-		CodexBin:    opts.CodexBin,
+		Provider:     opts.Supervisor,
+		WorkDir:      workDir,
+		Timeout:      time.Duration(evidence.Task.ExecutionPolicy.TimeoutMS) * time.Millisecond,
+		IdleTimeout:  opts.IdleTimeout,
+		ArtifactDir:  tryDir,
+		ClaudeBin:    opts.ClaudeBin,
+		CodexBin:     opts.CodexBin,
+		GLMAuthToken: opts.GLMAuthToken,
 	}, evidence)
 }
 
@@ -532,6 +533,8 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 	switch cli {
 	case "claude":
 		commandPlan, stdoutPath, stderrPath, err = prepareClaudeExecutorPlan(opts, loaded, workDir, prompt, attemptDir)
+	case "glm":
+		commandPlan, stdoutPath, stderrPath, err = prepareGLMExecutorPlan(opts, loaded, workDir, prompt, attemptDir)
 	case "codex":
 		commandPlan, stdoutPath, stderrPath, err = prepareCodexExecutorPlan(opts, loaded, workDir, prompt, attemptDir)
 	default:
@@ -674,6 +677,10 @@ func executorVerificationCmd(cli string) string {
 	switch cli {
 	case "codex":
 		return "codex exec"
+	case "glm":
+		// glm drives the Claude binary against GLM's endpoint; label it so
+		// reviewers can tell the run used GLM from the saved task file alone.
+		return "claude -p (glm)"
 	case "", "claude":
 		return "claude -p"
 	default:
@@ -1007,6 +1014,27 @@ func prepareClaudeExecutorPlan(opts Options, loaded task.Task, workDir, prompt, 
 		return runner.Command{}, "", "", err
 	}
 	return plan, filepath.Join(attemptDir, "claude.stdout.jsonl"), filepath.Join(attemptDir, "claude.stderr.log"), nil
+}
+
+// prepareGLMExecutorPlan builds the GLM implementation executor command plan by
+// reusing the Claude launch path and redirecting the Claude binary at GLM's
+// endpoint via runner.RedirectClaudeToGLM. It fails fast with an actionable,
+// secret-free error when executor.cli "glm" was selected without a configured
+// glm_api_key. The stdout/stderr paths reuse the claude.* names because GLM
+// produces the same stream-json output. Setup and acceptance-skeleton executors
+// apply the identical redirect in their own packages, so all executor roles
+// honor executor.cli "glm".
+func prepareGLMExecutorPlan(opts Options, loaded task.Task, workDir, prompt, attemptDir string) (runner.Command, string, string, error) {
+	token, err := runner.ResolveGLMToken(opts.GLMAuthToken)
+	if err != nil {
+		return runner.Command{}, "", "", err
+	}
+	plan, stdoutPath, stderrPath, err := prepareClaudeExecutorPlan(opts, loaded, workDir, prompt, attemptDir)
+	if err != nil {
+		return runner.Command{}, "", "", err
+	}
+	runner.RedirectClaudeToGLM(&plan, token)
+	return plan, stdoutPath, stderrPath, nil
 }
 
 // prepareCodexExecutorPlan builds the Codex executor command plan and the

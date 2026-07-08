@@ -11,7 +11,7 @@ var (
 	validStatuses               = []string{"draft", "queued", "running", "needs_supervisor_review", "accepted", "pr_opened", "failed", "closed", "merged", "archived"}
 	validPermissions            = []string{"read-only", "edit", "sandbox-full-access"}
 	validPromptModes            = []string{"replace", "append"}
-	validExecutorCLIs           = []string{"claude", "codex"}
+	validExecutorCLIs           = []string{"claude", "codex", "glm"}
 	validClaudeEfforts          = []string{"low", "medium", "high", "xhigh", "max"}
 	validCodexEfforts           = []string{"low", "medium", "high"}
 	validAFKDecisionPolicies    = []string{"choose-smallest-reversible"}

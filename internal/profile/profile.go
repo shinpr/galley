@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/shinpr/galley/internal/daemonconfig"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -90,7 +91,7 @@ type ExecutorDefault struct {
 // whose `scope.cwd` resolves to this environment profile. When `default_cli`
 // is set, the daemon uses it for that task even when daemon CLI startup
 // options, `daemon.yaml`, or the built-in default would otherwise pick a
-// different supervisor. Allowed values are `claude` and `codex`.
+// different supervisor. Allowed values are `claude`, `codex`, and `glm`.
 type SupervisorDefault struct {
 	DefaultCLI string `yaml:"default_cli,omitempty" json:"default_cli,omitempty"`
 }
@@ -223,10 +224,10 @@ func ValidateEnvironment(env Environment) ValidationResult {
 	require(&result, env.Constraints.SecretsPolicy != "", "constraints.secrets_policy is required")
 	require(&result, env.Constraints.DestructiveCommands != "", "constraints.destructive_commands is required")
 	if env.Executor != nil && env.Executor.DefaultCLI != "" {
-		require(&result, validExecutorCLI(env.Executor.DefaultCLI), "executor.default_cli must be one of: claude, codex")
+		require(&result, validExecutorCLI(env.Executor.DefaultCLI), "executor.default_cli must be one of: claude, codex, glm")
 	}
 	if env.Supervisor != nil && env.Supervisor.DefaultCLI != "" {
-		require(&result, validSupervisorCLI(env.Supervisor.DefaultCLI), "supervisor.default_cli must be one of: claude, codex")
+		require(&result, daemonconfig.IsValidSupervisor(env.Supervisor.DefaultCLI), "supervisor.default_cli must be one of: %s", strings.Join(daemonconfig.SupervisorCLIs(), ", "))
 	}
 	if env.RequiredChecks.Shell != "" {
 		require(&result, validRequiredCheckShell(env.RequiredChecks.Shell), "required_checks.shell must be one of: auto, sh, bash, cmd, powershell, pwsh")
@@ -282,19 +283,7 @@ func validateSetupCommandText(result *ValidationResult, field, value string, max
 
 func validExecutorCLI(value string) bool {
 	switch value {
-	case "claude", "codex":
-		return true
-	default:
-		return false
-	}
-}
-
-// validSupervisorCLI mirrors validExecutorCLI for the repository-scoped
-// supervisor selection. Allowed values are the two built-in supervisor
-// adapters Galley supports.
-func validSupervisorCLI(value string) bool {
-	switch value {
-	case "claude", "codex":
+	case "claude", "codex", "glm":
 		return true
 	default:
 		return false

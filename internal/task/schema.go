@@ -156,6 +156,19 @@ func executorSchema() map[string]any {
 						},
 					},
 				},
+				map[string]any{
+					"if": map[string]any{
+						"properties": map[string]any{
+							"cli": map[string]any{"const": "glm"},
+						},
+						"required": []string{"cli"},
+					},
+					"then": map[string]any{
+						"properties": map[string]any{
+							"effort": enumSchema(validClaudeEfforts),
+						},
+					},
+				},
 			}
 		},
 	)

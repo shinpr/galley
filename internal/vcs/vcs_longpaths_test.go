@@ -51,120 +51,77 @@ func assertLongpathsFlagPresent(t *testing.T, label, line string) {
 	}
 }
 
-func TestVCSAddPathsAppliesLongpathsFlag(t *testing.T) {
+// TestVCSGitInvocationsApplyLongpathsFlag drives every Galley-owned git
+// operation in the vcs package through a capturing fake git and asserts the
+// shared runner.GitArgs wrapper put `-c core.longpaths=true` on every argv.
+// The Windows addPathsForOS case additionally proves the longpaths prefix
+// survives stdin pathspec routing (--pathspec-from-file=-).
+func TestVCSGitInvocationsApplyLongpathsFlag(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses POSIX shell fake git binary")
 	}
-	binDir := t.TempDir()
-	runDir := t.TempDir()
-	workDir := t.TempDir()
-	capture := filepath.Join(t.TempDir(), "git.args")
-	fakeGit := writeFakeGit(t, binDir, capture)
-
-	if err := AddPaths(t.Context(), Binaries{Git: fakeGit}, workDir, runDir, []string{"a.txt"}); err != nil {
-		t.Fatalf("AddPaths: %v", err)
+	cases := []struct {
+		name         string
+		run          func(t *testing.T, git string) error
+		requireStdin bool
+	}{
+		{
+			name: "AddPaths",
+			run: func(t *testing.T, git string) error {
+				return AddPaths(t.Context(), Binaries{Git: git}, t.TempDir(), t.TempDir(), []string{"a.txt"})
+			},
+		},
+		{
+			name: "StatusPorcelainZ",
+			run: func(t *testing.T, git string) error {
+				_, err := StatusPorcelainZ(t.Context(), Binaries{Git: git}, t.TempDir())
+				return err
+			},
+		},
+		{
+			name: "StagePathsForReview",
+			run: func(t *testing.T, git string) error {
+				return StagePathsForReview(t.Context(), Binaries{Git: git}, t.TempDir(), t.TempDir(), []string{"changed.go"})
+			},
+		},
+		{
+			name: "Commit",
+			run: func(t *testing.T, git string) error {
+				return Commit(t.Context(), Binaries{Git: git}, t.TempDir(), t.TempDir(), "msg")
+			},
+		},
+		{
+			name: "PushCurrentBranch",
+			run: func(t *testing.T, git string) error {
+				return PushCurrentBranch(t.Context(), Binaries{Git: git}, t.TempDir(), t.TempDir())
+			},
+		},
+		{
+			name: "addPathsForOS_windows",
+			run: func(t *testing.T, git string) error {
+				return addPathsForOS(t.Context(), Binaries{Git: git}, t.TempDir(), t.TempDir(), []string{"a.go", "b.go"}, "windows")
+			},
+			requireStdin: true,
+		},
 	}
-	for _, line := range captureLines(t, capture) {
-		assertLongpathsFlagPresent(t, "AddPaths", line)
-	}
-}
-
-func TestVCSStatusPorcelainZAppliesLongpathsFlag(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("uses POSIX shell fake git binary")
-	}
-	binDir := t.TempDir()
-	workDir := t.TempDir()
-	capture := filepath.Join(t.TempDir(), "git.args")
-	fakeGit := writeFakeGit(t, binDir, capture)
-
-	if _, err := StatusPorcelainZ(t.Context(), Binaries{Git: fakeGit}, workDir); err != nil {
-		t.Fatalf("StatusPorcelainZ: %v", err)
-	}
-	for _, line := range captureLines(t, capture) {
-		assertLongpathsFlagPresent(t, "StatusPorcelainZ", line)
-	}
-}
-
-func TestVCSStagePathsForReviewAppliesLongpathsFlag(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("uses POSIX shell fake git binary")
-	}
-	binDir := t.TempDir()
-	runDir := t.TempDir()
-	workDir := t.TempDir()
-	capture := filepath.Join(t.TempDir(), "git.args")
-	fakeGit := writeFakeGit(t, binDir, capture)
-
-	if err := StagePathsForReview(t.Context(), Binaries{Git: fakeGit}, workDir, runDir, []string{"changed.go"}); err != nil {
-		t.Fatalf("StagePathsForReview: %v", err)
-	}
-	for _, line := range captureLines(t, capture) {
-		assertLongpathsFlagPresent(t, "StagePathsForReview", line)
-	}
-}
-
-func TestVCSCommitAppliesLongpathsFlag(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("uses POSIX shell fake git binary")
-	}
-	binDir := t.TempDir()
-	runDir := t.TempDir()
-	workDir := t.TempDir()
-	capture := filepath.Join(t.TempDir(), "git.args")
-	fakeGit := writeFakeGit(t, binDir, capture)
-
-	if err := Commit(t.Context(), Binaries{Git: fakeGit}, workDir, runDir, "msg"); err != nil {
-		t.Fatalf("Commit: %v", err)
-	}
-	for _, line := range captureLines(t, capture) {
-		assertLongpathsFlagPresent(t, "Commit", line)
-	}
-}
-
-func TestVCSPushCurrentBranchAppliesLongpathsFlag(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("uses POSIX shell fake git binary")
-	}
-	binDir := t.TempDir()
-	runDir := t.TempDir()
-	workDir := t.TempDir()
-	capture := filepath.Join(t.TempDir(), "git.args")
-	fakeGit := writeFakeGit(t, binDir, capture)
-
-	if err := PushCurrentBranch(t.Context(), Binaries{Git: fakeGit}, workDir, runDir); err != nil {
-		t.Fatalf("PushCurrentBranch: %v", err)
-	}
-	for _, line := range captureLines(t, capture) {
-		assertLongpathsFlagPresent(t, "PushCurrentBranch", line)
-	}
-}
-
-// TestVCSAddPathsForOSWindowsKeepsLongpathsFlagOnStdinRouting pins the
-// interaction between the Windows stdin pathspec routing and the longpaths
-// argv prefix: even when the pathspec list moves off argv onto stdin via
-// --pathspec-from-file=-, the longpaths flag must still appear on argv.
-func TestVCSAddPathsForOSWindowsKeepsLongpathsFlagOnStdinRouting(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("uses POSIX shell fake git binary")
-	}
-	binDir := t.TempDir()
-	runDir := t.TempDir()
-	workDir := t.TempDir()
-	capture := filepath.Join(t.TempDir(), "git.args")
-	fakeGit := writeFakeGit(t, binDir, capture)
-
-	if err := addPathsForOS(t.Context(), Binaries{Git: fakeGit}, workDir, runDir, []string{"a.go", "b.go"}, "windows"); err != nil {
-		t.Fatalf("addPathsForOS: %v", err)
-	}
-	lines := captureLines(t, capture)
-	if len(lines) == 0 {
-		t.Fatal("expected fake git to be invoked once")
-	}
-	for _, line := range lines {
-		assertLongpathsFlagPresent(t, "addPathsForOS(windows)", line)
-		if !strings.Contains(line, "--pathspec-from-file=-") {
-			t.Errorf("Windows routing must keep --pathspec-from-file=- alongside longpaths flag: %q", line)
-		}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			capture := filepath.Join(t.TempDir(), "git.args")
+			fakeGit := writeFakeGit(t, t.TempDir(), capture)
+			if err := tc.run(t, fakeGit); err != nil {
+				t.Fatalf("%s: %v", tc.name, err)
+			}
+			lines := captureLines(t, capture)
+			if len(lines) == 0 {
+				t.Fatalf("expected fake git to be invoked for %s", tc.name)
+			}
+			for _, line := range lines {
+				assertLongpathsFlagPresent(t, tc.name, line)
+				if tc.requireStdin && !strings.Contains(line, "--pathspec-from-file=-") {
+					t.Errorf("Windows routing must keep --pathspec-from-file=- alongside longpaths flag: %q", line)
+				}
+			}
+		})
 	}
 }

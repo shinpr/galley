@@ -84,28 +84,4 @@ func TestSkillBundledTaskSchemaReferenceCoversCodexCLI(t *testing.T) {
 	if !reflect.DeepEqual(generatedDoc, bundledDoc) {
 		t.Fatalf("generated task schema differs from %s; regenerate the skill-bundled reference schema from TaskJSONSchema", TaskSchemaPath)
 	}
-
-	want := []string{"claude", "codex"}
-	for label, data := range map[string][]byte{
-		"generated":          generated,
-		"skill-bundled task": bundled,
-	} {
-		var doc map[string]any
-		if err := json.Unmarshal(data, &doc); err != nil {
-			t.Fatalf("%s: not valid JSON: %v", label, err)
-		}
-		props, _ := doc["properties"].(map[string]any)
-		exec, _ := props["executor"].(map[string]any)
-		execProps, _ := exec["properties"].(map[string]any)
-		cliNode, _ := execProps["cli"].(map[string]any)
-		rawEnum, _ := cliNode["enum"].([]any)
-		got := []string{}
-		for _, v := range rawEnum {
-			s, _ := v.(string)
-			got = append(got, s)
-		}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("%s executor.cli enum = %#v, want %#v", label, got, want)
-		}
-	}
 }

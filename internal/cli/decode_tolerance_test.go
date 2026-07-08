@@ -72,6 +72,95 @@ func writeUnreadableTaskYAML(t *testing.T, path string) {
 	}
 }
 
+// writeTypeMismatchTaskYAML writes a task YAML that is genuinely undecodable
+// because a KNOWN field carries the wrong YAML type: acceptance_criteria is a
+// sequence of criteria, but here it is a scalar string. Unlike an unknown field
+// (silently tolerated) or a top-level scalar (fails the whole-document shape),
+// this exercises the decoder's per-field type checking, which is the path that
+// distinguishes "skip this unreadable sibling and keep going" from "tolerate and
+// decode". task.Load surfaces it as a decode error.
+func writeTypeMismatchTaskYAML(t *testing.T, path string) {
+	t.Helper()
+	body := `id: "task-type-mismatch-cli"
+mode: "afk"
+status: "failed"
+goal: "Type-mismatch CLI fixture."
+acceptance_criteria: "this should be a list of criteria, not a scalar"
+scope:
+  cwd: "/tmp"
+  allowed_paths:
+    - "."
+  forbidden_paths: []
+  permission: "edit"
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestTaskListSkipsUndecodableKnownFieldSiblingAndProcessesReadableTask closes
+// the seam where an unknown field is silently tolerated but a genuine decode
+// failure on a known field is not exercised. A type-mismatch sibling must not
+// derail the tolerant scan: it is surfaced as its own decode-error entry while a
+// readable sibling in the same directory is still listed. The CLI surfaces
+// undecodable tasks as a decode_error row (text) / DecodeError field (JSON) on
+// its normal output rather than as a separate stderr line, so the assertions
+// track that observable contract, and the command must still exit zero.
+func TestTaskListSkipsUndecodableKnownFieldSiblingAndProcessesReadableTask(t *testing.T) {
+	root := t.TempDir()
+	failedDir := filepath.Join(root, "tasks", "failed")
+	if err := os.MkdirAll(failedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Readable sibling that must still be processed.
+	validData, err := os.ReadFile(writeCLITaskYAML(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(failedDir, "valid.yaml"), validData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Undecodable sibling: type mismatch on a known field.
+	writeTypeMismatchTaskYAML(t, filepath.Join(failedDir, "type-mismatch.yaml"))
+
+	stdout, stderr, err := executeCommand("task", "list", "--root", root)
+	if err != nil {
+		t.Fatalf("task list must tolerate an undecodable known-field sibling: %v\nstderr=%q", err, stderr)
+	}
+	// The readable sibling is still processed.
+	if !strings.Contains(stdout, "task-cli-test") {
+		t.Fatalf("readable sibling missing from listing: %q", stdout)
+	}
+	// The undecodable sibling is surfaced as a decode-error entry, not silently
+	// dropped and not fatal.
+	if !strings.Contains(stdout, "decode_error") || !strings.Contains(stdout, "type-mismatch.yaml") {
+		t.Fatalf("undecodable known-field sibling must render a decode-error entry: %q", stdout)
+	}
+
+	// JSON output must carry a non-empty DecodeError on the mismatch entry while
+	// still emitting the readable sibling.
+	jsonStdout, _, err := executeCommand("task", "list", "--root", root, "--output", "json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var items []taskListItem
+	if err := json.Unmarshal([]byte(jsonStdout), &items); err != nil {
+		t.Fatalf("parse json: %v\n%s", err, jsonStdout)
+	}
+	var sawValid, sawMismatch bool
+	for _, item := range items {
+		if item.ID == "task-cli-test" {
+			sawValid = true
+		}
+		if item.DecodeError != "" && strings.HasSuffix(item.File, "type-mismatch.yaml") {
+			sawMismatch = true
+		}
+	}
+	if !sawValid || !sawMismatch {
+		t.Fatalf("json scan missed entries: valid=%v mismatch=%v\n%s", sawValid, sawMismatch, jsonStdout)
+	}
+}
+
 func TestTaskListSurfacesUnknownFieldAndUnreadableEntries(t *testing.T) {
 	root := t.TempDir()
 	// Valid task under tasks/failed.

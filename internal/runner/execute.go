@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -100,6 +101,44 @@ type RunResult struct {
 	IdleTimedOut bool `json:"idle_timed_out,omitempty"`
 }
 
+// childEnv builds the environment for a child process from the current process
+// environment, dropping every variable named in remove and then appending the
+// entries in appendVars. remove is applied first so a caller can delete an
+// inherited credential and set a replacement in the same command.
+func childEnv(remove, appendVars []string) []string {
+	environ := os.Environ()
+	if len(remove) == 0 {
+		return append(environ, appendVars...)
+	}
+	filtered := make([]string, 0, len(environ)+len(appendVars))
+	for _, kv := range environ {
+		if !envNameMatches(kv, remove) {
+			filtered = append(filtered, kv)
+		}
+	}
+	return append(filtered, appendVars...)
+}
+
+// envNameMatches reports whether the "NAME=value" entry's key matches any name
+// in names. Windows treats environment variable names case-insensitively, so
+// matching follows the host OS semantics.
+func envNameMatches(kv string, names []string) bool {
+	name := kv
+	if i := strings.IndexByte(kv, '='); i >= 0 {
+		name = kv[:i]
+	}
+	for _, n := range names {
+		if runtime.GOOS == "windows" {
+			if strings.EqualFold(name, n) {
+				return true
+			}
+		} else if name == n {
+			return true
+		}
+	}
+	return false
+}
+
 // RunCommand executes a command plan without going through a shell.
 func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResult, error) {
 	started := time.Now()
@@ -119,8 +158,8 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 	if command.WorkDir != "" {
 		cmd.Dir = command.WorkDir
 	}
-	if len(command.EnvAppend) > 0 {
-		cmd.Env = append(os.Environ(), command.EnvAppend...)
+	if len(command.EnvAppend) > 0 || len(command.EnvRemove) > 0 {
+		cmd.Env = childEnv(command.EnvRemove, command.EnvAppend)
 	}
 	if command.Stdin != "" {
 		cmd.Stdin = strings.NewReader(command.Stdin)

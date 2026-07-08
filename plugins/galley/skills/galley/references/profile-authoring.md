@@ -19,6 +19,7 @@ Backend defaults are intentionally separate:
 
 - Implementation executor default: stored in `environment.yaml` as `executor.default_cli`; unset resolves to Claude when a new task is authored.
 - Review supervisor default: optionally stored in `environment.yaml` as `supervisor.default_cli`; unset falls back to daemon startup state and then Claude.
+- Valid backends for either default are `claude`, `codex`, and `glm`. `glm` runs the Claude Code binary against GLM's Anthropic-compatible endpoint (Z.ai) and requires `glm_api_key` in `daemon.yaml`. The supervisor is the acceptance gate, so its default is the user's choice; the daemon default is `claude`.
 
 Use the bundled schemas as the profile field contract:
 
@@ -111,8 +112,8 @@ Environment profile questions:
 
 1. What is the target repo absolute path?
 2. Which discovered commands are available and safe to run repeatedly?
-3. Which implementation executor should new tasks use by default: `claude`, `codex`, or unset so authoring resolves to Claude?
-4. Should this repository set a review supervisor default: `claude`, `codex`, or unset so daemon startup state decides?
+3. Which implementation executor should new tasks use by default: `claude`, `codex`, `glm`, or unset so authoring resolves to Claude?
+4. Should this repository set a review supervisor default: `claude`, `codex`, `glm`, or unset so daemon startup state decides?
 5. Which discovered setup commands should prepare a fresh task worktree before implementation, if they are known?
 6. Does the repo require local services: DB, Docker, Redis, browser, dev server, Figma MCP, Playwright, cloud CLI?
 7. Is network access allowed, approval-gated, or unavailable?
@@ -261,9 +262,9 @@ Blocking severities:
 - <severity list>
 
 Environment constraints:
-- executor default: <claude|codex|unset>
+- executor default: <claude|codex|glm|unset>
 - required check shell: <auto|sh|bash|cmd|powershell|pwsh>
-- supervisor default: <claude|codex|unset>
+- supervisor default: <claude|codex|glm|unset>
 - network: <value>
 - secrets: <value>
 - destructive commands: <value>

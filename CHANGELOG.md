@@ -6,18 +6,20 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.9.0 - 2026-07-08
+
 ### Changed
 
-- Codex supervisor now runs read-only (`--sandbox read-only`), matching the Claude supervisor.
+- Added `glm` as an executor and supervisor backend. It runs the Claude Code binary against GLM's Anthropic-compatible endpoint (Z.ai) and is valid as `executor.cli` (implementation, setup, and acceptance-skeleton), `environment.yaml` `executor.default_cli`/`supervisor.default_cli`, and `--supervisor`. The Z.ai token is read from `daemon.yaml` `glm_api_key` and injected only into the child process environment; selecting `glm` without a token fails fast at daemon startup or before the executor runs.
+- Packaged Claude and Codex Galley plugins are now versioned as `0.1.20`: task-authoring, setup, and profile guidance document the `glm` backend and its `glm_api_key` requirement, split the executor and supervisor questions, and separate the supervisor's repository default (`supervisor.default_cli`) from a daemon-startup-only choice; bundled task/environment schemas and skeleton generation now accept `glm`.
 
 ### Fixed
 
 - Tasks queued with a `.yml` extension are now executed instead of silently ignored.
 - `task list` and `task show` now resolve the running daemon's root like `queue`/`requeue`.
 - Supervisor `needs_revision`/`hard_stop` verdicts are no longer rejected over a finding's `blocks_acceptance` flag.
-- `task requeue` now rejects a running task instead of risking a double run.
 - `scope.forbidden_paths` can no longer be bypassed by case on case-insensitive filesystems, and preflight ignores `.git` when detecting creator changes.
-- Windows: daemon stop/verification and interrupted-task recovery now work, child process trees are terminated on timeout/cancel, and multi-line `cmd` required checks fail fast.
+- Windows: daemon stop/verification and interrupted-task recovery now work, and child process trees are terminated on timeout/cancel.
 
 ## v0.8.4 - 2026-07-01
 

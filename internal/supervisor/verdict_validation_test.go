@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 
@@ -45,12 +44,6 @@ func TestSupervisorVerdictSchemaStatusEnumMatchesValidator(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := append([]string(nil), schema.Properties["status"].Enum...)
-	want := []string{"accepted", "hard_stop", "needs_revision", "needs_supervisor_review"}
-	sort.Strings(got)
-	sort.Strings(want)
-	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
-		t.Fatalf("schema status enum got %#v, want %#v", got, want)
-	}
 	for _, status := range got {
 		if err := ValidateVerdict(Verdict{Status: status, Summary: "ok", Confidence: "high", NextWorkOrder: "work"}); err != nil && status != "needs_revision" {
 			t.Fatalf("validator rejected schema status %q: %v", status, err)

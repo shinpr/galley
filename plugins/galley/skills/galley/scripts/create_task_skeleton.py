@@ -20,7 +20,7 @@ from typing import Any
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 SCHEMA_PATH = SCRIPT_DIR.parent / "references" / "task.schema.json"
 PROFILE_LOADER_DIR = SCRIPT_DIR / "profile_loader"
-VALID_EXECUTOR_CLIS = {"claude", "codex"}
+VALID_EXECUTOR_CLIS = {"claude", "codex", "glm"}
 ROOT_ORDER = [
     "id",
     "mode",
@@ -93,7 +93,7 @@ def parse_executor_default_payload(stdout: str, path: pathlib.Path) -> str | Non
         raise ValueError(f"profile loader returned invalid JSON: {exc}") from exc
     parsed = str(payload.get("default_cli") or "").strip()
     if parsed and parsed not in VALID_EXECUTOR_CLIS:
-        raise ValueError(f"{path}: executor.default_cli must be one of: claude, codex")
+        raise ValueError(f"{path}: executor.default_cli must be one of: claude, codex, glm")
     return parsed or None
 
 
@@ -253,7 +253,7 @@ def parse_executor_flow_mapping(value: str, path: pathlib.Path) -> str | None:
             parsed = unquote_yaml_scalar(raw_value)
             if parsed in VALID_EXECUTOR_CLIS:
                 return parsed
-            raise ValueError(f"{path}: executor.default_cli must be one of: claude, codex")
+            raise ValueError(f"{path}: executor.default_cli must be one of: claude, codex, glm")
     return None
 
 
@@ -297,7 +297,7 @@ def executor_default_from_environment(path: pathlib.Path) -> str | None:
                 parsed = unquote_yaml_scalar(value)
                 if parsed in VALID_EXECUTOR_CLIS:
                     return parsed
-                raise ValueError(f"{path}: executor.default_cli must be one of: claude, codex")
+                raise ValueError(f"{path}: executor.default_cli must be one of: claude, codex, glm")
     return None
 
 
@@ -313,6 +313,15 @@ def executor_defaults(cli: str) -> dict[str, Any]:
             "cli": "codex",
             "effort": "high",
             "prompt_profile": "codex-executor-v1",
+            "prompt_mode": "replace",
+        }
+    # glm runs the Claude Code binary against GLM's endpoint, so it shares
+    # Claude's prompt profile, effort set, and prompt mode; only the cli differs.
+    if cli == "glm":
+        return {
+            "cli": "glm",
+            "effort": "high",
+            "prompt_profile": "codexized-claude-executor-v1",
             "prompt_mode": "replace",
         }
     return {

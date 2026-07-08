@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/shinpr/galley/internal/daemonconfig"
 )
 
 func TestLoadAndValidateQualityExample(t *testing.T) {
@@ -107,6 +109,20 @@ constraints:
 	}
 }
 
+func TestValidateEnvironmentAcceptsExecutorDefaultCLI(t *testing.T) {
+	for _, value := range []string{"claude", "codex", "glm"} {
+		value := value
+		t.Run(value, func(t *testing.T) {
+			env := validEnvironmentForTest()
+			env.Executor = &ExecutorDefault{DefaultCLI: value}
+			result := ValidateEnvironment(env)
+			if !result.Valid() {
+				t.Fatalf("errors got %#v", result.Errors)
+			}
+		})
+	}
+}
+
 func TestValidateEnvironmentRejectsInvalidExecutorDefault(t *testing.T) {
 	env := Environment{
 		ID:       "local",
@@ -129,7 +145,9 @@ func TestValidateEnvironmentRejectsInvalidExecutorDefault(t *testing.T) {
 }
 
 func TestValidateEnvironmentAcceptsSupervisorDefaultCLI(t *testing.T) {
-	for _, value := range []string{"claude", "codex"} {
+	// Parameterized over the single supervisor-CLI source so a new value forces
+	// this profile-validation site to accept it too — no silent drift.
+	for _, value := range daemonconfig.SupervisorCLIs() {
 		value := value
 		t.Run(value, func(t *testing.T) {
 			env := validEnvironmentForTest()

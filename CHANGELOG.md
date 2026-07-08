@@ -6,6 +6,19 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- Codex supervisor now runs read-only (`--sandbox read-only`), matching the Claude supervisor.
+
+### Fixed
+
+- Tasks queued with a `.yml` extension are now executed instead of silently ignored.
+- `task list` and `task show` now resolve the running daemon's root like `queue`/`requeue`.
+- Supervisor `needs_revision`/`hard_stop` verdicts are no longer rejected over a finding's `blocks_acceptance` flag.
+- `task requeue` now rejects a running task instead of risking a double run.
+- `scope.forbidden_paths` can no longer be bypassed by case on case-insensitive filesystems, and preflight ignores `.git` when detecting creator changes.
+- Windows: daemon stop/verification and interrupted-task recovery now work, child process trees are terminated on timeout/cancel, and multi-line `cmd` required checks fail fast.
+
 ## v0.8.4 - 2026-07-01
 
 ### Changed

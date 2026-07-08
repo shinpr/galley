@@ -65,6 +65,30 @@ func TestRequeueMovesFailedTaskToQueued(t *testing.T) {
 	}
 }
 
+func TestRequeueRejectsRunningTask(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	runningPath := filepath.Join(root, "tasks", "running", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(runningPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(writeTaskYAML(t, "loop_budget: 3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Status = StatusRunning
+	if err := Save(runningPath, loaded); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Requeue(runningPath, RequeueOptions{}); err == nil {
+		t.Fatal("expected requeue of running task to be rejected")
+	}
+	// The running source must remain untouched for the owning daemon.
+	if _, err := os.Stat(runningPath); err != nil {
+		t.Fatalf("running source must be preserved: %v", err)
+	}
+}
+
 func TestRequeuePreservesPRAuthorLogin(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

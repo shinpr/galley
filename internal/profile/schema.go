@@ -57,7 +57,10 @@ func QualityJSONSchema() ([]byte, error) {
 
 func EnvironmentJSONSchema() ([]byte, error) {
 	schema := object(
-		required("id", "cwd", "commands", "constraints"),
+		// commands is not required here: ValidateEnvironment treats an empty
+		// commands map as a warning, not an error, so an editor validating
+		// against this schema must agree and not hard-fail a commandless profile.
+		required("id", "cwd", "constraints"),
 		properties(map[string]any{
 			"id":       stringSchema("minLength", 1, "description", "Repository environment profile identifier."),
 			"cwd":      stringSchema("minLength", 1, "description", "Absolute path to the target repository."),

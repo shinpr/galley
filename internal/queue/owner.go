@@ -82,7 +82,7 @@ func RecoverInterruptedRunning(root string, ownerLive func(Owner) (bool, error))
 	}
 	for _, entry := range entries {
 		name := entry.Name()
-		if !entry.Type().IsRegular() || filepath.Ext(name) != ".yaml" {
+		if !entry.Type().IsRegular() || !isTaskYAMLName(name) {
 			continue
 		}
 		runningPath := filepath.Join(runningDir, name)

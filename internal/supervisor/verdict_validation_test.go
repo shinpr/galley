@@ -179,6 +179,28 @@ func TestValidateVerdictForEvidenceRejectsBlocksAcceptanceMismatch(t *testing.T)
 	}
 }
 
+func TestValidateVerdictForEvidenceAllowsBlocksAcceptanceMismatchOnNeedsRevision(t *testing.T) {
+	// A non-accepted verdict must not be rejected over its findings' blocks_acceptance
+	// flag: the flag is moot when the verdict is already needs_revision, and rejecting
+	// here would discard actionable next_work_order feedback and stall the AFK loop.
+	err := ValidateVerdictForEvidence(Verdict{
+		Status:        "needs_revision",
+		Summary:       "needs work",
+		NextWorkOrder: "fix the failing test",
+		Findings:      []Finding{{Severity: "medium", Category: "correctness", Summary: "bug", BlocksAcceptance: false}},
+		Confidence:    "medium",
+	}, Evidence{
+		Task: task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},
+		Profiles: profile.Bundle{Quality: &profile.Quality{PassPolicy: profile.PassPolicy{
+			BlockingSeverities: []string{"critical", "high", "medium"},
+		}}},
+		DiffDirty: true,
+	})
+	if err != nil {
+		t.Fatalf("expected no error for needs_revision verdict, got: %v", err)
+	}
+}
+
 func TestValidateVerdictForEvidenceAllowsDiscussionItemsOnlyForAccepted(t *testing.T) {
 	evidence := Evidence{
 		Task: task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},

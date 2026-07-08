@@ -62,6 +62,16 @@ func snapshotPreflightFiles(root, excludeRoot string) (map[string]preflightFileF
 			}
 			return nil
 		}
+		// Never treat git metadata as a creator change: it is never a valid
+		// declared output, and in non-worktree runs git operations rewrite
+		// .git/index between the before/after snapshots, which would otherwise
+		// be reported as an undeclared change and fail the whole preflight.
+		if rel == ".git" || strings.HasPrefix(rel, ".git"+string(filepath.Separator)) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		if d.IsDir() {
 			return nil
 		}

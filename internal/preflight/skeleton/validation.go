@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/shinpr/galley/internal/task"
@@ -239,9 +240,9 @@ func pathInsideEffective(rel string, prefixes []string) bool {
 	if rel == "" {
 		return false
 	}
-	clean := filepath.Clean(rel)
+	clean := foldPathCase(filepath.Clean(rel))
 	for _, p := range prefixes {
-		cp := filepath.Clean(p)
+		cp := foldPathCase(filepath.Clean(p))
 		if cp == "." {
 			return true
 		}
@@ -250,6 +251,17 @@ func pathInsideEffective(rel string, prefixes []string) bool {
 		}
 	}
 	return false
+}
+
+// foldPathCase lower-cases a path on platforms whose default filesystem is
+// case-insensitive (Windows NTFS, macOS APFS) so a forbidden_paths entry like
+// "secrets" is not bypassed by a "Secrets" output that lands in the same
+// on-disk directory. On Linux paths stay case-sensitive.
+func foldPathCase(p string) string {
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		return strings.ToLower(p)
+	}
+	return p
 }
 
 // EffectivePreflightPaths resolves preflight allowed paths against task scope.

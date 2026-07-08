@@ -70,6 +70,47 @@ func TestClaimTaskHonorsExistingSourceLock(t *testing.T) {
 	}
 }
 
+func TestQueuedTasksMatchesYmlExtension(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	if err := EnsureLayout(root); err != nil {
+		t.Fatal(err)
+	}
+	ymlPath := filepath.Join(root, "tasks", "queued", "task.yml")
+	if err := task.Save(ymlPath, task.Task{ID: "task", Status: "queued", Scope: task.Scope{CWD: t.TempDir()}}); err != nil {
+		t.Fatal(err)
+	}
+	matches, err := QueuedTasks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 || matches[0] != ymlPath {
+		t.Fatalf("expected .yml task to be queued, got %v", matches)
+	}
+}
+
+func TestRunningRepoCountsSkipsCorruptFileAndCountsYml(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	if err := EnsureLayout(root); err != nil {
+		t.Fatal(err)
+	}
+	repo := t.TempDir()
+	if err := task.Save(filepath.Join(root, "tasks", "running", "good.yml"), task.Task{
+		ID: "good", Status: "running", Scope: task.Scope{CWD: repo},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "tasks", "running", "corrupt.yaml"), []byte("::not yaml::"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	counts, err := RunningRepoCounts(root)
+	if err != nil {
+		t.Fatalf("one corrupt running file must not fail scheduling: %v", err)
+	}
+	if got := counts[RepoConcurrencyKey(repo)]; got != 1 {
+		t.Fatalf("expected .yml running task counted once, got %d (%v)", got, counts)
+	}
+}
+
 func TestRecoverStaleClaimsRequeuesRunningTaskAndRemovesLock(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	if err := EnsureLayout(root); err != nil {

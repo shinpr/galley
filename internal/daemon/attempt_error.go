@@ -3,9 +3,9 @@ package daemon
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 
+	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/task"
 )
 
@@ -46,11 +46,14 @@ func classifyFailureKind(defaultKind string, err error) string {
 	if err == nil {
 		return defaultKind
 	}
-	msg := err.Error()
-	if strings.Contains(msg, "idle timeout") {
+	// Classify via the runner's typed sentinels rather than error-message
+	// substrings so a wording change in the runner cannot silently reclassify
+	// an idle/total timeout as a generic executor failure and hide the
+	// actionable timeout signal from downstream recovery.
+	if errors.Is(err, runner.ErrIdleTimeout) {
 		return "idle_timeout"
 	}
-	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(msg, "timed out") {
+	if errors.Is(err, runner.ErrTimeout) || errors.Is(err, context.DeadlineExceeded) {
 		return "timed_out"
 	}
 	return defaultKind

@@ -4,6 +4,7 @@ package runner
 
 import (
 	"os/exec"
+	"strconv"
 	"syscall"
 )
 
@@ -15,9 +16,14 @@ func killProcessGroup(cmd *exec.Cmd) {
 	if cmd.Process == nil {
 		return
 	}
-	// TODO: Use a Windows Job Object so descendant processes are cleaned up
-	// with the same strength as Unix process group termination.
-	_ = cmd.Process.Kill()
+	// taskkill /T terminates the process together with the descendants it
+	// spawned (node, test runners, git), matching Unix process-group termination
+	// so an idle/timeout/cancel does not leave orphaned children holding worktree
+	// locks. If taskkill cannot terminate the tree, fall back to killing the
+	// direct child so the call never becomes a no-op.
+	if err := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(cmd.Process.Pid)).Run(); err != nil {
+		_ = cmd.Process.Kill()
+	}
 }
 
 // processGroupID falls back to the PID on Windows; force-stop child cleanup

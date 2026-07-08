@@ -179,7 +179,6 @@
   "required": [
     "id",
     "cwd",
-    "commands",
     "constraints"
   ],
   "title": "Galley Environment Profile YAML",

@@ -50,6 +50,12 @@ type Command struct {
 	// intentionally not serialized into command-plan evidence and never holds
 	// the parent process environment.
 	EnvAppend []string `json:"-"`
+	// EnvRemove lists environment variable names to strip from the inherited
+	// parent environment before EnvAppend is applied. Like EnvAppend it is
+	// never serialized into evidence. It exists so a command can delete an
+	// inherited credential (for example ANTHROPIC_API_KEY when redirecting the
+	// Claude binary at a different endpoint) rather than merely shadowing it.
+	EnvRemove []string `json:"-"`
 	Warnings  []string `json:"warnings,omitempty"`
 }
 

@@ -85,7 +85,7 @@ func TestSkillBundledTaskSchemaReferenceCoversCodexCLI(t *testing.T) {
 		t.Fatalf("generated task schema differs from %s; regenerate the skill-bundled reference schema from TaskJSONSchema", TaskSchemaPath)
 	}
 
-	want := []string{"claude", "codex"}
+	want := []string{"claude", "codex", "glm"}
 	for label, data := range map[string][]byte{
 		"generated":          generated,
 		"skill-bundled task": bundled,

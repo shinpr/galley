@@ -107,6 +107,20 @@ constraints:
 	}
 }
 
+func TestValidateEnvironmentAcceptsExecutorDefaultCLI(t *testing.T) {
+	for _, value := range []string{"claude", "codex", "glm"} {
+		value := value
+		t.Run(value, func(t *testing.T) {
+			env := validEnvironmentForTest()
+			env.Executor = &ExecutorDefault{DefaultCLI: value}
+			result := ValidateEnvironment(env)
+			if !result.Valid() {
+				t.Fatalf("errors got %#v", result.Errors)
+			}
+		})
+	}
+}
+
 func TestValidateEnvironmentRejectsInvalidExecutorDefault(t *testing.T) {
 	env := Environment{
 		ID:       "local",
@@ -129,7 +143,7 @@ func TestValidateEnvironmentRejectsInvalidExecutorDefault(t *testing.T) {
 }
 
 func TestValidateEnvironmentAcceptsSupervisorDefaultCLI(t *testing.T) {
-	for _, value := range []string{"claude", "codex"} {
+	for _, value := range []string{"claude", "codex", "glm"} {
 		value := value
 		t.Run(value, func(t *testing.T) {
 			env := validEnvironmentForTest()

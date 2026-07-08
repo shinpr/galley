@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,6 +53,28 @@ func TestPreflightRejectsUnsupportedSupervisor(t *testing.T) {
 	t.Parallel()
 	if _, err := Preflight(Options{Root: t.TempDir(), Supervisor: "opus"}); err == nil {
 		t.Fatal("expected unsupported supervisor error")
+	}
+}
+
+func TestPreflightAcceptsGLMSupervisorWithToken(t *testing.T) {
+	t.Parallel()
+	opts, err := Preflight(Options{Root: t.TempDir(), Supervisor: "glm", GLMAuthToken: "zai-token"})
+	if err != nil {
+		t.Fatalf("glm supervisor with token should be accepted: %v", err)
+	}
+	if opts.Supervisor != "glm" {
+		t.Fatalf("supervisor got %q, want glm", opts.Supervisor)
+	}
+}
+
+func TestPreflightRejectsGLMSupervisorWithoutToken(t *testing.T) {
+	t.Parallel()
+	_, err := Preflight(Options{Root: t.TempDir(), Supervisor: "glm"})
+	if err == nil {
+		t.Fatal("expected glm supervisor without token to fail fast")
+	}
+	if !strings.Contains(err.Error(), "glm_api_key") {
+		t.Fatalf("error must name the missing config key, got %q", err)
 	}
 }
 

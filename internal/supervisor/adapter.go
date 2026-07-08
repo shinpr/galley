@@ -32,6 +32,10 @@ type AdapterOptions struct {
 	ArtifactDir string
 	CodexBin    string
 	ClaudeBin   string
+	// GLMAuthToken is the Z.ai token used when Provider is "glm". A glm
+	// supervisor is the Claude adapter pointed at GLM's endpoint, so it reuses
+	// the entire Claude review path and only redirects via the child env.
+	GLMAuthToken string
 }
 
 // AdapterRequest is the JSON request consumed by built-in supervisor adapters.
@@ -108,10 +112,12 @@ func RunAdapterPayload(ctx context.Context, opts AdapterOptions, request []byte)
 	switch opts.Provider {
 	case "codex":
 		return runCodexAdapter(ctx, opts, request)
-	case "claude":
+	case "claude", "glm":
+		// glm is the Claude review adapter pointed at GLM's endpoint; the
+		// redirect is applied inside runClaudeAdapterForOS based on Provider.
 		return runClaudeAdapter(ctx, opts, request)
 	default:
-		return nil, fmt.Errorf("supervisor provider must be one of: codex, claude")
+		return nil, fmt.Errorf("supervisor provider must be one of: codex, claude, glm")
 	}
 }
 
@@ -238,12 +244,22 @@ func runClaudeAdapterForOS(ctx context.Context, opts AdapterOptions, request []b
 	if opts.ArtifactDir != "" {
 		args = append(args, "--debug-file", debugPath)
 	}
-	_, err = runner.RunCommand(ctx, runner.Command{
+	commandPlan := runner.Command{
 		WorkDir:   opts.WorkDir,
 		Argv:      args,
 		Stdin:     string(request),
 		EnvAppend: []string{"GALLEY_CLAUDE_GUARD_MODE=supervisor"},
-	}, runner.RunOptions{Timeout: opts.Timeout, IdleTimeout: opts.IdleTimeout, StdoutPath: stdoutPath})
+	}
+	// A glm supervisor is this same Claude review command redirected at GLM's
+	// endpoint. Fail fast with the shared config error when the token is unset.
+	if opts.Provider == "glm" {
+		token, terr := runner.ResolveGLMToken(opts.GLMAuthToken)
+		if terr != nil {
+			return nil, terr
+		}
+		runner.RedirectClaudeToGLM(&commandPlan, token)
+	}
+	_, err = runner.RunCommand(ctx, commandPlan, runner.RunOptions{Timeout: opts.Timeout, IdleTimeout: opts.IdleTimeout, StdoutPath: stdoutPath})
 	if err != nil {
 		return nil, fmt.Errorf("claude supervisor failed: %w", err)
 	}

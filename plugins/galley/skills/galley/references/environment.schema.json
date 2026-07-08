@@ -46,7 +46,8 @@
         "default_cli": {
           "enum": [
             "claude",
-            "codex"
+            "codex",
+            "glm"
           ],
           "type": "string"
         }
@@ -155,7 +156,8 @@
         "default_cli": {
           "enum": [
             "claude",
-            "codex"
+            "codex",
+            "glm"
           ],
           "type": "string"
         }

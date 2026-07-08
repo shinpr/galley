@@ -272,8 +272,10 @@ func validateExecutor(result *ValidationResult, t Task) {
 	require(result, slices.Contains(validExecutorCLIs, t.Executor.CLI), "executor.cli must be one of: %s", strings.Join(validExecutorCLIs, ", "))
 	require(result, t.Executor.Effort != "", "executor.effort is required")
 	switch t.Executor.CLI {
-	case "claude":
-		require(result, slices.Contains(validClaudeEfforts, t.Executor.Effort), "executor.effort for claude must be one of: %s", strings.Join(validClaudeEfforts, ", "))
+	case "claude", "glm":
+		// glm runs through the Claude Code binary against GLM's
+		// Anthropic-compatible endpoint, so it accepts the same effort values.
+		require(result, slices.Contains(validClaudeEfforts, t.Executor.Effort), "executor.effort for %s must be one of: %s", t.Executor.CLI, strings.Join(validClaudeEfforts, ", "))
 	case "codex":
 		require(result, slices.Contains(validCodexEfforts, t.Executor.Effort), "executor.effort for codex must be one of: %s", strings.Join(validCodexEfforts, ", "))
 	}

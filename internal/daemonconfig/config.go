@@ -46,6 +46,14 @@ type File struct {
 	HeartbeatInterval    string `yaml:"heartbeat_interval,omitempty"`
 	ShutdownTimeout      string `yaml:"shutdown_timeout,omitempty"`
 	IdleTimeout          string `yaml:"idle_timeout,omitempty"`
+	// GLMAPIKey is the Z.ai API token used when a task selects executor.cli
+	// "glm". The token is read from this operator-owned, 0600 daemon.yaml and
+	// injected only into the executor child process environment as
+	// ANTHROPIC_AUTH_TOKEN (never onto argv or into run evidence). It is
+	// omitempty so daemons that never run glm tasks carry no secret. Absent or
+	// empty is valid here; the missing-token check fails fast at dispatch time
+	// only when a task actually requests executor.cli "glm".
+	GLMAPIKey string `yaml:"glm_api_key,omitempty"`
 	// Notifications configures the opt-in, best-effort notification command
 	// hook the daemon runs after a task reaches a terminal published status.
 	// A nil pointer (absent block) disables notifications entirely; the
@@ -212,8 +220,12 @@ func Load(root string) (File, bool, error) {
 // absent field is always valid because the resolver falls back to the next
 // layer.
 func (f File) Validate() error {
-	if f.Supervisor != "" && f.Supervisor != "claude" && f.Supervisor != "codex" {
-		return fmt.Errorf("supervisor must be one of: claude, codex (got %q)", f.Supervisor)
+	// glm is the Claude binary pointed at GLM's endpoint, so it is a valid
+	// supervisor anywhere claude is. The glm-token requirement is enforced at
+	// daemon startup (daemon.Preflight) using the shared runner helper so this
+	// low-level config package stays decoupled from the executor runner.
+	if f.Supervisor != "" && f.Supervisor != "claude" && f.Supervisor != "codex" && f.Supervisor != "glm" {
+		return fmt.Errorf("supervisor must be one of: claude, codex, glm (got %q)", f.Supervisor)
 	}
 	// max_concurrent_tasks must be >= 1: the daemon always needs at least
 	// one worker to make progress, and silently accepting 0 here just gets
@@ -298,6 +310,13 @@ func marshalDocumentedDefaults() ([]byte, error) {
 	buf.WriteString("#     enabled: true\n")
 	buf.WriteString("#     on: [failed, needs_supervisor_review]\n")
 	buf.WriteString("#     command: \"/path/to/docs/examples/notifications/notify-slack.sh\"\n")
+	buf.WriteString("#\n")
+	buf.WriteString("# glm_api_key: Z.ai API token used only when a task sets executor.cli: glm.\n")
+	buf.WriteString("# GLM runs the Claude Code binary against GLM's Anthropic-compatible endpoint;\n")
+	buf.WriteString("# the token is injected only into the executor child process environment and\n")
+	buf.WriteString("# never appears on the command line or in run evidence. This file is created\n")
+	buf.WriteString("# with 0600 permissions. Leave unset unless you run glm tasks. Example:\n")
+	buf.WriteString("#   glm_api_key: \"<your-z.ai-token>\"\n")
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
 	if err := enc.Encode(defaults); err != nil {

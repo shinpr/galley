@@ -97,7 +97,21 @@ func buildBuiltinCreatorCommandPlan(opts Options, payload []byte) (runner.Comman
 	if task.ExecutorProvider(opts.Task) == "codex" {
 		return buildCodexCreatorCommandPlan(opts, payload)
 	}
-	return buildClaudeCreatorCommandPlan(opts, payload)
+	cmd, perr := buildClaudeCreatorCommandPlan(opts, payload)
+	if perr != nil {
+		return runner.Command{}, perr
+	}
+	// executor.cli "glm" is the Claude binary pointed at GLM's endpoint, so the
+	// acceptance-skeleton creator honors it identically to the implementation
+	// attempt: same redirect, same fail-fast on a missing token.
+	if opts.Task.Executor.CLI == "glm" {
+		token, terr := runner.ResolveGLMToken(opts.GLMAuthToken)
+		if terr != nil {
+			return runner.Command{}, creatorErr("%v", terr)
+		}
+		runner.RedirectClaudeToGLM(&cmd, token)
+	}
+	return cmd, nil
 }
 
 // buildClaudeCreatorCommandPlan builds the Claude provider creator command

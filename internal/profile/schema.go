@@ -67,12 +67,12 @@ func EnvironmentJSONSchema() ([]byte, error) {
 			"commands": map[string]any{"type": "object", "additionalProperties": stringSchema("minLength", 1)},
 			"executor": object(
 				properties(map[string]any{
-					"default_cli": enumSchema([]string{"claude", "codex"}),
+					"default_cli": enumSchema([]string{"claude", "codex", "glm"}),
 				}),
 			),
 			"supervisor": object(
 				properties(map[string]any{
-					"default_cli": enumSchema([]string{"claude", "codex"}),
+					"default_cli": enumSchema([]string{"claude", "codex", "glm"}),
 				}),
 			),
 			"required_checks": object(

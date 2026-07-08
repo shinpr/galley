@@ -100,12 +100,13 @@ type PreflightError struct {
 // backend is intentionally not threaded here: supervisor selection is
 // independent from acceptance skeleton creator provider selection.
 type Options struct {
-	Task      task.Task
-	WorkDir   string
-	RunDir    string
-	Profiles  profile.Bundle
-	ClaudeBin string
-	CodexBin  string
+	Task         task.Task
+	WorkDir      string
+	RunDir       string
+	Profiles     profile.Bundle
+	ClaudeBin    string
+	CodexBin     string
+	GLMAuthToken string
 }
 
 // AcceptanceSkeletonPreflight runs the skeleton creator stage in the prepared

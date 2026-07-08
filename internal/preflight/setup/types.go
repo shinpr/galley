@@ -83,6 +83,7 @@ type Options struct {
 	Profiles               profile.Bundle
 	ClaudeBin              string
 	CodexBin               string
+	GLMAuthToken           string
 	EnvironmentProfilePath string
 	// RepositorySignals is an optional list of repository setup signal paths
 	// (manifests, lockfiles, setup docs) that Galley surfaces to the setup

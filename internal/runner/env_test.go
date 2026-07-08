@@ -56,6 +56,35 @@ func TestRunCommandAppendsGalleyOwnedEnvWithoutPersistingParentEnv(t *testing.T)
 	}
 }
 
+func TestRunCommandEnvRemoveStripsInheritedVariable(t *testing.T) {
+	t.Setenv("GO_WANT_GALLEY_ENV_HELPER", "1")
+	// Seed a real inherited credential in the parent environment; EnvRemove must
+	// delete it from the child even though it is present here.
+	t.Setenv("ANTHROPIC_API_KEY", "real-anthropic-key")
+
+	command := envHelperCommand(t, "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+	command.EnvRemove = []string{"ANTHROPIC_API_KEY"}
+	command.EnvAppend = []string{"ANTHROPIC_AUTH_TOKEN=glm-token"}
+
+	result, err := RunCommand(context.Background(), command, RunOptions{})
+	if err != nil {
+		t.Fatalf("RunCommand: %v\nstderr: %s", err, result.Stderr)
+	}
+	lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
+	want := []string{
+		"ANTHROPIC_API_KEY=",
+		"ANTHROPIC_AUTH_TOKEN=glm-token",
+	}
+	if len(lines) != len(want) {
+		t.Fatalf("helper stdout lines got %v, want %v", lines, want)
+	}
+	for i := range want {
+		if lines[i] != want[i] {
+			t.Fatalf("helper stdout line %d got %q, want %q", i, lines[i], want[i])
+		}
+	}
+}
+
 func envHelperCommand(t *testing.T, keys ...string) Command {
 	t.Helper()
 	exe, err := os.Executable()

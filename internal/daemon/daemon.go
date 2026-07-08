@@ -213,7 +213,13 @@ func runNormalDaemon(ctx context.Context, opts Options) error {
 		runExecutionRunner(ctx, opts)
 	}()
 	wg.Wait()
-	return ctx.Err()
+	// A cancelled context is the normal stop signal (SIGTERM/SIGINT); reporting
+	// context.Canceled as an error makes `galley daemon run` exit non-zero on a
+	// clean shutdown and read as a failed unit under systemd.
+	if err := ctx.Err(); err != nil && !errors.Is(err, context.Canceled) {
+		return err
+	}
+	return nil
 }
 
 // runMaintenanceRunner owns PR comment polling and PR worktree cleanup.
@@ -447,8 +453,11 @@ func repoKeyForClaim(opts Options, queuedPath string, repoCounts map[string]int)
 	if err != nil {
 		return "", false, fmt.Errorf("load queued task for repo limit %s: %w", queuedPath, err)
 	}
-	repoKey := loaded.Scope.CWD
-	if repoKey != "" && repoCounts[repoKey] >= opts.MaxConcurrentPerRepo {
+	if loaded.Scope.CWD == "" {
+		return "", false, nil
+	}
+	repoKey := queue.RepoConcurrencyKey(loaded.Scope.CWD)
+	if repoCounts[repoKey] >= opts.MaxConcurrentPerRepo {
 		return repoKey, true, nil
 	}
 	return repoKey, false, nil

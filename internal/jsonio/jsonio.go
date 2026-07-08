@@ -39,6 +39,12 @@ func Write(path string, value any) error {
 		}
 		return fmt.Errorf("write %s: %w", path, err)
 	}
+	// Flush the file's data to disk before the rename so a crash cannot leave a
+	// durable rename pointing at a truncated/zero-length evidence file.
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("sync %s: %w", tmpPath, err)
+	}
 	if err := file.Close(); err != nil {
 		return fmt.Errorf("close %s: %w", path, err)
 	}

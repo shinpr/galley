@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -73,13 +74,27 @@ func RunAdapter(ctx context.Context, opts AdapterOptions, evidence Evidence) (Ve
 		return Verdict{}, err
 	}
 	var verdict Verdict
-	if err := json.Unmarshal(output, &verdict); err != nil {
+	if err := json.Unmarshal(extractJSONObject(output), &verdict); err != nil {
 		return Verdict{}, fmt.Errorf("decode %s supervisor verdict: %w", opts.Provider, err)
 	}
 	if err := ValidateVerdictForEvidence(verdict, evidence); err != nil {
 		return Verdict{}, err
 	}
 	return verdict, nil
+}
+
+// extractJSONObject returns the substring from the first '{' to the last '}' so
+// a verdict wrapped in incidental prose (which the CLI can emit when the JSON
+// schema is not enforced on argv, e.g. on Windows) still decodes, matching the
+// executor result path's tolerance. If no braces are found the input is
+// returned unchanged so json.Unmarshal produces the original decode error.
+func extractJSONObject(b []byte) []byte {
+	start := bytes.IndexByte(b, '{')
+	end := bytes.LastIndexByte(b, '}')
+	if start < 0 || end < start {
+		return b
+	}
+	return b[start : end+1]
 }
 
 // RunAdapterPayload runs a built-in model supervisor against a serialized AdapterRequest.
@@ -148,7 +163,10 @@ func runCodexAdapter(ctx context.Context, opts AdapterOptions, request []byte) (
 			opts.CodexBin,
 			"exec",
 			"--cd", opts.WorkDir,
-			"--sandbox", "workspace-write",
+			// The supervisor only reviews; a read-only sandbox mirrors the Claude
+			// supervisor's Write-tool lockdown so review runs cannot mutate the
+			// executor's diff that is later committed/PR'd.
+			"--sandbox", "read-only",
 			"--json",
 			"--output-schema", schemaPath,
 			"--output-last-message", outPath,

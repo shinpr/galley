@@ -29,6 +29,35 @@ func shellArgvForOS(goos, command, scratchDir, configuredShell, configuredShellP
 	})
 }
 
+// TestShellArgvForOSWindowsCmdFailsFast pins fail-fast parity: a multi-line cmd
+// required check must abort after the first failing line, like sh/bash `set -e`.
+func TestShellArgvForOSWindowsCmdFailsFast(t *testing.T) {
+	scratch := t.TempDir()
+	command := "build.bat\nrun-tests.bat"
+
+	argv, cleanup, _, err := shellArgvForOS("windows", command, scratch, "cmd", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+	body, err := os.ReadFile(argv[2])
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(body)
+	if strings.Count(got, "if errorlevel 1 exit /b 1") != 2 {
+		t.Fatalf("each cmd line must be followed by a fail-fast guard, got:\n%s", got)
+	}
+	buildIdx := strings.Index(got, "build.bat")
+	guardIdx := strings.Index(got, "if errorlevel 1 exit /b 1")
+	testsIdx := strings.Index(got, "run-tests.bat")
+	if !(buildIdx < guardIdx && guardIdx < testsIdx) {
+		t.Fatalf("fail-fast guard must sit between the two commands, got:\n%s", got)
+	}
+}
+
 // TestShellArgvForOSWindowsUsesScriptFile pins AC5 for required quality-profile
 // checks: Windows verification commands use a single .cmd script execution
 // shape regardless of command length, so the command body never reaches argv

@@ -162,9 +162,9 @@ func Run(ctx context.Context, command string, ev Event, opts Options) (runner.Ru
 	return runner.RunCommand(ctx, cmd, runner.RunOptions{Timeout: timeout})
 }
 
-// truncateRunes shortens s to at most max runes, appending a single-character
+// truncateRunes keeps at most max runes of content, appending a single-rune
 // ellipsis when content was dropped so a downstream reader can tell the summary
-// was clipped.
+// was clipped (a clipped result is therefore up to max+1 runes long).
 func truncateRunes(s string, max int) string {
 	if max <= 0 {
 		return ""

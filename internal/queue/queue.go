@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
+	"strings"
 	"time"
 
+	"github.com/shinpr/galley/internal/pathutil"
 	"github.com/shinpr/galley/internal/task"
 )
 
@@ -32,10 +35,37 @@ func EnsureLayout(root string) error {
 	return nil
 }
 
+// isTaskYAMLName reports whether name is a task file (.yaml or .yml). Both
+// extensions are accepted at queue-authoring time, so every consumer must match
+// both or tasks authored with .yml are silently never claimed.
+func isTaskYAMLName(name string) bool {
+	switch filepath.Ext(name) {
+	case ".yaml", ".yml":
+		return true
+	default:
+		return false
+	}
+}
+
+// taskYAMLFiles returns the task file glob matches (.yaml and .yml) directly
+// under dir, preserving filepath.Glob semantics (missing dir yields no matches,
+// non-regular entries are included exactly as the previous single-extension
+// glob did).
+func taskYAMLFiles(dir string) ([]string, error) {
+	var matches []string
+	for _, ext := range []string{"*.yaml", "*.yml"} {
+		m, err := filepath.Glob(filepath.Join(dir, ext))
+		if err != nil {
+			return nil, err
+		}
+		matches = append(matches, m...)
+	}
+	return matches, nil
+}
+
 // QueuedTasks returns queued task YAML files in deterministic order.
 func QueuedTasks(root string) ([]string, error) {
-	pattern := filepath.Join(root, "tasks", "queued", "*.yaml")
-	matches, err := filepath.Glob(pattern)
+	matches, err := taskYAMLFiles(filepath.Join(root, "tasks", "queued"))
 	if err != nil {
 		return nil, err
 	}
@@ -44,23 +74,39 @@ func QueuedTasks(root string) ([]string, error) {
 }
 
 // RunningRepoCounts returns active running task counts keyed by source repository cwd.
+//
+// A single unreadable or malformed running file is skipped rather than failing
+// the whole call: this function gates scheduling, and hard-failing on one bad
+// file would stall every repo's queue. The key is canonicalized (symlinks
+// resolved, and case-folded on case-insensitive default filesystems) so the same
+// physical repo referenced by different path spellings counts once.
 func RunningRepoCounts(root string) (map[string]int, error) {
 	counts := map[string]int{}
-	matches, err := filepath.Glob(filepath.Join(root, "tasks", "running", "*.yaml"))
+	matches, err := taskYAMLFiles(filepath.Join(root, "tasks", "running"))
 	if err != nil {
 		return nil, err
 	}
 	for _, path := range matches {
 		loaded, err := task.Load(path)
-		if err != nil {
-			return nil, fmt.Errorf("load running task %s: %w", path, err)
+		if err != nil || loaded.Scope.CWD == "" {
+			continue
 		}
-		if loaded.Scope.CWD == "" {
-			return nil, fmt.Errorf("running task %s has empty scope.cwd", path)
-		}
-		counts[loaded.Scope.CWD]++
+		counts[RepoConcurrencyKey(loaded.Scope.CWD)]++
 	}
 	return counts, nil
+}
+
+// RepoConcurrencyKey canonicalizes a repository cwd for per-repo concurrency
+// accounting: it resolves symlinks and relative segments, and folds case on the
+// platforms whose default filesystem is case-insensitive (Windows NTFS, macOS
+// APFS) so /Repo and /repo are not counted as two repositories. Callers that
+// look up counts returned by RunningRepoCounts must key with this function.
+func RepoConcurrencyKey(cwd string) string {
+	key := pathutil.CleanPhysical(cwd)
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		key = strings.ToLower(key)
+	}
+	return key
 }
 
 // ClaimTask claims a queued task into running without overwriting an existing running task.
@@ -100,7 +146,7 @@ func RecoverStaleClaims(root string, ttl time.Duration, now time.Time) error {
 		if now.Sub(info.ModTime()) < ttl {
 			continue
 		}
-		if entry.Type().IsRegular() && filepath.Ext(entry.Name()) == ".yaml" {
+		if entry.Type().IsRegular() && isTaskYAMLName(entry.Name()) {
 			if err := requeueRunningTask(root, path); err != nil {
 				if errors.Is(err, os.ErrExist) {
 					continue

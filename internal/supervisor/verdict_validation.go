@@ -56,14 +56,17 @@ func ValidateVerdictForEvidence(verdict Verdict, evidence Evidence) error {
 	if verdict.Status != "accepted" && len(verdict.DiscussionItems) > 0 {
 		return fmt.Errorf("supervisor verdict discussion_items are only valid for accepted verdicts")
 	}
+	// blocks_acceptance is only meaningful for accepted verdicts; enforcing the
+	// pass-policy mapping on needs_revision/hard_stop verdicts would reject
+	// actionable revision feedback over a moot flag and stall the AFK loop.
+	if verdict.Status != "accepted" {
+		return nil
+	}
 	for i, finding := range verdict.Findings {
 		shouldBlock := severityBlocksAcceptance(finding.Severity, evidence.Profiles.Quality)
 		if finding.BlocksAcceptance != shouldBlock {
 			return fmt.Errorf("supervisor verdict findings[%d].blocks_acceptance=%t does not match pass policy for severity %q", i, finding.BlocksAcceptance, finding.Severity)
 		}
-	}
-	if verdict.Status != "accepted" {
-		return nil
 	}
 	if evidence.DiffDirty && len(verdict.ReviewedFiles) == 0 {
 		return fmt.Errorf("accepted supervisor verdict requires reviewed_files when diff is present")

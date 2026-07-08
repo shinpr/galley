@@ -9,6 +9,19 @@ import (
 	"testing"
 )
 
+func TestExtractJSONObjectStripsSurroundingProse(t *testing.T) {
+	cases := map[string]string{
+		"Here is the verdict:\n{\"status\":\"accepted\"}\nDone.": `{"status":"accepted"}`,
+		`{"status":"accepted"}`:                                  `{"status":"accepted"}`,
+		"no json here":                                           "no json here",
+	}
+	for in, want := range cases {
+		if got := string(extractJSONObject([]byte(in))); got != want {
+			t.Fatalf("extractJSONObject(%q)=%q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestRunAdapterPayloadCodexUsesEmbeddedPromptAndSchema(t *testing.T) {
 	skipPOSIXFakeSupervisorOnWindows(t)
 	binDir := t.TempDir()
@@ -61,10 +74,13 @@ printf '%s\n' '{"event":"done"}'
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"exec", "--sandbox", "workspace-write", "--output-schema", "--output-last-message"} {
+	for _, want := range []string{"exec", "--sandbox", "read-only", "--output-schema", "--output-last-message"} {
 		if !strings.Contains(string(args), want) {
 			t.Fatalf("codex args missing %q:\n%s", want, args)
 		}
+	}
+	if strings.Contains(string(args), "workspace-write") {
+		t.Fatalf("codex supervisor must not run with workspace-write:\n%s", args)
 	}
 	if _, err := os.Stat(filepath.Join(artifactDir, "supervisor-verdict.schema.json")); err != nil {
 		t.Fatal(err)

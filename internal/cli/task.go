@@ -117,7 +117,11 @@ func newTaskListCommand() *cobra.Command {
 		Use:   "list",
 		Short: "List tasks under a Galley workflow root",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			items, err := listTaskItems(root, state)
+			resolvedRoot, err := resolveTaskRoot(root, cmd.Flags().Changed("root"))
+			if err != nil {
+				return err
+			}
+			items, err := listTaskItems(resolvedRoot, state)
 			if err != nil {
 				return err
 			}
@@ -162,7 +166,11 @@ func newTaskShowCommand() *cobra.Command {
 		Short: "Show a task summary and latest failure/review context",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			path, err := resolveTaskPathOrID(root, args[0])
+			resolvedRoot, err := resolveTaskRoot(root, cmd.Flags().Changed("root"))
+			if err != nil {
+				return err
+			}
+			path, err := resolveTaskPathOrID(resolvedRoot, args[0])
 			if err != nil {
 				return err
 			}
@@ -173,7 +181,7 @@ func newTaskShowCommand() *cobra.Command {
 			item := taskSummary(path, loaded)
 			preflight := preflightSummary(loaded)
 			if preflight != nil {
-				applyRuntimePreflight(preflight, root, loaded.ID)
+				applyRuntimePreflight(preflight, resolvedRoot, loaded.ID)
 			}
 			payload := struct {
 				Summary   taskListItem          `json:"summary"`

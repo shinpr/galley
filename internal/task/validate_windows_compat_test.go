@@ -123,11 +123,6 @@ func TestPathForbiddenByScopeNormalizesSeparators(t *testing.T) {
 	if !pathForbiddenByScope(".env", forbidden) {
 		t.Fatalf("expected pathForbiddenByScope to match exact .env")
 	}
-	if !pathForbiddenByScope(".env\\local", forbidden) == false {
-		// .env/local should not match because forbidden is just .env file;
-		// keep behavior consistent: ".env/local" extends boundary so it
-		// must still be reported as inside.
-	}
 	if !pathForbiddenByScope(".env/local", forbidden) {
 		t.Fatalf("expected pathForbiddenByScope to match .env/local")
 	}

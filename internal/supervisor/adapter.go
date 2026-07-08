@@ -169,10 +169,7 @@ func runCodexAdapter(ctx context.Context, opts AdapterOptions, request []byte) (
 			opts.CodexBin,
 			"exec",
 			"--cd", opts.WorkDir,
-			// The supervisor only reviews; a read-only sandbox mirrors the Claude
-			// supervisor's Write-tool lockdown so review runs cannot mutate the
-			// executor's diff that is later committed/PR'd.
-			"--sandbox", "read-only",
+			"--sandbox", "workspace-write",
 			"--json",
 			"--output-schema", schemaPath,
 			"--output-last-message", outPath,

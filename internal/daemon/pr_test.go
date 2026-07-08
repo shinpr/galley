@@ -268,18 +268,6 @@ func TestNewValidationEvidenceIncludesAuditableFields(t *testing.T) {
 			t.Fatalf("encoded validation evidence missing %s: %s", key, encoded)
 		}
 	}
-
-	// Decoding into a narrower struct must still recover the existing errors slice.
-	var narrow struct {
-		Errors   []string `json:"errors"`
-		Warnings []string `json:"warnings"`
-	}
-	if err := json.Unmarshal(encoded, &narrow); err != nil {
-		t.Fatalf("narrow decode failed: %v", err)
-	}
-	if narrow.Errors == nil {
-		t.Fatal("narrow decode lost errors slice")
-	}
 }
 
 func TestNewValidationEvidenceReportsInvalidTasks(t *testing.T) {

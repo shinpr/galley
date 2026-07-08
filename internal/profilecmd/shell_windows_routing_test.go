@@ -29,11 +29,12 @@ func shellArgvForOS(goos, command, scratchDir, configuredShell, configuredShellP
 	})
 }
 
-// TestShellArgvForOSWindowsCmdFailsFast pins fail-fast parity: a multi-line cmd
-// required check must abort after the first failing line, like sh/bash `set -e`.
-func TestShellArgvForOSWindowsCmdFailsFast(t *testing.T) {
+// TestShellArgvForOSWindowsCmdPreservesMultilineVerbatim verifies a multi-line
+// cmd required check is written into the .cmd script exactly as authored, so
+// control-flow constructs (if/for blocks, `^` continuations) are not mangled.
+func TestShellArgvForOSWindowsCmdPreservesMultilineVerbatim(t *testing.T) {
 	scratch := t.TempDir()
-	command := "build.bat\nrun-tests.bat"
+	command := "if exist build.bat (\r\n  build.bat\r\n) else (\r\n  echo skip\r\n)"
 
 	argv, cleanup, _, err := shellArgvForOS("windows", command, scratch, "cmd", "")
 	if err != nil {
@@ -47,14 +48,11 @@ func TestShellArgvForOSWindowsCmdFailsFast(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(body)
-	if strings.Count(got, "if errorlevel 1 exit /b 1") != 2 {
-		t.Fatalf("each cmd line must be followed by a fail-fast guard, got:\n%s", got)
+	if !strings.Contains(got, command) {
+		t.Fatalf("multi-line command must be preserved verbatim, got:\n%s", got)
 	}
-	buildIdx := strings.Index(got, "build.bat")
-	guardIdx := strings.Index(got, "if errorlevel 1 exit /b 1")
-	testsIdx := strings.Index(got, "run-tests.bat")
-	if !(buildIdx < guardIdx && guardIdx < testsIdx) {
-		t.Fatalf("fail-fast guard must sit between the two commands, got:\n%s", got)
+	if strings.Contains(got, "if errorlevel 1 exit /b 1") {
+		t.Fatalf("no per-line guard must be injected into the cmd script, got:\n%s", got)
 	}
 }
 

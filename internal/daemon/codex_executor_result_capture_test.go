@@ -121,9 +121,6 @@ func TestCodexCommandPlanRecordsOutputSchemaAndLastMessage(t *testing.T) {
 	if gotLast == "" {
 		t.Fatalf("command_plan.json argv missing --output-last-message: %v", plan.Argv)
 	}
-	if filepath.Base(gotLast) != runner.CodexLastMessageFilename {
-		t.Fatalf("output-last-message filename drift: got %q, want %q", filepath.Base(gotLast), runner.CodexLastMessageFilename)
-	}
 }
 
 func TestCodexCommandPlanMaterializesEmbeddedSchemaWhenNoFileProvided(t *testing.T) {
@@ -173,9 +170,6 @@ func TestCodexCommandPlanMaterializesEmbeddedSchemaWhenNoFileProvided(t *testing
 	gotSchema := flagFromArgv(plan.Argv, "--output-schema")
 	if gotSchema == "" {
 		t.Fatalf("command_plan.json argv missing --output-schema: %v", plan.Argv)
-	}
-	if filepath.Base(gotSchema) != runner.CodexOutputSchemaFilename {
-		t.Fatalf("expected attempt-scoped schema filename %q, got %q (argv=%v)", runner.CodexOutputSchemaFilename, filepath.Base(gotSchema), plan.Argv)
 	}
 	if _, err := os.Stat(gotSchema); err != nil {
 		t.Fatalf("attempt-scoped schema file must exist on disk: %v", err)

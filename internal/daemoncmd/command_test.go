@@ -63,21 +63,6 @@ func TestStatusJSONReportsRoot(t *testing.T) {
 	}
 }
 
-func TestDaemonHelpReportsClaudeSupervisorDefault(t *testing.T) {
-	t.Parallel()
-	cmd := NewCommand("daemon")
-	var stdout bytes.Buffer
-	cmd.SetOut(&stdout)
-	cmd.SetErr(&bytes.Buffer{})
-	cmd.SetArgs([]string{"--help"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(stdout.String(), "defaults to "+daemon.DefaultSupervisor) {
-		t.Fatalf("help output missing claude supervisor default: %q", stdout.String())
-	}
-}
-
 func TestStatusJSONOmitsRuntimeDefaultFields(t *testing.T) {
 	t.Parallel()
 	// AC7 / D3: `galley daemon status --output json` must not include

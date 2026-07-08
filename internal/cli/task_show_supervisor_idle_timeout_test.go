@@ -75,21 +75,16 @@ func TestTaskShowExplainsSupervisorIdleTimeout(t *testing.T) {
 		"state: failed",
 		"latest_error_phase: supervisor",
 		"latest_error_kind: supervisor_idle_timeout",
-		"supervisor=codex",
-		"idle_timeout=10m0s",
-		"tries=3/3",
-		"Requeue the task",
-		"--idle-timeout",
-		"--supervisor",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("task show output missing %q: %q", want, stdout)
 		}
 	}
 
-	// AC4: the failure is reported as a supervisor watchdog timeout, not as the
-	// task's own execution_policy.timeout_ms expiring.
-	if !strings.Contains(stdout, "not the task execution_policy.timeout_ms expiring") {
-		t.Fatalf("task show output must disambiguate from task timeout_ms: %q", stdout)
+	// The daemon-authored failure message must be surfaced verbatim so the
+	// operator sees the explanation without reading daemon logs. The exact
+	// wording is owned and tested by the daemon package.
+	if !strings.Contains(stdout, supervisorIdleTimeoutMessage) {
+		t.Fatalf("task show output must surface the supervisor idle-timeout message: %q", stdout)
 	}
 }

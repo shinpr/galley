@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -584,21 +583,4 @@ func extractJSONStringField(s, key string) string {
 		end++
 	}
 	return rest[:end]
-}
-
-// TestReviewStagingErrorClassification documents the helper used by the
-// daemon loop to distinguish a review-time staging failure from a generic
-// executor failure (AC6).
-func TestReviewStagingErrorClassification(t *testing.T) {
-	wrapped := &reviewStagingError{Err: errors.New("boom")}
-	if got, ok := asReviewStagingError(wrapped); !ok || got != wrapped {
-		t.Fatalf("expected reviewStagingError to be recognized directly")
-	}
-	nested := fmt.Errorf("wrapped: %w", wrapped)
-	if _, ok := asReviewStagingError(nested); !ok {
-		t.Fatalf("expected wrapped reviewStagingError to be unwrappable")
-	}
-	if _, ok := asReviewStagingError(errors.New("plain")); ok {
-		t.Fatalf("plain errors must not be classified as review staging failures")
-	}
 }

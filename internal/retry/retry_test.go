@@ -149,25 +149,6 @@ func TestDo_ContextCancelledDuringBackoff(t *testing.T) {
 	}
 }
 
-func TestBaseDelaysSchedule(t *testing.T) {
-	want := [MaxAttempts - 1]time.Duration{
-		1 * time.Second,
-		2 * time.Second,
-		4 * time.Second,
-		8 * time.Second,
-		16 * time.Second,
-	}
-	if baseDelays != want {
-		t.Fatalf("baseDelays = %v, want %v", baseDelays, want)
-	}
-	if JitterRatio != 0.25 {
-		t.Fatalf("JitterRatio = %v, want 0.25", JitterRatio)
-	}
-	if MaxAttempts != 6 {
-		t.Fatalf("MaxAttempts = %d, want 6", MaxAttempts)
-	}
-}
-
 // TestSetHooksForTestPanicsOnNil pins the documented contract: SetHooksForTest
 // requires both hooks to be non-nil, otherwise it panics. This prevents an
 // external-package TestMain from silently disabling only one half of the

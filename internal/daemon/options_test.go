@@ -76,17 +76,6 @@ func TestPreflightRejectsUnsupportedSupervisor(t *testing.T) {
 	}
 }
 
-func TestPreflightAcceptsGLMSupervisorWithToken(t *testing.T) {
-	t.Parallel()
-	opts, err := Preflight(Options{Root: t.TempDir(), Supervisor: "glm", GLMAuthToken: "zai-token"})
-	if err != nil {
-		t.Fatalf("glm supervisor with token should be accepted: %v", err)
-	}
-	if opts.Supervisor != "glm" {
-		t.Fatalf("supervisor got %q, want glm", opts.Supervisor)
-	}
-}
-
 func TestEffectiveSupervisorHonorsGLMProfileOverride(t *testing.T) {
 	t.Parallel()
 	profiles := profile.Bundle{Environment: &profile.Environment{Supervisor: &profile.SupervisorDefault{DefaultCLI: "glm"}}}

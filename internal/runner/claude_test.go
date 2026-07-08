@@ -85,8 +85,9 @@ func TestClaudeCommandPlanIncludesWorkDirAndWarnings(t *testing.T) {
 	if command.WorkDir != "/tmp/project" {
 		t.Fatalf("work dir mismatch: %q", command.WorkDir)
 	}
-	if len(command.Warnings) != 1 {
-		t.Fatalf("expected 1 warning, got %#v", command.Warnings)
+	joinedWarnings := strings.Join(command.Warnings, "\n")
+	if !strings.Contains(joinedWarnings, "bypassPermissions") || !strings.Contains(joinedWarnings, "isolated sandbox/worktree") {
+		t.Fatalf("expected bypassPermissions sandbox/worktree safety warning, got %#v", command.Warnings)
 	}
 }
 

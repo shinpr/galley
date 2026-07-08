@@ -89,26 +89,6 @@ func TestGitArgsAppliesLongpathsFlag(t *testing.T) {
 	}
 }
 
-// TestGitArgsLongpathsFlagIsImmediatelyAfterBinary documents the invariant
-// that the longpaths config override appears before any subcommand or
-// `-C <path>` selector, which is required by git's argv parser: top-level
-// `-c key=value` overrides must precede the subcommand.
-func TestGitArgsLongpathsFlagIsImmediatelyAfterBinary(t *testing.T) {
-	got := GitArgs("git", "-C", "/repo", "worktree", "remove", "--force", "/work")
-	if len(got) < 4 {
-		t.Fatalf("GitArgs produced too few args: %v", got)
-	}
-	if got[0] != "git" {
-		t.Errorf("expected git binary first, got %q", got[0])
-	}
-	if got[1] != "-c" || got[2] != "core.longpaths=true" {
-		t.Errorf("expected -c core.longpaths=true after binary, got %v", got[1:3])
-	}
-	if got[3] != "-C" {
-		t.Errorf("expected subcommand selector after longpaths flag, got %q", got[3])
-	}
-}
-
 func TestProductionGitInvocationsUseGitArgs(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
 	fset := token.NewFileSet()

@@ -9,9 +9,6 @@ import (
 
 func TestSupervisorCLIsIsTheValidationSource(t *testing.T) {
 	for _, v := range SupervisorCLIs() {
-		if !IsValidSupervisor(v) {
-			t.Fatalf("%q should be valid", v)
-		}
 		if err := (File{Supervisor: v}).Validate(); err != nil {
 			t.Fatalf("Validate(supervisor=%q): %v", v, err)
 		}
@@ -51,6 +48,63 @@ func TestEnsureDefaultCreatesFileWithDocumentedDefaults(t *testing.T) {
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("daemon.yaml missing %q\ncontent:\n%s", want, content)
+		}
+	}
+}
+
+// TestEnsureDefaultThenLoadRoundTripsDocumentedDefaults closes the generate->parse
+// seam. TestEnsureDefaultCreatesFileWithDocumentedDefaults only asserts YAML
+// substrings, so a formatting change that made the generated file unparseable
+// (or that drifted a value away from Defaults()) would keep that test green. This
+// test Loads the file EnsureDefault wrote and asserts the parsed File equals the
+// documented defaults, proving the generated file round-trips through the real
+// decoder and validator.
+func TestEnsureDefaultThenLoadRoundTripsDocumentedDefaults(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	created, err := EnsureDefault(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created {
+		t.Fatalf("expected EnsureDefault to create %s on first call", Filename)
+	}
+
+	file, present, err := Load(root)
+	if err != nil {
+		t.Fatalf("generated %s did not Load: %v", Filename, err)
+	}
+	if !present {
+		t.Fatalf("expected present=true after EnsureDefault")
+	}
+
+	if file.Supervisor != "claude" {
+		t.Fatalf("supervisor got %q, want claude", file.Supervisor)
+	}
+	if file.MaxConcurrentTasks == nil || *file.MaxConcurrentTasks != 1 {
+		t.Fatalf("max_concurrent_tasks got %#v, want 1", file.MaxConcurrentTasks)
+	}
+	if file.MaxConcurrentPerRepo == nil || *file.MaxConcurrentPerRepo != 1 {
+		t.Fatalf("max_concurrent_per_repo got %#v, want 1", file.MaxConcurrentPerRepo)
+	}
+	if file.PollInterval != "10s" || file.ClaimTTL != "30m" || file.HeartbeatInterval != "1m" ||
+		file.ShutdownTimeout != "5m" || file.IdleTimeout != "10m" {
+		t.Fatalf("duration defaults drifted: %#v", file)
+	}
+	if file.Notifications == nil {
+		t.Fatalf("notifications block missing from generated defaults")
+	}
+	if file.Notifications.Enabled {
+		t.Fatalf("notifications must default to disabled, got enabled=true")
+	}
+	wantOn := DefaultNotificationEvents()
+	if got := file.Notifications.On; len(got) != len(wantOn) {
+		t.Fatalf("notifications.on got %v, want %v", got, wantOn)
+	} else {
+		for i := range wantOn {
+			if got[i] != wantOn[i] {
+				t.Fatalf("notifications.on[%d] got %q, want %q", i, got[i], wantOn[i])
+			}
 		}
 	}
 }

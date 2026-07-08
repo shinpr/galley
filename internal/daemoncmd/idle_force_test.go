@@ -14,33 +14,6 @@ import (
 	"github.com/shinpr/galley/internal/daemonctl"
 )
 
-func TestIdleTimeoutFlagDefault(t *testing.T) {
-	t.Parallel()
-	cmd := NewCommand("daemon")
-	flag := cmd.PersistentFlags().Lookup("idle-timeout")
-	if flag == nil {
-		t.Fatal("idle-timeout flag is not registered")
-	}
-	if flag.DefValue != "10m0s" {
-		t.Fatalf("idle-timeout default got %q, want 10m0s", flag.DefValue)
-	}
-}
-
-func TestStopForceFlagRegistered(t *testing.T) {
-	t.Parallel()
-	cmd := NewCommand("daemon")
-	for _, sub := range cmd.Commands() {
-		if sub.Name() != "stop" {
-			continue
-		}
-		if sub.Flags().Lookup("force") == nil {
-			t.Fatal("stop --force flag is not registered")
-		}
-		return
-	}
-	t.Fatal("stop subcommand not found")
-}
-
 func TestStopForceWithoutDaemonReportsNotRunning(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

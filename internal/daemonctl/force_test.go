@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -41,6 +42,12 @@ func TestForceStopGracefulSucceedsWithoutKill(t *testing.T) {
 
 func TestForceStopKillsUnresponsiveDaemonAfterTimeout(t *testing.T) {
 	t.Parallel()
+	if runtime.GOOS == "windows" {
+		// Windows Stop is an immediate TerminateProcess with no graceful phase,
+		// so a process cannot ignore shutdown to force the escalation-after-
+		// timeout path this test exercises.
+		t.Skip("no graceful-stop escalation path on Windows (Stop is TerminateProcess)")
+	}
 	shPath, err := exec.LookPath("sh")
 	if err != nil {
 		t.Skip("sh not available")

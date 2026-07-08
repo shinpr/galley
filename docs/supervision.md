@@ -12,17 +12,17 @@ For newly authored tasks, Galley resolves the executor in this order:
 
 The generated task records the selected backend in `executor.cli`. After that, the task YAML is authoritative: existing tasks keep their configured executor unless the task file is edited.
 
-Galley supports Claude Code and Codex as executor backends. Acceptance skeleton preflight, structured executor results, run evidence, and supervisor review use the same contracts across both backends.
+Galley supports Claude Code, Codex, and GLM as executor backends. GLM runs the `claude` binary against GLM's Z.ai endpoint and needs a `glm_api_key` in `daemon.yaml`. Acceptance skeleton preflight, structured executor results, run evidence, and supervisor review use the same contracts across all backends.
 
-The executor backend in `executor.cli` also drives acceptance skeleton preflight. A Codex task creates skeletons with Codex; a Claude task creates them with Claude Code.
+The executor backend in `executor.cli` also drives acceptance skeleton preflight. A Codex task creates skeletons with Codex; a Claude or GLM task creates them with the Claude Code binary.
 
 See [task-yaml.md](task-yaml.md) for the full `executor` block and [../examples/afk-task-codex.yaml](../examples/afk-task-codex.yaml) for a Codex task example.
 
 ## Supervisors
 
-Supervisor review defaults to Claude. Use `--supervisor codex` to select Codex instead, or `--supervisor claude` to be explicit.
+Supervisor review defaults to Claude. Use `--supervisor codex` for Codex, `--supervisor glm` for GLM (the `claude` binary pointed at GLM's Z.ai endpoint; needs `glm_api_key` in `daemon.yaml`), or `--supervisor claude` to be explicit. The supervisor is the acceptance gate; the backend is your choice.
 
-Both supervisor backends use the same verdict contract, retry budget, and evidence layout. Repository-specific PR behavior, comment polling, and worktree cleanup live in the environment profile resolved from `scope.cwd`.
+All supervisor backends use the same verdict contract, retry budget, and evidence layout. Repository-specific PR behavior, comment polling, and worktree cleanup live in the environment profile resolved from `scope.cwd`.
 
 Supervisor selection controls only review. It is independent from the executor backend in `executor.cli`.
 

@@ -3,6 +3,8 @@ package profile
 import (
 	"bytes"
 	"encoding/json"
+
+	"github.com/shinpr/galley/internal/daemonconfig"
 )
 
 const (
@@ -72,7 +74,7 @@ func EnvironmentJSONSchema() ([]byte, error) {
 			),
 			"supervisor": object(
 				properties(map[string]any{
-					"default_cli": enumSchema([]string{"claude", "codex", "glm"}),
+					"default_cli": enumSchema(daemonconfig.SupervisorCLIs()),
 				}),
 			),
 			"required_checks": object(

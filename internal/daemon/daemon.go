@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -284,8 +285,8 @@ func processQueuedTasks(ctx context.Context, opts Options) (int, error) {
 // Preflight resolves daemon options and verifies startup prerequisites.
 func Preflight(opts Options) (Options, error) {
 	opts = opts.withDefaults()
-	if opts.Supervisor != "codex" && opts.Supervisor != "claude" && opts.Supervisor != "glm" {
-		return Options{}, fmt.Errorf("supervisor must be one of: codex, claude, glm")
+	if !daemonconfig.IsValidSupervisor(opts.Supervisor) {
+		return Options{}, fmt.Errorf("supervisor must be one of: %s", strings.Join(daemonconfig.SupervisorCLIs(), ", "))
 	}
 	// glm rides the Claude binary, so a glm supervisor needs the same token as a
 	// glm executor. Fail fast at startup rather than at first review.
@@ -574,6 +575,15 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	profiles, resolvedProfiles, err := loadAndPersistTaskProfiles(opts, &loaded, runDir)
 	if err != nil {
 		return failClaimedStage(opts.Root, runningPath, &loaded, "run_evidence", "run_evidence_failed", err, runDir)
+	}
+
+	// A per-task environment.yaml supervisor.default_cli: glm override bypasses
+	// startup Preflight, so validate the token here — before setup/executor —
+	// rather than failing at the supervisor call after a full attempt ran.
+	if effectiveOptionsForProfiles(opts, profiles).Supervisor == "glm" {
+		if _, tokenErr := runner.ResolveGLMToken(opts.GLMAuthToken); tokenErr != nil {
+			return failClaimedStage(opts.Root, runningPath, &loaded, "supervisor_preflight", "supervisor_config_failed", fmt.Errorf("supervisor is \"glm\": %w", tokenErr), runDir)
+		}
 	}
 
 	prepared, err := prepareClaimedWorkspace(ctx, opts, profiles, runningPath, runDir, &loaded)

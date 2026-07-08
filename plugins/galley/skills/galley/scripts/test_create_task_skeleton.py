@@ -242,6 +242,28 @@ def main() -> int:
     if generated_executor_cli(yaml_text) != "codex":
         raise SystemExit("regression: explicit --executor-cli should override environment default")
 
+    # glm is a valid executor backend (Claude binary against GLM's endpoint), so
+    # both the environment default and an explicit --executor-cli must generate
+    # executor.cli: glm rather than silently falling back to claude.
+    with tempfile.TemporaryDirectory() as tmp:
+        tmpdir = pathlib.Path(tmp)
+        fake_cwd = tmpdir / "repo"
+        fake_cwd.mkdir(parents=True, exist_ok=True)
+        root = tmpdir / "galley"
+        write_environment_default(root, fake_cwd, "glm")
+        yaml_text = generate_skeleton(tmpdir, root=root)
+    if generated_executor_cli(yaml_text) != "glm":
+        raise SystemExit("regression: environment executor default glm should generate executor.cli: glm")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmpdir = pathlib.Path(tmp)
+        fake_cwd = tmpdir / "repo"
+        fake_cwd.mkdir(parents=True, exist_ok=True)
+        root = tmpdir / "galley"
+        yaml_text = generate_skeleton(tmpdir, "--executor-cli", "glm", root=root)
+    if generated_executor_cli(yaml_text) != "glm":
+        raise SystemExit("regression: explicit --executor-cli glm should generate executor.cli: glm")
+
     assert_fallback_parser_executor_default(
         'id: "test"\ncwd: "/tmp/repo"\ncommands: {}\nexecutor:\n  default_cli: "claude"\n',
         "claude",

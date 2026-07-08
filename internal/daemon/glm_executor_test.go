@@ -1,19 +1,5 @@
 package daemon
 
-// GLM executor wiring: a task with executor.cli "glm" reuses the Claude launch
-// path but redirects the Claude binary at GLM's Anthropic-compatible endpoint
-// via the child environment, and fails fast when the operator did not configure
-// a GLM token.
-//
-// Behavior under test:
-//   - applyGLMEnv injects ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN into the
-//     command's EnvAppend and marks ANTHROPIC_API_KEY for removal from the
-//     inherited child environment, without ever placing the token on argv.
-//   - prepareGLMExecutorPlan fails fast with an actionable, token-free error
-//     when opts.GLMAuthToken is empty or blank.
-//   - executorVerificationCmd labels a glm run distinctly so reviewers can tell
-//     the run used GLM from the saved task file alone.
-
 import (
 	"strings"
 	"testing"

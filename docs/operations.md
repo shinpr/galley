@@ -150,7 +150,7 @@ The `command` string is operator-owned. Task content is untrusted and is deliver
 
 ### Supervisor resolution
 
-`--supervisor` selects the built-in supervisor adapter (`claude` or `codex`). The daemon resolves the supervisor for each task in this order:
+`--supervisor` selects the built-in supervisor adapter (`claude`, `codex`, or `glm`). `glm` runs the `claude` binary against GLM's Z.ai endpoint and needs a `glm_api_key` in `daemon.yaml`. The daemon resolves the supervisor for each task in this order:
 
 1. The repository `environment.yaml` `supervisor.default_cli` (resolved from `scope.cwd`). This overrides every layer below for that task only.
 2. The daemon CLI `--supervisor` startup flag.

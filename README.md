@@ -11,7 +11,7 @@
 
 Galley is a local runtime for supervised AI coding tasks.
 
-It runs Claude Code or Codex in a git worktree, records evidence for each attempt, and asks a supervisor model to accept, retry, or escalate the result before the work is treated as done.
+It runs Claude Code, Codex, or GLM in a git worktree, records evidence for each attempt, and asks a supervisor model to accept, retry, or escalate the result before the work is treated as done.
 
 Galley is for tasks where the output should be inspectable later: the request, scope, checks, diffs, and supervisor verdict stay on disk.
 
@@ -121,8 +121,8 @@ run evidence + git diff
 - **Task YAML**: trusted local input describing the goal, acceptance criteria, scope, executor, verification, worktree, and PR behavior. See [docs/task-yaml.md](docs/task-yaml.md).
 - **Quality profile**: optional repository expectations for required checks, review dimensions, evidence, and pass policy. See [docs/profiles.md](docs/profiles.md).
 - **Environment profile**: optional repository defaults for command names, executor choice, local constraints, PR behavior, and cleanup policy. See [docs/profiles.md](docs/profiles.md).
-- **Executor**: Claude Code or Codex backend that implements the task. New tasks use `environment.yaml` `executor.default_cli` when configured, otherwise Claude.
-- **Supervisor**: Claude or Codex backend that reviews the result against acceptance criteria, required checks, and recorded evidence.
+- **Executor**: Claude Code, Codex, or GLM backend that implements the task. New tasks use `environment.yaml` `executor.default_cli` when configured, otherwise Claude. GLM runs the `claude` binary against GLM's Z.ai endpoint, so it needs `claude` on your PATH and a `glm_api_key` in `daemon.yaml`.
+- **Supervisor**: Claude, Codex, or GLM backend that reviews the result against acceptance criteria, required checks, and recorded evidence. It is the acceptance gate; the default is Claude.
 - **Worktree**: isolated git checkout used for AFK execution so the source repository stays clean.
 - **Evidence**: files under `runs/<run-id>/` that make each attempt auditable after the fact.
 

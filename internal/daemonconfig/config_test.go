@@ -7,6 +7,23 @@ import (
 	"testing"
 )
 
+func TestSupervisorCLIsIsTheValidationSource(t *testing.T) {
+	for _, v := range SupervisorCLIs() {
+		if !IsValidSupervisor(v) {
+			t.Fatalf("%q should be valid", v)
+		}
+		if err := (File{Supervisor: v}).Validate(); err != nil {
+			t.Fatalf("Validate(supervisor=%q): %v", v, err)
+		}
+	}
+	if IsValidSupervisor("bogus") {
+		t.Fatal("off-enum value must be invalid")
+	}
+	if err := (File{Supervisor: "bogus"}).Validate(); err == nil {
+		t.Fatal("off-enum supervisor must fail Validate")
+	}
+}
+
 func TestEnsureDefaultCreatesFileWithDocumentedDefaults(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

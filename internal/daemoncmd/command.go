@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -59,13 +60,11 @@ func NewCommand(use string) *cobra.Command {
 				}
 			}()
 			if supervisorProvider != "" {
-				switch supervisorProvider {
-				case "codex", "claude":
-					opts.Supervisor = supervisorProvider
-					opts.SupervisorSource = daemon.SupervisorSourceCLI
-				default:
-					return fmt.Errorf("--supervisor must be one of: codex, claude")
+				if !daemonconfig.IsValidSupervisor(supervisorProvider) {
+					return fmt.Errorf("--supervisor must be one of: %s", strings.Join(daemonconfig.SupervisorCLIs(), ", "))
 				}
+				opts.Supervisor = supervisorProvider
+				opts.SupervisorSource = daemon.SupervisorSourceCLI
 			}
 			opts.Explicit = explicitOptionsFromFlags(cmd)
 			if pollInterval > 0 {
@@ -135,7 +134,7 @@ func NewCommand(use string) *cobra.Command {
 	flags.DurationVar(&opts.HeartbeatInterval, "heartbeat-interval", 0, "Running task heartbeat interval; defaults to min(claim-ttl/4, 1m)")
 	flags.DurationVar(&opts.ShutdownTimeout, "shutdown-timeout", 5*time.Minute, "After SIGINT/SIGTERM, let active attempts finish for this duration before canceling them")
 	flags.DurationVar(&opts.IdleTimeout, "idle-timeout", 10*time.Minute, "Kill an executor or built-in supervisor subprocess that produces no stdout/stderr output for this duration")
-	flags.StringVar(&supervisorProvider, "supervisor", "", fmt.Sprintf("Built-in supervisor adapter: claude or codex; defaults to %s", daemon.DefaultSupervisor))
+	flags.StringVar(&supervisorProvider, "supervisor", "", fmt.Sprintf("Built-in supervisor adapter: %s; defaults to %s", strings.Join(daemonconfig.SupervisorCLIs(), ", "), daemon.DefaultSupervisor))
 	flags.StringVar(&pidFile, "pid-file", "", "PID file path for start, stop, and status; defaults to ROOT/galley-daemon.pid")
 	flags.StringVar(&logFile, "log-file", "", "Log file path for start; defaults to ROOT/galley-daemon.log")
 	flags.DurationVar(&stopTimeout, "stop-timeout", 30*time.Second, "How long stop waits after sending SIGTERM")

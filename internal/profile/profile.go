@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/shinpr/galley/internal/daemonconfig"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -226,7 +227,7 @@ func ValidateEnvironment(env Environment) ValidationResult {
 		require(&result, validExecutorCLI(env.Executor.DefaultCLI), "executor.default_cli must be one of: claude, codex, glm")
 	}
 	if env.Supervisor != nil && env.Supervisor.DefaultCLI != "" {
-		require(&result, validSupervisorCLI(env.Supervisor.DefaultCLI), "supervisor.default_cli must be one of: claude, codex, glm")
+		require(&result, daemonconfig.IsValidSupervisor(env.Supervisor.DefaultCLI), "supervisor.default_cli must be one of: %s", strings.Join(daemonconfig.SupervisorCLIs(), ", "))
 	}
 	if env.RequiredChecks.Shell != "" {
 		require(&result, validRequiredCheckShell(env.RequiredChecks.Shell), "required_checks.shell must be one of: auto, sh, bash, cmd, powershell, pwsh")
@@ -281,18 +282,6 @@ func validateSetupCommandText(result *ValidationResult, field, value string, max
 }
 
 func validExecutorCLI(value string) bool {
-	switch value {
-	case "claude", "codex", "glm":
-		return true
-	default:
-		return false
-	}
-}
-
-// validSupervisorCLI mirrors validExecutorCLI for the repository-scoped
-// supervisor selection. Allowed values are the two built-in supervisor
-// adapters Galley supports.
-func validSupervisorCLI(value string) bool {
 	switch value {
 	case "claude", "codex", "glm":
 		return true

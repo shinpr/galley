@@ -1,10 +1,5 @@
 package supervisor
 
-// A "glm" supervisor is the Claude review adapter pointed at GLM's endpoint. It
-// must reuse the entire Claude review path, inject the GLM endpoint + token into
-// the child env, strip any inherited ANTHROPIC_API_KEY, and fail fast when no
-// token is configured.
-
 import (
 	"context"
 	"os"

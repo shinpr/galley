@@ -1,9 +1,5 @@
 package skeleton
 
-// The acceptance-skeleton creator is one of the executor roles, so executor.cli
-// "glm" must redirect it to GLM's endpoint exactly like the implementation
-// attempt, and fail fast when no token is configured.
-
 import (
 	"strings"
 	"testing"

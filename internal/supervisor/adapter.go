@@ -250,8 +250,7 @@ func runClaudeAdapterForOS(ctx context.Context, opts AdapterOptions, request []b
 		Stdin:     string(request),
 		EnvAppend: []string{"GALLEY_CLAUDE_GUARD_MODE=supervisor"},
 	}
-	// A glm supervisor is this same Claude review command redirected at GLM's
-	// endpoint. Fail fast with the shared config error when the token is unset.
+	// glm redirects this same Claude review command to GLM's endpoint.
 	if opts.Provider == "glm" {
 		token, terr := runner.ResolveGLMToken(opts.GLMAuthToken)
 		if terr != nil {

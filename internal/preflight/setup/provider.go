@@ -46,9 +46,7 @@ func BuildExecutorCommandPlan(opts Options, payload []byte) (runner.Command, str
 		if err != nil {
 			return runner.Command{}, "claude", err
 		}
-		// executor.cli "glm" is the Claude binary pointed at GLM's endpoint, so
-		// the setup executor honors it identically to the implementation
-		// attempt: same redirect, same fail-fast on a missing token.
+		// glm redirects the setup executor to GLM's endpoint like any executor role.
 		if opts.Task.Executor.CLI == "glm" {
 			token, terr := runner.ResolveGLMToken(opts.GLMAuthToken)
 			if terr != nil {

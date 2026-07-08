@@ -1,9 +1,5 @@
 package runner
 
-// GLM redirect: "glm" is the Claude binary pointed at GLM's endpoint. The
-// shared redirect injects the endpoint + token into the child environment and
-// strips any inherited ANTHROPIC_API_KEY, and the token never reaches argv.
-
 import (
 	"strings"
 	"testing"

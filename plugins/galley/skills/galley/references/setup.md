@@ -41,7 +41,7 @@ Use `galley` for later commands when it works on `PATH`; otherwise use the verif
 
 The installer installs the `galley` binary. By default it downloads a prebuilt GitHub Release asset; `--local` builds from the current checkout. Daemon operations are available under `<galley-bin> daemon ...`.
 
-Check provider CLIs after the user chooses execution backends: run `claude --version` when Claude is selected as implementation executor or daemon supervisor, and `codex --version` when Codex is selected as implementation executor or daemon supervisor. Check `gh auth status` when the accepted profile proposal enables PR automation.
+Check provider CLIs after the user chooses execution backends: run `claude --version` when Claude is selected as implementation executor or daemon supervisor, and `codex --version` when Codex is selected as implementation executor or daemon supervisor. `glm` uses the same `claude` binary, so `claude --version` covers it; when `glm` is selected, additionally confirm `glm_api_key` is set in `daemon.yaml`. If it is unset or unknown, ask the user to set it, choose `claude`/`codex`, or defer daemon start. Check `gh auth status` when the accepted profile proposal enables PR automation.
 
 ## Repository Layout
 
@@ -83,7 +83,7 @@ Setup includes repository profiles. After resolving the profile paths:
 - Profile creation starts by reading `references/quality.schema.json` and `references/environment.schema.json`; use schema defaults as the proposed values unless repo evidence or user choices point elsewhere.
 - `quality.yaml` proposal includes required checks, review dimensions, evidence requirements, and blocking severities.
 - `environment.yaml` proposal includes cwd, commands, optional setup commands for fresh worktree readiness, implementation executor default, optional required-check shell, network/secrets/destructive-command constraints, PR creation, PR comment handling, base branch, and worktree cleanup.
-- The profile intake order is schema review, review strictness, implementation executor choice, optional daemon supervisor choice, then repository inspection approval. Store the implementation executor choice in `environment.yaml` as `executor.default_cli`; carry the supervisor choice into the daemon startup plan only, because it is not an environment profile field. PR automation is a profile proposal decision; daemon supervisor changes are applied at daemon start.
+- The profile intake order is schema review, review strictness, implementation executor choice, supervisor choice, then repository inspection approval. Store the implementation executor choice in `environment.yaml` as `executor.default_cli`. The supervisor has two save targets — ask which the user wants and do not mix them: a repository default in `environment.yaml` `supervisor.default_cli` (overrides per task for this repo), or a daemon-wide choice applied at daemon start (`--supervisor` / `daemon.yaml`). PR automation is a profile proposal decision.
 - Profile creation requires repository inspection approval and profile approval before writing files.
 - Inspect the repository after approval, then draft candidate profiles from discovered commands, CI, README, config, and existing local guidance.
 - Present one combined profile proposal after inspection. Include the evidence behind each required check and each environment setting.
@@ -93,14 +93,16 @@ Setup includes repository profiles. After resolving the profile paths:
 When setup needs to ask for both backend choices, use this shape during profile intake:
 
 ```markdown
-Galley can use `claude` or `codex` separately for implementation and review.
+Galley can use `claude`, `codex`, or `glm` separately for implementation and review. `glm` runs the Claude Code binary against GLM's Anthropic-compatible endpoint (Z.ai) and requires `glm_api_key` in `daemon.yaml`; it is valid for both roles. The supervisor is the acceptance gate, so its backend is the user's choice; the daemon default is `claude`.
 
-- Implementation executor: writes the task changes in the worktree and is stored in `environment.yaml` as `executor.default_cli` for new task authoring.
-- Review supervisor: reviews completed attempts and is applied when starting or restarting the daemon.
+- Implementation executor: writes the task changes in the worktree, stored in `environment.yaml` as `executor.default_cli`.
+- Review supervisor: the acceptance gate. Its backend is saved either as a repository default (`environment.yaml` `supervisor.default_cli`) or for daemon startup only (`--supervisor` / `daemon.yaml`).
 
-Which implementation executor should new tasks use? Which review supervisor should the daemon use?
+Answer each separately:
 
-If the executor is left unset, new task authoring uses Claude. If the supervisor is left unset, the daemon uses Claude.
+- Implementation executor: `claude`, `codex`, `glm`, or unset (unset → new task authoring uses Claude).
+- Review supervisor backend: `claude`, `codex`, `glm`, or unset (unset → the daemon uses Claude).
+- Review supervisor save target: repository default (`supervisor.default_cli`) or daemon startup only.
 ```
 
 ```bash
@@ -112,8 +114,8 @@ If the executor is left unset, new task authoring uses Claude. If the supervisor
 
 Choose daemon settings before startup. Explain the defaults and ask for changes when the user has not already chosen:
 
-- implementation executor: use `environment.yaml` `executor.default_cli` for new task authoring when it is set; if it is unset, task authoring resolves to Claude. Claude and Codex are both supported.
-- supervisor: Claude is the daemon default when unset; Codex can be selected for Codex review. Claude and Codex are both supported.
+- implementation executor: use `environment.yaml` `executor.default_cli` for new task authoring when it is set; if it is unset, task authoring resolves to Claude. Any backend listed above is valid.
+- supervisor: Claude is the daemon default when unset; a non-default review backend from the list above can be selected at daemon start.
 - PR automation, PR comment handling, base branch, and worktree cleanup: use the resolved `environment.yaml`.
 - run mode: `daemon start` keeps working in the background; `daemon run --once` drains the current queue once.
 - concurrency: keep defaults unless the user asks for parallel task execution.

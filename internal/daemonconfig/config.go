@@ -25,10 +25,24 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	"go.yaml.in/yaml/v3"
 )
+
+// supervisorCLIs is the single source the --supervisor flag, daemon.yaml
+// validation, daemon Preflight, and profile validation all consult so the
+// accepted set cannot drift between them. glm additionally needs a token,
+// enforced at startup/per task rather than by this list.
+var supervisorCLIs = []string{"claude", "codex", "glm"}
+
+// SupervisorCLIs returns the accepted supervisor adapter values in stable order.
+func SupervisorCLIs() []string { return slices.Clone(supervisorCLIs) }
+
+// IsValidSupervisor reports whether value is an accepted supervisor adapter.
+func IsValidSupervisor(value string) bool { return slices.Contains(supervisorCLIs, value) }
 
 // Filename is the daemon configuration filename written under the daemon root.
 const Filename = "daemon.yaml"
@@ -46,13 +60,8 @@ type File struct {
 	HeartbeatInterval    string `yaml:"heartbeat_interval,omitempty"`
 	ShutdownTimeout      string `yaml:"shutdown_timeout,omitempty"`
 	IdleTimeout          string `yaml:"idle_timeout,omitempty"`
-	// GLMAPIKey is the Z.ai API token used when a task selects executor.cli
-	// "glm". The token is read from this operator-owned, 0600 daemon.yaml and
-	// injected only into the executor child process environment as
-	// ANTHROPIC_AUTH_TOKEN (never onto argv or into run evidence). It is
-	// omitempty so daemons that never run glm tasks carry no secret. Absent or
-	// empty is valid here; the missing-token check fails fast at dispatch time
-	// only when a task actually requests executor.cli "glm".
+	// GLMAPIKey is the Z.ai token used when glm is the executor or supervisor.
+	// Absent/empty is valid; a missing token fails fast only when glm is selected.
 	GLMAPIKey string `yaml:"glm_api_key,omitempty"`
 	// Notifications configures the opt-in, best-effort notification command
 	// hook the daemon runs after a task reaches a terminal published status.
@@ -220,12 +229,13 @@ func Load(root string) (File, bool, error) {
 // absent field is always valid because the resolver falls back to the next
 // layer.
 func (f File) Validate() error {
-	// glm is the Claude binary pointed at GLM's endpoint, so it is a valid
-	// supervisor anywhere claude is. The glm-token requirement is enforced at
-	// daemon startup (daemon.Preflight) using the shared runner helper so this
-	// low-level config package stays decoupled from the executor runner.
-	if f.Supervisor != "" && f.Supervisor != "claude" && f.Supervisor != "codex" && f.Supervisor != "glm" {
-		return fmt.Errorf("supervisor must be one of: claude, codex, glm (got %q)", f.Supervisor)
+	// Supervisor membership is validated against the single SupervisorCLIs
+	// source so this check, the --supervisor flag, and daemon Preflight cannot
+	// disagree. The glm-token requirement is enforced separately at daemon
+	// startup and per task, keeping this low-level package decoupled from the
+	// executor runner.
+	if f.Supervisor != "" && !IsValidSupervisor(f.Supervisor) {
+		return fmt.Errorf("supervisor must be one of: %s (got %q)", strings.Join(SupervisorCLIs(), ", "), f.Supervisor)
 	}
 	// max_concurrent_tasks must be >= 1: the daemon always needs at least
 	// one worker to make progress, and silently accepting 0 here just gets
@@ -311,11 +321,9 @@ func marshalDocumentedDefaults() ([]byte, error) {
 	buf.WriteString("#     on: [failed, needs_supervisor_review]\n")
 	buf.WriteString("#     command: \"/path/to/docs/examples/notifications/notify-slack.sh\"\n")
 	buf.WriteString("#\n")
-	buf.WriteString("# glm_api_key: Z.ai API token used only when a task sets executor.cli: glm.\n")
-	buf.WriteString("# GLM runs the Claude Code binary against GLM's Anthropic-compatible endpoint;\n")
-	buf.WriteString("# the token is injected only into the executor child process environment and\n")
-	buf.WriteString("# never appears on the command line or in run evidence. This file is created\n")
-	buf.WriteString("# with 0600 permissions. Leave unset unless you run glm tasks. Example:\n")
+	buf.WriteString("# glm_api_key: Z.ai token used when glm is the executor (executor.cli: glm)\n")
+	buf.WriteString("# or the supervisor (--supervisor glm / supervisor.default_cli). Leave unset\n")
+	buf.WriteString("# unless you use glm. Example:\n")
 	buf.WriteString("#   glm_api_key: \"<your-z.ai-token>\"\n")
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)

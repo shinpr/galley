@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shinpr/galley/internal/daemonconfig"
 	"github.com/shinpr/galley/internal/profile"
 )
 
@@ -49,6 +50,25 @@ func TestPreflightHonorsExplicitSupervisors(t *testing.T) {
 	}
 }
 
+func TestPreflightAcceptsEveryCanonicalSupervisor(t *testing.T) {
+	// Bind Preflight to the single supervisor-CLI source: every canonical value
+	// must be accepted here, so a new value cannot be valid in daemonconfig yet
+	// rejected at daemon startup.
+	for _, supervisor := range daemonconfig.SupervisorCLIs() {
+		supervisor := supervisor
+		t.Run(supervisor, func(t *testing.T) {
+			t.Parallel()
+			opts := Options{Root: t.TempDir(), Supervisor: supervisor}
+			if supervisor == "glm" {
+				opts.GLMAuthToken = "zai-token"
+			}
+			if _, err := Preflight(opts); err != nil {
+				t.Fatalf("Preflight should accept canonical supervisor %q: %v", supervisor, err)
+			}
+		})
+	}
+}
+
 func TestPreflightRejectsUnsupportedSupervisor(t *testing.T) {
 	t.Parallel()
 	if _, err := Preflight(Options{Root: t.TempDir(), Supervisor: "opus"}); err == nil {
@@ -64,6 +84,14 @@ func TestPreflightAcceptsGLMSupervisorWithToken(t *testing.T) {
 	}
 	if opts.Supervisor != "glm" {
 		t.Fatalf("supervisor got %q, want glm", opts.Supervisor)
+	}
+}
+
+func TestEffectiveSupervisorHonorsGLMProfileOverride(t *testing.T) {
+	t.Parallel()
+	profiles := profile.Bundle{Environment: &profile.Environment{Supervisor: &profile.SupervisorDefault{DefaultCLI: "glm"}}}
+	if got := effectiveOptionsForProfiles(Options{Supervisor: "codex"}, profiles).Supervisor; got != "glm" {
+		t.Fatalf("profile supervisor override = %q, want glm", got)
 	}
 }
 

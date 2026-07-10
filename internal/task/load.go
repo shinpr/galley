@@ -70,28 +70,22 @@ func writeFileAtomicMode(path string, data []byte, perm os.FileMode, overwrite b
 		// Cross-platform no-overwrite publication boundary. The destination
 		// task YAML must appear atomically: a concurrently polling daemon
 		// must see either no file at all or the fully written/synced file.
-		// The previous hardlink-based primitive was replaced because
-		// `os.Link` used CreateHardLink on Windows and failed on
-		// filesystems without hardlink support (FAT32, ReFS, cross-volume
-		// temp dirs). A naive write directly to the destination with
-		// O_CREATE|O_EXCL preserved duplicate-destination protection but
-		// reintroduced a partial-publication window: the destination
-		// becomes visible immediately after open(), before the YAML bytes
-		// are written and synced, so a fast poller could load a truncated
-		// file and fail the task with a decode error.
+		// Hardlinks are unusable here: `os.Link` maps to CreateHardLink on
+		// Windows and fails on filesystems without hardlink support (FAT32,
+		// ReFS, cross-volume temp dirs). Writing directly to the destination
+		// with O_CREATE|O_EXCL keeps duplicate-destination protection but
+		// opens a partial-publication window: the destination becomes visible
+		// immediately after open(), before the YAML bytes are written and
+		// synced, so a fast poller could load a truncated file and fail the
+		// task with a decode error.
 		//
-		// The reservation-then-rename pattern below restores atomicity
-		// without hardlinks. A separate `<path>.lock` file created with
-		// O_CREATE|O_EXCL serializes publication for `path`, the YAML is
-		// written to a temp file in the same directory and fsynced, the
-		// final destination is re-checked while we hold the reservation,
-		// and `os.Rename` publishes the fully written file in a single
-		// step. Same-directory rename is atomic on every supported OS.
-		// The lock is removed only after a successful publication, so
-		// callers that observe a contended lock can safely retry: either
-		// the destination is now in place (treated as duplicate-
-		// destination by the caller surface) or the previous writer
-		// failed and the lock has been cleaned up.
+		// The reservation-then-rename pattern below achieves atomicity
+		// without hardlinks. Same-directory rename is atomic on every
+		// supported OS. The `<path>.lock` file is removed only after a
+		// successful publication, so callers that observe a contended lock
+		// can safely retry: either the destination is now in place (treated
+		// as duplicate-destination by the caller surface) or the previous
+		// writer failed and the lock has been cleaned up.
 		lockPath := path + ".lock"
 		lock, err := os.OpenFile(lockPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err != nil {

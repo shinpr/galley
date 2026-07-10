@@ -47,9 +47,8 @@ type WorktreeCleanupResult struct {
 // overwriting an existing destination. Archive prioritizes removing the file
 // from normal operational scans whenever the move is safe:
 //
-//  1. When the task YAML loads, archive keeps the historical behavior: it sets
-//     status to "archived", appends an audit attempt, and writes the updated
-//     YAML at the archived path.
+//  1. When the task YAML loads, archive sets status to "archived", appends an
+//     audit attempt, and writes the updated YAML at the archived path.
 //  2. When loading fails but the file still parses as a YAML mapping, archive
 //     falls back to a yaml.Node round-trip that only updates the top-level
 //     `status` field. No attempt is appended because the file cannot be safely

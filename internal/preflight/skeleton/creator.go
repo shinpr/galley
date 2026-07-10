@@ -44,9 +44,9 @@ type creatorManifest struct {
 }
 
 // resolveSkeletonDeclarations returns the skeleton outputs and no_skeletons
-// entries for the preflight stage. The first version always uses the built-in
-// test creator because the core value is reasoning from natural-language task
-// context and ACs into concrete test skeletons.
+// entries for the preflight stage. It always uses the built-in test creator
+// because the core value is reasoning from natural-language task context and
+// ACs into concrete test skeletons.
 func resolveSkeletonDeclarations(ctx context.Context, opts Options) ([]task.AcceptanceSkeletonOutputDef, []noSkeletonDeclaration, *preflightErr) {
 	return runBuiltinSkeletonCreator(ctx, opts)
 }
@@ -113,11 +113,8 @@ func buildBuiltinCreatorCommandPlan(opts Options, payload []byte) (runner.Comman
 }
 
 // buildClaudeCreatorCommandPlan builds the Claude provider creator command
-// plan. It preserves the established Claude creator behavior: the JSON guard
-// plugin, replace-mode system prompt, and bypassPermissions permission mode.
-// The task executor model and effort settings are propagated so the creator
-// run uses the same executor backend configuration as the implementation
-// attempt.
+// plan. Task executor model and effort are propagated so the creator run uses
+// the same executor backend configuration as the implementation attempt.
 func buildClaudeCreatorCommandPlan(opts Options, payload []byte) (runner.Command, *preflightErr) {
 	bin := opts.ClaudeBin
 	if bin == "" {

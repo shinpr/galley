@@ -264,10 +264,6 @@ func parsePRCommand(comment vcs.PRComment) (prCommand, bool) {
 		return prCommand{}, false
 	}
 
-	// Split the rest of the body into the command line and the trailing block,
-	// TrimSpace each part separately, and join them with a blank line when both
-	// are non-empty. An empty Reason falls back to the default acknowledgement
-	// string so a bare "/galley" still produces a stable Reason.
 	firstLine, trailing, _ := strings.Cut(rest, "\n")
 	firstLine = strings.TrimSpace(firstLine)
 	trailing = strings.TrimSpace(trailing)

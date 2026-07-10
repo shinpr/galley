@@ -34,8 +34,8 @@ import (
 // best-effort and off the task-state critical path, so the timeout is short
 // enough to keep a slow or hanging notifier from holding daemon resources while
 // still allowing a real network delivery (Slack webhook, ntfy, email) to
-// complete. It is intentionally not operator-tunable in the first version to
-// keep the daemon.yaml surface small.
+// complete. It is intentionally not operator-tunable, to keep the daemon.yaml
+// surface small.
 const DefaultTimeout = 30 * time.Second
 
 // summaryMaxRunes bounds the latest-summary field. The bound is measured in

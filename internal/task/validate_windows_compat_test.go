@@ -6,11 +6,10 @@ import (
 	"testing"
 )
 
-// TestValidateWorktreePathAcceptsSeparatorVariants covers the Windows
-// regression where `filepath.Clean` produced `..\foo` and the
-// `strings.HasPrefix(clean, "../")` check rejected every otherwise-valid
-// sibling worktree.path on Windows. The normalized validator must accept
-// both `/` and `\` variants for the same logical sibling path on every OS.
+// TestValidateWorktreePathAcceptsSeparatorVariants checks that the validator
+// accepts both `/` and `\` variants of the same logical sibling worktree.path
+// on every OS; a native `filepath.Clean` + `strings.HasPrefix(clean, "../")`
+// check would reject the backslash form on Windows.
 func TestValidateWorktreePathAcceptsSeparatorVariants(t *testing.T) {
 	t.Parallel()
 	siblingPaths := []string{
@@ -37,8 +36,8 @@ func TestValidateWorktreePathAcceptsSeparatorVariants(t *testing.T) {
 
 // TestValidateWorktreePathRejectsInternalAndDeepParent confirms the same
 // validator still rejects repo-internal worktrees and deep parent traversal
-// regardless of separator. Pre-fix, the deep-parent rule used
-// `strings.HasPrefix(clean, "../../")` which silently passed on Windows.
+// regardless of separator, including the backslash form that a native
+// `strings.HasPrefix(clean, "../../")` check would miss on Windows.
 func TestValidateWorktreePathRejectsInternalAndDeepParent(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -69,13 +68,13 @@ func TestValidateWorktreePathRejectsInternalAndDeepParent(t *testing.T) {
 	}
 }
 
-// TestValidateRelativePathDetectsBackslashParentTraversal covers the related
-// AC2 regression: `validateRelativePath` (used by scope.allowed_paths,
+// TestValidateRelativePathDetectsBackslashParentTraversal covers the AC2
+// backslash case: `validateRelativePath` (used by scope.allowed_paths,
 // scope.forbidden_paths, files[].source/destination, and
-// preflight.acceptance_skeleton paths) only rejected `../` parent traversal.
-// On Windows `filepath.Clean("..\\foo")` returns `..\\foo`, so the old
-// `strings.HasPrefix(clean, "../")` check silently allowed parent traversal
-// for backslash inputs. After normalization the rule fires for both forms.
+// preflight.acceptance_skeleton paths) must reject parent traversal for both
+// `../` and `..\` forms. On Windows `filepath.Clean("..\\foo")` returns
+// `..\\foo`, so a `strings.HasPrefix(clean, "../")` check alone would miss the
+// backslash form.
 func TestValidateRelativePathDetectsBackslashParentTraversal(t *testing.T) {
 	t.Parallel()
 	task := validTask(t)
@@ -152,9 +151,6 @@ var windowsAbsoluteForms = []string{
 // that scope.allowed_paths, scope.forbidden_paths, files[].source,
 // files[].destination, and the preflight.acceptance_skeleton paths all reject
 // Windows-style absolute forms when the validator runs on a non-Windows host.
-// Before isLogicalAbsolutePath the only Windows form caught here was the UNC
-// `\\server\share` shape (because its slash form starts with `/`); drive
-// letter forms slipped past entirely on Unix.
 func TestValidateRelativePathRejectsWindowsAbsoluteFormsOnNonWindowsHost(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -248,10 +244,9 @@ func TestValidateRelativePathRejectsWindowsAbsoluteFormsOnNonWindowsHost(t *test
 }
 
 // TestValidateWorktreePathRejectsWindowsAbsoluteForms covers the worktree
-// absolute precheck. `filepath.IsAbs` used to gate this check, which missed
-// drive-letter absolutes on non-Windows hosts and let them fall through to
-// validateWorktreePath where they produced the misleading "must point to a
-// sibling path" error instead of the canonical "must be relative" error.
+// absolute precheck: drive-letter and other host-foreign absolute forms must
+// be rejected with the canonical "must be relative" error on non-Windows
+// hosts, not fall through to validateWorktreePath's sibling-path check.
 func TestValidateWorktreePathRejectsWindowsAbsoluteForms(t *testing.T) {
 	t.Parallel()
 	for _, p := range windowsAbsoluteForms {

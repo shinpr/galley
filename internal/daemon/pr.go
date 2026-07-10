@@ -233,10 +233,8 @@ func prTitle(loaded task.Task) string {
 	// First pass: enforce the visual rune cap with whitespace-preferred
 	// truncation. Most goals fit and are returned untouched.
 	title = truncatePRTitleByRunes(title)
-	// Second pass: enforce GitHub's hard byte cap. The rune cap can still
-	// exceed 256 bytes when every rune is a 4-byte UTF-8 character, so this
-	// pass guarantees the result fits while preserving valid UTF-8 and the
-	// ellipsis marker.
+	// Second pass: enforce GitHub's hard byte cap, which the rune cap can still
+	// exceed for titles made of multi-byte UTF-8 runes.
 	title = truncatePRTitleByBytes(title)
 	return title
 }

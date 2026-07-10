@@ -27,9 +27,7 @@ cat >/dev/null || true
 title="Galley: ${GALLEY_TASK_STATUS:-task} ${GALLEY_TASK_ID:-}"
 body="${GALLEY_SUMMARY:-} (${GALLEY_REPO:-})"
 
-# osascript receives title/body as argv ($1,$2), read inside the AppleScript with
-# `item N of argv`, so the values are data and are never parsed as AppleScript or
-# shell source.
+# Pass title/body as argv, read via `item N of argv`, so they stay data.
 osascript - "$title" "$body" <<'APPLESCRIPT'
 on run argv
   display notification (item 2 of argv) with title (item 1 of argv) sound name "default"

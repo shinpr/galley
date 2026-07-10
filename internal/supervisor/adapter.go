@@ -229,8 +229,6 @@ func runClaudeAdapterForOS(ctx context.Context, opts AdapterOptions, request []b
 			return nil, err
 		}
 		args = append(args, "--system-prompt-file", systemPromptPath)
-		// JSON schema is intentionally not passed on argv on Windows; verdict
-		// validators in ValidateVerdictForEvidence reject malformed output.
 	} else {
 		schema, err := runner.ClaudeCompatibleJSONSchema(schemas.SupervisorVerdict)
 		if err != nil {

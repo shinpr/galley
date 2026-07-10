@@ -309,8 +309,6 @@ func buildClaudeArgvWindows(opts ClaudeOptions) ([]string, string, []string, err
 		warnings = append(warnings, "Windows runner does not pass --json-schema on argv; Galley relies on the Claude guard hook and the executor result validators to reject malformed final output")
 	}
 	argv = append(argv, common.Suffix...)
-	// The work order prompt is delivered through stdin so Galley-generated
-	// long content does not reach argv on Windows.
 	return argv, opts.Prompt, warnings, nil
 }
 

@@ -326,11 +326,10 @@ func TestTaskShowAcceptedTerminalSuppressesPriorFailure(t *testing.T) {
 	}
 }
 
-// TestTaskShowAcceptedTerminalCoversPRLifecycleStatuses guards the regression
-// reviewers flagged in iteration 1: once the daemon's PR cleanup loop moves
-// an accepted task from pr_opened to closed or merged, prior failed attempts
-// must remain under the prior_attempt_* prefix instead of regressing to the
-// active "failed" framing.
+// TestTaskShowAcceptedTerminalCoversPRLifecycleStatuses guards the case where
+// the daemon's PR cleanup loop moves an accepted task from pr_opened to closed
+// or merged: prior failed attempts must remain under the prior_attempt_* prefix
+// instead of regressing to the active "failed" framing.
 func TestTaskShowAcceptedTerminalCoversPRLifecycleStatuses(t *testing.T) {
 	for _, terminalStatus := range []string{"closed", "merged"} {
 		terminalStatus := terminalStatus

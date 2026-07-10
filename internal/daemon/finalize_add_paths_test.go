@@ -45,9 +45,9 @@ func TestAddEligiblePorcelainPathsEmptyWhenOnlyStagedDeletions(t *testing.T) {
 // TestParsePorcelainPathsStillReportsStagedDeletion pins AC4: the
 // change-visibility parser used by progress detection, the finalize-time
 // forbidden_paths gate, and scope-expansion reporting must keep reporting
-// staged-only deletions. The fix only changes which paths reach git add, not
-// which paths are considered changed/reviewable, so forbidden-path deletions
-// stay visible to the safety gate.
+// staged-only deletions. Path selection for git add is separate from
+// change/reviewability detection, so forbidden-path deletions stay visible to
+// the safety gate.
 func TestParsePorcelainPathsStillReportsStagedDeletion(t *testing.T) {
 	porcelain := "D  secret/leak.txt\nA  src/added.go\n"
 	got := parsePorcelainPaths(porcelain)

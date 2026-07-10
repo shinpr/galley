@@ -9,7 +9,7 @@ package task
 //   - Process: validateExecutor (internal/task/validate.go) and the executor
 //     schema enumeration (internal/task/schema.go) accept both "claude" and
 //     "codex" while rejecting unknown values.
-//   - Observable result: ValidationResult.OK==true for both supported CLIs;
+//   - Observable result: ValidationResult.Valid()==true for both supported CLIs;
 //     the generated executor schema (under schemas/) lists both values in the
 //     "cli" enum; an unknown CLI ("opus-cli") still fails with a clear error.
 

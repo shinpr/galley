@@ -55,9 +55,8 @@ func cleanupTaskWorktree(ctx context.Context, opts Options, path string) error {
 	// A persisted final PR status (merged/closed) is sufficient on its own:
 	// the PR lifecycle has no remaining decision, so cleanup of an already-
 	// final historical task must not depend on GitHub API availability (D1).
-	// Querying GitHub for these tasks is the recurring maintenance failure
-	// this change removes, so the no-GitHub path is gated strictly on the
-	// persisted final status (R1).
+	// Querying GitHub for these tasks is a recurring maintenance failure, so
+	// the no-GitHub path is gated strictly on the persisted final status (R1).
 	persistedFinal := loaded.PR.Status == "merged" || loaded.PR.Status == "closed"
 	finalStatus := loaded.PR.Status
 	if !persistedFinal {

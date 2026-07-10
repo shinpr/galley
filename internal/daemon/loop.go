@@ -60,26 +60,17 @@ func asReviewStagingError(err error) (*reviewStagingError, bool) {
 // stage the executor-produced worktree changes Galley hands to the
 // supervisor.
 //
-// The implementation runs in three steps:
+// It discovers the dirty worktree paths, builds the explicit reviewable path
+// set (dropping empty/non-local entries, deduplicating, and excluding
+// excludePaths — task.files entries declared commit:false), and stages exactly
+// that set. Forbidden-path entries are intentionally kept so the finalize-time
+// forbidden_paths gate still observes them, and the staged diff the supervisor
+// reviews reflects the executor's submitted artifact and nothing else.
 //
-// 1. Discover the dirty worktree paths via `git status --porcelain=v1 -z`
-// after the executor returned.
-// 2. Build the explicit reviewable path set with reviewablePathsFromStatus.
-// The builder drops empty/non-local entries, deduplicates, and excludes
-// the supplied excludePaths (task.files entries declared with
-// commit:false). Forbidden-path entries are intentionally kept in the
-// set so the existing finalize-time forbidden_paths gate still observes
-// them.
-// 3. Stage exactly that explicit path set with vcs.StagePathsForReview. The
-// staging command runs `git add -A -- <path> [<path>...]` so the diff
-// fields the supervisor reviews (StagedDiff / Diff in the snapshot)
-// reflect the executor's submitted artifact and nothing else.
-//
-// Tests override this seam to inject deterministic failures and to assert
-// the exclude-list contract without spawning a real git process; production
-// callers always go through the three-step flow above. The signature keeps
-// excludePaths visible at the seam so failure-path tests can document the
-// shape of the contract.
+// Tests override this seam to inject deterministic failures and assert the
+// exclude-list contract without spawning a real git process. The signature
+// keeps excludePaths visible at the seam so failure-path tests can document
+// the contract.
 var stageExecutorOutput = func(ctx context.Context, opts Options, workDir, attemptDir string, excludePaths []string) error {
 	bins := vcsBinaries(opts)
 	statusZ, err := vcs.StatusPorcelainZ(ctx, bins, workDir)
@@ -347,7 +338,7 @@ func applySupervisorVerdict(ctx, shutdownCtx context.Context, req verdictApplica
 		// Daemon-side acceptance gate. When required skeleton
 		// coverage or required-check evidence is missing or failed, downgrade
 		// the accepted verdict to needs_supervisor_review with a user-visible
-		// reason. The first version has no waiver mechanism.
+		// reason. There is no waiver mechanism.
 		if reason, ok := evaluateAcceptanceGate(req.Loaded, req.RunDir); !ok {
 			fmt.Fprintf(os.Stderr, "galley: task %s accepted-verdict downgraded by acceptance gate: %s\n", req.Loaded.ID, reason)
 			return "", true, degradeToSupervisorReview(req, "acceptance-gate", "Accepted verdict downgraded by acceptance skeleton gate: "+reason, "Inspect preflight_result.json and required verification evidence before re-finalizing.")
@@ -599,9 +590,6 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 	}, nil
 }
 
-// codexLastMessagePath returns the attempt-scoped `--output-last-message`
-// capture path Galley requests for Codex executor runs (empty for Claude
-// because Claude streams its result directly to stdout JSONL).
 func markRevisionRequestsAddressed(loaded *task.Task, evidence string) {
 	for i := range loaded.RevisionRequests {
 		if loaded.RevisionRequests[i].Status == "addressed" {
@@ -840,8 +828,8 @@ func evaluateAcceptanceGate(loaded *task.Task, runDir string) (string, bool) {
 		return message, false
 	}
 	if res.Status == "skipped" {
-		// First version has no provider hook; required preflight cannot be
-		// silently skipped to acceptance.
+		// Required preflight cannot be silently skipped to acceptance; there is
+		// no waiver hook.
 		if cfg.IsRequired() {
 			return "acceptance skeleton preflight was skipped while required", false
 		}

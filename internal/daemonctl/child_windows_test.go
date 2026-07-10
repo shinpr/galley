@@ -20,12 +20,11 @@ func TestTerminateChildProcessWindowsNilIsNoOp(t *testing.T) {
 }
 
 // TestTerminateChildProcessWindowsTerminatesLivingProcess covers the
-// Windows branch of the cross-platform start-cleanup helper. The pre-fix
-// path called `process.Signal(syscall.SIGTERM)`, which returned
-// "not supported by windows" and left the child running after a failed
-// `galley daemon start`. The helper must instead invoke `Process.Kill`
-// (TerminateProcess) so the child is gone before the operator's start
-// command returns an error.
+// Windows branch of the cross-platform start-cleanup helper. Windows has no
+// SIGTERM equivalent (`process.Signal(syscall.SIGTERM)` returns
+// "not supported by windows" and leaves the child running), so the helper
+// must invoke `Process.Kill` (TerminateProcess) to ensure the child is gone
+// before a failed `galley daemon start` returns an error.
 func TestTerminateChildProcessWindowsTerminatesLivingProcess(t *testing.T) {
 	t.Parallel()
 	cmd := exec.Command("cmd.exe", "/C", "ping -n 30 127.0.0.1 > NUL")

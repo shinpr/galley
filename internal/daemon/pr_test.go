@@ -31,14 +31,12 @@ func TestPRTitleTruncatesRunes(t *testing.T) {
 	}
 }
 
-// TestPRTitlePreservesOrdinaryLongASCIIGoal covers AC1: an ordinary long
-// ASCII task goal comparable in length to PR 18's goal must be preserved
-// verbatim and must not gain an ellipsis. This guards against regressing the
-// PR title budget back down to a value that prematurely truncates such goals.
+// TestPRTitlePreservesOrdinaryLongASCIIGoal asserts that an ordinary long
+// ASCII goal within the byte budget is preserved verbatim without truncation
+// and never gains an ellipsis.
 func TestPRTitlePreservesOrdinaryLongASCIIGoal(t *testing.T) {
 	t.Parallel()
-	// PR 18's goal text, an ordinary long ASCII goal that the previous narrow
-	// rune budget truncated mid-sentence.
+	// A representative ordinary long ASCII goal that fits within the byte budget without truncation.
 	goal := "Restrict Galley PR comment commands so only the PR author, when also trusted by GitHub author association, can requeue or update a task."
 	title := prTitle(task.Task{Goal: goal})
 	if title != goal {

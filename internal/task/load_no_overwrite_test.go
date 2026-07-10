@@ -15,11 +15,9 @@ import (
 
 // TestWriteFileNoOverwriteAtomicCreatesAndRefuses covers the AC3 contract on
 // the no-overwrite write path that backs `task queue`, `task requeue`,
-// archive, and daemon claim/requeue file moves. Pre-fix, the implementation
-// used `os.Link` against a temp file which surfaced as a raw "not supported
-// by windows" error on filesystems that did not implement hardlinks. The
-// replacement primitive must (1) create the destination atomically and
-// (2) refuse to overwrite an existing destination on every supported OS.
+// archive, and daemon claim/requeue file moves. The primitive must (1) create
+// the destination atomically and (2) refuse to overwrite an existing
+// destination on every supported OS.
 func TestWriteFileNoOverwriteAtomicCreatesAndRefuses(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -55,16 +53,12 @@ func TestWriteFileNoOverwriteAtomicCreatesAndRefuses(t *testing.T) {
 
 // TestWriteFileNoOverwriteAtomicPublicationIsAtomic covers the queue
 // publication boundary that backs `task queue`, `task requeue`, archive, and
-// daemon claim/requeue file moves. The pre-fix implementation called
-// `os.OpenFile(path, O_CREATE|O_EXCL)` directly against the final destination,
-// which made the file visible to a concurrently polling daemon before the
-// YAML bytes were written and synced. A poller could then load a partial
-// file and fail the task with a YAML decode error. The fixed implementation
-// must publish only after the full contents are written, so a concurrent
-// reader that observes the destination either sees the complete payload or
-// `os.ErrNotExist`. The test runs many publish/observe pairs across
-// goroutines so a partial publication window is exercised by scheduling
-// jitter rather than relying on a fragile timing hook.
+// daemon claim/requeue file moves. Publication must happen only after the full
+// contents are written and synced, so a concurrent reader that observes the
+// destination either sees the complete payload or `os.ErrNotExist`, never a
+// partial file that fails with a YAML decode error. The test runs many
+// publish/observe pairs across goroutines so a partial publication window is
+// exercised by scheduling jitter rather than relying on a fragile timing hook.
 func TestWriteFileNoOverwriteAtomicPublicationIsAtomic(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

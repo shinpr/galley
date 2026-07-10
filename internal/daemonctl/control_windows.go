@@ -21,8 +21,7 @@ const processQueryLimitedInformation = 0x1000
 
 // Alive reports whether pid exists by opening the process and inspecting its
 // exit code. Windows has no signal(0) equivalent: `process.Signal(Signal(0))`
-// surfaces a raw "not supported by windows" error from the Go runtime, which
-// is exactly the cross-platform regression this build-tagged path replaces.
+// surfaces a raw "not supported by windows" error from the Go runtime.
 func Alive(pid int) (bool, error) {
 	if pid <= 0 {
 		return false, nil

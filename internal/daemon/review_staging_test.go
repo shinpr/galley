@@ -112,12 +112,11 @@ func TestRunOnceAcceptedFinalizationCommitsStagedNewFile(t *testing.T) {
 
 // TestRunOnceAcceptedFinalizationCommitsStagedOnlyDeletion pins AC1+AC3 for a
 // staged-only deletion. The fake executor stages the deletion of a tracked
-// file with `git rm` and submits no other change. Before the fix, review
-// staging ran `git add -A -- <deleted path>` and failed with "pathspec did not
-// match any files", so the attempt never reached the supervisor. After the
-// fix, review staging skips the already-staged deletion (it stays visible in
-// the captured attempt diff), the supervisor accepts the dirty diff, and
-// finalization commits the deletion without re-adding it.
+// file with `git rm` and submits no other change. Review staging must skip the
+// already-staged deletion — running `git add -A -- <deleted path>` fails with
+// "pathspec did not match any files" — so it stays visible in the captured
+// attempt diff, the supervisor accepts the dirty diff, and finalization commits
+// the deletion without re-adding it.
 func TestRunOnceAcceptedFinalizationCommitsStagedOnlyDeletion(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)

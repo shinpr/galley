@@ -1,17 +1,7 @@
 // Package skeleton contains Codex provider integration for the acceptance
-// skeleton creator.
-//
-// This file owns the Codex-specific creator concerns kept separate from the
-// Claude creator path so provider routing, runner integration, and Codex
-// manifest capture can be reviewed independently of the shared creator
-// orchestration in acceptance_skeleton_creator.go.
-//
-// The Codex creator runs through the same Codex command planner the
-// implementation executor uses (runner.CodexCommandPlan): the acceptance
-// skeleton prompt is delivered as the system prompt, the acceptance skeleton
-// manifest schema is wired through `codex exec --output-schema`, and the
-// structured manifest is captured from the attempt-scoped
-// `codex exec --output-last-message` file rather than stdout.
+// skeleton creator, kept separate from the Claude creator path so provider
+// routing, runner integration, and manifest capture can be reviewed
+// independently.
 package skeleton
 
 import (

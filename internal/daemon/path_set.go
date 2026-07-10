@@ -53,8 +53,6 @@ func reviewablePathsFromStatus(statusZ string, excludeDestinations []string) []s
 	seen := make(map[string]bool, len(raw))
 	var result []string
 	for _, entry := range raw {
-		// Already-staged deletions remain visible in the staged diff and do
-		// not need another git add.
 		if isStagedOnlyDeletion(entry.X, entry.Y) {
 			continue
 		}
@@ -62,11 +60,6 @@ func reviewablePathsFromStatus(statusZ string, excludeDestinations []string) []s
 		if clean == "" {
 			continue
 		}
-		// Reject any path that escapes the worktree root. filepath.IsLocal
-		// returns false for absolute paths, drive-letter paths, and any
-		// segment that backs out of cwd, so the review-staging set cannot
-		// widen beyond the executor's working directory regardless of how
-		// git status formatted the entry.
 		if !filepath.IsLocal(clean) {
 			continue
 		}

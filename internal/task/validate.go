@@ -31,9 +31,9 @@ func normalizeLogicalPath(p string) string {
 }
 
 // logicalPathEscapes reports whether a slash-cleaned logical path is `..` or
-// starts with `../`. This is the separator-independent equivalent of the
-// previous `filepath.Clean` + `strings.HasPrefix(..., "../")` checks, which
-// silently passed on Windows because cleaned paths used `\` separators.
+// starts with `../`. It is separator-independent: a native `filepath.Clean` +
+// `strings.HasPrefix(..., "../")` check uses `\` separators on Windows and
+// misses `../` prefixes.
 func logicalPathEscapes(clean string) bool {
 	return clean == ".." || strings.HasPrefix(clean, "../")
 }
@@ -218,9 +218,8 @@ func validateWorktree(result *ValidationResult, t Task) {
 	require(result, t.Worktree.Path != "", "worktree.path is required for AFK tasks")
 	// Use isLogicalAbsolutePath so Windows-authored absolute worktree paths
 	// (`C:\repo.worktrees`, `\\share\worktrees`, `\foo`) are rejected even on
-	// non-Windows hosts. `filepath.IsAbs` is OS-specific and used to let those
-	// forms slip through to validateWorktreePath, which then reported a
-	// misleading sibling-path error.
+	// non-Windows hosts. `filepath.IsAbs` is OS-specific and misses these on
+	// Unix hosts.
 	if t.Worktree.Path != "" && isLogicalAbsolutePath(t.Worktree.Path) {
 		result.Errors = append(result.Errors, "worktree.path must be relative")
 	} else if t.Worktree.Path != "" {
@@ -229,11 +228,10 @@ func validateWorktree(result *ValidationResult, t Task) {
 }
 
 func validateWorktreePath(result *ValidationResult, path string) {
-	// Worktree paths are authored as logical (slash) relative paths. Cleaning
-	// natively on Windows produced backslash-prefixed strings, so the
-	// `"../"`/`"../../"` literal checks below never matched and rejected every
-	// otherwise valid sibling. Normalize to slash form first so the rule
-	// behaves the same on every OS.
+	// Worktree paths are authored as logical (slash) relative paths. Normalize
+	// to slash form first so the `"../"`/`"../../"` literal checks below behave
+	// the same on every OS; native Windows cleaning yields backslash separators
+	// that those checks would miss.
 	clean := normalizeLogicalPath(path)
 	if clean == ".." || strings.HasPrefix(clean, "../../") {
 		result.Errors = append(result.Errors, fmt.Sprintf("worktree.path contains parent traversal path %q", path))

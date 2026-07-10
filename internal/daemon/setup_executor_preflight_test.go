@@ -40,7 +40,7 @@ func runSetupPreflight(ctx context.Context, opts setuppreflight.Options) (*setup
 	return setuppreflight.Run(ctx, opts)
 }
 
-// TestSetupPreflightRunsBeforeAcceptanceSkeletonAndExecutor proves AC2: the
+// TestSetupPreflightSequencesBeforeSkeletonAndExecutor proves AC2: the
 // setup preflight runs after worktree/input-file preparation and before any
 // acceptance skeleton work or implementation executor attempt. The setup
 // executor runner stub records its observed order vs the daemon-level
@@ -484,8 +484,7 @@ func TestSetupPreflightAtomicProfileRewriteAndSecondRunSeededReuse(t *testing.T)
 	dir := t.TempDir()
 	// Profile without setup; includes unrelated content that must survive the
 	// atomic rewrite. pr.base is intentionally written as an unquoted scalar
-	// so the round-trip check below proves the YAML node style is preserved
-	// (a previous regression re-quoted it on rewrite).
+	// so the round-trip check below proves the YAML node style is preserved.
 	envBody := `id: "absent-setup"
 cwd: ` + workdirQuote(work) + `
 commands:
@@ -754,14 +753,11 @@ func workdirQuote(s string) string {
 }
 
 // TestSetupPreflightReadyWithoutSuccessfulCommandsFailsAndKeepsEnvironmentUnchanged
-// is the regression test for the setup-result contract update: a setup
+// pins the setup-result contract: a setup
 // executor that returns status=ready with no successful_commands cannot
 // produce a learned plan, so the daemon must downgrade the result to failed
 // (with repair guidance), keep setup_result.json diagnostic, and NOT silently
-// leave environment.yaml unchanged behind a fake-passing setup. The previous
-// behavior silently skipped persistence and treated the result as ready,
-// which violated AC7's "environment.yaml is not silently left unchanged"
-// invariant.
+// leave environment.yaml unchanged behind a fake-passing setup.
 func TestSetupPreflightReadyWithoutSuccessfulCommandsFailsAndKeepsEnvironmentUnchanged(t *testing.T) {
 	work := t.TempDir()
 	runDir := t.TempDir()
@@ -815,7 +811,7 @@ pr:
 		t.Fatalf("update should be nil when no learned plan can be persisted: %+v", update)
 	}
 	// environment.yaml must be byte-identical: not silently left unchanged
-	// behind a ready+empty-plan facade. The contract is "no silent unchanged".
+	// behind a ready+empty-plan facade.
 	after, err := os.ReadFile(envPath)
 	if err != nil {
 		t.Fatal(err)
@@ -908,9 +904,9 @@ func TestEnforceLearnedSetupPlanContractRequiresReadyEvidence(t *testing.T) {
 // against it: required keys are present, no extra keys leak (the schema is
 // additionalProperties:false), and enum-constrained fields (status, source,
 // provider, per-command source) carry values from the schema's enum lists.
-// This pins the schema/runtime sync the previous contract drift would have
-// allowed (the runtime persisted provider/source fields that the published
-// schema did not declare).
+// This pins the schema/runtime sync: the runtime persists provider/source
+// fields, so the published schema must declare them, guarding against drift
+// where the two disagree.
 func TestSetupResultSchemaMatchesPersistedShape(t *testing.T) {
 	runDir := t.TempDir()
 	res := &setuppreflight.Result{
@@ -951,10 +947,9 @@ func TestSetupResultSchemaMatchesPersistedShape(t *testing.T) {
 	if errs := validateAgainstSchemaForTest(saved, schema, "$"); len(errs) > 0 {
 		t.Fatalf("saved setup_result.json does not match schema:\n  %s", strings.Join(errs, "\n  "))
 	}
-	// Also assert the schema declares the runtime-persisted fields the
-	// previous contract drift omitted (provider, source). This guards future
-	// drift where someone removes one of them from the schema without also
-	// removing it from the Go struct.
+	// Also assert the schema declares the runtime-persisted provider and
+	// source fields. This guards future drift where someone removes one of
+	// them from the schema without also removing it from the Go struct.
 	props, _ := schema["properties"].(map[string]any)
 	for _, requiredKey := range []string{"provider", "source", "successful_commands", "inspected_files", "readiness_evidence", "repair_guidance", "error"} {
 		if _, ok := props[requiredKey]; !ok {

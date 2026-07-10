@@ -360,11 +360,8 @@ func TestRunOnceOpenPRCommitsPushesAndUpdatesTask(t *testing.T) {
 
 // TestRunOnceOpenPRPersistsPRAuthorLogin exercises the success path for the
 // PR author capture step that protects later /galley PR comment handling.
-// The fake `gh` differentiates between `gh pr create ...` (returns the new PR
-// URL) and `gh api repos/{owner}/{repo}/pulls/{number}` (returns a JSON
-// payload with the PR author's login). The saved done task must carry the
-// login on PR.AuthorLogin so the PR-author trust check can run later without
-// re-fetching from GitHub.
+// The saved done task must carry the login on PR.AuthorLogin so the PR-author
+// trust check can run later without re-fetching from GitHub.
 func TestRunOnceOpenPRPersistsPRAuthorLogin(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)

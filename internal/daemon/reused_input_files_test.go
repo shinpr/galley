@@ -74,9 +74,9 @@ func TestReconcileReusedInputFilesDoesNotEscapeViaSymlinkedDestinationParent(t *
 	}
 	srcDir := t.TempDir()
 	source := filepath.Join(srcDir, "context.md")
-	// Identical content: the pre-fix reconciler treated a matching destination as
-	// a stale copy and removed it. The fix must refuse to read or remove through a
-	// symlinked destination parent that resolves outside the worktree.
+	// Identical content would let the reconciler treat the destination as a stale
+	// copy and remove it, but it must refuse to read or remove through a symlinked
+	// destination parent that resolves outside the worktree.
 	if err := os.WriteFile(source, []byte("same content"), 0o600); err != nil {
 		t.Fatal(err)
 	}

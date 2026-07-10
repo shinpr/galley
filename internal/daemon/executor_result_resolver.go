@@ -8,6 +8,9 @@ import (
 	"github.com/shinpr/galley/internal/runner"
 )
 
+// codexLastMessagePath returns the attempt-scoped `--output-last-message`
+// capture path Galley requests for Codex executor runs (empty for Claude
+// because Claude streams its result directly to stdout JSONL).
 func codexLastMessagePath(cli, attemptDir string) string {
 	if cli != "codex" || attemptDir == "" {
 		return ""

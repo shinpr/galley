@@ -27,15 +27,15 @@ package daemon
 //   processAvailable waits on the executor goroutine before the next cycle.)
 // @timing: implement alongside the daemon scheduler refactor.
 //
-// Implementation notes for the executor:
-//   - There is no existing test that proves polling is independent of execution;
-//     this skeleton must be completed, not deleted.
-//   - Use a cancelable context and a short PollInterval so the maintenance runner
-//     ticks several times during the blocking executor attempt.
-//   - The fake gh appends each comment-poll invocation to pollLog; assert at
-//     least two poll invocations are recorded WHILE executorStarted exists and
-//     before the executor attempt has been allowed to finish.
-//   - Replace the explicit t.Fatal placeholder with the act + assert sequence.
+// Skeleton constraints (must stay satisfied):
+//   - Completion: this skeleton carries a real act+assert body rather than a
+//     placeholder; it must not be reduced back to an unimplemented stub.
+//   - Mixed-state timing: use a cancelable context and a short PollInterval so
+//     the maintenance runner ticks several times during the blocking executor
+//     attempt.
+//   - Assertion: prove at least two comment-poll invocations are recorded while
+//     the executor-start marker still exists and before the executor attempt is
+//     released, so polling is shown to run independently of execution.
 
 import (
 	"bytes"
@@ -51,7 +51,6 @@ import (
 )
 
 func TestNormalDaemonPollsPRCommentsWhileExecutorAttemptIsRunning(t *testing.T) {
-	// Arrange: Galley root + source repo.
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	runDaemonGit(t, repo, "branch", "-M", "main")

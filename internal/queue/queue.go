@@ -49,8 +49,7 @@ func isTaskYAMLName(name string) bool {
 
 // taskYAMLFiles returns the task file glob matches (.yaml and .yml) directly
 // under dir, preserving filepath.Glob semantics (missing dir yields no matches,
-// non-regular entries are included exactly as the previous single-extension
-// glob did).
+// non-regular entries are included).
 func taskYAMLFiles(dir string) ([]string, error) {
 	var matches []string
 	for _, ext := range []string{"*.yaml", "*.yml"} {

@@ -6,6 +6,12 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.9.1 - 2026-07-10
+
+### Fixed
+
+- Claude executor and supervisor runs now pass Claude-compatible JSON schemas by stripping unsupported root `$schema` and schema combinators before invoking Claude Code.
+
 ## v0.9.0 - 2026-07-08
 
 ### Changed

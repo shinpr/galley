@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -153,10 +154,13 @@ func ClaudeShellPreview(opts ClaudeOptions) (string, []string, error) {
 	}
 	opts = withDefaultEmbeddedOptions(opts)
 
-	argv, err := buildClaudeArgv(opts, func(_ string, path string) (string, error) {
+	argv, err := buildClaudeArgv(opts, func(label string, path string) (string, error) {
 		absolute, err := absPath(path)
 		if err != nil {
 			return "", err
+		}
+		if label == "JSON schema" {
+			return readOptionFile("JSON schema", absolute)
 		}
 		return fmt.Sprintf("$(cat %s)", shellToken(absolute)), nil
 	})
@@ -200,11 +204,38 @@ func buildClaudeArgv(opts ClaudeOptions, fileValue func(label, path string) (str
 				return nil, err
 			}
 		}
+		var err error
+		schema, err = ClaudeCompatibleJSONSchema(schema)
+		if err != nil {
+			return nil, err
+		}
 		argv = append(argv, "--json-schema", schema)
 	}
 	argv = append(argv, common.Suffix...)
 	argv = append(argv, opts.Prompt)
 	return argv, nil
+}
+
+// ClaudeCompatibleJSONSchema removes root JSON Schema keywords that current
+// Claude Code versions reject before validating the body passed to
+// --json-schema. Galley still validates parsed executor results after Claude
+// returns, so provider compatibility does not own the semantic contract.
+func ClaudeCompatibleJSONSchema(schema string) (string, error) {
+	var doc any
+	if err := json.Unmarshal([]byte(schema), &doc); err != nil {
+		return "", fmt.Errorf("parse Claude JSON schema: %w", err)
+	}
+	if obj, ok := doc.(map[string]any); ok {
+		delete(obj, "$schema")
+		delete(obj, "allOf")
+		delete(obj, "anyOf")
+		delete(obj, "oneOf")
+	}
+	body, err := json.Marshal(doc)
+	if err != nil {
+		return "", fmt.Errorf("encode Claude JSON schema: %w", err)
+	}
+	return string(body), nil
 }
 
 type claudeCommonArgs struct {

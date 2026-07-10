@@ -51,7 +51,7 @@ func TestClaudeArgvAppendPrompt(t *testing.T) {
 	command, err := ClaudeCommandPlanForOS(ClaudeOptions{
 		PromptMode:       "append",
 		SystemPromptFile: promptPath,
-		JSONSchema:       `{"type":"object"}`,
+		JSONSchema:       `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object"}`,
 		Prompt:           "do the work",
 	}, "linux")
 	if err != nil {
@@ -106,6 +106,12 @@ func TestClaudeCommandPlanUsesEmbeddedPromptAndSchemaByDefault(t *testing.T) {
 			t.Fatalf("argv missing %q", want)
 		}
 	}
+	if strings.Contains(argAfter(t, command.Argv, "--json-schema"), "$schema") {
+		t.Fatalf("Claude argv schema must omit root $schema: %s", argAfter(t, command.Argv, "--json-schema"))
+	}
+	if strings.Contains(argAfter(t, command.Argv, "--json-schema"), `"allOf"`) {
+		t.Fatalf("Claude argv schema must omit root allOf: %s", argAfter(t, command.Argv, "--json-schema"))
+	}
 }
 
 func TestClaudeArgvRejectsUnknownPromptMode(t *testing.T) {
@@ -127,29 +133,31 @@ func TestClaudeArgvRejectsUnknownPromptMode(t *testing.T) {
 
 func TestClaudeShellPreviewUsesCatAndCd(t *testing.T) {
 	t.Parallel()
-	promptPath, err := filepath.Abs("prompts/claude-executor-full.md")
-	if err != nil {
-		t.Fatal(err)
-	}
-	schemaPath, err := filepath.Abs("schemas/claude-result.schema.json")
-	if err != nil {
-		t.Fatal(err)
-	}
+	promptPath, schemaPath := writePromptFixtures(t)
 
 	got, warnings, err := ClaudeShellPreview(ClaudeOptions{
 		WorkDir:          "/tmp/project",
 		PromptMode:       "replace",
-		SystemPromptFile: "prompts/claude-executor-full.md",
-		JSONSchemaFile:   "schemas/claude-result.schema.json",
+		SystemPromptFile: promptPath,
+		JSONSchemaFile:   schemaPath,
 		Prompt:           "do the work",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	want := `cd /tmp/project && claude -p --output-format stream-json --verbose --system-prompt "$(cat ` + shellToken(promptPath) + `)" --json-schema "$(cat ` + shellToken(schemaPath) + `)" 'do the work'`
-	if got != want {
-		t.Fatalf("got %q, want %q", got, want)
+	for _, want := range []string{
+		`cd /tmp/project && claude -p --output-format stream-json --verbose`,
+		`--system-prompt "$(cat ` + shellToken(promptPath) + `)"`,
+		`--json-schema`,
+		`'do the work'`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("preview missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "$schema") || strings.Contains(got, `$(cat `+shellToken(schemaPath)+`)`) {
+		t.Fatalf("preview must inline Claude-compatible schema without root $schema:\n%s", got)
 	}
 	if len(warnings) != 0 {
 		t.Fatalf("unexpected warnings: %#v", warnings)
@@ -348,7 +356,7 @@ func TestClaudeCommandPlanNonWindowsPreservesArgvShape(t *testing.T) {
 		Bin:          "claude",
 		PromptMode:   "replace",
 		SystemPrompt: "system body",
-		JSONSchema:   `{"type":"object"}`,
+		JSONSchema:   `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object"}`,
 		Prompt:       "do the work",
 	}, "linux")
 	if err != nil {
@@ -361,11 +369,33 @@ func TestClaudeCommandPlanNonWindowsPreservesArgvShape(t *testing.T) {
 	if !containsArg(command.Argv, "--json-schema") {
 		t.Fatalf("non-Windows argv must keep --json-schema: %#v", command.Argv)
 	}
+	if got := argAfter(t, command.Argv, "--json-schema"); got != `{"type":"object"}` {
+		t.Fatalf("non-Windows argv must pass Claude-compatible schema, got %q", got)
+	}
 	if command.Argv[len(command.Argv)-1] != "do the work" {
 		t.Fatalf("non-Windows argv must end with work order prompt: %#v", command.Argv)
 	}
 	if command.Stdin != "" {
 		t.Fatalf("non-Windows command should not set stdin, got %q", command.Stdin)
+	}
+}
+
+func TestClaudeCompatibleJSONSchemaRemovesUnsupportedRootKeywordsOnly(t *testing.T) {
+	t.Parallel()
+	got, err := ClaudeCompatibleJSONSchema(`{"$schema":"https://json-schema.org/draft/2020-12/schema","allOf":[{"required":["x"]}],"anyOf":[{"type":"object"}],"oneOf":[{"type":"object"}],"type":"object","properties":{"nested":{"$schema":"kept","allOf":[{"required":["y"]}],"type":"string"}}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "draft/2020-12") {
+		t.Fatalf("root $schema was not removed: %s", got)
+	}
+	for _, unsupported := range []string{`"allOf":[{"required":["x"]}]`, `"anyOf":[{"type":"object"}]`, `"oneOf":[{"type":"object"}]`} {
+		if strings.Contains(got, unsupported) {
+			t.Fatalf("root unsupported keyword was not removed: %s", got)
+		}
+	}
+	if !strings.Contains(got, `"nested":{"$schema":"kept","allOf":[{"required":["y"]}],"type":"string"}`) {
+		t.Fatalf("nested schema metadata should remain untouched: %s", got)
 	}
 }
 
@@ -397,7 +427,7 @@ func writePromptFixtures(t *testing.T) (string, string) {
 	if err := os.WriteFile(promptPath, []byte("system prompt"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(schemaPath, []byte(`{"type":"object"}`), 0o600); err != nil {
+	if err := os.WriteFile(schemaPath, []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return promptPath, schemaPath

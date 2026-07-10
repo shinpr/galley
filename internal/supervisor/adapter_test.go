@@ -120,6 +120,9 @@ printf '%s\n' '{"status":"accepted","summary":"ok","acceptance_gaps":[],"reviewe
 			t.Fatalf("claude args missing %q:\n%s", want, args)
 		}
 	}
+	if strings.Contains(string(args), "$schema") || strings.Contains(string(args), "draft/2020-12") {
+		t.Fatalf("claude supervisor schema must omit root $schema:\n%s", args)
+	}
 	for _, unwanted := range []string{"--allowedTools", "--allowed-tools"} {
 		if strings.Contains(string(args), unwanted) {
 			t.Fatalf("claude args should not set %q:\n%s", unwanted, args)

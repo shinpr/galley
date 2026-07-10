@@ -668,8 +668,11 @@ func TestClaudeArgsShell(t *testing.T) {
 	if stderr != "" {
 		t.Fatalf("stderr got %q", stderr)
 	}
-	if !strings.HasPrefix(stdout, "cd ") || !strings.Contains(stdout, `--system-prompt "$(cat `) || !strings.Contains(stdout, `--json-schema "$(cat `) {
+	if !strings.HasPrefix(stdout, "cd ") || !strings.Contains(stdout, `--system-prompt "$(cat `) || !strings.Contains(stdout, `--json-schema `) {
 		t.Fatalf("unexpected shell preview: %q", stdout)
+	}
+	if strings.Contains(stdout, `--json-schema "$(cat `) || strings.Contains(stdout, "$schema") {
+		t.Fatalf("shell preview must inline Claude-compatible schema: %q", stdout)
 	}
 }
 

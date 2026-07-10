@@ -93,7 +93,7 @@ func rejectDuplicateTaskID(path, id, root string) error {
 		}
 		return nil
 	}
-	return fmt.Errorf("queue registration failed: could not obtain a stable view of existing tasks after %d attempts because tasks kept moving between state directories; the task source was preserved and not queued; retry the queue command", duplicateScanMaxAttempts)
+	return fmt.Errorf("queue registration failed after %d scans: task state kept changing; source preserved and not queued; retry the command", duplicateScanMaxAttempts)
 }
 
 // scanForDuplicateTaskID requests a rescan when an enumerated task has moved.

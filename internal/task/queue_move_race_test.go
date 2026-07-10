@@ -214,7 +214,7 @@ func TestQueueDuplicateScanRetryExhaustion(t *testing.T) {
 		t.Fatal("expected retry exhaustion to fail queue registration")
 	}
 	msg := err.Error()
-	for _, want := range []string{"queue registration failed", "preserved", "retry the queue command"} {
+	for _, want := range []string{"queue registration failed", "preserved", "retry the command"} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("error missing %q recovery fact: %v", want, err)
 		}

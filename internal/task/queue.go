@@ -1,6 +1,7 @@
 package task
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,12 @@ import (
 	"github.com/shinpr/galley/internal/strutil"
 	"go.yaml.in/yaml/v3"
 )
+
+// Bound retries so continuous task movement cannot block queue registration.
+const duplicateScanMaxAttempts = 5
+
+// Overridden by tests to reproduce a move between enumeration and read.
+var taskIDForDuplicateScan = taskIDFromFile
 
 type QueueOptions struct {
 	Reason     string
@@ -73,27 +80,48 @@ func rejectDuplicateTaskID(path, id, root string) error {
 	if err != nil {
 		return err
 	}
+	for attempt := 0; attempt < duplicateScanMaxAttempts; attempt++ {
+		duplicatePath, moved, err := scanForDuplicateTaskID(root, current, id)
+		if err != nil {
+			return err
+		}
+		if moved {
+			continue
+		}
+		if duplicatePath != "" {
+			return fmt.Errorf("task id %q already exists at %s", id, duplicatePath)
+		}
+		return nil
+	}
+	return fmt.Errorf("queue registration failed after %d scans: task state kept changing; source preserved and not queued; retry the command", duplicateScanMaxAttempts)
+}
+
+// scanForDuplicateTaskID requests a rescan when an enumerated task has moved.
+func scanForDuplicateTaskID(root, current, id string) (string, bool, error) {
 	matches, err := filepath.Glob(filepath.Join(root, "tasks", "*", "*.y*ml"))
 	if err != nil {
-		return err
+		return "", false, err
 	}
 	for _, match := range matches {
 		absMatch, err := filepath.Abs(match)
 		if err != nil {
-			return err
+			return "", false, err
 		}
 		if absMatch == current {
 			continue
 		}
-		existingID, err := taskIDFromFile(match)
+		existingID, err := taskIDForDuplicateScan(match)
 		if err != nil {
-			return fmt.Errorf("inspect existing task %s: %w", match, err)
+			if errors.Is(err, os.ErrNotExist) {
+				return "", true, nil
+			}
+			return "", false, fmt.Errorf("inspect existing task %s: %w", match, err)
 		}
 		if existingID == id {
-			return fmt.Errorf("task id %q already exists at %s", id, match)
+			return match, false, nil
 		}
 	}
-	return nil
+	return "", false, nil
 }
 
 func taskIDFromFile(path string) (string, error) {

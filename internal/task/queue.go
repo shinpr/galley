@@ -12,16 +12,10 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// duplicateScanMaxAttempts bounds how many times duplicate-ID inspection reruns
-// the complete scan when a previously enumerated task disappears mid-scan. The
-// daemon can rename a task between state directories (e.g. queued -> running)
-// after enumeration but before its ID is read; a bounded rescan finds it at its
-// new location without a global lock that could stall daemon processing.
+// Bound retries so continuous task movement cannot block queue registration.
 const duplicateScanMaxAttempts = 5
 
-// taskIDForDuplicateScan reads a task ID during duplicate-ID inspection. It is a
-// package variable so move-race regression tests can deterministically relocate
-// a task between path enumeration and the ID read.
+// Overridden by tests to reproduce a move between enumeration and read.
 var taskIDForDuplicateScan = taskIDFromFile
 
 type QueueOptions struct {
@@ -92,9 +86,6 @@ func rejectDuplicateTaskID(path, id, root string) error {
 			return err
 		}
 		if moved {
-			// A task disappeared between enumeration and its ID read, so the
-			// daemon relocated it mid-scan. Rescan to inspect it at its new
-			// location instead of aborting on the now-stale path.
 			continue
 		}
 		if duplicatePath != "" {
@@ -105,11 +96,7 @@ func rejectDuplicateTaskID(path, id, root string) error {
 	return fmt.Errorf("queue registration failed: could not obtain a stable view of existing tasks after %d attempts because tasks kept moving between state directories; the task source was preserved and not queued; retry the queue command", duplicateScanMaxAttempts)
 }
 
-// scanForDuplicateTaskID runs one complete duplicate-ID scan. It reports the
-// path of a same-ID task when found, or moved=true when a previously enumerated
-// task vanished mid-scan (os.ErrNotExist) so the caller can rescan. Any other
-// inspection error is returned as the underlying cause rather than treated as a
-// move race.
+// scanForDuplicateTaskID requests a rescan when an enumerated task has moved.
 func scanForDuplicateTaskID(root, current, id string) (string, bool, error) {
 	matches, err := filepath.Glob(filepath.Join(root, "tasks", "*", "*.y*ml"))
 	if err != nil {

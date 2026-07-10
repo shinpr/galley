@@ -232,9 +232,13 @@ func runClaudeAdapterForOS(ctx context.Context, opts AdapterOptions, request []b
 		// JSON schema is intentionally not passed on argv on Windows; verdict
 		// validators in ValidateVerdictForEvidence reject malformed output.
 	} else {
+		schema, err := runner.ClaudeCompatibleJSONSchema(schemas.SupervisorVerdict)
+		if err != nil {
+			return nil, fmt.Errorf("prepare Claude supervisor schema: %w", err)
+		}
 		args = append(args,
 			"--system-prompt", prompts.ClaudeSupervisor(),
-			"--json-schema", schemas.SupervisorVerdict,
+			"--json-schema", schema,
 		)
 	}
 	args = append(args, "--plugin-dir", guardDir)

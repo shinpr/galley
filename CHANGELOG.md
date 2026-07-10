@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Fixed
+
+- `task queue` no longer fails when the daemon moves an existing task between state directories (e.g. queued to running) during duplicate-ID inspection; it rescans the current task state, still rejects genuine duplicate IDs, and only reports a bounded, source-preserving failure (distinct from a task execution failure) if it cannot obtain a stable view.
+
 ## v0.9.1 - 2026-07-10
 
 ### Fixed

@@ -100,7 +100,7 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 	// executor timeout still has a chance to capture worktree state and write
 	// its evidence file.
 	excludePaths := nonCommittedInputDestinations(loaded.Files)
-	if err := stageExecutorOutput(ctx, opts, workDir, attemptDir, excludePaths); err != nil {
+	if err := opts.daemonDependencies().stageExecutorOutput(ctx, opts, workDir, attemptDir, excludePaths); err != nil {
 		return attemptOutcome{}, &reviewStagingError{Err: err}
 	}
 

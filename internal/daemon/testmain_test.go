@@ -18,20 +18,17 @@ import (
 // internal/retry tests; daemon tests only need the retry loop to advance
 // instantly.
 //
-// The setupExecutorRunner is also stubbed to a default ready result so the
+// The invocation-scoped setup runner is also stubbed to a ready result so the
 // majority of daemon tests, which do not exercise the setup executor preflight,
 // do not need to spawn a real Claude/Codex subprocess. Tests that exercise the
-// setup preflight contract override setupExecutorRunner explicitly via
+// setup preflight contract override the test runner explicitly via
 // withSetupExecutorRunner.
 func TestMain(m *testing.M) {
 	restoreRetry := retry.SetHooksForTest(
 		func(_ context.Context, _ time.Duration) error { return nil },
 		func() float64 { return 1.0 },
 	)
-	prevSetup := setupExecutorRunner
-	setupExecutorRunner = defaultTestSetupExecutorRunner
 	code := m.Run()
-	setupExecutorRunner = prevSetup
 	restoreRetry()
 	os.Exit(code)
 }
@@ -57,10 +54,27 @@ func defaultTestSetupExecutorRunner(_ context.Context, _ setuppreflight.Options)
 	}, nil
 }
 
+var testSetupExecutorRunner = defaultTestSetupExecutorRunner
+
+func testDaemonOptions(opts Options) Options {
+	deps := opts.daemonDependencies()
+	deps.setupExecutorRunner = testSetupExecutorRunner
+	opts.dependencies = &deps
+	return opts
+}
+
+func runTestDaemon(ctx context.Context, opts Options) error {
+	return Run(ctx, testDaemonOptions(opts))
+}
+
+func processAvailableForTest(ctx context.Context, opts Options) (int, error) {
+	return processAvailable(ctx, testDaemonOptions(opts))
+}
+
 // withSetupExecutorRunner installs a setup executor runner for the duration of
 // a test. The previous runner is restored when the cleanup fires.
 func withSetupExecutorRunner(t interface{ Cleanup(func()) }, runner func(context.Context, setuppreflight.Options) (*setuppreflight.Result, error)) {
-	prev := setupExecutorRunner
-	setupExecutorRunner = runner
-	t.Cleanup(func() { setupExecutorRunner = prev })
+	prev := testSetupExecutorRunner
+	testSetupExecutorRunner = runner
+	t.Cleanup(func() { testSetupExecutorRunner = prev })
 }

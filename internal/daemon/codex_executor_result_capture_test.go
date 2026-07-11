@@ -87,7 +87,7 @@ func TestCodexCommandPlanRecordsOutputSchemaAndLastMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Run(context.Background(), Options{
+	if err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -148,7 +148,7 @@ func TestCodexCommandPlanMaterializesEmbeddedSchemaWhenNoFileProvided(t *testing
 
 	// Intentionally omit JSONSchemaFile so the runner has to materialize the
 	// embedded schema into an attempt-scoped file.
-	if err := Run(context.Background(), Options{
+	if err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		Once:               true,
@@ -220,7 +220,7 @@ printf '%s\n' '{"event":"unrelated"}'
 		t.Fatal(err)
 	}
 
-	if err := Run(context.Background(), Options{
+	if err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -286,7 +286,7 @@ printf '%s\n' '`+hardStopResult+`'
 		t.Fatal(err)
 	}
 
-	if err := Run(context.Background(), Options{
+	if err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,

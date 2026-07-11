@@ -66,7 +66,7 @@ echo '{"status":"completed_with_risks","summary":"only reproduced the skeleton",
 		t.Fatal(err)
 	}
 
-	err = Run(context.Background(), Options{
+	err = runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,

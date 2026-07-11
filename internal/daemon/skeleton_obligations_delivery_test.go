@@ -64,7 +64,7 @@ echo '{"status":"completed","summary":"done","files_modified":["daemon-output.tx
 	// The task may finalize (accepted) or be downgraded by the acceptance gate;
 	// either way the executor runs first and dumps its input. The final status is
 	// not the subject under test.
-	if err := Run(context.Background(), Options{
+	if err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,

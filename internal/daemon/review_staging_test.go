@@ -29,7 +29,7 @@ func TestRunOnceStagesNewUntrackedFileBeforeSupervisorReview(t *testing.T) {
 	}
 	writeDaemonTask(t, taskPath, repo)
 
-	if err := Run(context.Background(), Options{
+	if err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -80,7 +80,7 @@ func TestRunOnceAcceptedFinalizationCommitsStagedNewFile(t *testing.T) {
 	}
 	writeDaemonTask(t, taskPath, repo)
 
-	if err := Run(context.Background(), Options{
+	if err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -135,7 +135,7 @@ func TestRunOnceAcceptedFinalizationCommitsStagedOnlyDeletion(t *testing.T) {
 	}
 	writeDaemonTask(t, taskPath, repo)
 
-	if err := Run(context.Background(), Options{
+	if err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -214,7 +214,7 @@ func TestRunOnceAcceptedFinalizationExcludesNonCommittedInputFile(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	if err := Run(context.Background(), Options{
+	if err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -282,7 +282,7 @@ func TestRunOnceAcceptedFinalizationDetectsForbiddenPathAfterStaging(t *testing.
 	// failure via its return value (matching the daemon's other terminal
 	// failure paths such as TestRunOnceFailsWhenPRBaseRefMissing) and also
 	// moves the task to tasks/failed for inspection.
-	runErr := Run(context.Background(), Options{
+	runErr := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -340,8 +340,7 @@ func TestRunOnceReviewStagingFailureRecordsAttemptErrorBeforeSupervisor(t *testi
 	// Override the staging seam to capture invocation evidence under the
 	// attempt dir (so file-based evidence still exists for review) and then
 	// return an error that mimics a real `git add -A` failure.
-	prev := stageExecutorOutput
-	stageExecutorOutput = func(_ context.Context, _ Options, workDir, attemptDir string, _ []string) error {
+	stageForTest := func(_ context.Context, _ Options, workDir, attemptDir string, _ []string) error {
 		if err := os.MkdirAll(attemptDir, 0o700); err != nil {
 			return err
 		}
@@ -350,13 +349,12 @@ func TestRunOnceReviewStagingFailureRecordsAttemptErrorBeforeSupervisor(t *testi
 		}
 		return fmt.Errorf("git add -A (review staging) failed: simulated index lock")
 	}
-	t.Cleanup(func() { stageExecutorOutput = prev })
 
 	// AC6: a review-staging failure is a terminal attempt error. Run surfaces
 	// the wrapped error to its caller (mirroring other daemon failure modes
 	// like TestRunOnceFailsWhenPRBaseRefMissing) and moves the task to
 	// tasks/failed with the staging-classified attempt error attached.
-	runErr := Run(context.Background(), Options{
+	runErr := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -364,6 +362,7 @@ func TestRunOnceReviewStagingFailureRecordsAttemptErrorBeforeSupervisor(t *testi
 		ClaudeBin:          claudeBin,
 		Once:               true,
 		MaxConcurrentTasks: 1,
+		dependencies:       &daemonDependencies{stageExecutorOutput: stageForTest},
 	})
 	if runErr == nil {
 		t.Fatal("expected review-staging failure to be surfaced by Run")
@@ -433,7 +432,7 @@ func TestRunOnceReviewStagingExcludesNonCommittedInputFromAttemptDiff(t *testing
 		t.Fatal(err)
 	}
 
-	if err := Run(context.Background(), Options{
+	if err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -511,7 +510,7 @@ func TestRunOnceReviewStagingDoesNotPresentContextInputAsSubmittedDiff(t *testin
 		t.Fatal(err)
 	}
 
-	if err := Run(context.Background(), Options{
+	if err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,

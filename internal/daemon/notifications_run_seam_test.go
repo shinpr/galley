@@ -33,7 +33,7 @@ func TestRunOnceDeliversNotificationThroughRunWiring(t *testing.T) {
 	}
 	writeDaemonTask(t, taskPath, repo)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,

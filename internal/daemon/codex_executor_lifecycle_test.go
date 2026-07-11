@@ -86,7 +86,7 @@ func TestCodexExecutorSuccessProducesParityRunEvidence(t *testing.T) {
 	}
 	setLoopBudget(t, taskPath, 2)
 
-	if err := Run(context.Background(), Options{
+	if err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -183,7 +183,7 @@ fi
 	}
 	setLoopBudget(t, taskPath, 3)
 
-	if err := Run(context.Background(), Options{
+	if err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -253,7 +253,7 @@ func TestCodexExecutorIdleTimeoutClassifiedConsistently(t *testing.T) {
 	// TestCodexExecutorRetryRespectsLoopBudget.
 	setLoopBudget(t, taskPath, 1)
 
-	_ = Run(context.Background(), Options{
+	_ = runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,

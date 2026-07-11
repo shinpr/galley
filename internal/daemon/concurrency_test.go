@@ -34,7 +34,7 @@ func TestRunProcessesTasksConcurrentlyAcrossRepos(t *testing.T) {
 		setLoopBudget(t, p, 2)
 	}
 
-	if err := Run(context.Background(), Options{
+	if err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,

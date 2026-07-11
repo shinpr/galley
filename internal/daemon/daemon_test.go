@@ -31,7 +31,7 @@ func TestRunOnceMovesTaskToDoneAndWritesRunEvidence(t *testing.T) {
 	writeDaemonTask(t, taskPath, repo)
 	setLoopBudget(t, taskPath, 2)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -112,7 +112,7 @@ echo '{"status":"completed","summary":"done","files_modified":["daemon-output.tx
 		t.Fatal(err)
 	}
 
-	err = Run(context.Background(), Options{
+	err = runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -154,7 +154,7 @@ func TestRunOnceUsesModelSupervisorProvider(t *testing.T) {
 	}
 	writeDaemonTask(t, taskPath, repo)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -190,7 +190,7 @@ func TestRunOnceRecordsSupervisorTimeoutInTaskAttempt(t *testing.T) {
 	writeDaemonTask(t, taskPath, repo)
 	setTimeoutMS(t, taskPath, 50)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -247,7 +247,7 @@ fi
 	writeDaemonTask(t, taskPath, repo)
 	setLoopBudget(t, taskPath, 2)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -287,7 +287,7 @@ func TestRunOncePreservesExecutorDecisionsWithVerificationEvidence(t *testing.T)
 	}
 	writeDaemonTask(t, taskPath, repo)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -326,7 +326,7 @@ func TestRunOnceOpenPRCommitsPushesAndUpdatesTask(t *testing.T) {
 	}
 	writeDaemonTask(t, taskPath, repo)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -387,7 +387,7 @@ fi
 	}
 	writeDaemonTask(t, taskPath, repo)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -437,7 +437,7 @@ func TestRunOnceOpenPRUsesExecutorCommit(t *testing.T) {
 	}
 	writeDaemonTask(t, taskPath, repo)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -492,7 +492,7 @@ func TestRunOnceOpenPRCommitsAcceptedDiffOutsideAllowedPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = Run(context.Background(), Options{
+	err = runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -554,7 +554,7 @@ func TestRunOnceCopiesInputFileAndRemovesBeforeCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = Run(context.Background(), Options{
+	err = runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -602,7 +602,7 @@ func TestRunOnceMovesInvalidTaskToFailed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := Run(context.Background(), Options{Root: root, Once: true})
+	err := runTestDaemon(context.Background(), Options{Root: root, Once: true})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -622,7 +622,7 @@ func TestRunOnceHardStopMovesTaskToFailed(t *testing.T) {
 	}
 	writeDaemonTask(t, taskPath, repo)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -654,7 +654,7 @@ func TestRunOnceParseFailureNeedsSupervisorReview(t *testing.T) {
 	}
 	writeDaemonTask(t, taskPath, repo)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -689,7 +689,7 @@ func TestRunOnceCompletedWithRisksNeedsSupervisorReview(t *testing.T) {
 	}
 	writeDaemonTask(t, taskPath, repo)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -724,7 +724,7 @@ func TestRunOnceCompletedWithoutDiffNeedsSupervisorReview(t *testing.T) {
 	}
 	writeDaemonTask(t, taskPath, repo)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -760,7 +760,7 @@ func TestRunOnceStopsAfterConsecutiveNoDiffAttempts(t *testing.T) {
 	writeDaemonTask(t, taskPath, repo)
 	setLoopBudget(t, taskPath, 5)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -800,7 +800,7 @@ func TestRunOnceDrainsQueue(t *testing.T) {
 	writeDaemonTask(t, filepath.Join(queueDir, "task-1.yaml"), repo1)
 	writeDaemonTask(t, filepath.Join(queueDir, "task-2.yaml"), repo2)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -830,7 +830,7 @@ func TestRunOnceContinuesAfterTaskFailure(t *testing.T) {
 	}
 	writeDaemonTask(t, filepath.Join(queueDir, "good.yaml"), repo)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -866,7 +866,7 @@ func TestRunOnceRecordsValidationErrorsInTaskAttempt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = Run(context.Background(), Options{
+	err = runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -919,7 +919,7 @@ func TestProcessAvailableSkipsClaimConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	processed, err := processAvailable(context.Background(), Options{Root: root, MaxConcurrentTasks: 1, ClaimTTL: time.Hour}.withDefaults())
+	processed, err := processAvailableForTest(context.Background(), Options{Root: root, MaxConcurrentTasks: 1, ClaimTTL: time.Hour}.withDefaults())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -949,7 +949,7 @@ func TestProcessAvailableSkipsConflictAndClaimsLaterTask(t *testing.T) {
 	}
 	writeDaemonTask(t, filepath.Join(queueDir, "b-good.yaml"), repo)
 
-	processed, err := processAvailable(context.Background(), Options{
+	processed, err := processAvailableForTest(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -984,7 +984,7 @@ func TestProcessAvailableHonorsMaxConcurrentPerRepo(t *testing.T) {
 	writeDaemonTask(t, filepath.Join(runningDir, "active.yaml"), repo)
 	writeDaemonTask(t, filepath.Join(queueDir, "queued.yaml"), repo)
 
-	processed, err := processAvailable(context.Background(), Options{
+	processed, err := processAvailableForTest(context.Background(), Options{
 		Root:                 root,
 		SystemPromptFile:     promptPath,
 		JSONSchemaFile:       schemaPath,
@@ -1020,7 +1020,7 @@ func TestProcessAvailableAllowsDifferentRepos(t *testing.T) {
 	writeDaemonTask(t, filepath.Join(runningDir, "active.yaml"), repo1)
 	writeDaemonTask(t, filepath.Join(queueDir, "queued.yaml"), repo2)
 
-	processed, err := processAvailable(context.Background(), Options{
+	processed, err := processAvailableForTest(context.Background(), Options{
 		Root:                 root,
 		SystemPromptFile:     promptPath,
 		JSONSchemaFile:       schemaPath,
@@ -1052,7 +1052,7 @@ func TestProcessAvailableDoesNotBlockOnMultipleClaimErrors(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := processAvailable(context.Background(), Options{
+		_, err := processAvailableForTest(context.Background(), Options{
 			Root:               root,
 			MaxConcurrentTasks: 1,
 			ClaimTTL:           time.Hour,
@@ -1083,7 +1083,7 @@ func TestProcessAvailableLetsClaimedTaskFinishAfterShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	processed, err := processAvailable(ctx, Options{
+	processed, err := processAvailableForTest(ctx, Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -1103,7 +1103,7 @@ func TestProcessAvailableLetsClaimedTaskFinishAfterShutdown(t *testing.T) {
 	ctx, cancel = context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		_, err := processAvailable(ctx, Options{
+		_, err := processAvailableForTest(ctx, Options{
 			Root:               root,
 			SystemPromptFile:   promptPath,
 			JSONSchemaFile:     schemaPath,
@@ -1139,7 +1139,7 @@ func TestShutdownStopsBeforeRetryAttempt(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		_, err := processAvailable(ctx, Options{
+		_, err := processAvailableForTest(ctx, Options{
 			Root:               root,
 			SystemPromptFile:   promptPath,
 			JSONSchemaFile:     schemaPath,
@@ -1194,7 +1194,7 @@ func TestRunOnceStopsWhenOnlyClaimConflictsRemain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		Once:               true,
 		MaxConcurrentTasks: 1,
@@ -1592,7 +1592,7 @@ func TestRunOnceBranchesNewWorktreeFromEnvironmentPRBaseOriginRef(t *testing.T) 
 	}
 	writeDaemonTask(t, taskPath, repo)
 
-	if err := Run(context.Background(), Options{
+	if err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -1673,7 +1673,7 @@ func TestRunOnceBranchesNewWorktreeFromLocalHeadsFallback(t *testing.T) {
 	}
 	writeDaemonTask(t, taskPath, repo)
 
-	if err := Run(context.Background(), Options{
+	if err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -1712,7 +1712,7 @@ func TestRunOnceFailsWhenPRBaseRefMissing(t *testing.T) {
 	}
 	writeDaemonTask(t, taskPath, repo)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -1770,7 +1770,7 @@ func TestRunOnceFailsWhenStaleOriginRefAndFetchFails(t *testing.T) {
 	}
 	writeDaemonTask(t, taskPath, repo)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -1865,7 +1865,7 @@ func TestRunOnceRefreshesStaleOriginRefBeforeWorktreeCreation(t *testing.T) {
 	}
 	writeDaemonTask(t, taskPath, repo)
 
-	if err := Run(context.Background(), Options{
+	if err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,

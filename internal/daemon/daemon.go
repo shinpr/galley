@@ -21,6 +21,7 @@ import (
 	"github.com/shinpr/galley/internal/queue"
 	"github.com/shinpr/galley/internal/runartifact"
 	"github.com/shinpr/galley/internal/runner"
+	"github.com/shinpr/galley/internal/supervisor"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/internal/taskstate"
 	"github.com/shinpr/galley/internal/version"
@@ -121,7 +122,40 @@ type Options struct {
 	// waiting the full default bound.
 	notifyTimeout    time.Duration
 	notifyDispatcher *notificationDispatcher
+	dependencies     *daemonDependencies
 	Explicit         ExplicitOptions
+}
+
+type daemonDependencies struct {
+	stageExecutorOutput func(context.Context, Options, string, string, []string) error
+	supervisorRunner    func(context.Context, Options, supervisor.Evidence, string, string) (supervisor.Verdict, error)
+	setupExecutorRunner func(context.Context, setuppreflight.Options) (*setuppreflight.Result, error)
+}
+
+func defaultDaemonDependencies() daemonDependencies {
+	return daemonDependencies{
+		stageExecutorOutput: defaultStageExecutorOutput,
+		supervisorRunner:    defaultSupervisorRunner,
+		setupExecutorRunner: setuppreflight.RunExecutor,
+	}
+}
+
+func (opts Options) daemonDependencies() daemonDependencies {
+	defaults := defaultDaemonDependencies()
+	if opts.dependencies == nil {
+		return defaults
+	}
+	deps := *opts.dependencies
+	if deps.stageExecutorOutput == nil {
+		deps.stageExecutorOutput = defaults.stageExecutorOutput
+	}
+	if deps.supervisorRunner == nil {
+		deps.supervisorRunner = defaults.supervisorRunner
+	}
+	if deps.setupExecutorRunner == nil {
+		deps.setupExecutorRunner = defaults.setupExecutorRunner
+	}
+	return deps
 }
 
 type ExplicitOptions struct {
@@ -612,7 +646,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 		CodexBin:               opts.CodexBin,
 		GLMAuthToken:           opts.GLMAuthToken,
 		EnvironmentProfilePath: resolvedProfiles.EnvironmentProfileFile,
-		ExecutorRunner:         setupExecutorRunner,
+		ExecutorRunner:         opts.daemonDependencies().setupExecutorRunner,
 	})
 	if setupErr != nil {
 		return failClaimedStage(opts.Root, runningPath, &loaded, setuppreflight.Phase, setuppreflight.FailedKind, setupErr, runDir)

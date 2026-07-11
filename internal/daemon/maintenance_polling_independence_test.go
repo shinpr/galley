@@ -114,7 +114,7 @@ esac
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		done <- Run(ctx, Options{
+		done <- runTestDaemon(ctx, Options{
 			Root:               root,
 			SystemPromptFile:   promptPath,
 			JSONSchemaFile:     schemaPath,

@@ -45,7 +45,7 @@ func TestSupervisorRetryRecoversAfterStallOnSecondTry(t *testing.T) {
 		return supervisor.Verdict{Status: "accepted", Summary: "ok"}, nil
 	}
 
-	opts := Options{dependencies: &daemonDependencies{supervisorRunner: runnerForTest}}
+	opts := Options{Supervisor: "claude", dependencies: &daemonDependencies{supervisorRunner: runnerForTest}}
 	verdict, err := evaluateSupervisorWithRetry(context.Background(), opts, supervisor.Evidence{Task: task.Task{ID: "test"}}, attemptDir, attemptDir)
 	if err != nil {
 		t.Fatalf("evaluateSupervisorWithRetry returned error: %v", err)
@@ -106,7 +106,7 @@ func TestSupervisorRetryExhaustedReturnsClassifiedFailure(t *testing.T) {
 		return supervisor.Verdict{}, runnerCommandErr(runner.CommandErrorIdleTimeout, errors.New("command produced no output for 1s (idle timeout)"))
 	}
 
-	opts := Options{dependencies: &daemonDependencies{supervisorRunner: runnerForTest}}
+	opts := Options{Supervisor: "claude", dependencies: &daemonDependencies{supervisorRunner: runnerForTest}}
 	_, err := evaluateSupervisorWithRetry(context.Background(), opts, supervisor.Evidence{Task: task.Task{ID: "test"}}, attemptDir, attemptDir)
 	if err == nil {
 		t.Fatal("expected exhausted retries to return an error")
@@ -185,7 +185,7 @@ func TestSupervisorRetryMixedStallsDoNotReportSupervisorIdleTimeout(t *testing.T
 		return supervisor.Verdict{}, stalls[calls-1]
 	}
 
-	opts := Options{dependencies: &daemonDependencies{supervisorRunner: runnerForTest}}
+	opts := Options{Supervisor: "claude", dependencies: &daemonDependencies{supervisorRunner: runnerForTest}}
 	_, err := evaluateSupervisorWithRetry(context.Background(), opts, supervisor.Evidence{Task: task.Task{ID: "test"}}, attemptDir, attemptDir)
 	if err == nil {
 		t.Fatal("expected exhausted mixed stalls to return an error")

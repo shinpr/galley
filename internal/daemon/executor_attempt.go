@@ -163,11 +163,11 @@ func mergeAttemptEvidence(loaded *task.Task, outcome attemptOutcome, runID, work
 		appendRisk(loaded, "git-diff", "partial_verification", outcome.DiffErr.Error(), "Stored other run evidence; git diff evidence is unavailable.", true)
 	}
 	if outcome.ParseErr != nil {
-		appendRisk(loaded, "claude-result-parse", "partial_verification", outcome.ParseErr.Error(), "Stored raw Claude stdout and stderr for supervisor review.", true)
+		appendRisk(loaded, "executor-result-parse", "partial_verification", outcome.ParseErr.Error(), fmt.Sprintf("Stored raw %s stdout and stderr for supervisor review.", executorArtifactLabel(loaded.Executor.CLI)), true)
 		return
 	}
 	if outcome.ExecutorResult.Status == "completed" && outcome.DiffErr == nil && !outcome.DiffDirty {
-		appendRisk(loaded, "git-diff-empty", "partial_verification", "Executor completed but produced no git diff in the execution workspace.", "Stored Claude result and raw logs for supervisor review.", true)
+		appendRisk(loaded, "git-diff-empty", "partial_verification", "Executor completed but produced no git diff in the execution workspace.", fmt.Sprintf("Stored %s result and raw logs for supervisor review.", executorArtifactLabel(loaded.Executor.CLI)), true)
 	}
 	for _, ac := range outcome.ExecutorResult.AcceptanceCriteria {
 		for i := range loaded.AcceptanceCriteria {
@@ -185,7 +185,7 @@ func mergeAttemptEvidence(loaded *task.Task, outcome attemptOutcome, runID, work
 	}
 	for _, decision := range outcome.ExecutorResult.Decisions {
 		loaded.Decisions = append(loaded.Decisions, task.Decision{
-			ID:               fmt.Sprintf("claude-decision-%d", len(loaded.Decisions)+1),
+			ID:               fmt.Sprintf("executor-decision-%d", len(loaded.Decisions)+1),
 			Question:         decision.Question,
 			Chosen:           decision.Chosen,
 			Rationale:        decision.Rationale,
@@ -194,11 +194,18 @@ func mergeAttemptEvidence(loaded *task.Task, outcome attemptOutcome, runID, work
 		})
 	}
 	for _, executorRisk := range outcome.ExecutorResult.Risks {
-		appendRisk(loaded, "claude-risk", executorRisk.Type, executorRisk.Detail, executorRisk.Mitigation, executorRisk.NeedsHumanReview)
+		appendRisk(loaded, "executor-risk", executorRisk.Type, executorRisk.Detail, executorRisk.Mitigation, executorRisk.NeedsHumanReview)
 	}
 	if outcome.ExecutorResult.Status == "hard_stop" && outcome.ExecutorResult.HardStop != nil {
 		appendRisk(loaded, "executor-hard-stop", "other", outcome.ExecutorResult.HardStop.Reason, strings.Join(outcome.ExecutorResult.HardStop.NeededToContinue, "; "), true)
 	}
+}
+
+func executorArtifactLabel(cli string) string {
+	if cli == "" {
+		return "executor"
+	}
+	return cli + " executor"
 }
 
 // executorVerificationCmd returns a stable command label that identifies the

@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- Packaged Claude and Codex Galley plugins are now versioned as `0.1.21`. General environment-profile examples and authoring guidance now use Claude as the default executor and supervisor backend.
+
 ## v0.9.2 - 2026-07-10
 
 ### Fixed

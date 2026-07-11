@@ -170,7 +170,7 @@ setup:
     - run: "<fresh worktree setup command>"
       why: "<why this prepares the worktree>"
 executor:
-  default_cli: "codex"
+  default_cli: "claude"
 constraints:
   network: "approval_required"
   secrets_policy: "never_read_env_files"

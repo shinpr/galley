@@ -43,7 +43,7 @@ func TestLoadAndValidateEnvironmentExample(t *testing.T) {
 	if env.Commands["test_unit"] == "" {
 		t.Fatalf("commands got %#v", env.Commands)
 	}
-	if env.Executor == nil || env.Executor.DefaultCLI != "codex" {
+	if env.Executor == nil || env.Executor.DefaultCLI != "claude" {
 		t.Fatalf("executor default got %#v", env.Executor)
 	}
 }

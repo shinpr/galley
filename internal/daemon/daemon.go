@@ -580,11 +580,12 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	if err != nil {
 		return failClaimedStage(opts.Root, runningPath, &loaded, "run_evidence", "run_evidence_failed", err, runDir)
 	}
+	effectiveOpts := resolveEffectiveTaskOptions(opts, profiles).apply(opts)
 
 	// A per-task environment.yaml supervisor.default_cli: glm override bypasses
 	// startup Preflight, so validate the token here — before setup/executor —
 	// rather than failing at the supervisor call after a full attempt ran.
-	if effectiveOptionsForProfiles(opts, profiles).Supervisor == "glm" {
+	if effectiveOpts.Supervisor == "glm" {
 		if _, tokenErr := runner.ResolveGLMToken(opts.GLMAuthToken); tokenErr != nil {
 			return failClaimedStage(opts.Root, runningPath, &loaded, "supervisor_preflight", "supervisor_config_failed", fmt.Errorf("supervisor is \"glm\": %w", tokenErr), runDir)
 		}
@@ -652,7 +653,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 			}
 		}
 	}
-	return runSupervisorLoop(ctx, shutdownCtx, opts, runningPath, &loaded, prepared, profiles, runDir, runID)
+	return runSupervisorLoop(ctx, shutdownCtx, effectiveOpts, runningPath, &loaded, prepared, profiles, runDir, runID)
 }
 
 func failClaimedStage(root, runningPath string, loaded *task.Task, phase, kind string, err error, runDir string) error {

@@ -27,7 +27,9 @@ const ClaudeSupervisorSystemPromptFilename = "claude_supervisor_system_prompt.md
 
 // AdapterOptions configures a built-in model supervisor adapter.
 type AdapterOptions struct {
-	Provider    string
+	Provider string
+	// Model is passed unchanged to the provider CLI. Empty preserves its default.
+	Model       string
 	WorkDir     string
 	Timeout     time.Duration
 	IdleTimeout time.Duration
@@ -146,6 +148,13 @@ func NewAdapterRequest(evidence Evidence) AdapterRequest {
 	}}
 }
 
+func appendSupervisorModel(args []string, model string) []string {
+	if model == "" {
+		return args
+	}
+	return append(args, "--model", model)
+}
+
 func runCodexAdapter(ctx context.Context, opts AdapterOptions, request []byte) ([]byte, error) {
 	dir, cleanup, err := supervisorArtifactDir(opts.ArtifactDir, "galley-codex-supervisor-*")
 	if err != nil {
@@ -168,19 +177,21 @@ func runCodexAdapter(ctx context.Context, opts AdapterOptions, request []byte) (
 	if err := writeSupervisorFile(schemaPath, []byte(schemas.SupervisorVerdict)); err != nil {
 		return nil, err
 	}
+	args := []string{
+		opts.CodexBin,
+		"exec",
+		"--cd", opts.WorkDir,
+		"--sandbox", "workspace-write",
+		"--json",
+		"--output-schema", schemaPath,
+		"--output-last-message", outPath,
+	}
+	args = appendSupervisorModel(args, opts.Model)
+	args = append(args, "-")
 	_, err = runner.RunCommand(ctx, runner.Command{
 		WorkDir: opts.WorkDir,
-		Argv: []string{
-			opts.CodexBin,
-			"exec",
-			"--cd", opts.WorkDir,
-			"--sandbox", "workspace-write",
-			"--json",
-			"--output-schema", schemaPath,
-			"--output-last-message", outPath,
-			"-",
-		},
-		Stdin: prompt,
+		Argv:    args,
+		Stdin:   prompt,
 	}, runner.RunOptions{Timeout: opts.Timeout, IdleTimeout: opts.IdleTimeout, StdoutPath: eventsPath})
 	if err != nil {
 		return nil, fmt.Errorf("codex supervisor failed: %w", err)
@@ -228,6 +239,7 @@ func runClaudeAdapterForOS(ctx context.Context, opts AdapterOptions, request []b
 		"--disallowedTools", "Write,Edit,MultiEdit,NotebookEdit",
 		"--output-format", "text",
 	}
+	args = appendSupervisorModel(args, opts.Model)
 	if goos == "windows" {
 		systemPromptPath := filepath.Join(dir, ClaudeSupervisorSystemPromptFilename)
 		if err := writeSupervisorFile(systemPromptPath, []byte(prompts.ClaudeSupervisor())); err != nil {

@@ -16,9 +16,11 @@ func TestRunAdapterPayloadGLMRedirectsToEndpointAndStripsAPIKey(t *testing.T) {
 
 	binDir := t.TempDir()
 	envPath := filepath.Join(t.TempDir(), "claude.env")
+	argsPath := filepath.Join(t.TempDir(), "claude.args")
 	fakeClaude := filepath.Join(binDir, "claude")
 	if err := os.WriteFile(fakeClaude, []byte(`#!/bin/sh
 printf 'BASE=%s\nAUTH=%s\nKEY=[%s]\n' "$ANTHROPIC_BASE_URL" "$ANTHROPIC_AUTH_TOKEN" "$ANTHROPIC_API_KEY" > `+envPath+`
+printf '%s\n' "$*" > `+argsPath+`
 cat >/dev/null
 printf '%s\n' '{"status":"accepted","summary":"ok","acceptance_gaps":[],"reviewed_files":["README.md"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["checked"]}],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"medium","next_work_order":""}'
 `), 0o700); err != nil {
@@ -27,6 +29,7 @@ printf '%s\n' '{"status":"accepted","summary":"ok","acceptance_gaps":[],"reviewe
 
 	output, err := RunAdapterPayload(context.Background(), AdapterOptions{
 		Provider:     "glm",
+		Model:        "provider-model-x",
 		WorkDir:      t.TempDir(),
 		ArtifactDir:  t.TempDir(),
 		ClaudeBin:    fakeClaude,
@@ -51,6 +54,13 @@ printf '%s\n' '{"status":"accepted","summary":"ok","acceptance_gaps":[],"reviewe
 	}
 	if !strings.Contains(got, "KEY=[]") {
 		t.Fatalf("inherited ANTHROPIC_API_KEY was not stripped from child env:\n%s", got)
+	}
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(args), "--model provider-model-x") != 1 {
+		t.Fatalf("glm args must contain one configured model: %s", args)
 	}
 }
 

@@ -52,6 +52,7 @@ printf '%s\n' '{"status":"accepted","summary":"ok","acceptance_gaps":[],"reviewe
 
 	output, err := runClaudeAdapterForOS(context.Background(), AdapterOptions{
 		Provider:    "claude",
+		Model:       "provider-model-x",
 		WorkDir:     t.TempDir(),
 		ArtifactDir: artifactDir,
 		ClaudeBin:   fakeClaude,
@@ -73,6 +74,9 @@ printf '%s\n' '{"status":"accepted","summary":"ok","acceptance_gaps":[],"reviewe
 	}
 	if strings.Contains(argsStr, "--json-schema") {
 		t.Fatalf("Windows supervisor argv must not include --json-schema: %s", argsStr)
+	}
+	if strings.Count(argsStr, "--model provider-model-x") != 1 {
+		t.Fatalf("Windows supervisor argv must contain one configured model: %s", argsStr)
 	}
 	// The bare --system-prompt flag must not appear; only --system-prompt-file.
 	if strings.Contains(argsStr, "--system-prompt ") || strings.HasSuffix(argsStr, "--system-prompt") {

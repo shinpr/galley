@@ -160,6 +160,10 @@
             "glm"
           ],
           "type": "string"
+        },
+        "model": {
+          "description": "Optional model name passed unchanged to the selected supervisor CLI. Omit or leave empty to use the CLI default; accepted values depend on the provider.",
+          "type": "string"
         }
       },
       "type": "object"

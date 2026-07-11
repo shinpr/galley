@@ -76,6 +76,7 @@ func EnvironmentJSONSchema() ([]byte, error) {
 			"supervisor": object(
 				properties(map[string]any{
 					"default_cli": enumSchema(daemonconfig.SupervisorCLIs()),
+					"model":       stringSchema("description", "Optional model name passed unchanged to the selected supervisor CLI. Omit or leave empty to use the CLI default; accepted values depend on the provider."),
 				}),
 			),
 			"required_checks": object(

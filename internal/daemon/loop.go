@@ -99,6 +99,7 @@ var supervisorRunner = defaultSupervisorRunner
 func defaultSupervisorRunner(ctx context.Context, opts Options, evidence supervisor.Evidence, tryDir, workDir string) (supervisor.Verdict, error) {
 	return supervisor.RunAdapter(ctx, supervisor.AdapterOptions{
 		Provider:     opts.Supervisor,
+		Model:        opts.SupervisorModel,
 		WorkDir:      workDir,
 		Timeout:      time.Duration(evidence.Task.ExecutionPolicy.TimeoutMS) * time.Millisecond,
 		IdleTimeout:  opts.IdleTimeout,
@@ -510,8 +511,14 @@ func attemptsLeft(budget, attempt int) int {
 // extracted from runSupervisorLoop so it can be unit-tested without driving a
 // full task through the daemon loop.
 func writeSupervisorEvidence(runDir string, effectiveOpts Options) error {
+	modelSource := SupervisorModelSourceCLIDefault
+	if effectiveOpts.SupervisorModel != "" {
+		modelSource = SupervisorModelSourceRepoProfile
+	}
 	return writeJSON(filepath.Join(runDir, "supervisor.json"), map[string]string{
-		"resolved": effectiveOpts.Supervisor,
-		"source":   effectiveOpts.SupervisorSource,
+		"resolved":     effectiveOpts.Supervisor,
+		"source":       effectiveOpts.SupervisorSource,
+		"model":        effectiveOpts.SupervisorModel,
+		"model_source": modelSource,
 	})
 }

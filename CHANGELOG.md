@@ -8,7 +8,7 @@ This project follows semantic versioning.
 
 ### Changed
 
-- Packaged Claude and Codex Galley plugins are now versioned as `0.1.21`. General environment-profile examples and authoring guidance now use Claude as the default executor and supervisor backend.
+- Packaged Claude and Codex plugins are now `0.1.22`. Environment-profile guidance uses Claude defaults and supports repository-pinned supervisor models through `supervisor.model`, with the effective setting recorded in run evidence.
 
 ## v0.9.2 - 2026-07-10
 

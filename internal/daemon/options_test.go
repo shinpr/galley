@@ -190,6 +190,83 @@ func TestWriteSupervisorEvidenceRecordsResolvedAndSource(t *testing.T) {
 	}
 }
 
+func TestEffectiveOptionsForProfilesResolvesSupervisorModel(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name      string
+		env       *profile.Environment
+		wantModel string
+	}{
+		{
+			name:      "pinned model without default_cli",
+			env:       &profile.Environment{Supervisor: &profile.SupervisorDefault{Model: "provider-model-x"}},
+			wantModel: "provider-model-x",
+		},
+		{
+			name:      "pinned model preserved exactly",
+			env:       &profile.Environment{Supervisor: &profile.SupervisorDefault{DefaultCLI: "codex", Model: " spaced model "}},
+			wantModel: " spaced model ",
+		},
+		{
+			name:      "empty model omitted",
+			env:       &profile.Environment{Supervisor: &profile.SupervisorDefault{DefaultCLI: "claude", Model: ""}},
+			wantModel: "",
+		},
+		{
+			name:      "no supervisor block",
+			env:       &profile.Environment{},
+			wantModel: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			effective := effectiveOptionsForProfiles(Options{Root: t.TempDir()}, profile.Bundle{Environment: tc.env})
+			if effective.SupervisorModel != tc.wantModel {
+				t.Fatalf("supervisor model got %q, want %q", effective.SupervisorModel, tc.wantModel)
+			}
+		})
+	}
+}
+
+func TestWriteSupervisorEvidenceRecordsModelState(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name            string
+		model           string
+		wantModel       string
+		wantModelSource string
+	}{
+		{name: "pinned", model: "provider-model-x", wantModel: "provider-model-x", wantModelSource: SupervisorModelSourceRepoProfile},
+		{name: "omitted", model: "", wantModel: "", wantModelSource: SupervisorModelSourceCLIDefault},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runDir := t.TempDir()
+			if err := writeSupervisorEvidence(runDir, Options{
+				Supervisor:       "claude",
+				SupervisorSource: SupervisorSourceRepoProfile,
+				SupervisorModel:  tc.model,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(filepath.Join(runDir, "supervisor.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got map[string]string
+			if err := json.Unmarshal(data, &got); err != nil {
+				t.Fatal(err)
+			}
+			if got["model"] != tc.wantModel {
+				t.Fatalf("model got %q, want %q", got["model"], tc.wantModel)
+			}
+			if got["model_source"] != tc.wantModelSource {
+				t.Fatalf("model_source got %q, want %q (evidence %#v)", got["model_source"], tc.wantModelSource, got)
+			}
+		})
+	}
+}
+
 func TestEffectiveOptionsForProfilesCleansWorktreesByDefault(t *testing.T) {
 	t.Parallel()
 	effective := effectiveOptionsForProfiles(Options{Root: t.TempDir()}, profile.Bundle{})

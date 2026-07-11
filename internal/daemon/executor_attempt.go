@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/shinpr/galley/internal/profile"
 	"github.com/shinpr/galley/internal/runartifact"
 	"github.com/shinpr/galley/internal/runner"
+	claudeguard "github.com/shinpr/galley/internal/runner/claude_guard_plugin"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/internal/workspace"
 )
@@ -271,4 +273,82 @@ func appendSupervisorIdleTimeoutAttempt(loaded *task.Task, outcome attemptOutcom
 	})
 	loaded.Status = "needs_supervisor_review"
 	appendRisk(loaded, "supervisor-idle-timeout", "partial_verification", message, "Inspect the supervisor-try-N evidence under the attempt directory, then requeue the task or adjust the daemon --idle-timeout or --supervisor settings.", true)
+}
+
+// prepareClaudeExecutorPlan builds the Claude executor command plan and the
+// stdout/stderr capture paths used by runExecutorAttempt.
+func prepareClaudeExecutorPlan(opts Options, loaded task.Task, workDir, prompt, attemptDir string) (runner.Command, string, string, error) {
+	claudeOpts := runner.FromTask(loaded)
+	claudeOpts.Bin = opts.ClaudeBin
+	claudeOpts.WorkDir = workDir
+	claudeOpts.SystemPromptFile = opts.SystemPromptFile
+	claudeOpts.JSONSchemaFile = opts.JSONSchemaFile
+	claudeOpts.AttemptDir = attemptDir
+	claudeOpts.Prompt = prompt
+	if !opts.DisableClaudeGuard {
+		guardDir := opts.ClaudeGuardPluginDir
+		if guardDir == "" {
+			guardDir = filepath.Join(opts.Root, "runtime", "claude-guard-plugin")
+		}
+		guardDir, err := claudeguard.Ensure(guardDir)
+		if err != nil {
+			return runner.Command{}, "", "", err
+		}
+		guardDir, err = filepath.Abs(guardDir)
+		if err != nil {
+			return runner.Command{}, "", "", fmt.Errorf("resolve Claude guard plugin dir: %w", err)
+		}
+		claudeOpts.PluginDirs = append(claudeOpts.PluginDirs, guardDir)
+	}
+	plan, err := runner.ClaudeCommandPlan(claudeOpts)
+	if err != nil {
+		return runner.Command{}, "", "", err
+	}
+	return plan, filepath.Join(attemptDir, "claude.stdout.jsonl"), filepath.Join(attemptDir, "claude.stderr.log"), nil
+}
+
+// prepareGLMExecutorPlan builds the GLM implementation executor command plan by
+// reusing the Claude launch path and redirecting the Claude binary at GLM's
+// endpoint via runner.RedirectClaudeToGLM. It fails fast with an actionable,
+// secret-free error when executor.cli "glm" was selected without a configured
+// glm_api_key. The stdout/stderr paths reuse the claude.* names because GLM
+// produces the same stream-json output. Setup and acceptance-skeleton executors
+// apply the identical redirect in their own packages, so all executor roles
+// honor executor.cli "glm".
+func prepareGLMExecutorPlan(opts Options, loaded task.Task, workDir, prompt, attemptDir string) (runner.Command, string, string, error) {
+	token, err := runner.ResolveGLMToken(opts.GLMAuthToken)
+	if err != nil {
+		return runner.Command{}, "", "", err
+	}
+	plan, stdoutPath, stderrPath, err := prepareClaudeExecutorPlan(opts, loaded, workDir, prompt, attemptDir)
+	if err != nil {
+		return runner.Command{}, "", "", err
+	}
+	runner.RedirectClaudeToGLM(&plan, token)
+	return plan, stdoutPath, stderrPath, nil
+}
+
+// prepareCodexExecutorPlan builds the Codex executor command plan and the
+// stdout/stderr capture paths used by runExecutorAttempt. The stdout file is
+// named codex.stdout.jsonl to mirror the claude.stdout.jsonl convention.
+//
+// AttemptDir is threaded through to the runner so JSONSchemaFile/JSONSchema is
+// mapped onto a real `codex exec --output-schema <file>` path and the daemon
+// also requests `--output-last-message <file>` under the same attempt
+// directory. The Codex CLI writes the final assistant message to that file,
+// which resolveCodexResult then parses to preserve completed,
+// completed_with_risks, and hard_stop executor results for supervisor handoff.
+func prepareCodexExecutorPlan(opts Options, loaded task.Task, workDir, prompt, attemptDir string) (runner.Command, string, string, error) {
+	codexOpts := runner.CodexFromTask(loaded)
+	codexOpts.Bin = opts.CodexBin
+	codexOpts.WorkDir = workDir
+	codexOpts.SystemPromptFile = opts.SystemPromptFile
+	codexOpts.JSONSchemaFile = opts.JSONSchemaFile
+	codexOpts.AttemptDir = attemptDir
+	codexOpts.Prompt = prompt
+	plan, err := runner.CodexCommandPlan(codexOpts)
+	if err != nil {
+		return runner.Command{}, "", "", err
+	}
+	return plan, filepath.Join(attemptDir, "codex.stdout.jsonl"), filepath.Join(attemptDir, "codex.stderr.log"), nil
 }

@@ -25,7 +25,6 @@ func moveToWorkflowState(root, currentPath string, state task.WorkflowState, upd
 	return nil
 }
 
-// MoveToStatus publishes a decoded task to the directory determined by its status.
 func MoveToStatus(root, currentPath string, updated *task.Task) error {
 	if updated == nil {
 		return errors.New("move task to status: task is nil")

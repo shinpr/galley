@@ -10,7 +10,6 @@ import (
 	"strings"
 )
 
-// ExecutorResult is the provider-neutral structured result returned by an executor.
 type ExecutorResult struct {
 	Status             string                        `json:"status"`
 	Summary            string                        `json:"summary"`
@@ -23,7 +22,6 @@ type ExecutorResult struct {
 	HardStop           *ExecutorHardStop             `json:"hard_stop,omitempty"`
 }
 
-// ExecutorAcceptanceCriterion records executor evidence for one criterion.
 type ExecutorAcceptanceCriterion struct {
 	ID       string   `json:"id"`
 	Status   string   `json:"status"`
@@ -31,7 +29,6 @@ type ExecutorAcceptanceCriterion struct {
 	Notes    string   `json:"notes"`
 }
 
-// ExecutorVerification records one verification command reported by an executor.
 type ExecutorVerification struct {
 	Command       string `json:"command"`
 	Status        string `json:"status"`
@@ -39,7 +36,6 @@ type ExecutorVerification struct {
 	OutputExcerpt string `json:"output_excerpt"`
 }
 
-// ExecutorScopeExpansion records a deliberate change outside task.scope.allowed_paths.
 type ExecutorScopeExpansion struct {
 	Path              string `json:"path"`
 	Reason            string `json:"reason"`
@@ -47,7 +43,6 @@ type ExecutorScopeExpansion struct {
 	Minimality        string `json:"minimality"`
 }
 
-// ExecutorDecision records one decision reported by an executor.
 type ExecutorDecision struct {
 	Question         string `json:"question"`
 	Chosen           string `json:"chosen"`
@@ -56,7 +51,6 @@ type ExecutorDecision struct {
 	NeedsHumanReview bool   `json:"needs_human_review"`
 }
 
-// ExecutorRisk records one risk reported by an executor.
 type ExecutorRisk struct {
 	Type             string `json:"type"`
 	Detail           string `json:"detail"`
@@ -64,14 +58,12 @@ type ExecutorRisk struct {
 	NeedsHumanReview bool   `json:"needs_human_review"`
 }
 
-// ExecutorHardStop records hard-stop details.
 type ExecutorHardStop struct {
 	Reason           string   `json:"reason"`
 	Attempted        []string `json:"attempted"`
 	NeededToContinue []string `json:"needed_to_continue"`
 }
 
-// ExtractExecutorResult parses a provider-neutral structured result from text.
 func ExtractExecutorResult(text string) (ExecutorResult, error) {
 	if result, found, err := extractExecutorResultLine(strings.TrimSpace(text)); found {
 		return result, err
@@ -92,7 +84,6 @@ func ExtractExecutorResult(text string) (ExecutorResult, error) {
 	return ExecutorResult{}, fmt.Errorf("structured executor result not found")
 }
 
-// ExtractExecutorResultFile parses structured executor results from a text file.
 func ExtractExecutorResultFile(path string) (ExecutorResult, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -123,9 +114,7 @@ func ExtractExecutorResultFile(path string) (ExecutorResult, error) {
 	return ExecutorResult{}, fmt.Errorf("structured executor result not found")
 }
 
-// Validate checks the lightweight executor result contract used by the daemon.
-// Empty arrays are valid, but nil slices are rejected because the JSON contract
-// requires explicit array fields for stable downstream evidence handling.
+// Validate requires explicit arrays so persisted evidence has a stable shape.
 func (r ExecutorResult) Validate() error {
 	switch r.Status {
 	case "completed", "completed_with_risks", "hard_stop":

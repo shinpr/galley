@@ -1,11 +1,5 @@
 package runner
 
-// AC: AC4 — The Codex executor command plan must wire the structured
-// executor-result schema through `codex exec --output-schema` and request a
-// `--output-last-message` capture file, and the captured final message must
-// parse back into a ExecutorResult so completed, completed_with_risks, and
-// hard_stop executor judgments survive supervisor handoff.
-
 import (
 	"encoding/json"
 	"os"
@@ -29,9 +23,6 @@ func TestCodexCommandPlanMaterializesEmbeddedSchemaWhenOnlyContentAvailable(t *t
 		t.Fatalf("CodexCommandPlan: %v", err)
 	}
 
-	// Argv must include --output-schema pointing at a real file under the
-	// attempt directory and --output-last-message under the same directory so
-	// `codex exec` can dereference both paths.
 	schemaFlag := flagValue(t, plan.Argv, "--output-schema")
 	if schemaFlag == "" {
 		t.Fatalf("argv missing --output-schema: %v", plan.Argv)

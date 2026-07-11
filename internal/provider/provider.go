@@ -1,5 +1,4 @@
-// Package provider defines Galley's supported model provider identities and
-// mechanical capabilities without depending on runtime or configuration code.
+// Package provider owns supported provider identities and capabilities.
 package provider
 
 import "slices"

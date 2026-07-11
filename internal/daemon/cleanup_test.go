@@ -105,10 +105,6 @@ func TestCleanupWorktreesRemovesDirtyClosedPRWorktree(t *testing.T) {
 	}
 }
 
-// writeFailIfInvokedGH returns a fake `gh` binary that records every
-// invocation by creating a marker file and exits successfully so a buggy
-// caller does not pay the FetchPRState retry backoff. Tests assert the marker
-// is absent to prove the no-GitHub cleanup path never shelled out to `gh`.
 func writeFailIfInvokedGH(t *testing.T) (ghBin, marker string) {
 	t.Helper()
 	marker = filepath.Join(t.TempDir(), "gh-invoked")
@@ -124,10 +120,6 @@ func assertGHNotInvoked(t *testing.T, marker string) {
 	}
 }
 
-// TestCleanupWorktreesSkipsAlreadyFinalMissingWorktreeWithoutGitHubAPI covers
-// AC1: a done task that already records pr.status merged/closed and whose
-// managed worktree path is already absent must complete cleanup without
-// invoking `gh api`.
 func TestCleanupWorktreesSkipsAlreadyFinalMissingWorktreeWithoutGitHubAPI(t *testing.T) {
 	for _, prStatus := range []string{"merged", "closed"} {
 		t.Run(prStatus, func(t *testing.T) {
@@ -139,8 +131,6 @@ func TestCleanupWorktreesSkipsAlreadyFinalMissingWorktreeWithoutGitHubAPI(t *tes
 			taskPath := filepath.Join(root, "tasks", "done", "task.yaml")
 			writeDaemonTask(t, taskPath, repo)
 			_, worktreePath := prepareDonePRTask(t, taskPath, repo, prStatus)
-			// Simulate an already-final historical task whose worktree was
-			// already removed in a prior sweep.
 			if err := os.RemoveAll(worktreePath); err != nil {
 				t.Fatal(err)
 			}
@@ -165,10 +155,6 @@ func TestCleanupWorktreesSkipsAlreadyFinalMissingWorktreeWithoutGitHubAPI(t *tes
 	}
 }
 
-// TestCleanupWorktreesRemovesPersistedFinalWorktreeWithoutGitHubAPI covers
-// AC2: a done task that already records pr.status merged/closed and whose
-// managed worktree still exists must be removed using the persisted final PR
-// status, without first refreshing PR state from GitHub.
 func TestCleanupWorktreesRemovesPersistedFinalWorktreeWithoutGitHubAPI(t *testing.T) {
 	for _, prStatus := range []string{"merged", "closed"} {
 		t.Run(prStatus, func(t *testing.T) {
@@ -207,10 +193,6 @@ func TestCleanupWorktreesRemovesPersistedFinalWorktreeWithoutGitHubAPI(t *testin
 	}
 }
 
-// TestCleanupWorktreesErrorIncludesTaskContext covers AC5: an actionable
-// cleanup failure must identify the failing task (file or id) plus the PR URL
-// or resolved worktree path. The worktree path is pointed at the source
-// repository so workspace.Remove refuses removal deterministically.
 func TestCleanupWorktreesErrorIncludesTaskContext(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
@@ -236,10 +218,6 @@ func TestCleanupWorktreesErrorIncludesTaskContext(t *testing.T) {
 	}
 }
 
-// TestCleanupWorktreesContinuesAfterTaskFailure covers AC6: cleanup keeps
-// scanning remaining done tasks after a per-task failure and returns the first
-// contextualized failure once the sweep completes. The failing task sorts
-// before the removable task so the returned error is the contextualized one.
 func TestCleanupWorktreesContinuesAfterTaskFailure(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
@@ -267,7 +245,6 @@ func TestCleanupWorktreesContinuesAfterTaskFailure(t *testing.T) {
 	}
 	assertGHNotInvoked(t, marker)
 
-	// The sweep continued past the failure and cleaned the later removable task.
 	if _, statErr := os.Stat(removableWorktree); !os.IsNotExist(statErr) {
 		t.Fatalf("later removable worktree should be cleaned, err=%v", statErr)
 	}
@@ -318,9 +295,6 @@ func TestCleanupWorktreesLogsAdditionalTaskFailures(t *testing.T) {
 	assertGHNotInvoked(t, marker)
 }
 
-// pointWorktreeAtSourceRepo rewrites a done task's managed worktree path to the
-// source repository so workspace.Remove refuses to remove it, producing a
-// deterministic actionable cleanup failure for AC5/AC6.
 func pointWorktreeAtSourceRepo(t *testing.T, taskPath, repo string) {
 	t.Helper()
 	loaded, err := task.Load(taskPath)

@@ -20,7 +20,6 @@ const (
 	StatusArchived              = "archived"
 )
 
-// WorkflowState is a directory in the file-backed task lifecycle.
 type WorkflowState string
 
 const (

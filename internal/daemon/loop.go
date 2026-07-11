@@ -111,9 +111,6 @@ func defaultSupervisorRunner(ctx context.Context, opts Options, evidence supervi
 
 func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPath string, loaded *task.Task, prepared workspace.Prepared, profiles profile.Bundle, runDir, runID string) error {
 	fmt.Fprintf(os.Stderr, "galley: task %s running in %s (run_id=%s)\n", loaded.ID, prepared.CWD, runID)
-	// processClaimedTask resolved profiles and effective task options once
-	// before workspace creation. The opts received here are that immutable
-	// claimed-task resolution; maintenance paths resolve independently.
 	effectiveOpts := opts
 	// Persist the resolved supervisor and its source as run evidence.
 	// Reviewers can then tell whether the per-task supervisor came from the

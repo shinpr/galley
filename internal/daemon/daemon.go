@@ -571,22 +571,8 @@ func gracefulTaskContext(parent context.Context, timeout time.Duration) (context
 }
 
 func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningPath string) error {
-	// runDir is captured here so the deferred terminal notification can include
-	// the run directory in its payload. It stays empty for pre-run failures
-	// (e.g. a task that fails to load or validate before run evidence exists),
-	// in which case the notification reports an empty run_dir.
 	var runDir string
-	// Start the best-effort terminal notification hook after the task body
-	// returns. By this point every terminal publication has already happened
-	// through the taskstate publication APIs, so the hook only observes a
-	// task that actually reached a published terminal state. The hook reads the
-	// published task from tasks/done|failed so a failed move (task still in
-	// running/) produces no notification, and a hook failure cannot affect the
-	// already-completed state transition. notifyTerminalPublication dispatches
-	// delivery on a detached goroutine and returns immediately, so a slow or
-	// stuck notifier cannot delay this goroutine's wg.Done() or the next daemon
-	// iteration. Daemon shutdown cancels any in-flight delivery and Run waits
-	// for cleanup before the process exits.
+	// Notification observes published terminal state and cannot change it.
 	defer func() { notifyTerminalPublication(ctx, opts, runningPath, &runDir) }()
 
 	loaded, err := loadClaimedTask(runningPath)

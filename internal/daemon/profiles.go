@@ -167,9 +167,6 @@ func refExists(ctx context.Context, opts Options, sourceCWD, ref string) (bool, 
 	return true, nil
 }
 
-// effectiveTaskOptions is the profile-resolved policy shared by equivalent
-// consumers in one claimed-task execution. Maintenance resolves separately for
-// each historical task because it has a different lifecycle and load time.
 type effectiveTaskOptions struct {
 	OpenPR           bool
 	CommitOnAccept   bool

@@ -57,19 +57,9 @@ func TestResolveProfileFilesKeepsExplicitOverride(t *testing.T) {
 	}
 }
 
-// TestRunOnceBranchesNewWorktreeFromEnvironmentPRBaseOriginRef covers AC2 +
-// AC4 case (1): when the environment profile's pr.base resolves to an
-// origin/<base> ref, the new task worktree is branched from that ref's SHA
-// rather than the source repo's current HEAD. This also exercises the order
-// requirement: profile resolution must happen before workspace.Prepare.
 func TestRunOnceBranchesNewWorktreeFromEnvironmentPRBaseOriginRef(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
-	// Wire a real bare origin remote and publish feature-base at the initial
-	// commit. The daemon's pre-resolve `git fetch origin feature-base` must
-	// succeed against this remote so origin/feature-base remains the chosen
-	// start-point. Advance source HEAD so origin/feature-base SHA differs
-	// from the source repo HEAD SHA.
 	remote := filepath.Join(t.TempDir(), "remote.git")
 	runDaemonGit(t, t.TempDir(), "init", "--bare", remote)
 	runDaemonGit(t, repo, "remote", "add", "origin", remote)
@@ -110,15 +100,10 @@ func TestRunOnceBranchesNewWorktreeFromEnvironmentPRBaseOriginRef(t *testing.T) 
 		t.Fatal(err)
 	}
 	worktreePath := taskWorktreePath(repo, doneTask.Worktree.Path)
-	// The fake claude does not commit, so the new branch HEAD equals the
-	// start-point ref's SHA. If profile resolution were skipped or ordered
-	// after Prepare, the worktree HEAD would equal the source repo HEAD
-	// (headSHA) instead.
 	got := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", worktreePath, "rev-parse", "HEAD")))
 	if got != baseSHA {
 		t.Fatalf("worktree HEAD got %q, want origin/feature-base SHA %q (source HEAD=%q)", got, baseSHA, headSHA)
 	}
-	// AC7: profiles.json must still be written into the run directory.
 	matches, err := filepath.Glob(filepath.Join(root, "runs", "*", "profiles.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -147,15 +132,11 @@ func TestRunOnceBranchesNewWorktreeFromEnvironmentPRBaseOriginRef(t *testing.T) 
 	}
 }
 
-// TestRunOnceBranchesNewWorktreeFromLocalHeadsFallback covers AC4 case (2):
-// when origin/<base> is missing but refs/heads/<base> exists, the local
-// branch is used as the start-point.
 func TestRunOnceBranchesNewWorktreeFromLocalHeadsFallback(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	baseSHA := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "HEAD")))
 	runDaemonGit(t, repo, "branch", "feature-local")
-	// Advance master/main so HEAD differs from feature-local tip.
 	if err := os.WriteFile(filepath.Join(repo, "advance.txt"), []byte("advance\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -197,10 +178,6 @@ func TestRunOnceBranchesNewWorktreeFromLocalHeadsFallback(t *testing.T) {
 	}
 }
 
-// TestRunOnceFailsWhenPRBaseRefMissing covers AC4 case (3): when neither
-// origin/<base> nor refs/heads/<base> exists, the daemon must fail the
-// claimed task with a descriptive error and record the attempt as
-// phase=workspace.
 func TestRunOnceFailsWhenPRBaseRefMissing(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
@@ -242,23 +219,11 @@ func TestRunOnceFailsWhenPRBaseRefMissing(t *testing.T) {
 	}
 }
 
-// TestRunOnceFailsWhenStaleOriginRefAndFetchFails covers the tightened
-// PR-review behavior: when the source repository has an origin remote, a
-// stale refs/remotes/origin/<pr.base> cached locally, and `git fetch origin
-// <pr.base>` cannot succeed (here, the configured origin URL is unreachable),
-// the daemon must refuse to use the stale remote-tracking ref and instead
-// fail the claimed task in the workspace phase. This prevents a stale local
-// origin/<base> from silently anchoring a new task branch behind the actual
-// remote tip when the daemon cannot confirm freshness.
 func TestRunOnceFailsWhenStaleOriginRefAndFetchFails(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
-	// Wire origin to a bogus URL so `git fetch origin feature-stale` fails.
 	bogusRemote := filepath.Join(t.TempDir(), "does-not-exist.git")
 	runDaemonGit(t, repo, "remote", "add", "origin", bogusRemote)
-	// Pre-create a stale refs/remotes/origin/feature-stale: if the daemon
-	// did not refuse on fetch failure, this stale ref would still be
-	// resolved as the start-point.
 	staleSHA := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "HEAD")))
 	runDaemonGit(t, repo, "update-ref", "refs/remotes/origin/feature-stale", staleSHA)
 
@@ -295,47 +260,30 @@ func TestRunOnceFailsWhenStaleOriginRefAndFetchFails(t *testing.T) {
 	if last.Error == nil || last.Error.Phase != "workspace" {
 		t.Fatalf("attempt error got %#v", last.Error)
 	}
-	// The error must surface the source repo path, the pr.base value, and
-	// the failed fetch operation so `galley task show` exposes the reason.
 	for _, want := range []string{repo, "feature-stale", "fetch", "refs/remotes/origin/feature-stale"} {
 		if !strings.Contains(last.Error.Message, want) {
 			t.Fatalf("attempt error message missing %q: %q", want, last.Error.Message)
 		}
 	}
-	// No worktree must have been created from the stale ref.
 	doneTask := filepath.Join(root, "tasks", "done", "task.yaml")
 	if _, statErr := os.Stat(doneTask); statErr == nil {
 		t.Fatalf("expected no done task, but found %s", doneTask)
 	}
-	// The stale local ref must remain untouched (the fetch failed, so no
-	// refresh could have updated it). This documents that we did not
-	// silently rewrite the stale ref while refusing to use it.
 	stillStale := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "refs/remotes/origin/feature-stale")))
 	if stillStale != staleSHA {
 		t.Fatalf("stale origin/feature-stale unexpectedly changed; got %q want %q", stillStale, staleSHA)
 	}
 }
 
-// TestRunOnceRefreshesStaleOriginRefBeforeWorktreeCreation covers the
-// PR-review revision request: when the source repository has an origin remote
-// and a stale refs/remotes/origin/<pr.base> cached locally, the daemon must
-// fetch origin <pr.base> before resolving the start-point so the new task
-// branch starts from the latest remote tip rather than the stale local copy.
 func TestRunOnceRefreshesStaleOriginRefBeforeWorktreeCreation(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
-	// Bare upstream remote and origin wiring on the source repo.
 	remote := filepath.Join(t.TempDir(), "remote.git")
 	runDaemonGit(t, t.TempDir(), "init", "--bare", remote)
 	runDaemonGit(t, repo, "remote", "add", "origin", remote)
-	// Seed the upstream feature-stale branch at SHA_A from the source repo.
 	runDaemonGit(t, repo, "push", "origin", "HEAD:refs/heads/feature-stale")
 	shaA := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "HEAD")))
-	// Pin the local remote-tracking ref at SHA_A so the cached origin/feature-stale
-	// is genuinely stale once the upstream advances below.
 	runDaemonGit(t, repo, "update-ref", "refs/remotes/origin/feature-stale", shaA)
-	// Advance feature-stale on the upstream via a separate publisher clone so
-	// the remote tip moves to SHA_B without touching the source repo.
 	publisher := filepath.Join(t.TempDir(), "publisher")
 	runDaemonGit(t, t.TempDir(), "clone", remote, publisher)
 	runDaemonGit(t, publisher, "config", "user.email", "test@example.com")
@@ -351,7 +299,6 @@ func TestRunOnceRefreshesStaleOriginRefBeforeWorktreeCreation(t *testing.T) {
 	if shaA == shaB {
 		t.Fatal("setup failed: shaA and shaB should differ")
 	}
-	// Sanity check: the source repo still sees the stale SHA before the daemon runs.
 	cached := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "refs/remotes/origin/feature-stale")))
 	if cached != shaA {
 		t.Fatalf("setup failed: cached origin/feature-stale got %q, want stale SHA %q", cached, shaA)
@@ -387,9 +334,6 @@ func TestRunOnceRefreshesStaleOriginRefBeforeWorktreeCreation(t *testing.T) {
 	if got != shaB {
 		t.Fatalf("worktree HEAD got %q, want refreshed origin/feature-stale tip %q (stale was %q)", got, shaB, shaA)
 	}
-	// The local remote-tracking ref must have been refreshed by the daemon's
-	// pre-resolve fetch, confirming refs/remotes/origin/feature-stale is no
-	// longer stale.
 	refreshed := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "refs/remotes/origin/feature-stale")))
 	if refreshed != shaB {
 		t.Fatalf("refs/remotes/origin/feature-stale not refreshed; got %q want %q", refreshed, shaB)

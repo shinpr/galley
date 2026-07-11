@@ -24,11 +24,7 @@ type AcceptanceGateInputs struct {
 	AcceptanceIDs []string
 }
 
-// AcceptanceGate enforces : an accepted verdict must be downgraded to
-// needs_supervisor_review when required skeleton coverage is missing. The
-// supervisor is responsible for inspecting implementation_required skeletons
-// for TODO/skipped/placeholder tests; required test execution evidence comes
-// from the normal quality profile checks.
+// AcceptanceGate rejects acceptance when required skeleton coverage is missing.
 func AcceptanceGate(in AcceptanceGateInputs) (string, bool) {
 	if !in.Required {
 		return "", true
@@ -53,17 +49,7 @@ func AcceptanceGate(in AcceptanceGateInputs) (string, bool) {
 	return strings.Join(problems, "; "), false
 }
 
-// evaluateAcceptanceGate inspects the preflight result and required-check
-// evidence and returns ("", true) when acceptance is allowed.
-// Tasks without preflight.acceptance_skeleton enabled always pass — the
-// gate (including the required quality-check evidence gate) only activates
-// when a human opted the task into acceptance skeleton preflight via the
-// task contract.
 func evaluateAcceptanceGate(loaded *task.Task, runDir string) (string, bool) {
-	// Default flow: a task that omits or disables preflight.acceptance_skeleton
-	// must validate and finalize through the normal daemon path. The required
-	// quality-check evidence gate is part of the acceptance skeleton contract,
-	// so only an enabled preflight section opts a task in.
 	if loaded == nil || loaded.Preflight == nil || loaded.Preflight.AcceptanceSkeleton == nil {
 		return "", true
 	}
@@ -71,11 +57,6 @@ func evaluateAcceptanceGate(loaded *task.Task, runDir string) (string, bool) {
 	if !cfg.IsEnabled() {
 		return "", true
 	}
-	// Required quality-check evidence gate. Scoped to
-	// preflight-enabled tasks so a supervisor cannot finalize an accepted
-	// verdict while a required profile check is missing or failed in the
-	// latest executor result. This gate is tied to enabled:true, not
-	// required:true; required:false only relaxes per-AC skeleton coverage.
 	if reason, ok := requiredCheckEvidenceGate(loaded, runDir); !ok {
 		return reason, false
 	}
@@ -84,7 +65,6 @@ func evaluateAcceptanceGate(loaded *task.Task, runDir string) (string, bool) {
 		return fmt.Sprintf("could not read preflight_result.json: %v", err), false
 	}
 	if res == nil {
-		// Enabled task without a recorded result must not finalize silently.
 		return "preflight_result.json is missing for an enabled acceptance skeleton task", false
 	}
 	if res.Status == "failed" {
@@ -95,8 +75,6 @@ func evaluateAcceptanceGate(loaded *task.Task, runDir string) (string, bool) {
 		return message, false
 	}
 	if res.Status == "skipped" {
-		// Required preflight cannot be silently skipped to acceptance; there is
-		// no waiver hook.
 		if cfg.IsRequired() {
 			return "acceptance skeleton preflight was skipped while required", false
 		}
@@ -115,19 +93,8 @@ func evaluateAcceptanceGate(loaded *task.Task, runDir string) (string, bool) {
 	return reason, ok
 }
 
-// requiredCheckEvidenceGate inspects the latest executor result for the run
-// and verifies that every required quality-profile check has passing
-// verification evidence. It is only invoked by evaluateAcceptanceGate for
-// tasks that enabled acceptance skeleton preflight; the default daemon flow
-// never reaches it. It also returns ("", true) when there is no run
-// directory, no resolved quality profile, or no required checks.
-//
-// Gate semantics deliberately mirror preferred_commands: they are an ordered
-// fallback list, not an AND-list. The gate therefore treats a required check as
-// satisfied when any preferred command has passing verification evidence, as
-// failed when none passed but at least one failed, and as missing only when no
-// preferred command has evidence. Requiring evidence for every preferred command
-// would downgrade multi-command checks even when the first command passed.
+// requiredCheckEvidenceGate treats preferred commands as fallbacks: one pass
+// satisfies a check, while failures block only when no fallback passes.
 func requiredCheckEvidenceGate(loaded *task.Task, runDir string) (string, bool) {
 	if runDir == "" {
 		return "", true
@@ -149,9 +116,7 @@ func requiredCheckEvidenceGate(loaded *task.Task, runDir string) (string, bool) 
 	if err != nil || res == nil {
 		return "no executor result is available to verify required quality checks", false
 	}
-	// Index the latest verification evidence by command. The same command can
-	// appear more than once (e.g. retried after a fix); the last entry wins so
-	// a passing rerun supersedes an earlier failure.
+	// Later retry evidence supersedes earlier results for the same command.
 	status := map[string]string{}
 	for _, v := range res.Verification {
 		status[strings.TrimSpace(v.Command)] = strings.TrimSpace(v.Status)
@@ -176,8 +141,6 @@ func requiredCheckEvidenceGate(loaded *task.Task, runDir string) (string, bool) 
 				satisfied = true
 				sawAny = true
 			case "":
-				// no evidence for this fallback command — expected when an
-				// earlier command in the list already passed.
 			default:
 				sawFailure = true
 				sawAny = true
@@ -186,7 +149,6 @@ func requiredCheckEvidenceGate(loaded *task.Task, runDir string) (string, bool) 
 		}
 		switch {
 		case satisfied:
-			// ok — a preferred command passed.
 		case sawFailure:
 			problems = append(problems, fmt.Sprintf("required check %q has failed verification evidence for [%s] and no passing fallback command", c.ID, strings.Join(failed, ", ")))
 		case !sawAny:
@@ -248,12 +210,8 @@ func mapAcceptanceStatus(status string) string {
 	}
 }
 
-// applyAcceptedAcceptanceCriteria normalizes per-criterion statuses once the
-// supervisor has accepted the attempt. The supervisor verdict represents the
-// final decision over the whole task, so any AC still marked as pending,
-// unknown, or not_satisfied from earlier executor reports would otherwise leak
-// into the rendered PR body and mislead reviewers. AC IDs that the supervisor
-// flagged as gaps are rendered as partially_satisfied to preserve that nuance.
+// applyAcceptedAcceptanceCriteria prevents stale executor statuses from
+// contradicting an accepted supervisor verdict while preserving reported gaps.
 func applyAcceptedAcceptanceCriteria(loaded *task.Task, verdict supervisor.Verdict) {
 	if verdict.Status != "accepted" {
 		return

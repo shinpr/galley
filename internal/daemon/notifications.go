@@ -48,30 +48,6 @@ func (d *notificationDispatcher) Wait() {
 	d.wg.Wait()
 }
 
-// notifyTerminalPublication starts the opt-in, best-effort notification command
-// hook for a claimed task that has finished processing. It is invoked from a
-// defer in processClaimedTask, so by the time it runs every terminal
-// publication has already happened through the taskstate publication APIs.
-//
-// Delivery runs on a dispatcher goroutine and this function returns
-// immediately. That is load-bearing: processClaimedTask must be free to return
-// so its WaitGroup slot is released and processAvailable's wg.Wait() can advance
-// to the next stale-recovery and queue-polling pass. A slow or stuck
-// notification command therefore cannot delay the current daemon iteration even
-// though task state has already been published.
-//
-// The dispatcher is still tied to the daemon process lifecycle. Daemon shutdown
-// cancels the dispatcher context and Run waits for in-flight notification
-// goroutines before clearing the child registry, so a notification subprocess is
-// killed through runner.RunCommand cancellation instead of being abandoned as an
-// unmanaged child. Retry and at-least-once delivery guarantees are out of scope;
-// the product contract is best-effort failure visibility, not guaranteed
-// delivery.
-//
-// Hook outcomes are logged and swallowed. Notification success or failure never
-// mutates task state, never moves the task back, never retries the task, and
-// never fails the daemon loop, so a broken or hanging notifier cannot hide the
-// primary task outcome.
 func notifyTerminalPublication(_ context.Context, opts Options, runningPath string, runDir *string) {
 	if opts.notifyDispatcher == nil {
 		return

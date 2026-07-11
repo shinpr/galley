@@ -28,11 +28,7 @@ type attemptOutcome struct {
 	DiffDirty      bool
 	Diff           string
 	DiffErr        error
-	// DiffSnapshot retains the full git evidence for this attempt so progress
-	// detection can decide whether the dirty diff contains non-skeleton
-	// changes. The snapshot is a value rather than a pointer so an empty
-	// outcome stays a zero struct.
-	DiffSnapshot workspace.Snapshot
+	DiffSnapshot   workspace.Snapshot
 }
 
 func defaultStageExecutorOutput(ctx context.Context, opts Options, workDir, attemptDir string, excludePaths []string) error {
@@ -99,17 +95,8 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 		}
 	}
 
-	// Stage executor-produced worktree changes before capturing the snapshot
-	// Galley hands to the supervisor. Without this step, newly-created
-	// untracked files would not appear in the staged or unstaged diff surfaces
-	// and the supervisor would receive an empty diff for new-file work. Non-committed task input file destinations are excluded so
-	// the staged review evidence is constrained to executor-produced changes
-	// and context-only inputs do not leak into the supervisor diff. Staging failure is fatal: we surface
-	// a typed error so the caller records a `review_staging` attempt failure
-	// instead of sending an empty diff to the supervisor. The parent
-	// ctx (not attemptCtx) is used here so a staging step initiated after
-	// executor timeout still has a chance to capture worktree state and write
-	// its evidence file.
+	// Stage untracked executor output, excluding context-only inputs, before
+	// supervisor review. The parent context preserves evidence after a timeout.
 	excludePaths := nonCommittedInputDestinations(loaded.Files)
 	if err := opts.daemonDependencies().stageExecutorOutput(ctx, opts, workDir, attemptDir, excludePaths); err != nil {
 		return attemptOutcome{}, &reviewStagingError{Err: err}
@@ -208,17 +195,11 @@ func executorArtifactLabel(cli string) string {
 	return cli + " executor"
 }
 
-// executorVerificationCmd returns a stable command label that identifies the
-// executor CLI used for an attempt. It is the value Galley records in
-// task.verification.commands so reviewers can tell whether the run was driven
-// by Claude or Codex from the saved task file alone.
 func executorVerificationCmd(cli string) string {
 	switch cli {
 	case "codex":
 		return "codex exec"
 	case "glm":
-		// glm drives the Claude binary against GLM's endpoint; label it so
-		// reviewers can tell the run used GLM from the saved task file alone.
 		return "claude -p (glm)"
 	case "", "claude":
 		return "claude -p"
@@ -235,10 +216,6 @@ func executorAttemptError(outcome attemptOutcome, attemptDir string) *task.Attem
 }
 
 func appendSupervisorFailureAttempt(loaded *task.Task, outcome attemptOutcome, err error, attemptDir string) {
-	// An exhausted supervisor idle timeout is an infrastructure
-	// watchdog failure, not a supervisor verdict. Record it under the distinct
-	// supervisor_idle_timeout kind with a self-explanatory message instead of
-	// the generic supervisor-failure classification.
 	if idle, ok := asSupervisorIdleTimeout(err); ok {
 		appendSupervisorIdleTimeoutAttempt(loaded, outcome, idle, attemptDir)
 		return
@@ -253,26 +230,11 @@ func appendSupervisorFailureAttempt(loaded *task.Task, outcome attemptOutcome, e
 		Summary:           err.Error(),
 		Error:             attemptError("supervisor", kind, err, attemptDir),
 	})
-	// A supervisor evaluation that fails after exhausting the in-attempt retry
-	// budget (idle timeout, total timeout, or forced kill) is a transient
-	// runtime failure of the supervisor process, not a defect in the task or
-	// the executor's work. Surface it as needs_supervisor_review — consistent
-	// with the loop's other "a human should look at this" outcomes — so the
-	// task moves to failed/ with a status that signals follow-up review rather
-	// than a hard task failure.
+	// A supervisor process failure is not a verdict on the executor's work.
 	loaded.Status = "needs_supervisor_review"
 	appendRisk(loaded, "supervisor-stall", "partial_verification", fmt.Sprintf("Supervisor evaluation failed (%s): %s", kind, err.Error()), "Inspect the supervisor-try-N evidence under the attempt directory and requeue the task once the supervisor backend is healthy.", true)
 }
 
-// appendSupervisorIdleTimeoutAttempt records the failed attempt for an
-// exhausted built-in supervisor idle timeout. The attempt error uses the
-// distinct supervisor_idle_timeout kind and a message that names the
-// supervisor adapter, idle-timeout duration, and try count, so the failed task
-// YAML and `galley task show` explain the failure without daemon logs
-// . The SupervisorVerdict field is set to the same infrastructure
-// kind rather than needs_revision or accepted because no supervisor verdict
-// was produced. Task lifecycle stays identical to the existing
-// supervisor-stall path: needs_supervisor_review, then moved to failed/.
 func appendSupervisorIdleTimeoutAttempt(loaded *task.Task, outcome attemptOutcome, idle *supervisorIdleTimeoutError, attemptDir string) {
 	message := idle.attemptErrorMessage()
 	loaded.Attempts = append(loaded.Attempts, task.Attempt{
@@ -293,8 +255,6 @@ func appendSupervisorIdleTimeoutAttempt(loaded *task.Task, outcome attemptOutcom
 	appendRisk(loaded, "supervisor-idle-timeout", "partial_verification", message, "Inspect the supervisor-try-N evidence under the attempt directory, then requeue the task or adjust the daemon --idle-timeout or --supervisor settings.", true)
 }
 
-// prepareClaudeExecutorPlan builds the Claude executor command plan and the
-// stdout/stderr capture paths used by runExecutorAttempt.
 func prepareClaudeExecutorPlan(opts Options, loaded task.Task, workDir, prompt, attemptDir string) (runner.Command, string, string, error) {
 	claudeOpts := runner.FromTask(loaded)
 	claudeOpts.Bin = opts.ClaudeBin
@@ -325,14 +285,7 @@ func prepareClaudeExecutorPlan(opts Options, loaded task.Task, workDir, prompt, 
 	return plan, filepath.Join(attemptDir, "claude.stdout.jsonl"), filepath.Join(attemptDir, "claude.stderr.log"), nil
 }
 
-// prepareGLMExecutorPlan builds the GLM implementation executor command plan by
-// reusing the Claude launch path and redirecting the Claude binary at GLM's
-// endpoint via runner.RedirectClaudeToGLM. It fails fast with an actionable,
-// secret-free error when executor.cli "glm" was selected without a configured
-// glm_api_key. The stdout/stderr paths reuse the claude.* names because GLM
-// produces the same stream-json output. Setup and acceptance-skeleton executors
-// apply the identical redirect in their own packages, so all executor roles
-// honor executor.cli "glm".
+// GLM uses Claude's transport and evidence format with a redirected endpoint.
 func prepareGLMExecutorPlan(opts Options, loaded task.Task, workDir, prompt, attemptDir string) (runner.Command, string, string, error) {
 	token, err := runner.ResolveGLMToken(opts.GLMAuthToken)
 	if err != nil {
@@ -346,16 +299,6 @@ func prepareGLMExecutorPlan(opts Options, loaded task.Task, workDir, prompt, att
 	return plan, stdoutPath, stderrPath, nil
 }
 
-// prepareCodexExecutorPlan builds the Codex executor command plan and the
-// stdout/stderr capture paths used by runExecutorAttempt. The stdout file is
-// named codex.stdout.jsonl to mirror the claude.stdout.jsonl convention.
-//
-// AttemptDir is threaded through to the runner so JSONSchemaFile/JSONSchema is
-// mapped onto a real `codex exec --output-schema <file>` path and the daemon
-// also requests `--output-last-message <file>` under the same attempt
-// directory. The Codex CLI writes the final assistant message to that file,
-// which resolveCodexResult then parses to preserve completed,
-// completed_with_risks, and hard_stop executor results for supervisor handoff.
 func prepareCodexExecutorPlan(opts Options, loaded task.Task, workDir, prompt, attemptDir string) (runner.Command, string, string, error) {
 	codexOpts := runner.CodexFromTask(loaded)
 	codexOpts.Bin = opts.CodexBin

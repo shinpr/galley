@@ -201,8 +201,8 @@ func withDefaultEmbeddedCodexOptions(opts CodexOptions) (CodexOptions, error) {
 	return opts, nil
 }
 
-// CodexExecutorResultSchema adapts the result schema to Codex's stricter subset.
-// ExecutorResult.Validate preserves semantic checks after parsing.
+// CodexExecutorResultSchema removes unsupported generation constraints;
+// ExecutorResult.Validate enforces them after parsing.
 func CodexExecutorResultSchema() (string, error) {
 	return CodexCompatibleOutputSchema(schemas.ClaudeResult)
 }
@@ -344,13 +344,7 @@ func resolveCodexAttemptFiles(opts CodexOptions) (CodexOptions, error) {
 	return opts, nil
 }
 
-// ExtractCodexLastMessageFile parses the structured executor result from a
-// `codex exec --output-last-message` capture file. The Codex CLI writes the
-// final assistant message verbatim, so the captured content typically contains
-// a single JSON object that already matches the executor result schema. The
-// parser reuses the same line-level extractor as the Claude stdout path so
-// final messages that embed the JSON inside surrounding prose still resolve
-// to a validated ExecutorResult.
+// ExtractCodexLastMessageFile parses a Codex final-message capture.
 func ExtractCodexLastMessageFile(path string) (ExecutorResult, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

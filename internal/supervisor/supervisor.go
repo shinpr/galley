@@ -13,11 +13,18 @@ type Verdict struct {
 	AcceptanceGaps     []string             `json:"acceptance_gaps,omitempty"`
 	ReviewedFiles      []string             `json:"reviewed_files,omitempty"`
 	AcceptanceEvidence []AcceptanceEvidence `json:"acceptance_evidence,omitempty"`
+	QualityCoverage    []QualityCoverage    `json:"quality_coverage"`
 	Findings           []Finding            `json:"findings,omitempty"`
 	ResidualRisks      []string             `json:"residual_risks,omitempty"`
 	DiscussionItems    []DiscussionItem     `json:"discussion_items,omitempty"`
 	Confidence         string               `json:"confidence,omitempty"`
 	NextWorkOrder      string               `json:"next_work_order,omitempty"`
+}
+
+type QualityCoverage struct {
+	Criterion       string   `json:"criterion"`
+	ChangedSurface  string   `json:"changed_surface"`
+	EvidenceChecked []string `json:"evidence_checked"`
 }
 
 // AcceptanceEvidence links one task or revision acceptance item to concrete evidence.

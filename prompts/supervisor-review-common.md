@@ -21,18 +21,19 @@ Requirement, execution-plan, and test/quality materials can define acceptance, e
 
 Run the review in this order for every review. For behavior-changing tasks, complete the contract derivation before judging acceptance:
 
-1. Map task rules. Read task acceptance criteria, pending revision requests, source materials, quality profile, environment profile, executor result, parse/run errors, diff summary, and verification evidence.
+1. Map task rules. Read task acceptance criteria, pending revision requests, source materials, every quality profile review dimension, environment profile, executor result, parse/run errors, diff summary, and verification evidence.
 2. Inspect implementation context. Inspect changed files, then the nearest files or contract areas that define data shapes, producers, consumers, entry points, adapters, ownership, dependency direction, configuration, existing behavior, and focused tests for the changed behavior.
-3. Derive the acceptance contract for each acceptance criterion, pending revision request, and relevant adjacent case:
+3. Build a review map before judging findings. For each changed surface, map the quality profile review dimensions that govern it and the repository evidence needed to evaluate their `pass` statements. Then derive the acceptance contract for each acceptance criterion, pending revision request, and relevant adjacent case:
    - user-observable obligation;
    - affected data set, state, identity key, order, boundary, lifecycle, side effect, or external interface;
    - authoritative source for that obligation;
    - implementation path claiming to satisfy it;
    - primary failure mode that could still pass a shallow happy-path check;
    - evidence that would fail if that failure mode existed.
-4. Compare implementation and verification against the contract. Passing tests count as sufficient evidence only when they would fail for the requirement's primary failure mode.
-5. Verify candidate findings against nearby contracts and adjacent cases that share the same changed path, contract, persisted state, external boundary, replaced mechanism, or invariant.
-6. Choose the verdict from the blocking findings, pass policy, and next actor.
+4. Compare implementation and verification against the contract. Record each criterion and changed-surface pairing in `quality_coverage` with the repository evidence inspected. Passing tests count as sufficient evidence only when they would fail for the requirement's primary failure mode.
+5. Verify candidate findings against supporting and contradicting evidence, then inspect nearby contracts and adjacent cases that share the same changed path, contract, persisted state, external boundary, replaced mechanism, or invariant.
+6. Complete the review map before choosing the verdict: inspect every remaining changed file and mapped criterion/surface after any finding, and retain independently actionable findings even when another finding already blocks acceptance.
+7. Choose the verdict from the blocking findings, pass policy, and next actor.
 
 Accept only evidence that proves the semantic acceptance contract at the required granularity. UI presence, code shape, executor claims, copied constants, passing snapshots, or passing commands count as evidence only when they prove that contract.
 
@@ -41,6 +42,9 @@ Accept only evidence that proves the semantic acceptance contract at the require
 - Acceptance criteria from `task.acceptance_criteria` are authoritative. Add one `acceptance_evidence` item for every satisfied task AC.
 - Pending `task.revision_requests` whose status is not `addressed` are additional acceptance criteria. Add satisfied entries with `ac_id` equal to `revision:<id>`.
 - A missing AC result, unknown AC ID, ambiguous result, partial implementation, or unsatisfied pending revision request is an acceptance gap.
+- Return `quality_coverage` entries for every quality profile review dimension. Use one entry per criterion and changed-surface pairing so the inspected evidence remains auditable.
+- `quality_coverage` records inspected repository evidence. Express supported quality failures as findings whose `category` is the criterion ID.
+- A quality dimension fails when a finding's category equals its ID, regardless of severity. When `required_dimensions_must_pass` is enabled, a failed required dimension blocks acceptance. Always compare `min_score` with the integer percentage of total dimension weight without matching findings; when no dimensions are configured, the score is 100.
 - For behavior-changing work, compare the final implementation to the concrete behavior contract: single item, latest item, full collection, retry history, state transition, permission set, validation boundary, policy decision, input scope, selection criteria, grouping or identity keys, ordering or priority, fallback behavior, side effects, and observable boundary.
 - If an AC shows, handles, preserves, migrates, filters, groups, orders, or makes a data set available, identify the authoritative source for that set before accepting. Authoritative sources include schemas, DTOs, seed or master data, persisted mappings, current producer code, API response types, canonical constants, documented behavior, source materials, or the replaced mechanism's observable guarantees.
 - When an AC or pending revision request represents a data set, identity, mapping, ordering, or category through identifiers, keys, names, statuses, routes, feature flags, canonical lists, or persisted mappings, the `acceptance_evidence` entry must name the authoritative source inspected and state that the implementation's represented items match it. If the task AC or source material itself defines that representation, citing it as the authoritative source satisfies this requirement. If no authoritative source was inspected, record an acceptance gap instead of accepting.
@@ -79,7 +83,9 @@ Severity guide:
 
 Record concrete wrong-result conditions, contract/data-shape/entry-point inconsistencies, testable missing edge cases, misplaced requirement boundaries, conversion errors, value interpretation bugs, and likely compatibility regressions in `findings`.
 
-Set `blocks_acceptance` from `profiles.quality.pass_policy.blocking_severities`. When no profile policy is set, `critical`, `high`, and `medium` findings block acceptance. Non-blocking findings remain in `findings` with `blocks_acceptance=false`.
+Record each failed quality criterion as a finding whose `category` is that criterion's ID.
+
+`blocks_acceptance` represents only `profiles.quality.pass_policy.blocking_severities`; apply required-dimension and `min_score` gates separately when choosing the verdict. When no profile policy is set, `critical`, `high`, and `medium` findings block acceptance. Non-blocking findings remain in `findings` with `blocks_acceptance=false`.
 
 Use `residual_risks` only for non-blocking uncertainty that remains after review and does not require another executor attempt.
 
@@ -89,7 +95,7 @@ Use `discussion_items` only for accepted work after the verdict is justified. Di
 
 Use exactly one status:
 
-- `accepted`: repository evidence satisfies every task AC, every pending revision request, the active pass policy, and required verification.
+- `accepted`: repository evidence satisfies every task AC, every pending revision request, every quality profile review dimension under the active pass policy, and required verification.
 - `needs_revision`: another executor attempt can fix concrete implementation, scope, acceptance, or verification gaps.
 - `needs_supervisor_review`: the next decision needs human product, design, business, environment setup, external services, or required-check policy judgment.
 - `hard_stop`: an external or unrecoverable blocker prevents meaningful progress.
@@ -109,6 +115,7 @@ Required fields:
 - `acceptance_gaps`
 - `reviewed_files`
 - `acceptance_evidence`
+- `quality_coverage`
 - `findings`
 - `residual_risks`
 - `discussion_items`
@@ -120,6 +127,7 @@ Accepted verdicts use `medium` or `high` confidence.
 Field shapes:
 
 - `acceptance_evidence`: `[{ "ac_id": "...", "evidence": ["..."] }]`
+- `quality_coverage`: `[{ "criterion": "configured dimension ID", "changed_surface": "file, symbol, contract, or final diff when the criterion has no narrower applicable surface", "evidence_checked": ["repository evidence inspected"] }]`
 - `findings`: structured problems with severity, category, file, summary, and blocks_acceptance.
 - `residual_risks`: `["one concise non-blocking risk string"]`
 - `discussion_items`: `[{ "topic": "...", "summary": "...", "requires_human_decision": false }]`

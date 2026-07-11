@@ -13,7 +13,7 @@ import (
 	"github.com/shinpr/galley/internal/task"
 )
 
-const fakeSupervisorAcceptedVerdict = `{"status":"accepted","summary":"codex accepted after stall","acceptance_gaps":[],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["diff"]}],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}`
+const fakeSupervisorAcceptedVerdict = `{"status":"accepted","summary":"codex accepted after stall","acceptance_gaps":[],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["diff"]}],"findings":[],"quality_coverage":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}`
 
 // writeStallThenAcceptCodexSupervisor returns a fake `codex` binary that, on
 // its first invocation, reads the request and then produces no stdout/stderr

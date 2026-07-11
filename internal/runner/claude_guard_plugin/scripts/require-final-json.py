@@ -23,6 +23,7 @@ SUPERVISOR_TEMPLATE = """{
   "acceptance_gaps": [],
   "reviewed_files": ["path/to/file.ext"],
   "acceptance_evidence": [{"ac_id": "AC1", "evidence": ["Concrete evidence from changed files or verification output."]}],
+  "quality_coverage": [{"criterion": "configured-dimension-id", "changed_surface": "path/or/contract", "evidence_checked": ["Repository evidence inspected for this criterion and surface."]}],
   "findings": [],
   "residual_risks": [],
   "discussion_items": [],
@@ -204,6 +205,7 @@ def validate_supervisor_verdict(verdict):
         "acceptance_gaps",
         "reviewed_files",
         "acceptance_evidence",
+        "quality_coverage",
         "findings",
         "residual_risks",
         "discussion_items",
@@ -218,6 +220,7 @@ def validate_supervisor_verdict(verdict):
     require_array(verdict["acceptance_gaps"], "acceptance_gaps")
     require_array(verdict["reviewed_files"], "reviewed_files")
     require_array(verdict["acceptance_evidence"], "acceptance_evidence")
+    validate_quality_coverage_shape(verdict["quality_coverage"])
     require_array(verdict["findings"], "findings")
     require_array(verdict["residual_risks"], "residual_risks")
     require_array(verdict["discussion_items"], "discussion_items")
@@ -267,6 +270,22 @@ def validate_supervisor_verdict(verdict):
         raise ValueError("accepted verdicts require medium or high confidence")
     if verdict["status"] != "accepted" and verdict["discussion_items"]:
         raise ValueError("discussion_items are only valid for accepted verdicts")
+
+
+def validate_quality_coverage_shape(coverage):
+    require_array(coverage, "quality_coverage")
+    for index, item in enumerate(coverage):
+        require_object(item, f"quality_coverage[{index}]")
+        for field in ["criterion", "changed_surface", "evidence_checked"]:
+            if field not in item:
+                raise ValueError(f"quality_coverage[{index}].{field} is required")
+        if not isinstance(item["criterion"], str) or not item["criterion"].strip():
+            raise ValueError(f"quality_coverage[{index}].criterion must be a non-empty string")
+        if not isinstance(item["changed_surface"], str) or not item["changed_surface"].strip():
+            raise ValueError(f"quality_coverage[{index}].changed_surface must be a non-empty string")
+        require_array(item["evidence_checked"], f"quality_coverage[{index}].evidence_checked")
+        if not item["evidence_checked"] or any(not isinstance(value, str) or not value.strip() for value in item["evidence_checked"]):
+            raise ValueError(f"quality_coverage[{index}].evidence_checked must contain non-empty strings")
 
 
 def validate_creator_manifest(manifest):

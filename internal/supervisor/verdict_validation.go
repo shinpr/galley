@@ -19,6 +19,9 @@ func ValidateVerdict(verdict Verdict) error {
 	if verdict.Confidence == "" {
 		return fmt.Errorf("supervisor verdict confidence is required")
 	}
+	if verdict.QualityCoverage == nil {
+		return fmt.Errorf("supervisor verdict quality_coverage is required")
+	}
 	if verdict.Status == "needs_revision" && verdict.NextWorkOrder == "" {
 		return fmt.Errorf("needs_revision verdict requires next_work_order")
 	}
@@ -53,6 +56,10 @@ func ValidateVerdictForEvidence(verdict Verdict, evidence Evidence) error {
 	if err := ValidateVerdict(verdict); err != nil {
 		return err
 	}
+	requireCompleteCoverage := verdict.Status == "accepted" || verdict.Status == "needs_revision"
+	if err := validateQualityCoverage(verdict.QualityCoverage, evidence.Profiles.Quality, requireCompleteCoverage); err != nil {
+		return fmt.Errorf("supervisor verdict has invalid quality coverage: %w", err)
+	}
 	if verdict.Status != "accepted" && len(verdict.DiscussionItems) > 0 {
 		return fmt.Errorf("supervisor verdict discussion_items are only valid for accepted verdicts")
 	}
@@ -82,7 +89,110 @@ func ValidateVerdictForEvidence(verdict Verdict, evidence Evidence) error {
 	if missing := missingAcceptanceEvidence(verdict, evidence); len(missing) > 0 {
 		return fmt.Errorf("accepted supervisor verdict missing acceptance evidence for %s", strings.Join(missing, ", "))
 	}
+	if err := validateAcceptedQualityCoverage(verdict, evidence.Profiles.Quality); err != nil {
+		return err
+	}
 	return nil
+}
+
+func validateAcceptedQualityCoverage(verdict Verdict, quality *profile.Quality) error {
+	if quality == nil {
+		return nil
+	}
+	if quality.PassPolicy.RequiredDimensionsMustPass {
+		for _, dimension := range quality.ReviewDimensions {
+			if dimension.Required && hasQualityFinding(verdict.Findings, dimension.ID) {
+				return fmt.Errorf("accepted supervisor verdict failed required quality criterion %q", dimension.ID)
+			}
+		}
+	}
+	if score := qualityFindingScore(verdict.Findings, quality); score < quality.PassPolicy.MinScore {
+		return fmt.Errorf("accepted supervisor verdict quality score %d is below required minimum %d", score, quality.PassPolicy.MinScore)
+	}
+	return nil
+}
+
+func validateQualityCoverage(coverage []QualityCoverage, quality *profile.Quality, requireComplete bool) error {
+	dimensions := []profile.ReviewDimension(nil)
+	if quality != nil {
+		dimensions = quality.ReviewDimensions
+	}
+	if len(dimensions) == 0 {
+		if len(coverage) > 0 {
+			return fmt.Errorf("quality_coverage contains criteria but the quality profile has no review dimensions")
+		}
+		return nil
+	}
+	expected := make(map[string]bool, len(dimensions))
+	for _, dimension := range dimensions {
+		expected[dimension.ID] = true
+	}
+	seenCriteria := make(map[string]bool, len(dimensions))
+	seenPairs := make(map[string]bool, len(coverage))
+	for i, item := range coverage {
+		if !expected[item.Criterion] {
+			return fmt.Errorf("quality_coverage[%d].criterion %q is not configured", i, item.Criterion)
+		}
+		if strings.TrimSpace(item.ChangedSurface) == "" {
+			return fmt.Errorf("quality_coverage[%d].changed_surface is required", i)
+		}
+		if !nonEmptyStrings(item.EvidenceChecked) {
+			return fmt.Errorf("quality_coverage[%d].evidence_checked requires non-empty values", i)
+		}
+		pair := item.Criterion + "\x00" + item.ChangedSurface
+		if seenPairs[pair] {
+			return fmt.Errorf("quality_coverage contains duplicate criterion and changed_surface pair %q", item.Criterion+": "+item.ChangedSurface)
+		}
+		seenPairs[pair] = true
+		seenCriteria[item.Criterion] = true
+	}
+	if requireComplete {
+		for _, dimension := range dimensions {
+			if !seenCriteria[dimension.ID] {
+				return fmt.Errorf("quality_coverage missing criterion %q", dimension.ID)
+			}
+		}
+	}
+	return nil
+}
+
+func nonEmptyStrings(values []string) bool {
+	if len(values) == 0 {
+		return false
+	}
+	for _, value := range values {
+		if strings.TrimSpace(value) == "" {
+			return false
+		}
+	}
+	return true
+}
+
+func qualityFindingScore(findings []Finding, quality *profile.Quality) int {
+	failed := make(map[string]bool, len(findings))
+	for _, finding := range findings {
+		failed[finding.Category] = true
+	}
+	total, passed := 0, 0
+	for _, dimension := range quality.ReviewDimensions {
+		total += dimension.Weight
+		if !failed[dimension.ID] {
+			passed += dimension.Weight
+		}
+	}
+	if total == 0 {
+		return 100
+	}
+	return passed * 100 / total
+}
+
+func hasQualityFinding(findings []Finding, criterion string) bool {
+	for _, finding := range findings {
+		if finding.Category == criterion {
+			return true
+		}
+	}
+	return false
 }
 
 func missingAcceptanceEvidence(verdict Verdict, evidence Evidence) []string {

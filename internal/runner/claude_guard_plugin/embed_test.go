@@ -175,6 +175,38 @@ func TestRequireFinalJSONRejectsInvalidScopeExpansionPath(t *testing.T) {
 	}
 }
 
+func TestRequireFinalJSONRejectsEmptySupervisorQualityEvidence(t *testing.T) {
+	dir, err := Ensure(filepath.Join(t.TempDir(), "guard"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := map[string]any{
+		"status": "accepted", "summary": "done", "acceptance_gaps": []any{}, "reviewed_files": []string{"file.go"},
+		"acceptance_evidence": []any{}, "findings": []any{}, "residual_risks": []any{}, "discussion_items": []any{}, "confidence": "high", "next_work_order": "",
+		"quality_coverage": []any{map[string]any{
+			"criterion": "criterion-a", "changed_surface": "changed-surface", "evidence_checked": []string{" "},
+		}},
+	}
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hookInput, err := json.Marshal(map[string]string{"last_assistant_message": string(resultJSON)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := pythonCommand(t, filepath.Join(dir, "scripts", "require-final-json.py"))
+	cmd.Env = append(os.Environ(), "GALLEY_CLAUDE_GUARD_MODE=supervisor")
+	cmd.Stdin = strings.NewReader(string(hookInput))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("guard script failed: %v\n%s", err, output)
+	}
+	if got := string(output); !strings.Contains(got, `"decision": "block"`) || !strings.Contains(got, "evidence_checked must contain non-empty strings") {
+		t.Fatalf("expected quality evidence rejection, got %s", got)
+	}
+}
+
 func pythonCommand(t *testing.T, script string) *exec.Cmd {
 	t.Helper()
 	if runtime.GOOS != "windows" {

@@ -198,9 +198,12 @@ func ValidateQuality(q Quality) ValidationResult {
 			result.Errors = append(result.Errors, fmt.Sprintf("%s.preferred_commands is required when check is required", prefix))
 		}
 	}
+	dimensionIDs := make(map[string]bool, len(q.ReviewDimensions))
 	for i, dim := range q.ReviewDimensions {
 		prefix := fmt.Sprintf("review_dimensions[%d]", i)
 		require(&result, dim.ID != "", "%s.id is required", prefix)
+		require(&result, !dimensionIDs[dim.ID], "%s.id %q is duplicated", prefix, dim.ID)
+		dimensionIDs[dim.ID] = true
 		require(&result, dim.Weight >= 0, "%s.weight cannot be negative", prefix)
 		require(&result, dim.Pass != "", "%s.pass is required", prefix)
 	}

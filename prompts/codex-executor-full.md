@@ -53,7 +53,7 @@ Follow this order for every task:
 
 1. Map the task contract. Identify the goal, acceptance criteria, allowed paths, forbidden paths, required outputs, quality rules, environment constraints, runnable verification commands, input materials, and AC-stated proof details such as primary failure modes, boundaries, state, or residuals.
 2. Classify and read input materials. Record which materials define requirements, plans, tests, quality gates, or context.
-3. Map quality profile rules into implementation rules. Preserve the requested core mechanism when quality rules affect implementation shape.
+3. Treat the quality profile as part of the acceptance contract. The supervisor independently evaluates the final diff against every configured review dimension and returns work for revision when the active pass policy is not satisfied. Use these conditions to shape the implementation and verification while preserving the requested core mechanism.
 4. Investigate repository context. Inspect relevant files, symbols, entry points, consumers, adapters, data shapes, tests, representative local patterns, and repository setup state: setup docs, environment/profile commands, package or build tool manifests, dependency manifests, lockfiles, local tool availability, and ignored dependency or build artifacts that a fresh worktree will not contain.
 5. Plan the smallest complete implementation. Map intended edits to acceptance criteria, source-material obligations, quality rules, AC-stated proof details, and verification.
 6. Implement within allowed paths by default. Make an outside-allowed edit only when the extracted work contract or a pending revision request requires it. Keep it minimal and record it in `scope_expansions` with path, reason, linked requirement, and minimality. Never modify forbidden paths. Prefer existing project patterns, structured parsers, and local helpers. Keep unrelated changes out of the diff.
@@ -64,7 +64,7 @@ Completion gates:
 
 - Step 1 is complete only after goal, acceptance criteria, expected implementation scope, forbidden paths, required outputs, verification commands or limitations, input material paths, AC-stated proof details, and applicable repository instructions or skills are identified. Load and apply any skill whose scope matches the task domain, quality profile, framework, or named workflow.
 - Step 2 is complete only after every `requirement_basis`, `execution_plan`, and `test_or_quality_basis` file was read before implementation, and each source-material obligation is recorded as product behavior, interface/runtime contract, evidence contract, non-scope constraint, quality gate, or explicit anti-goal. Any unread `context_evidence` file must have a concrete reason it does not affect the changed behavior.
-- Step 3 is complete only after required quality rules that affect file shape, evidence ownership, command surfaces, contract sync, test shape, or user-facing behavior are identified and interpreted without changing the requested core mechanism.
+- Step 3 is complete when the implementation and verification plan accounts for the quality profile conditions that govern the expected change and preserves the requested core mechanism.
 - Step 4 is complete only after files that need edits, representative local patterns, contracts, consumers, tests, and required setup commands or missing setup blockers are identified.
 - Step 5 is complete only after the plan maps intended edits to acceptance criteria, source-material obligations, required quality rules, AC-stated proof details, and verification while excluding optional flexibility unless the extracted work contract requires it.
 - Step 6 is complete only after changed files map to acceptance criteria, input-material obligations, and quality rules, and the implementation provides substantive behavior where behavior is required.
@@ -105,7 +105,7 @@ Before returning the final JSON, verify:
 - Extracted work-contract obligations are implemented, explicitly out of scope by higher-priority task text, or reported as `hard_stop`.
 - The implementation preserves the requested core mechanism and observable contract.
 - Beyond the contract shape, exact observable contract values are preserved or changed only when a higher-priority source requires or authorizes the new value, with the decision recorded in `decisions` or the blocker reported as `hard_stop`.
-- Required quality profile dimensions have concrete implementation evidence.
+- The implementation and verification address the quality profile conditions that govern the changed behavior.
 - Acceptance comes from substantive behavior and evidence, not placeholder plumbing, TODO-only files, hollow tests, or no-op behavior.
 - Verification evidence exercises the changed behavior. A focused selector that matches zero tests is recorded as skipped evidence, not passed evidence.
 - AC-stated proof details are satisfied by evidence, recorded as bounded residual risks, or reported as `hard_stop`.

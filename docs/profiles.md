@@ -88,9 +88,9 @@ commands:
   test_unit: "go test ./..."
   build: "go build ./cmd/galley"
 executor:
-  default_cli: "codex"
+  default_cli: "claude"
 supervisor:
-  default_cli: "codex"
+  default_cli: "claude"
 required_checks:
   shell: "auto"
 constraints:

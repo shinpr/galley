@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- Packaged Claude and Codex Galley plugins are now versioned as `0.1.21`: general environment-profile guidance (the shipped `environment-local.yaml` example, `docs/profiles.md`, and the profile-authoring skill template) now explicitly uses Claude for the backend defaults it presents — `executor.default_cli: "claude"`, plus `supervisor.default_cli: "claude"` in the `docs/profiles.md` example — so new task authoring selects Claude as the default backend instead of Codex.
+
 ## v0.9.2 - 2026-07-10
 
 ### Fixed

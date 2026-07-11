@@ -144,7 +144,7 @@ func TestRunOnceUsesModelSupervisorProvider(t *testing.T) {
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
 	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
-	codexBin := writeFakeCodexSupervisor(t, `{"status":"accepted","summary":"codex accepted","acceptance_gaps":[],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["diff"]}],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}`)
+	codexBin := writeFakeCodexSupervisor(t, `{"status":"accepted","summary":"codex accepted","acceptance_gaps":[],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["diff"]}],"findings":[],"quality_coverage":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}`)
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -795,15 +795,15 @@ done
 if [ "$supervisor" = "1" ]; then
   request="$(cat)"
   if printf '%s' "$request" | grep -q '"status":"hard_stop"'; then
-    printf '%s\n' '{"status":"hard_stop","summary":"executor reported hard_stop","acceptance_gaps":[],"reviewed_files":[],"acceptance_evidence":[],"findings":[{"severity":"high","category":"execution","file":"","summary":"executor reported hard_stop","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}'
+    printf '%s\n' '{"status":"hard_stop","summary":"executor reported hard_stop","acceptance_gaps":[],"reviewed_files":[],"acceptance_evidence":[],"findings":[{"severity":"high","category":"execution","file":"","summary":"executor reported hard_stop","blocks_acceptance":true}],"quality_coverage":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}'
   elif printf '%s' "$request" | grep -q '"parse_error":"'; then
-    printf '%s\n' '{"status":"needs_revision","summary":"executor result was invalid","acceptance_gaps":["executor result JSON is invalid"],"reviewed_files":[],"acceptance_evidence":[],"findings":[{"severity":"medium","category":"verification","file":"","summary":"executor result JSON is invalid","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"Return valid structured JSON and preserve any useful workspace changes."}'
+    printf '%s\n' '{"status":"needs_revision","summary":"executor result was invalid","acceptance_gaps":["executor result JSON is invalid"],"reviewed_files":[],"acceptance_evidence":[],"findings":[{"severity":"medium","category":"verification","file":"","summary":"executor result JSON is invalid","blocks_acceptance":true}],"quality_coverage":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"Return valid structured JSON and preserve any useful workspace changes."}'
   elif printf '%s' "$request" | grep -q '"status":"completed_with_risks"'; then
-    printf '%s\n' '{"status":"needs_revision","summary":"executor reported risks","acceptance_gaps":["executor reported risks"],"reviewed_files":[],"acceptance_evidence":[],"findings":[{"severity":"medium","category":"verification","file":"","summary":"executor reported risks","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"Resolve the reported risks and rerun verification."}'
+    printf '%s\n' '{"status":"needs_revision","summary":"executor reported risks","acceptance_gaps":["executor reported risks"],"reviewed_files":[],"acceptance_evidence":[],"findings":[{"severity":"medium","category":"verification","file":"","summary":"executor reported risks","blocks_acceptance":true}],"quality_coverage":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"Resolve the reported risks and rerun verification."}'
   elif printf '%s' "$request" | grep -q '"diff_dirty":false'; then
-    printf '%s\n' '{"status":"needs_revision","summary":"no repository diff was produced","acceptance_gaps":["no repository diff was produced"],"reviewed_files":[],"acceptance_evidence":[],"findings":[{"severity":"medium","category":"acceptance","file":"","summary":"no repository diff was produced","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"Make the required repository change and return valid structured JSON."}'
+    printf '%s\n' '{"status":"needs_revision","summary":"no repository diff was produced","acceptance_gaps":["no repository diff was produced"],"reviewed_files":[],"acceptance_evidence":[],"findings":[{"severity":"medium","category":"acceptance","file":"","summary":"no repository diff was produced","blocks_acceptance":true}],"quality_coverage":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"Make the required repository change and return valid structured JSON."}'
   else
-    printf '%s\n' '{"status":"accepted","summary":"fake claude supervisor accepted","acceptance_gaps":[],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["diff"]}],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}'
+    printf '%s\n' '{"status":"accepted","summary":"fake claude supervisor accepted","acceptance_gaps":[],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["diff"]}],"findings":[],"quality_coverage":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}'
   fi
   exit 0
 fi

@@ -156,6 +156,7 @@ Return one JSON object that follows the common supervisor output contract and sc
 Provider-specific field guidance:
 
 - `acceptance_evidence`: use `{ "ac_id": "...", "evidence": ["..."] }` items for every satisfied acceptance criterion and revision request.
+- `quality_coverage`: include every quality profile review dimension and changed-surface pairing, listing the repository evidence inspected. Use the criterion ID as the finding category when the evidence supports a quality failure.
 - `findings`: set `file` to the relevant path, or to an empty string when no single file applies.
 - `residual_risks`: string array only, for example `["Non-blocking uncertainty that does not require another executor attempt."]`. Use `findings` for anything that needs severity, category, file, or blocking status.
 - `discussion_items`: accepted-work reviewer notes only. Use an empty array unless the verdict is already accepted and useful non-gating context remains. Each item must use `topic`, `summary`, and `requires_human_decision`; use `summary`, not `note`.

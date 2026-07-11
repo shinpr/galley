@@ -6,9 +6,12 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.9.3 - 2026-07-11
+
 ### Changed
 
 - Packaged Claude and Codex plugins are now `0.1.22`. Environment-profile guidance uses Claude defaults and supports repository-pinned supervisor models through `supervisor.model`, with the effective setting recorded in run evidence.
+- Supervisor reviews now record quality-profile coverage by changed surface; findings drive required-dimension and weighted-score gates while executors focus on implementation and verification evidence.
 
 ## v0.9.2 - 2026-07-10
 

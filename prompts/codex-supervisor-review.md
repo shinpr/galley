@@ -73,6 +73,7 @@ Follow the common supervisor output contract and schema. Provider-specific field
 
 - `reviewed_files`: files or contract areas inspected during repository/context review.
 - `acceptance_evidence`: one entry per task AC, plus one entry per pending revision request using `revision:<request.id>`.
+- `quality_coverage`: one entry per quality profile review dimension and changed-surface pairing, listing the repository evidence inspected. Use the criterion ID as the finding category when the evidence supports a quality failure.
 - `findings`: structured problems only. Empty array means no problems found. Set `file` to the relevant path, or to an empty string when no single file applies.
 - `residual_risks`: non-blocking concerns that do not require another executor attempt.
 - `discussion_items`: accepted-work reviewer notes only. Use an empty array unless the verdict is already accepted and useful non-gating context remains.

@@ -88,11 +88,11 @@ Completion gate:
 
 ## Step 3. Map Quality Profile Rules [BLOCKING]
 
-Map required quality profile review dimensions into implementation rules before editing.
+Treat the quality profile as part of the acceptance contract. The supervisor independently evaluates the final diff against every configured review dimension and returns work for revision when the active pass policy is not satisfied. Use these conditions to shape the implementation and verification while preserving the requested core mechanism.
 
 Completion gate:
 
-- Required quality rules that affect file shape, evidence ownership, command surfaces, contract sync, test shape, or user-facing behavior are identified.
+- The implementation and verification plan accounts for the quality profile conditions that govern the expected change.
 - Any quality rule that could be misread as changing the requested core mechanism is interpreted in a way that preserves the task contract.
 
 ## Step 4. Investigate Code Context [BLOCKING]
@@ -157,7 +157,7 @@ Before returning the final JSON, verify:
 - Every extracted work-contract obligation is implemented, explicitly out of scope by higher-priority task text, or reported as `hard_stop`.
 - The final implementation preserves the task's requested core mechanism. Any implementation strategy change keeps the same mechanism and observable contract.
 - Beyond the contract shape, exact observable contract values are preserved or changed only when a higher-priority source requires or authorizes the new value, with the decision recorded in `decisions` or the blocker reported as `hard_stop`.
-- Required quality profile dimensions have concrete implementation evidence. Treat quality profile rules as coding rules during implementation and as supervisor review hints.
+- The implementation and verification address the quality profile conditions that govern the changed behavior.
 - The implementation is substantive: AC satisfaction comes from real behavior and evidence when the AC requires behavior, rather than fixed templates, metadata shells, placeholder plumbing, TODO-only files, hollow tests, or no-op behavior.
 - Verification evidence exercises the changed behavior. A focused selector that matches zero tests is skipped evidence rather than passed evidence.
 - AC-stated proof details are satisfied by evidence, recorded as bounded residual risks, or reported as `hard_stop`.

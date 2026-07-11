@@ -64,10 +64,11 @@ Supported fields:
 - `review_dimensions[].weight`: non-negative relative weight for reporting.
 - `review_dimensions[].required`: whether the dimension is mandatory.
 - `review_dimensions[].pass`: observable pass condition for the dimension.
+- When review dimensions are configured, the supervisor records `quality_coverage` for each criterion and changed-surface pairing, including the repository evidence inspected. Every configured dimension must appear, and findings categorized by dimension drive required-dimension and weighted-score policy.
 - `evidence_requirements.file_line_references`: ask for file/line evidence in review output.
 - `evidence_requirements.command_outputs`: ask for command output evidence.
 - `pass_policy.required_dimensions_must_pass`: require all mandatory dimensions to pass.
-- `pass_policy.min_score`: 0-100 score threshold.
+- `pass_policy.min_score`: 0-100 threshold over all configured dimension weights. A dimension contributes its weight when no finding uses its ID as `category`; total configured weight of zero scores 100.
 - `pass_policy.unresolved_high_findings_allowed`: number of unresolved high findings allowed.
 - `pass_policy.blocking_severities`: severities that block acceptance. Values are `critical`, `high`, `medium`, and `low`.
 

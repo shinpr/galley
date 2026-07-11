@@ -41,6 +41,8 @@ Attempt evidence includes:
 - `git_status.json`
 - `diff.patch`
 
+When the quality profile defines review dimensions, every supervisor verdict includes `quality_coverage` for each criterion and changed-surface pairing, with the repository evidence inspected. Galley requires coverage for every configured dimension and enforces the active pass policy from categorized findings before accepting.
+
 Galley also records `workspace.json` for the effective execution workspace and writes `profiles.json` when quality or environment profiles are loaded.
 
 ## Task Files

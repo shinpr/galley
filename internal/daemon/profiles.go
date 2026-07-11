@@ -176,6 +176,7 @@ type effectiveTaskOptions struct {
 	CleanupWorktrees bool
 	Supervisor       string
 	SupervisorSource string
+	SupervisorModel  string
 }
 
 func resolveEffectiveTaskOptions(opts Options, profiles profile.Bundle) effectiveTaskOptions {
@@ -188,6 +189,7 @@ func resolveEffectiveTaskOptions(opts Options, profiles profile.Bundle) effectiv
 		CleanupWorktrees: true,
 		Supervisor:       opts.Supervisor,
 		SupervisorSource: opts.SupervisorSource,
+		SupervisorModel:  opts.SupervisorModel,
 	}
 	if profiles.Environment != nil {
 		env := profiles.Environment
@@ -198,9 +200,18 @@ func resolveEffectiveTaskOptions(opts Options, profiles profile.Bundle) effectiv
 		if env.Worktree.Cleanup != nil {
 			effective.CleanupWorktrees = *env.Worktree.Cleanup
 		}
-		if env.Supervisor != nil && env.Supervisor.DefaultCLI != "" {
-			effective.Supervisor = env.Supervisor.DefaultCLI
-			effective.SupervisorSource = SupervisorSourceRepoProfile
+		if env.Supervisor != nil {
+			if env.Supervisor.DefaultCLI != "" {
+				effective.Supervisor = env.Supervisor.DefaultCLI
+				effective.SupervisorSource = SupervisorSourceRepoProfile
+			}
+			// supervisor.model is resolved independently of default_cli: a
+			// repository may pin a model for whichever supervisor adapter runs
+			// (built-in default, CLI startup flag, daemon.yaml, or a repository
+			// default_cli override) without also overriding the CLI selection.
+			if env.Supervisor.Model != "" {
+				effective.SupervisorModel = env.Supervisor.Model
+			}
 		}
 	}
 	if effective.OpenPR {
@@ -218,6 +229,7 @@ func (effective effectiveTaskOptions) apply(opts Options) Options {
 	opts.CleanupWorktrees = effective.CleanupWorktrees
 	opts.Supervisor = effective.Supervisor
 	opts.SupervisorSource = effective.SupervisorSource
+	opts.SupervisorModel = effective.SupervisorModel
 	return opts
 }
 

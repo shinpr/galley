@@ -157,7 +157,9 @@ The `command` string is operator-owned. Task content is untrusted and is deliver
 3. The `supervisor` field in `daemon.yaml`.
 4. The built-in default (`claude`).
 
-`galley daemon status` omits startup defaults it cannot report accurately, such as effective supervisor and concurrency. The supervisor that actually ran a task is persisted to `runs/<run-id>/supervisor.json`.
+The supervisor model is a separate, optional repository setting: `environment.yaml` `supervisor.model` pins the exact model Galley forwards to the selected supervisor CLI's native `--model` option for every supervisor evaluation of a task in that repository. It is resolved independently of the supervisor CLI selection above, and when absent or empty the supervisor CLI uses its own default model.
+
+`galley daemon status` omits startup defaults it cannot report accurately, such as effective supervisor and concurrency. The supervisor that actually ran a task is persisted to `runs/<run-id>/supervisor.json`, including the resolved `model` (empty when unpinned) and a `model_source` of `environment_profile` or `cli_default` so reviewers can tell a pinned model from the supervisor CLI default.
 
 On Unix, foreground and background daemons use the same shutdown path. On `SIGINT` or `SIGTERM`, Galley stops claiming new queued tasks, lets active attempts finish until the shutdown timeout, records evidence, and avoids starting another retry attempt after shutdown is requested.
 

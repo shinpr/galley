@@ -96,7 +96,15 @@ type Options struct {
 	// daemon CLI wiring before Preflight and then overridden per task when an
 	// environment.yaml supervisor.default_cli wins for that task. The value is
 	// persisted to runs/<run-id>/supervisor.json as evidence.
-	SupervisorSource     string
+	SupervisorSource string
+	// SupervisorModel is the exact model name resolved from the repository
+	// environment profile's supervisor.model. Galley passes it unchanged to the
+	// built-in supervisor adapter's native --model option for every supervisor
+	// try of a task in that repository. Empty means no repository override, so
+	// the selected supervisor CLI uses its own default model. The value (and
+	// whether it was pinned) is persisted to runs/<run-id>/supervisor.json as
+	// review evidence.
+	SupervisorModel      string
 	ShutdownTimeout      time.Duration
 	DisableClaudeGuard   bool
 	ClaudeGuardPluginDir string
@@ -192,6 +200,14 @@ const (
 	SupervisorSourceCLI          = "cli"
 	SupervisorSourceDaemonConfig = "daemon_config"
 	SupervisorSourceDefault      = "default"
+)
+
+// Supervisor model source labels. Persisted in run evidence so reviewers and
+// AFK users can tell whether the supervisor ran on a model pinned by the
+// repository environment profile or on the supervisor CLI's own default.
+const (
+	SupervisorModelSourceRepoProfile = "environment_profile"
+	SupervisorModelSourceCLIDefault  = "cli_default"
 )
 
 // Run starts the daemon loop.

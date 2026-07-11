@@ -38,6 +38,11 @@ type AdapterOptions struct {
 	// supervisor is the Claude adapter pointed at GLM's endpoint, so it reuses
 	// the entire Claude review path and only redirects via the child env.
 	GLMAuthToken string
+	// Model is the exact model name Galley passes to the supervisor CLI through
+	// its native `--model` option. It is forwarded unchanged for every adapter
+	// (Codex, Claude, and GLM). Empty means Galley omits the option so the CLI
+	// uses its own default model.
+	Model string
 }
 
 // AdapterRequest is the JSON request consumed by built-in supervisor adapters.
@@ -168,19 +173,24 @@ func runCodexAdapter(ctx context.Context, opts AdapterOptions, request []byte) (
 	if err := writeSupervisorFile(schemaPath, []byte(schemas.SupervisorVerdict)); err != nil {
 		return nil, err
 	}
+	argv := []string{
+		opts.CodexBin,
+		"exec",
+		"--cd", opts.WorkDir,
+		"--sandbox", "workspace-write",
+		"--json",
+		"--output-schema", schemaPath,
+		"--output-last-message", outPath,
+	}
+	if opts.Model != "" {
+		argv = append(argv, "--model", opts.Model)
+	}
+	// `-` marks codex exec reading the prompt from stdin and must stay last.
+	argv = append(argv, "-")
 	_, err = runner.RunCommand(ctx, runner.Command{
 		WorkDir: opts.WorkDir,
-		Argv: []string{
-			opts.CodexBin,
-			"exec",
-			"--cd", opts.WorkDir,
-			"--sandbox", "workspace-write",
-			"--json",
-			"--output-schema", schemaPath,
-			"--output-last-message", outPath,
-			"-",
-		},
-		Stdin: prompt,
+		Argv:    argv,
+		Stdin:   prompt,
 	}, runner.RunOptions{Timeout: opts.Timeout, IdleTimeout: opts.IdleTimeout, StdoutPath: eventsPath})
 	if err != nil {
 		return nil, fmt.Errorf("codex supervisor failed: %w", err)
@@ -227,6 +237,12 @@ func runClaudeAdapterForOS(ctx context.Context, opts AdapterOptions, request []b
 		"--tools", "default",
 		"--disallowedTools", "Write,Edit,MultiEdit,NotebookEdit",
 		"--output-format", "text",
+	}
+	// glm reuses this Claude command (redirected via child env), so the native
+	// --model option applies to the Claude and GLM adapters alike; the value is
+	// a GLM model name when Provider is "glm".
+	if opts.Model != "" {
+		args = append(args, "--model", opts.Model)
 	}
 	if goos == "windows" {
 		systemPromptPath := filepath.Join(dir, ClaudeSupervisorSystemPromptFilename)

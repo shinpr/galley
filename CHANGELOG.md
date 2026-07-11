@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Added
+
+- Repository-scoped supervisor model override. `environment.yaml` now accepts an optional `supervisor.model` string that Galley forwards unchanged to the selected built-in supervisor CLI (`claude`, `codex`, or `glm`) through its native `--model` option for every supervisor evaluation of a task in that repository. It is resolved independently of `supervisor.default_cli`; accepted values are whatever the selected provider CLI accepts (Galley does not validate model availability); and when absent or empty the supervisor CLI keeps its own default model. `runs/<run-id>/supervisor.json` now also records `model` (empty when unpinned) and `model_source` (`environment_profile` or `cli_default`) so reviewers can tell a pinned model from the CLI default. The bundled `environment.schema.json` declares the new optional field.
+
 ### Changed
 
 - Packaged Claude and Codex Galley plugins are now versioned as `0.1.21`. General environment-profile examples and authoring guidance now use Claude as the default executor and supervisor backend.

@@ -5,6 +5,13 @@ commands:
   build: "go build ./cmd/galley"
 executor:
   default_cli: "claude"
+# supervisor pins the repository review backend and, optionally, its model.
+# default_cli overrides the daemon supervisor for this repository; model is an
+# exact override forwarded to the CLI's native --model option (omit to use the
+# supervisor CLI default). Both are optional and resolved independently.
+# supervisor:
+#   default_cli: "claude"
+#   model: "claude-sonnet-4-5"
 required_checks:
   # Use shell_path to pin a custom shell executable. Recognized executable
   # names such as bash, cmd.exe, powershell.exe, and pwsh.exe can stand alone;

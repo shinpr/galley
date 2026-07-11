@@ -160,6 +160,73 @@ func TestValidateEnvironmentAcceptsSupervisorDefaultCLI(t *testing.T) {
 	}
 }
 
+func TestLoadEnvironmentDecodesSupervisorModel(t *testing.T) {
+	// The KnownFields(true) loader rejects unknown keys, so this proves
+	// supervisor.model is part of the environment contract and is forwarded as
+	// an exact free-form string with no Galley-side enum. An empty/omitted model
+	// stays absent (nil pointer only carries what YAML provided).
+	path := filepath.Join(t.TempDir(), "environment.yaml")
+	body := `id: local-dev
+cwd: /tmp/repo
+commands:
+  build: go build ./...
+supervisor:
+  model: "provider-model-x"
+constraints:
+  network: approval_required
+  secrets_policy: never_read_env_files
+  destructive_commands: deny
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env, err := LoadEnvironment(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.Supervisor == nil || env.Supervisor.Model != "provider-model-x" {
+		t.Fatalf("supervisor model got %#v", env.Supervisor)
+	}
+	if result := ValidateEnvironment(env); !result.Valid() {
+		t.Fatalf("model-only supervisor block must validate: %#v", result.Errors)
+	}
+}
+
+func TestLoadEnvironmentAcceptsExplicitEmptySupervisorModel(t *testing.T) {
+	// AC3 (profile-side): An explicit empty supervisor.model must round-trip
+	// through the loader and pass ValidateEnvironment. Galley treats an empty
+	// string the same as an omitted model (the supervisor CLI keeps its own
+	// default), so the explicit-empty YAML form must not be rejected.
+	path := filepath.Join(t.TempDir(), "environment.yaml")
+	body := `id: local-dev
+cwd: /tmp/repo
+commands:
+  build: go build ./...
+supervisor:
+  model: ""
+constraints:
+  network: approval_required
+  secrets_policy: never_read_env_files
+  destructive_commands: deny
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env, err := LoadEnvironment(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.Supervisor == nil {
+		t.Fatalf("supervisor block must decode even with an empty model: %#v", env.Supervisor)
+	}
+	if env.Supervisor.Model != "" {
+		t.Fatalf("supervisor model got %q, want empty", env.Supervisor.Model)
+	}
+	if result := ValidateEnvironment(env); !result.Valid() {
+		t.Fatalf("explicit-empty supervisor model must validate: %#v", result.Errors)
+	}
+}
+
 func TestValidateEnvironmentRejectsInvalidSupervisorDefault(t *testing.T) {
 	env := validEnvironmentForTest()
 	env.Supervisor = &SupervisorDefault{DefaultCLI: "opus"}

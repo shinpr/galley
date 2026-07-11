@@ -95,6 +95,14 @@ type ExecutorDefault struct {
 // different supervisor. Allowed values are `claude`, `codex`, and `glm`.
 type SupervisorDefault struct {
 	DefaultCLI string `yaml:"default_cli,omitempty" json:"default_cli,omitempty"`
+	// Model pins the exact model name Galley passes to the selected supervisor
+	// CLI through its native `--model` option for every built-in supervisor
+	// evaluation in this repository. It is an optional free-form string: Galley
+	// forwards it unchanged and does not maintain a model enum because model
+	// availability depends on the provider account and CLI configuration. When
+	// absent or empty, Galley omits the option so the supervisor CLI uses its
+	// own default model.
+	Model string `yaml:"model,omitempty" json:"model,omitempty"`
 }
 
 type RequiredCheckEnvironment struct {

@@ -106,6 +106,7 @@ func defaultSupervisorRunner(ctx context.Context, opts Options, evidence supervi
 		ClaudeBin:    opts.ClaudeBin,
 		CodexBin:     opts.CodexBin,
 		GLMAuthToken: opts.GLMAuthToken,
+		Model:        opts.SupervisorModel,
 	}, evidence)
 }
 
@@ -510,8 +511,17 @@ func attemptsLeft(budget, attempt int) int {
 // extracted from runSupervisorLoop so it can be unit-tested without driving a
 // full task through the daemon loop.
 func writeSupervisorEvidence(runDir string, effectiveOpts Options) error {
+	// model records the exact repository-pinned supervisor model (empty when
+	// unpinned), and model_source distinguishes a pinned model from using the
+	// supervisor CLI default so an omitted model is never reported as pinned.
+	modelSource := SupervisorModelSourceCLIDefault
+	if effectiveOpts.SupervisorModel != "" {
+		modelSource = SupervisorModelSourceRepoProfile
+	}
 	return writeJSON(filepath.Join(runDir, "supervisor.json"), map[string]string{
-		"resolved": effectiveOpts.Supervisor,
-		"source":   effectiveOpts.SupervisorSource,
+		"resolved":     effectiveOpts.Supervisor,
+		"source":       effectiveOpts.SupervisorSource,
+		"model":        effectiveOpts.SupervisorModel,
+		"model_source": modelSource,
 	})
 }

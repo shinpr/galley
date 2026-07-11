@@ -76,6 +76,7 @@ func EnvironmentJSONSchema() ([]byte, error) {
 			"supervisor": object(
 				properties(map[string]any{
 					"default_cli": enumSchema(daemonconfig.SupervisorCLIs()),
+					"model":       stringSchema("description", "Optional exact model name passed to the selected supervisor CLI through its native `--model` option. Accepted values are determined by the selected provider CLI; Galley forwards the string unchanged and does not validate model availability or maintain a model enum. When absent or empty, Galley omits the option and the supervisor CLI uses its own default model."),
 				}),
 			),
 			"required_checks": object(

@@ -190,6 +190,86 @@ func TestWriteSupervisorEvidenceRecordsResolvedAndSource(t *testing.T) {
 	}
 }
 
+func TestWriteSupervisorEvidenceRecordsModelState(t *testing.T) {
+	t.Parallel()
+	// AC4: run evidence must identify an explicitly resolved supervisor model
+	// and distinguish a pinned model from using the supervisor CLI default so
+	// AFK users and later agents can tell which model setting governed review.
+	cases := []struct {
+		name            string
+		model           string
+		wantModel       string
+		wantModelSource string
+	}{
+		{name: "pinned model recorded", model: "provider-model-x", wantModel: "provider-model-x", wantModelSource: SupervisorModelSourceRepoProfile},
+		{name: "omitted model reported as cli default", model: "", wantModel: "", wantModelSource: SupervisorModelSourceCLIDefault},
+	}
+	for _, tt := range cases {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			runDir := t.TempDir()
+			if err := writeSupervisorEvidence(runDir, Options{
+				Supervisor:       "claude",
+				SupervisorSource: SupervisorSourceRepoProfile,
+				SupervisorModel:  tt.model,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(filepath.Join(runDir, "supervisor.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got map[string]string
+			if err := json.Unmarshal(data, &got); err != nil {
+				t.Fatal(err)
+			}
+			if got["model"] != tt.wantModel || got["model_source"] != tt.wantModelSource {
+				t.Fatalf("supervisor evidence got model=%q model_source=%q; want %q/%q", got["model"], got["model_source"], tt.wantModel, tt.wantModelSource)
+			}
+			// The resolved supervisor and its source remain present so the
+			// added model fields extend, not replace, existing evidence.
+			if got["resolved"] != "claude" || got["source"] != SupervisorSourceRepoProfile {
+				t.Fatalf("supervisor evidence lost resolved/source: %#v", got)
+			}
+		})
+	}
+}
+
+func TestEffectiveSupervisorModelResolution(t *testing.T) {
+	t.Parallel()
+	// AC1: environment.yaml supervisor.model reaches effective daemon options
+	// unchanged, and it resolves independently of default_cli so a repository
+	// can pin a model without also overriding the supervisor CLI selection.
+	cases := []struct {
+		name       string
+		supervisor *profile.SupervisorDefault
+		base       Options
+		wantModel  string
+		wantCLI    string
+	}{
+		{name: "no supervisor block leaves model empty", supervisor: nil, base: Options{Supervisor: "claude", SupervisorSource: SupervisorSourceDefault}, wantModel: "", wantCLI: "claude"},
+		{name: "empty model omitted", supervisor: &profile.SupervisorDefault{Model: ""}, base: Options{Supervisor: "claude", SupervisorSource: SupervisorSourceDefault}, wantModel: "", wantCLI: "claude"},
+		{name: "model pinned without cli override", supervisor: &profile.SupervisorDefault{Model: "provider-model-x"}, base: Options{Supervisor: "codex", SupervisorSource: SupervisorSourceCLI}, wantModel: "provider-model-x", wantCLI: "codex"},
+		{name: "model and cli override together", supervisor: &profile.SupervisorDefault{DefaultCLI: "glm", Model: "glm-model-y"}, base: Options{Supervisor: "codex", SupervisorSource: SupervisorSourceCLI}, wantModel: "glm-model-y", wantCLI: "glm"},
+	}
+	for _, tt := range cases {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			bundle := profile.Bundle{Environment: &profile.Environment{}}
+			bundle.Environment.Supervisor = tt.supervisor
+			got := effectiveOptionsForProfiles(tt.base, bundle)
+			if got.SupervisorModel != tt.wantModel {
+				t.Fatalf("resolved supervisor model=%q; want %q", got.SupervisorModel, tt.wantModel)
+			}
+			if got.Supervisor != tt.wantCLI {
+				t.Fatalf("resolved supervisor cli=%q; want %q", got.Supervisor, tt.wantCLI)
+			}
+		})
+	}
+}
+
 func TestEffectiveOptionsForProfilesCleansWorktreesByDefault(t *testing.T) {
 	t.Parallel()
 	effective := effectiveOptionsForProfiles(Options{Root: t.TempDir()}, profile.Bundle{})

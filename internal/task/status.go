@@ -3,6 +3,8 @@ package task
 import (
 	"fmt"
 	"path/filepath"
+
+	"github.com/shinpr/galley/internal/provider"
 )
 
 const (
@@ -107,8 +109,9 @@ func IsAcceptedTerminal(status string) bool {
 }
 
 func ExecutorProvider(t Task) string {
-	if t.Executor.CLI == "codex" {
-		return "codex"
+	transport, ok := provider.TransportFor(t.Executor.CLI)
+	if !ok {
+		return "claude"
 	}
-	return "claude"
+	return string(transport)
 }

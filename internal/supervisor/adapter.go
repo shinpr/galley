@@ -8,9 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/shinpr/galley/internal/profile"
+	"github.com/shinpr/galley/internal/provider"
 	"github.com/shinpr/galley/internal/runner"
 	claudeguard "github.com/shinpr/galley/internal/runner/claude_guard_plugin"
 	"github.com/shinpr/galley/internal/task"
@@ -109,16 +111,19 @@ func RunAdapterPayload(ctx context.Context, opts AdapterOptions, request []byte)
 	if opts.ClaudeBin == "" {
 		opts.ClaudeBin = "claude"
 	}
-	switch opts.Provider {
-	case "codex":
+	transport, ok := provider.TransportFor(opts.Provider)
+	if !ok || !provider.IsSupervisor(opts.Provider) {
+		return nil, fmt.Errorf("supervisor provider must be one of: %s", strings.Join(provider.SupervisorIDs(), ", "))
+	}
+	switch transport {
+	case provider.TransportCodex:
 		return runCodexAdapter(ctx, opts, request)
-	case "claude", "glm":
+	case provider.TransportClaude:
 		// glm is the Claude review adapter pointed at GLM's endpoint; the
 		// redirect is applied inside runClaudeAdapterForOS based on Provider.
 		return runClaudeAdapter(ctx, opts, request)
-	default:
-		return nil, fmt.Errorf("supervisor provider must be one of: codex, claude, glm")
 	}
+	return nil, fmt.Errorf("supervisor provider %q has unsupported transport %q", opts.Provider, transport)
 }
 
 // NewAdapterRequest converts in-process evidence into the adapter JSON contract.

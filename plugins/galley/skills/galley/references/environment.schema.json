@@ -162,7 +162,7 @@
           "type": "string"
         },
         "model": {
-          "description": "Optional exact model override forwarded unchanged to the selected supervisor CLI via its native `--model` option. Accepted values are determined by the provider CLI; Galley does not validate model names. Omit or set to an empty string to preserve the supervisor CLI's default model.",
+          "description": "Optional model name passed unchanged to the selected supervisor CLI. Omit or leave empty to use the CLI default; accepted values depend on the provider.",
           "type": "string"
         }
       },

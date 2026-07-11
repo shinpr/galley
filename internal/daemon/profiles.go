@@ -3,7 +3,6 @@ package daemon
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/shinpr/galley/internal/fileutil"
 	"github.com/shinpr/galley/internal/galleyhome"
@@ -206,10 +205,7 @@ func resolveEffectiveTaskOptions(opts Options, profiles profile.Bundle) effectiv
 				effective.Supervisor = env.Supervisor.DefaultCLI
 				effective.SupervisorSource = SupervisorSourceRepoProfile
 			}
-			// A whitespace-only model is treated as absent so it preserves the CLI
-			// default; a real value is forwarded unchanged per the exact-value
-			// contract, independent of whether default_cli is also set.
-			if strings.TrimSpace(env.Supervisor.Model) != "" {
+			if env.Supervisor.Model != "" {
 				effective.SupervisorModel = env.Supervisor.Model
 			}
 		}

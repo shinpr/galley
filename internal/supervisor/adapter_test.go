@@ -22,6 +22,17 @@ func TestExtractJSONObjectStripsSurroundingProse(t *testing.T) {
 	}
 }
 
+func TestAppendSupervisorModel(t *testing.T) {
+	base := []string{"supervisor"}
+	if got := appendSupervisorModel(base, ""); len(got) != 1 {
+		t.Fatalf("empty model changed argv: %v", got)
+	}
+	got := appendSupervisorModel(base, "provider-model-x")
+	if strings.Join(got, " ") != "supervisor --model provider-model-x" {
+		t.Fatalf("configured model argv got %v", got)
+	}
+}
+
 func TestRunAdapterPayloadCodexUsesEmbeddedPromptAndSchema(t *testing.T) {
 	skipPOSIXFakeSupervisorOnWindows(t)
 	binDir := t.TempDir()
@@ -51,6 +62,7 @@ printf '%s\n' '{"event":"done"}'
 
 	output, err := RunAdapterPayload(context.Background(), AdapterOptions{
 		Provider:    "codex",
+		Model:       "provider-model-x",
 		WorkDir:     t.TempDir(),
 		ArtifactDir: artifactDir,
 		CodexBin:    fakeCodex,
@@ -79,6 +91,9 @@ printf '%s\n' '{"event":"done"}'
 			t.Fatalf("codex args missing %q:\n%s", want, args)
 		}
 	}
+	if strings.Count(string(args), "--model provider-model-x") != 1 {
+		t.Fatalf("codex args must contain one configured model: %s", args)
+	}
 	if _, err := os.Stat(filepath.Join(artifactDir, "supervisor-verdict.schema.json")); err != nil {
 		t.Fatal(err)
 	}
@@ -101,6 +116,7 @@ printf '%s\n' '{"status":"accepted","summary":"ok","acceptance_gaps":[],"reviewe
 
 	output, err := RunAdapterPayload(context.Background(), AdapterOptions{
 		Provider:    "claude",
+		Model:       "provider-model-x",
 		WorkDir:     t.TempDir(),
 		ArtifactDir: t.TempDir(),
 		ClaudeBin:   fakeClaude,
@@ -119,6 +135,9 @@ printf '%s\n' '{"status":"accepted","summary":"ok","acceptance_gaps":[],"reviewe
 		if !strings.Contains(string(args), want) {
 			t.Fatalf("claude args missing %q:\n%s", want, args)
 		}
+	}
+	if strings.Count(string(args), "--model provider-model-x") != 1 {
+		t.Fatalf("claude args must contain one configured model: %s", args)
 	}
 	if strings.Contains(string(args), "$schema") || strings.Contains(string(args), "draft/2020-12") {
 		t.Fatalf("claude supervisor schema must omit root $schema:\n%s", args)

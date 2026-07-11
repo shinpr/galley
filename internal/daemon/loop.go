@@ -510,10 +510,6 @@ func attemptsLeft(budget, attempt int) int {
 // determined the supervisor adapter Galley used. The function is
 // extracted from runSupervisorLoop so it can be unit-tested without driving a
 // full task through the daemon loop.
-//
-// model_source distinguishes a repository-pinned supervisor model from the
-// supervisor CLI default: an omitted override records an empty model with
-// cli_default so a later reader never mistakes the CLI default for a pin.
 func writeSupervisorEvidence(runDir string, effectiveOpts Options) error {
 	modelSource := SupervisorModelSourceCLIDefault
 	if effectiveOpts.SupervisorModel != "" {

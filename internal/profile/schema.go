@@ -76,10 +76,7 @@ func EnvironmentJSONSchema() ([]byte, error) {
 			"supervisor": object(
 				properties(map[string]any{
 					"default_cli": enumSchema(daemonconfig.SupervisorCLIs()),
-					// No minLength: an explicit empty string is a valid, meaningful
-					// value that selects the supervisor CLI's default model, matching
-					// the Go SupervisorDefault.Model contract and the description below.
-					"model": stringSchema("description", "Optional exact model override forwarded unchanged to the selected supervisor CLI via its native `--model` option. Accepted values are determined by the provider CLI; Galley does not validate model names. Omit or set to an empty string to preserve the supervisor CLI's default model."),
+					"model":       stringSchema("description", "Optional model name passed unchanged to the selected supervisor CLI. Omit or leave empty to use the CLI default; accepted values depend on the provider."),
 				}),
 			),
 			"required_checks": object(

@@ -28,9 +28,7 @@ const ClaudeSupervisorSystemPromptFilename = "claude_supervisor_system_prompt.md
 // AdapterOptions configures a built-in model supervisor adapter.
 type AdapterOptions struct {
 	Provider string
-	// Model, when non-empty, is forwarded unchanged as the provider CLI's native
-	// --model option; empty preserves the CLI default. The adapter does not
-	// validate the value, so availability is the provider CLI's responsibility.
+	// Model is passed unchanged to the provider CLI. Empty preserves its default.
 	Model       string
 	WorkDir     string
 	Timeout     time.Duration
@@ -150,52 +148,11 @@ func NewAdapterRequest(evidence Evidence) AdapterRequest {
 	}}
 }
 
-// codexSupervisorArgv builds the codex exec argv, appending the native --model
-// pair only when a supervisor model is pinned. The trailing "-" reads the
-// prompt from stdin and always stays last.
-func codexSupervisorArgv(opts AdapterOptions, schemaPath, outPath string) []string {
-	argv := []string{
-		opts.CodexBin,
-		"exec",
-		"--cd", opts.WorkDir,
-		"--sandbox", "workspace-write",
-		"--json",
-		"--output-schema", schemaPath,
-		"--output-last-message", outPath,
+func appendSupervisorModel(args []string, model string) []string {
+	if model == "" {
+		return args
 	}
-	if opts.Model != "" {
-		argv = append(argv, "--model", opts.Model)
-	}
-	return append(argv, "-")
-}
-
-// claudeSupervisorArgv builds the Claude (and GLM, which reuses it) supervisor
-// argv, appending the native --model pair only when a model is pinned. It
-// selects OS-specific prompt delivery: --system-prompt-file on Windows, inline
-// --system-prompt and --json-schema elsewhere.
-func claudeSupervisorArgv(opts AdapterOptions, goos, guardDir, debugPath, systemPromptPath, schema string) []string {
-	args := []string{
-		opts.ClaudeBin,
-		"-p",
-		"--no-session-persistence",
-		"--permission-mode", "bypassPermissions",
-		"--tools", "default",
-		"--disallowedTools", "Write,Edit,MultiEdit,NotebookEdit",
-		"--output-format", "text",
-	}
-	if opts.Model != "" {
-		args = append(args, "--model", opts.Model)
-	}
-	if goos == "windows" {
-		args = append(args, "--system-prompt-file", systemPromptPath)
-	} else {
-		args = append(args, "--system-prompt", prompts.ClaudeSupervisor(), "--json-schema", schema)
-	}
-	args = append(args, "--plugin-dir", guardDir)
-	if opts.ArtifactDir != "" {
-		args = append(args, "--debug-file", debugPath)
-	}
-	return args
+	return append(args, "--model", model)
 }
 
 func runCodexAdapter(ctx context.Context, opts AdapterOptions, request []byte) ([]byte, error) {
@@ -220,10 +177,20 @@ func runCodexAdapter(ctx context.Context, opts AdapterOptions, request []byte) (
 	if err := writeSupervisorFile(schemaPath, []byte(schemas.SupervisorVerdict)); err != nil {
 		return nil, err
 	}
-	argv := codexSupervisorArgv(opts, schemaPath, outPath)
+	args := []string{
+		opts.CodexBin,
+		"exec",
+		"--cd", opts.WorkDir,
+		"--sandbox", "workspace-write",
+		"--json",
+		"--output-schema", schemaPath,
+		"--output-last-message", outPath,
+	}
+	args = appendSupervisorModel(args, opts.Model)
+	args = append(args, "-")
 	_, err = runner.RunCommand(ctx, runner.Command{
 		WorkDir: opts.WorkDir,
-		Argv:    argv,
+		Argv:    args,
 		Stdin:   prompt,
 	}, runner.RunOptions{Timeout: opts.Timeout, IdleTimeout: opts.IdleTimeout, StdoutPath: eventsPath})
 	if err != nil {
@@ -263,19 +230,36 @@ func runClaudeAdapterForOS(ctx context.Context, opts AdapterOptions, request []b
 	if err != nil {
 		return nil, err
 	}
-	var systemPromptPath, schema string
+	args := []string{
+		opts.ClaudeBin,
+		"-p",
+		"--no-session-persistence",
+		"--permission-mode", "bypassPermissions",
+		"--tools", "default",
+		"--disallowedTools", "Write,Edit,MultiEdit,NotebookEdit",
+		"--output-format", "text",
+	}
+	args = appendSupervisorModel(args, opts.Model)
 	if goos == "windows" {
-		systemPromptPath = filepath.Join(dir, ClaudeSupervisorSystemPromptFilename)
+		systemPromptPath := filepath.Join(dir, ClaudeSupervisorSystemPromptFilename)
 		if err := writeSupervisorFile(systemPromptPath, []byte(prompts.ClaudeSupervisor())); err != nil {
 			return nil, err
 		}
+		args = append(args, "--system-prompt-file", systemPromptPath)
 	} else {
-		schema, err = runner.ClaudeCompatibleJSONSchema(schemas.SupervisorVerdict)
+		schema, err := runner.ClaudeCompatibleJSONSchema(schemas.SupervisorVerdict)
 		if err != nil {
 			return nil, fmt.Errorf("prepare Claude supervisor schema: %w", err)
 		}
+		args = append(args,
+			"--system-prompt", prompts.ClaudeSupervisor(),
+			"--json-schema", schema,
+		)
 	}
-	args := claudeSupervisorArgv(opts, goos, guardDir, debugPath, systemPromptPath, schema)
+	args = append(args, "--plugin-dir", guardDir)
+	if opts.ArtifactDir != "" {
+		args = append(args, "--debug-file", debugPath)
+	}
 	commandPlan := runner.Command{
 		WorkDir:   opts.WorkDir,
 		Argv:      args,

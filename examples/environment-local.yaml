@@ -5,9 +5,7 @@ commands:
   build: "go build ./cmd/galley"
 executor:
   default_cli: "claude"
-# supervisor optionally pins the repository review adapter and its model; both
-# fields are optional and omitting model uses the provider CLI's default. Accepted
-# model values are determined by the selected provider CLI.
+# Optional repository review overrides; omitted values preserve existing defaults.
 # supervisor:
 #   default_cli: "claude"
 #   model: "claude-sonnet-4-5"

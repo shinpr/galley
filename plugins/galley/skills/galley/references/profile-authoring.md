@@ -19,7 +19,7 @@ Backend defaults are intentionally separate:
 
 - Implementation executor default: stored in `environment.yaml` as `executor.default_cli`; unset resolves to Claude when a new task is authored.
 - Review supervisor default: optionally stored in `environment.yaml` as `supervisor.default_cli`; unset falls back to daemon startup state and then Claude.
-- Review supervisor model: optionally stored in `environment.yaml` as `supervisor.model`. It is an exact model override forwarded unchanged to the selected supervisor CLI's native `--model` option; accepted values are determined by that provider CLI, not a Galley-defined enum. Unset or empty preserves the supervisor CLI's default model.
+- Review supervisor model: set `supervisor.model` to an exact provider model name; omit it or use an empty value to keep that CLI's default.
 - Valid backends for either default are `claude`, `codex`, and `glm`. `glm` runs the Claude Code binary against GLM's Anthropic-compatible endpoint (Z.ai) and requires `glm_api_key` in `daemon.yaml`. The supervisor is the acceptance gate, so its default is the user's choice; the daemon default is `claude`.
 
 Use the bundled schemas as the profile field contract:

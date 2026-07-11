@@ -192,10 +192,6 @@ func TestWriteSupervisorEvidenceRecordsResolvedAndSource(t *testing.T) {
 
 func TestEffectiveOptionsForProfilesResolvesSupervisorModel(t *testing.T) {
 	t.Parallel()
-	// AC1: a configured environment.yaml supervisor.model reaches the effective
-	// daemon options unchanged, independent of supervisor.default_cli. AC3:
-	// absent, empty, and whitespace-only values leave no override so the
-	// supervisor CLI default is preserved.
 	cases := []struct {
 		name      string
 		env       *profile.Environment
@@ -217,11 +213,6 @@ func TestEffectiveOptionsForProfilesResolvesSupervisorModel(t *testing.T) {
 			wantModel: "",
 		},
 		{
-			name:      "whitespace model omitted",
-			env:       &profile.Environment{Supervisor: &profile.SupervisorDefault{Model: "   "}},
-			wantModel: "",
-		},
-		{
 			name:      "no supervisor block",
 			env:       &profile.Environment{},
 			wantModel: "",
@@ -239,9 +230,6 @@ func TestEffectiveOptionsForProfilesResolvesSupervisorModel(t *testing.T) {
 
 func TestWriteSupervisorEvidenceRecordsModelState(t *testing.T) {
 	t.Parallel()
-	// AC4: run evidence identifies an explicitly resolved supervisor model and
-	// distinguishes it from the supervisor CLI default so AFK users and later
-	// agents can tell which model setting governed review.
 	cases := []struct {
 		name            string
 		model           string

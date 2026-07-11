@@ -8,12 +8,12 @@ import (
 	"testing"
 )
 
-func TestClaudeResultSerializedShapeCompatibility(t *testing.T) {
+func TestExecutorResultSerializedShapeCompatibility(t *testing.T) {
 	t.Parallel()
-	data, err := json.Marshal(ClaudeResult{
+	data, err := json.Marshal(ExecutorResult{
 		Status: "completed", Summary: "done", FilesModified: []string{},
-		AcceptanceCriteria: []ClaudeAcceptanceCriterion{}, Verification: []ClaudeVerification{},
-		ScopeExpansions: []ClaudeScopeExpansion{}, Decisions: []ClaudeDecision{}, Risks: []ClaudeRisk{},
+		AcceptanceCriteria: []ExecutorAcceptanceCriterion{}, Verification: []ExecutorVerification{},
+		ScopeExpansions: []ExecutorScopeExpansion{}, Decisions: []ExecutorDecision{}, Risks: []ExecutorRisk{},
 	})
 	if err != nil {
 		t.Fatal(err)

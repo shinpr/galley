@@ -3,7 +3,7 @@ package runner
 // AC: AC4 — The Codex executor command plan must wire the structured
 // executor-result schema through `codex exec --output-schema` and request a
 // `--output-last-message` capture file, and the captured final message must
-// parse back into a ClaudeResult so completed, completed_with_risks, and
+// parse back into a ExecutorResult so completed, completed_with_risks, and
 // hard_stop executor judgments survive supervisor handoff.
 
 import (

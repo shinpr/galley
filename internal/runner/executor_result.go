@@ -71,21 +71,6 @@ type ExecutorHardStop struct {
 	NeededToContinue []string `json:"needed_to_continue"`
 }
 
-// Compatibility aliases keep provider-specific callers building while common
-// runtime code migrates to the executor-neutral contract.
-type ClaudeResult = ExecutorResult
-type ClaudeAcceptanceCriterion = ExecutorAcceptanceCriterion
-type ClaudeVerification = ExecutorVerification
-type ClaudeScopeExpansion = ExecutorScopeExpansion
-type ClaudeDecision = ExecutorDecision
-type ClaudeRisk = ExecutorRisk
-type ClaudeHardStop = ExecutorHardStop
-
-// ExtractClaudeResult parses Claude's structured result from stdout.
-func ExtractClaudeResult(stdout string) (ClaudeResult, error) {
-	return ExtractExecutorResult(stdout)
-}
-
 // ExtractExecutorResult parses a provider-neutral structured result from text.
 func ExtractExecutorResult(text string) (ExecutorResult, error) {
 	if result, found, err := extractExecutorResultLine(strings.TrimSpace(text)); found {
@@ -105,11 +90,6 @@ func ExtractExecutorResult(text string) (ExecutorResult, error) {
 		return ExecutorResult{}, firstErr
 	}
 	return ExecutorResult{}, fmt.Errorf("structured executor result not found")
-}
-
-// ExtractClaudeResultFile parses Claude's structured result from a captured stdout file.
-func ExtractClaudeResultFile(path string) (ClaudeResult, error) {
-	return ExtractExecutorResultFile(path)
 }
 
 // ExtractExecutorResultFile parses structured executor results from a text file.

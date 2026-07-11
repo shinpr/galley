@@ -8,15 +8,6 @@ import (
 	"testing"
 )
 
-// swapDuplicateScanReader replaces the duplicate-ID scan reader for a single
-// test and returns a restore function. Tests using it must not run in parallel
-// because the reader is package-global state.
-func swapDuplicateScanReader(fn func(string) (string, error)) func() {
-	prev := taskIDForDuplicateScan
-	taskIDForDuplicateScan = fn
-	return func() { taskIDForDuplicateScan = prev }
-}
-
 // writeTaskFileWithID writes a valid task file at path with the given ID and status.
 func writeTaskFileWithID(t *testing.T, path, id, status string) {
 	t.Helper()
@@ -69,7 +60,7 @@ func TestQueueRescansWhenTaskMovesDuringDuplicateScan(t *testing.T) {
 	writeTaskFileWithID(t, draftPath, "incoming-task", "draft")
 
 	moved := false
-	restore := swapDuplicateScanReader(func(p string) (string, error) {
+	readTaskID := func(p string) (string, error) {
 		if !moved && filepath.Base(p) == "existing.yaml" && filepath.Base(filepath.Dir(p)) == "queued" {
 			moved = true
 			if err := os.Rename(existingQueued, filepath.Join(runningDir, "existing.yaml")); err != nil {
@@ -77,10 +68,9 @@ func TestQueueRescansWhenTaskMovesDuringDuplicateScan(t *testing.T) {
 			}
 		}
 		return taskIDFromFile(p)
-	})
-	t.Cleanup(restore)
+	}
 
-	result, err := Queue(draftPath, QueueOptions{Root: root})
+	result, err := queue(draftPath, QueueOptions{Root: root}, readTaskID)
 	if err != nil {
 		t.Fatalf("queue should recover from a move race, got error: %v", err)
 	}
@@ -116,7 +106,7 @@ func TestQueueRejectsDuplicateWhenSameIDTaskMovesDuringScan(t *testing.T) {
 	writeTaskFileWithID(t, draftPath, "dupe-id", "draft")
 
 	moved := false
-	restore := swapDuplicateScanReader(func(p string) (string, error) {
+	readTaskID := func(p string) (string, error) {
 		if !moved && filepath.Base(p) == "existing.yaml" && filepath.Base(filepath.Dir(p)) == "queued" {
 			moved = true
 			if err := os.Rename(existingQueued, filepath.Join(runningDir, "existing.yaml")); err != nil {
@@ -124,10 +114,9 @@ func TestQueueRejectsDuplicateWhenSameIDTaskMovesDuringScan(t *testing.T) {
 			}
 		}
 		return taskIDFromFile(p)
-	})
-	t.Cleanup(restore)
+	}
 
-	_, err := Queue(draftPath, QueueOptions{Root: root})
+	_, err := queue(draftPath, QueueOptions{Root: root}, readTaskID)
 	if err == nil {
 		t.Fatal("expected duplicate task id rejection after rescan")
 	}
@@ -159,16 +148,15 @@ func TestQueueDuplicateScanReportsNonENOENTError(t *testing.T) {
 
 	sentinel := errors.New("permission denied")
 	calls := 0
-	restore := swapDuplicateScanReader(func(p string) (string, error) {
+	readTaskID := func(p string) (string, error) {
 		if filepath.Base(p) == "existing.yaml" {
 			calls++
 			return "", sentinel
 		}
 		return taskIDFromFile(p)
-	})
-	t.Cleanup(restore)
+	}
 
-	_, err := Queue(draftPath, QueueOptions{Root: root})
+	_, err := queue(draftPath, QueueOptions{Root: root}, readTaskID)
 	if err == nil {
 		t.Fatal("expected the underlying inspection error to be reported")
 	}
@@ -200,16 +188,15 @@ func TestQueueDuplicateScanRetryExhaustion(t *testing.T) {
 	writeTaskFileWithID(t, draftPath, "incoming-task", "draft")
 
 	calls := 0
-	restore := swapDuplicateScanReader(func(p string) (string, error) {
+	readTaskID := func(p string) (string, error) {
 		if filepath.Base(p) == "existing.yaml" {
 			calls++
 			return "", os.ErrNotExist
 		}
 		return taskIDFromFile(p)
-	})
-	t.Cleanup(restore)
+	}
 
-	_, err := Queue(draftPath, QueueOptions{Root: root})
+	_, err := queue(draftPath, QueueOptions{Root: root}, readTaskID)
 	if err == nil {
 		t.Fatal("expected retry exhaustion to fail queue registration")
 	}

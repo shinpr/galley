@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-func TestExtractClaudeResultFromPlainJSON(t *testing.T) {
+func TestExtractExecutorResultFromPlainJSON(t *testing.T) {
 	t.Parallel()
-	result, err := ExtractClaudeResult(`{"status":"completed","summary":"done","files_modified":[],"acceptance_criteria":[],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}`)
+	result, err := ExtractExecutorResult(`{"status":"completed","summary":"done","files_modified":[],"acceptance_criteria":[],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -18,9 +18,9 @@ func TestExtractClaudeResultFromPlainJSON(t *testing.T) {
 	}
 }
 
-func TestExtractClaudeResultAcceptsScopeExpansions(t *testing.T) {
+func TestExtractExecutorResultAcceptsScopeExpansions(t *testing.T) {
 	t.Parallel()
-	result, err := ExtractClaudeResult(`{"status":"completed","summary":"done","files_modified":["internal/task/workorder.go"],"acceptance_criteria":[],"verification":[],"scope_expansions":[{"path":"internal/task","reason":"revision required task work order changes","linked_requirement":"revision:pr-comment-1","minimality":"only the work order renderer changed"}],"decisions":[],"risks":[]}`)
+	result, err := ExtractExecutorResult(`{"status":"completed","summary":"done","files_modified":["internal/task/workorder.go"],"acceptance_criteria":[],"verification":[],"scope_expansions":[{"path":"internal/task","reason":"revision required task work order changes","linked_requirement":"revision:pr-comment-1","minimality":"only the work order renderer changed"}],"decisions":[],"risks":[]}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,11 +29,11 @@ func TestExtractClaudeResultAcceptsScopeExpansions(t *testing.T) {
 	}
 }
 
-func TestExtractClaudeResultFromStreamJSONResultString(t *testing.T) {
+func TestExtractExecutorResultFromStreamJSONResultString(t *testing.T) {
 	t.Parallel()
 	stdout := `{"type":"system","message":"start"}` + "\n" +
 		`{"type":"result","result":"{\"status\":\"completed_with_risks\",\"summary\":\"done\",\"files_modified\":[],\"acceptance_criteria\":[],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}"}`
-	result, err := ExtractClaudeResult(stdout)
+	result, err := ExtractExecutorResult(stdout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestExtractClaudeResultFromStreamJSONResultString(t *testing.T) {
 	}
 }
 
-func TestExtractClaudeResultFileReadsBeyondTailSizedNoise(t *testing.T) {
+func TestExtractExecutorResultFileReadsBeyondTailSizedNoise(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "claude.stdout.jsonl")
 	noise := strings.Repeat("x", 70*1024)
@@ -51,7 +51,7 @@ func TestExtractClaudeResultFileReadsBeyondTailSizedNoise(t *testing.T) {
 	if err := os.WriteFile(path, []byte(stdout), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	result, err := ExtractClaudeResultFile(path)
+	result, err := ExtractExecutorResultFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,15 +60,15 @@ func TestExtractClaudeResultFileReadsBeyondTailSizedNoise(t *testing.T) {
 	}
 }
 
-func TestExtractClaudeResultRejectsMissingResult(t *testing.T) {
+func TestExtractExecutorResultRejectsMissingResult(t *testing.T) {
 	t.Parallel()
-	_, err := ExtractClaudeResult(`{"type":"system"}`)
+	_, err := ExtractExecutorResult(`{"type":"system"}`)
 	if err == nil {
 		t.Fatal("expected error")
 	}
 }
 
-func TestExtractClaudeResultRejectsMissingRequiredFields(t *testing.T) {
+func TestExtractExecutorResultRejectsMissingRequiredFields(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name  string
@@ -81,7 +81,7 @@ func TestExtractClaudeResultRejectsMissingRequiredFields(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := ExtractClaudeResult(tt.input)
+			_, err := ExtractExecutorResult(tt.input)
 			if err == nil {
 				t.Fatal("expected error")
 			}
@@ -89,15 +89,15 @@ func TestExtractClaudeResultRejectsMissingRequiredFields(t *testing.T) {
 	}
 }
 
-func TestExtractClaudeResultRejectsHardStopWithoutDetails(t *testing.T) {
+func TestExtractExecutorResultRejectsHardStopWithoutDetails(t *testing.T) {
 	t.Parallel()
-	_, err := ExtractClaudeResult(`{"status":"hard_stop","summary":"blocked","files_modified":[],"acceptance_criteria":[],"verification":[],"decisions":[],"risks":[]}`)
+	_, err := ExtractExecutorResult(`{"status":"hard_stop","summary":"blocked","files_modified":[],"acceptance_criteria":[],"verification":[],"decisions":[],"risks":[]}`)
 	if err == nil {
 		t.Fatal("expected error")
 	}
 }
 
-func TestExtractClaudeResultRejectsInvalidNestedEnums(t *testing.T) {
+func TestExtractExecutorResultRejectsInvalidNestedEnums(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name  string
@@ -112,7 +112,7 @@ func TestExtractClaudeResultRejectsInvalidNestedEnums(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := ExtractClaudeResult(tt.input)
+			_, err := ExtractExecutorResult(tt.input)
 			if err == nil {
 				t.Fatal("expected error")
 			}
@@ -120,7 +120,7 @@ func TestExtractClaudeResultRejectsInvalidNestedEnums(t *testing.T) {
 	}
 }
 
-func TestExtractClaudeResultRejectsNestedRequiredFields(t *testing.T) {
+func TestExtractExecutorResultRejectsNestedRequiredFields(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name  string
@@ -146,7 +146,7 @@ func TestExtractClaudeResultRejectsNestedRequiredFields(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := ExtractClaudeResult(tt.input)
+			_, err := ExtractExecutorResult(tt.input)
 			if err == nil {
 				t.Fatal("expected error")
 			}

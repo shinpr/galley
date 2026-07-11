@@ -15,9 +15,6 @@ import (
 // Bound retries so continuous task movement cannot block queue registration.
 const duplicateScanMaxAttempts = 5
 
-// Overridden by tests to reproduce a move between enumeration and read.
-var taskIDForDuplicateScan = taskIDFromFile
-
 type QueueOptions struct {
 	Reason     string
 	Root       string
@@ -32,6 +29,10 @@ type QueueResult struct {
 
 // Queue validates a task and moves it to tasks/queued without overwriting an existing queued task.
 func Queue(path string, opts QueueOptions) (QueueResult, error) {
+	return queue(path, opts, taskIDFromFile)
+}
+
+func queue(path string, opts QueueOptions, readTaskID func(string) (string, error)) (QueueResult, error) {
 	loaded, err := Load(path)
 	if err != nil {
 		return QueueResult{}, err
@@ -46,7 +47,7 @@ func Queue(path string, opts QueueOptions) (QueueResult, error) {
 	if !validation.Valid() {
 		return QueueResult{}, fmt.Errorf("task validation failed: %v", validation.Errors)
 	}
-	if err := rejectDuplicateTaskID(path, loaded.ID, opts.Root); err != nil {
+	if err := rejectDuplicateTaskID(path, loaded.ID, opts.Root, readTaskID); err != nil {
 		return QueueResult{}, err
 	}
 	loaded.Attempts = append(loaded.Attempts, Attempt{
@@ -71,7 +72,7 @@ func Queue(path string, opts QueueOptions) (QueueResult, error) {
 	return QueueResult{Task: loaded, From: path, To: nextPath}, nil
 }
 
-func rejectDuplicateTaskID(path, id, root string) error {
+func rejectDuplicateTaskID(path, id, root string, readTaskID func(string) (string, error)) error {
 	root = queueRoot(path, root)
 	if root == "" || id == "" {
 		return nil
@@ -81,7 +82,7 @@ func rejectDuplicateTaskID(path, id, root string) error {
 		return err
 	}
 	for attempt := 0; attempt < duplicateScanMaxAttempts; attempt++ {
-		duplicatePath, moved, err := scanForDuplicateTaskID(root, current, id)
+		duplicatePath, moved, err := scanForDuplicateTaskID(root, current, id, readTaskID)
 		if err != nil {
 			return err
 		}
@@ -97,7 +98,7 @@ func rejectDuplicateTaskID(path, id, root string) error {
 }
 
 // scanForDuplicateTaskID requests a rescan when an enumerated task has moved.
-func scanForDuplicateTaskID(root, current, id string) (string, bool, error) {
+func scanForDuplicateTaskID(root, current, id string, readTaskID func(string) (string, error)) (string, bool, error) {
 	var matches []string
 	for _, state := range AllWorkflowStates() {
 		stateMatches, err := filepath.Glob(filepath.Join(TaskStateDir(root, state), "*.y*ml"))
@@ -114,7 +115,7 @@ func scanForDuplicateTaskID(root, current, id string) (string, bool, error) {
 		if absMatch == current {
 			continue
 		}
-		existingID, err := taskIDForDuplicateScan(match)
+		existingID, err := readTaskID(match)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				return "", true, nil

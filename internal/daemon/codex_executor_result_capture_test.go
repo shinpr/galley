@@ -23,7 +23,7 @@ import (
 	"github.com/shinpr/galley/internal/task"
 )
 
-func TestCodexExecutorLastMessageJSONReachesClaudeResult(t *testing.T) {
+func TestCodexExecutorLastMessageJSONReachesExecutorResult(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
@@ -81,7 +81,7 @@ printf '%s\n' '{"event":"unrelated"}'
 	}
 
 	data := mustReadSingleGlob(t, filepath.Join(root, "runs", "*", "attempt-1", runartifact.ExecutorResultFilename))
-	var got runner.ClaudeResult
+	var got runner.ExecutorResult
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("decode executor_result.json: %v", err)
 	}
@@ -147,7 +147,7 @@ printf '%s\n' '`+hardStopResult+`'
 	}
 
 	data := mustReadSingleGlob(t, filepath.Join(root, "runs", "*", "attempt-1", runartifact.ExecutorResultFilename))
-	var got runner.ClaudeResult
+	var got runner.ExecutorResult
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("decode executor_result.json: %v", err)
 	}

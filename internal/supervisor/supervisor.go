@@ -46,7 +46,7 @@ type DiscussionItem struct {
 type Evidence struct {
 	Task            task.Task
 	Profiles        profile.Bundle
-	Claude          runner.ClaudeResult
+	ExecutorResult  runner.ExecutorResult
 	ParseError      error
 	RunError        error
 	DiffDirty       bool

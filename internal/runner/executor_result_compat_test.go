@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -29,5 +30,13 @@ func TestClaudeResultSerializedShapeCompatibility(t *testing.T) {
 	want := []string{"acceptance_criteria", "decisions", "files_modified", "risks", "scope_expansions", "status", "summary", "verification"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("serialized executor-result keys = %v; want %v", got, want)
+	}
+}
+
+func TestExecutorResultValidationUsesProviderNeutralVocabulary(t *testing.T) {
+	t.Parallel()
+	err := (ExecutorResult{}).Validate()
+	if err == nil || !strings.Contains(err.Error(), "executor result") || strings.Contains(err.Error(), "Claude") {
+		t.Fatalf("validation error = %v", err)
 	}
 }

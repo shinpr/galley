@@ -863,7 +863,7 @@ func startHeartbeat(ctx context.Context, path string, interval time.Duration) fu
 	}
 }
 
-func claudeStatus(result runner.RunResult, err error) string {
+func executorStatus(result runner.RunResult, err error) string {
 	if err == nil {
 		return "completed"
 	}

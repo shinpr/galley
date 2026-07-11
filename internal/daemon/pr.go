@@ -424,8 +424,10 @@ func isResolvedAttemptRisk(risk task.Risk) bool {
 	for _, prefix := range []string{
 		"workspace-dirty-",
 		"claude-risk-",
+		"executor-risk-",
 		"git-diff-empty-",
 		"claude-result-parse-",
+		"executor-result-parse-",
 		"git-diff-",
 	} {
 		if strings.HasPrefix(risk.ID, prefix) {

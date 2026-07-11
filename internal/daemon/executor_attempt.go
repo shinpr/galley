@@ -18,15 +18,15 @@ import (
 )
 
 type attemptOutcome struct {
-	Started      time.Time
-	Completed    time.Time
-	RunResult    runner.RunResult
-	RunErr       error
-	ClaudeResult runner.ClaudeResult
-	ParseErr     error
-	DiffDirty    bool
-	Diff         string
-	DiffErr      error
+	Started        time.Time
+	Completed      time.Time
+	RunResult      runner.RunResult
+	RunErr         error
+	ExecutorResult runner.ExecutorResult
+	ParseErr       error
+	DiffDirty      bool
+	Diff           string
+	DiffErr        error
 	// DiffSnapshot retains the full git evidence for this attempt so progress
 	// detection can decide whether the dirty diff contains non-skeleton
 	// changes. The snapshot is a value rather than a pointer so an empty
@@ -81,9 +81,9 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 
 	resultPath := runartifact.Path(attemptDir, runartifact.ExecutorResultFilename)
 	lastMessagePath := codexLastMessagePath(cli, attemptDir)
-	claudeResult, parseErr := resolveExecutorResult(cli, stdoutPath, run.RunResult.Stdout, lastMessagePath)
+	executorResult, parseErr := resolveExecutorResult(cli, stdoutPath, run.RunResult.Stdout, lastMessagePath)
 	if parseErr == nil {
-		if err := writeJSON(resultPath, claudeResult); err != nil {
+		if err := writeJSON(resultPath, executorResult); err != nil {
 			return attemptOutcome{}, err
 		}
 	}
@@ -110,16 +110,16 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 	}
 
 	return attemptOutcome{
-		Started:      run.Started,
-		Completed:    run.Completed,
-		RunResult:    run.RunResult,
-		RunErr:       run.RunErr,
-		ClaudeResult: claudeResult,
-		ParseErr:     parseErr,
-		DiffDirty:    diffArtifacts.Dirty,
-		Diff:         diffArtifacts.Diff,
-		DiffErr:      diffArtifacts.Err,
-		DiffSnapshot: diffArtifacts.Snapshot,
+		Started:        run.Started,
+		Completed:      run.Completed,
+		RunResult:      run.RunResult,
+		RunErr:         run.RunErr,
+		ExecutorResult: executorResult,
+		ParseErr:       parseErr,
+		DiffDirty:      diffArtifacts.Dirty,
+		Diff:           diffArtifacts.Diff,
+		DiffErr:        diffArtifacts.Err,
+		DiffSnapshot:   diffArtifacts.Snapshot,
 	}, nil
 }
 
@@ -155,24 +155,24 @@ func mergeAttemptEvidence(loaded *task.Task, outcome attemptOutcome, runID, work
 		appendRisk(loaded, "claude-result-parse", "partial_verification", outcome.ParseErr.Error(), "Stored raw Claude stdout and stderr for supervisor review.", true)
 		return
 	}
-	if outcome.ClaudeResult.Status == "completed" && outcome.DiffErr == nil && !outcome.DiffDirty {
+	if outcome.ExecutorResult.Status == "completed" && outcome.DiffErr == nil && !outcome.DiffDirty {
 		appendRisk(loaded, "git-diff-empty", "partial_verification", "Executor completed but produced no git diff in the execution workspace.", "Stored Claude result and raw logs for supervisor review.", true)
 	}
-	for _, ac := range outcome.ClaudeResult.AcceptanceCriteria {
+	for _, ac := range outcome.ExecutorResult.AcceptanceCriteria {
 		for i := range loaded.AcceptanceCriteria {
 			if loaded.AcceptanceCriteria[i].ID == ac.ID {
 				loaded.AcceptanceCriteria[i].Status = mapAcceptanceStatus(ac.Status)
 			}
 		}
 	}
-	for _, verification := range outcome.ClaudeResult.Verification {
+	for _, verification := range outcome.ExecutorResult.Verification {
 		loaded.Verification.Commands = append(loaded.Verification.Commands, task.VerificationCommand{
 			Cmd:           verification.Command,
 			Status:        verification.Status,
 			OutputExcerpt: verification.OutputExcerpt,
 		})
 	}
-	for _, decision := range outcome.ClaudeResult.Decisions {
+	for _, decision := range outcome.ExecutorResult.Decisions {
 		loaded.Decisions = append(loaded.Decisions, task.Decision{
 			ID:               fmt.Sprintf("claude-decision-%d", len(loaded.Decisions)+1),
 			Question:         decision.Question,
@@ -182,11 +182,11 @@ func mergeAttemptEvidence(loaded *task.Task, outcome attemptOutcome, runID, work
 			NeedsHumanReview: decision.NeedsHumanReview,
 		})
 	}
-	for _, claudeRisk := range outcome.ClaudeResult.Risks {
-		appendRisk(loaded, "claude-risk", claudeRisk.Type, claudeRisk.Detail, claudeRisk.Mitigation, claudeRisk.NeedsHumanReview)
+	for _, executorRisk := range outcome.ExecutorResult.Risks {
+		appendRisk(loaded, "claude-risk", executorRisk.Type, executorRisk.Detail, executorRisk.Mitigation, executorRisk.NeedsHumanReview)
 	}
-	if outcome.ClaudeResult.Status == "hard_stop" && outcome.ClaudeResult.HardStop != nil {
-		appendRisk(loaded, "claude-hard-stop", "other", outcome.ClaudeResult.HardStop.Reason, strings.Join(outcome.ClaudeResult.HardStop.NeededToContinue, "; "), true)
+	if outcome.ExecutorResult.Status == "hard_stop" && outcome.ExecutorResult.HardStop != nil {
+		appendRisk(loaded, "executor-hard-stop", "other", outcome.ExecutorResult.HardStop.Reason, strings.Join(outcome.ExecutorResult.HardStop.NeededToContinue, "; "), true)
 	}
 }
 

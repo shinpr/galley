@@ -213,7 +213,7 @@ func loadRunProfiles(runDir string) (profile.Bundle, error) {
 	return payload.Bundle, nil
 }
 
-func loadLatestExecutorResult(runDir string) (*runner.ClaudeResult, string, error) {
+func loadLatestExecutorResult(runDir string) (*runner.ExecutorResult, string, error) {
 	bestDir, _, err := runlog.LatestAttemptDir(runDir)
 	if err != nil {
 		return nil, "", err
@@ -228,7 +228,7 @@ func loadLatestExecutorResult(runDir string) (*runner.ClaudeResult, string, erro
 		}
 		return nil, bestDir, err
 	}
-	var res runner.ClaudeResult
+	var res runner.ExecutorResult
 	if err := json.Unmarshal(data, &res); err != nil {
 		return nil, bestDir, err
 	}

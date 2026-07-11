@@ -207,7 +207,7 @@ func withDefaultEmbeddedCodexOptions(opts CodexOptions) (CodexOptions, error) {
 // requires every object property to be listed in required. The runner keeps
 // optional semantics by making originally optional properties nullable before
 // invoking Codex. Galley still validates the parsed result with
-// ClaudeResult.Validate(), which preserves semantic requirements after the
+// ExecutorResult.Validate(), which preserves semantic requirements after the
 // model responds.
 func CodexExecutorResultSchema() (string, error) {
 	return CodexCompatibleOutputSchema(schemas.ClaudeResult)
@@ -355,20 +355,20 @@ func resolveCodexAttemptFiles(opts CodexOptions) (CodexOptions, error) {
 // a single JSON object that already matches the executor result schema. The
 // parser reuses the same line-level extractor as the Claude stdout path so
 // final messages that embed the JSON inside surrounding prose still resolve
-// to a validated ClaudeResult.
-func ExtractCodexLastMessageFile(path string) (ClaudeResult, error) {
+// to a validated ExecutorResult.
+func ExtractCodexLastMessageFile(path string) (ExecutorResult, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return ClaudeResult{}, fmt.Errorf("read codex last message %s: %w", path, err)
+		return ExecutorResult{}, fmt.Errorf("read codex last message %s: %w", path, err)
 	}
 	text := string(data)
-	if result, found, parseErr := extractClaudeResultLine(text); found {
+	if result, found, parseErr := extractExecutorResultLine(text); found {
 		return result, parseErr
 	}
 	// Fall back to the stdout-style scan so multi-line responses still surface
 	// the embedded JSON result without forcing the executor to emit a strict
 	// single-line message.
-	return ExtractClaudeResult(text)
+	return ExtractExecutorResult(text)
 }
 
 func codexWarnings(opts CodexOptions) []string {

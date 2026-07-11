@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Added
+
+- `environment.yaml` now accepts an optional `supervisor.model` that pins the exact model the repository's built-in supervisor runs. Galley passes the value through unchanged via the CLI's native `--model` option for the Codex, Claude, and GLM supervisor adapters; accepted values are whatever the selected provider CLI recognizes rather than a Galley-defined enum. When it is absent or empty, Galley omits `--model` and preserves the supervisor CLI default. Each run records the resolved model and its source (`environment_profile` or `cli_default`) in `runs/<run-id>/supervisor.json`.
+
 ## v0.9.2 - 2026-07-10
 
 ### Fixed

@@ -91,6 +91,7 @@ executor:
   default_cli: "codex"
 supervisor:
   default_cli: "codex"
+  model: "gpt-5-codex"
 required_checks:
   shell: "auto"
 constraints:
@@ -114,6 +115,7 @@ Supported fields:
 - `commands`: named local commands the executor and supervisor can reference.
 - `executor.default_cli`: optional implementation executor default for new task authoring. Values are `claude`, `codex`, and `glm`. `glm` runs the `claude` binary against GLM's Z.ai endpoint and needs a `glm_api_key` in `daemon.yaml`. When it is unset, new task authoring uses Claude unless the author explicitly chooses another backend. An explicit task YAML `executor.cli` remains authoritative for that task.
 - `supervisor.default_cli`: optional repository-scoped supervisor adapter. Values are `claude`, `codex`, and `glm`. When set, it overrides daemon startup supervisor settings for tasks in this repository.
+- `supervisor.model`: optional exact model the selected supervisor CLI runs for this repository. Galley passes the value through unchanged via the CLI's native `--model` option (Codex, Claude, and GLM), so accepted values are whatever the selected provider CLI recognizes rather than a Galley-defined enum. When it is absent or empty, Galley omits `--model` and the supervisor CLI uses its default model. Each run records the resolved model in `runs/<run-id>/supervisor.json` (`model` plus `model_source`, which is `environment_profile` when pinned and `cli_default` otherwise).
 - `required_checks.shell`: optional shell for Galley-owned `quality.required_checks` execution. Values are `auto`, `sh`, `bash`, `cmd`, `powershell`, and `pwsh`.
 - `required_checks.shell_path`: optional executable path override for required-check shell selection. When both `shell` and `shell_path` are set, `shell_path` wins.
 - `constraints.network`: local network policy.

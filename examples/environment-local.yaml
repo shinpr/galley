@@ -5,6 +5,13 @@ commands:
   build: "go build ./cmd/galley"
 executor:
   default_cli: "codex"
+# supervisor optionally pins the repository review supervisor and its model.
+# default_cli is one of claude, codex, or glm. model is an optional exact model
+# passed unchanged to that CLI's --model option; accepted values depend on the
+# selected provider CLI. Omit or leave model empty to keep the CLI default.
+# supervisor:
+#   default_cli: "codex"
+#   model: "gpt-5-codex"
 required_checks:
   # Use shell_path to pin a custom shell executable. Recognized executable
   # names such as bash, cmd.exe, powershell.exe, and pwsh.exe can stand alone;

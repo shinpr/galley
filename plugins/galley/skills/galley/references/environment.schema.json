@@ -160,6 +160,10 @@
             "glm"
           ],
           "type": "string"
+        },
+        "model": {
+          "description": "Optional exact model the selected supervisor CLI runs for this repository, passed through unchanged via the CLI's native `--model` option. Accepted values are determined by the selected provider CLI, not by Galley. Absent or empty preserves the supervisor CLI's default model.",
+          "type": "string"
         }
       },
       "type": "object"

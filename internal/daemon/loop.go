@@ -105,6 +105,7 @@ func defaultSupervisorRunner(ctx context.Context, opts Options, evidence supervi
 		ArtifactDir:  tryDir,
 		ClaudeBin:    opts.ClaudeBin,
 		CodexBin:     opts.CodexBin,
+		Model:        opts.SupervisorModel,
 		GLMAuthToken: opts.GLMAuthToken,
 	}, evidence)
 }
@@ -503,15 +504,33 @@ func attemptsLeft(budget, attempt int) int {
 	return budget - attempt
 }
 
+// Supervisor model evidence labels. Persisted in run evidence so AFK users and
+// later agents can tell whether a review used a repository-pinned model or the
+// supervisor CLI's own default without re-deriving it from the profile.
+const (
+	SupervisorModelSourceProfile    = "environment_profile"
+	SupervisorModelSourceCLIDefault = "cli_default"
+)
+
 // writeSupervisorEvidence persists the resolved supervisor and its source for
 // a run so reviewers can verify which precedence layer (repository
 // environment profile, CLI startup flag, daemon.yaml, or built-in default)
-// determined the supervisor adapter Galley used. The function is
-// extracted from runSupervisorLoop so it can be unit-tested without driving a
-// full task through the daemon loop.
+// determined the supervisor adapter Galley used. It also records the resolved
+// supervisor model and its source so an explicitly pinned model is
+// observable and distinguishable from letting the supervisor CLI pick its
+// default: `model` is the exact pinned value (empty when none is pinned) and
+// `model_source` is "environment_profile" only when a model was pinned. The
+// function is extracted from runSupervisorLoop so it can be unit-tested without
+// driving a full task through the daemon loop.
 func writeSupervisorEvidence(runDir string, effectiveOpts Options) error {
+	modelSource := SupervisorModelSourceCLIDefault
+	if effectiveOpts.SupervisorModel != "" {
+		modelSource = SupervisorModelSourceProfile
+	}
 	return writeJSON(filepath.Join(runDir, "supervisor.json"), map[string]string{
-		"resolved": effectiveOpts.Supervisor,
-		"source":   effectiveOpts.SupervisorSource,
+		"resolved":     effectiveOpts.Supervisor,
+		"source":       effectiveOpts.SupervisorSource,
+		"model":        effectiveOpts.SupervisorModel,
+		"model_source": modelSource,
 	})
 }

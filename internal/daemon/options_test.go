@@ -190,6 +190,109 @@ func TestWriteSupervisorEvidenceRecordsResolvedAndSource(t *testing.T) {
 	}
 }
 
+func TestEffectiveOptionsForProfilesAppliesRepoSupervisorModel(t *testing.T) {
+	t.Parallel()
+	// AC1: a repository supervisor.model resolves onto the effective daemon
+	// options unchanged so it can reach the supervisor adapter later. The model
+	// resolves independently of default_cli: pinning a model must not require
+	// also overriding the supervisor selection.
+	opts := Options{
+		Root:             t.TempDir(),
+		Supervisor:       "codex",
+		SupervisorSource: SupervisorSourceCLI,
+	}
+	effective := effectiveOptionsForProfiles(opts, profile.Bundle{
+		Environment: &profile.Environment{
+			Supervisor: &profile.SupervisorDefault{Model: "pinned-model-42"},
+		},
+	})
+	if effective.SupervisorModel != "pinned-model-42" {
+		t.Fatalf("supervisor model got %q, want pinned-model-42", effective.SupervisorModel)
+	}
+	// default_cli was not set in the profile, so supervisor selection is
+	// preserved from the CLI layer.
+	if effective.Supervisor != "codex" || effective.SupervisorSource != SupervisorSourceCLI {
+		t.Fatalf("supervisor selection changed unexpectedly: %q/%q", effective.Supervisor, effective.SupervisorSource)
+	}
+}
+
+func TestEffectiveOptionsForProfilesTreatsBlankSupervisorModelAsUnset(t *testing.T) {
+	t.Parallel()
+	// AC3: an absent or whitespace-only supervisor.model preserves the CLI
+	// default (empty SupervisorModel), so the adapter omits --model.
+	cases := map[string]*profile.SupervisorDefault{
+		"absent":          {DefaultCLI: "claude"},
+		"empty":           {Model: ""},
+		"whitespace-only": {Model: "   "},
+	}
+	for name, sup := range cases {
+		sup := sup
+		t.Run(name, func(t *testing.T) {
+			effective := effectiveOptionsForProfiles(Options{Root: t.TempDir()}, profile.Bundle{
+				Environment: &profile.Environment{Supervisor: sup},
+			})
+			if effective.SupervisorModel != "" {
+				t.Fatalf("%s: supervisor model got %q, want empty", name, effective.SupervisorModel)
+			}
+		})
+	}
+}
+
+func TestWriteSupervisorEvidenceRecordsPinnedModel(t *testing.T) {
+	t.Parallel()
+	// AC4: a pinned model is observable in run evidence and reported as coming
+	// from the environment profile rather than the CLI default.
+	runDir := t.TempDir()
+	if err := writeSupervisorEvidence(runDir, Options{
+		Supervisor:       "codex",
+		SupervisorSource: SupervisorSourceRepoProfile,
+		SupervisorModel:  "pinned-model-42",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := readSupervisorEvidence(t, runDir)
+	if got["model"] != "pinned-model-42" {
+		t.Fatalf("model got %q, want pinned-model-42", got["model"])
+	}
+	if got["model_source"] != SupervisorModelSourceProfile {
+		t.Fatalf("model_source got %q, want %s", got["model_source"], SupervisorModelSourceProfile)
+	}
+}
+
+func TestWriteSupervisorEvidenceRecordsCLIDefaultModel(t *testing.T) {
+	t.Parallel()
+	// AC4: an omitted model is not reported as pinned; the evidence records an
+	// empty model and a cli_default source so a default is distinguishable from
+	// a pin.
+	runDir := t.TempDir()
+	if err := writeSupervisorEvidence(runDir, Options{
+		Supervisor:       "claude",
+		SupervisorSource: SupervisorSourceDefault,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := readSupervisorEvidence(t, runDir)
+	if got["model"] != "" {
+		t.Fatalf("model got %q, want empty", got["model"])
+	}
+	if got["model_source"] != SupervisorModelSourceCLIDefault {
+		t.Fatalf("model_source got %q, want %s", got["model_source"], SupervisorModelSourceCLIDefault)
+	}
+}
+
+func readSupervisorEvidence(t *testing.T, runDir string) map[string]string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(runDir, "supervisor.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]string
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
 func TestEffectiveOptionsForProfilesCleansWorktreesByDefault(t *testing.T) {
 	t.Parallel()
 	effective := effectiveOptionsForProfiles(Options{Root: t.TempDir()}, profile.Bundle{})

@@ -93,8 +93,15 @@ type ExecutorDefault struct {
 // is set, the daemon uses it for that task even when daemon CLI startup
 // options, `daemon.yaml`, or the built-in default would otherwise pick a
 // different supervisor. Allowed values are `claude`, `codex`, and `glm`.
+//
+// Model optionally pins the exact model the selected supervisor CLI runs for
+// this repository. Galley passes the value through unchanged via the CLI's
+// native `--model` option and does not validate it against an enum: model
+// availability depends on the provider account and CLI configuration. An
+// absent or empty value preserves the supervisor CLI's default model.
 type SupervisorDefault struct {
 	DefaultCLI string `yaml:"default_cli,omitempty" json:"default_cli,omitempty"`
+	Model      string `yaml:"model,omitempty" json:"model,omitempty"`
 }
 
 type RequiredCheckEnvironment struct {

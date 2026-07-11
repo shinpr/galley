@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/shinpr/galley/internal/fileutil"
 	"github.com/shinpr/galley/internal/galleyhome"
@@ -176,6 +177,7 @@ type effectiveTaskOptions struct {
 	CleanupWorktrees bool
 	Supervisor       string
 	SupervisorSource string
+	SupervisorModel  string
 }
 
 func resolveEffectiveTaskOptions(opts Options, profiles profile.Bundle) effectiveTaskOptions {
@@ -188,6 +190,7 @@ func resolveEffectiveTaskOptions(opts Options, profiles profile.Bundle) effectiv
 		CleanupWorktrees: true,
 		Supervisor:       opts.Supervisor,
 		SupervisorSource: opts.SupervisorSource,
+		SupervisorModel:  opts.SupervisorModel,
 	}
 	if profiles.Environment != nil {
 		env := profiles.Environment
@@ -201,6 +204,13 @@ func resolveEffectiveTaskOptions(opts Options, profiles profile.Bundle) effectiv
 		if env.Supervisor != nil && env.Supervisor.DefaultCLI != "" {
 			effective.Supervisor = env.Supervisor.DefaultCLI
 			effective.SupervisorSource = SupervisorSourceRepoProfile
+		}
+		// The supervisor model is resolved independently of default_cli: a
+		// repository can pin a model while leaving supervisor selection to
+		// daemon startup state. A whitespace-only value is treated as absent so
+		// it preserves the CLI default rather than forcing a malformed override.
+		if env.Supervisor != nil && strings.TrimSpace(env.Supervisor.Model) != "" {
+			effective.SupervisorModel = env.Supervisor.Model
 		}
 	}
 	if effective.OpenPR {
@@ -218,6 +228,7 @@ func (effective effectiveTaskOptions) apply(opts Options) Options {
 	opts.CleanupWorktrees = effective.CleanupWorktrees
 	opts.Supervisor = effective.Supervisor
 	opts.SupervisorSource = effective.SupervisorSource
+	opts.SupervisorModel = effective.SupervisorModel
 	return opts
 }
 

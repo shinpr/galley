@@ -34,6 +34,12 @@ type AdapterOptions struct {
 	ArtifactDir string
 	CodexBin    string
 	ClaudeBin   string
+	// Model, when non-empty, is passed through unchanged to the selected
+	// supervisor CLI's native --model option (Codex `exec` and Claude both
+	// accept --model). An empty value omits the option so the CLI uses its
+	// default model. Galley does not validate the value against an enum;
+	// availability is the provider CLI's responsibility.
+	Model string
 	// GLMAuthToken is the Z.ai token used when Provider is "glm". A glm
 	// supervisor is the Claude adapter pointed at GLM's endpoint, so it reuses
 	// the entire Claude review path and only redirects via the child env.
@@ -168,19 +174,26 @@ func runCodexAdapter(ctx context.Context, opts AdapterOptions, request []byte) (
 	if err := writeSupervisorFile(schemaPath, []byte(schemas.SupervisorVerdict)); err != nil {
 		return nil, err
 	}
+	argv := []string{
+		opts.CodexBin,
+		"exec",
+		"--cd", opts.WorkDir,
+		"--sandbox", "workspace-write",
+		"--json",
+		"--output-schema", schemaPath,
+		"--output-last-message", outPath,
+	}
+	// A pinned model is applied through Codex's native --model option and
+	// omitted entirely otherwise so Codex keeps its default. The positional "-"
+	// (read prompt from stdin) stays last.
+	if opts.Model != "" {
+		argv = append(argv, "--model", opts.Model)
+	}
+	argv = append(argv, "-")
 	_, err = runner.RunCommand(ctx, runner.Command{
 		WorkDir: opts.WorkDir,
-		Argv: []string{
-			opts.CodexBin,
-			"exec",
-			"--cd", opts.WorkDir,
-			"--sandbox", "workspace-write",
-			"--json",
-			"--output-schema", schemaPath,
-			"--output-last-message", outPath,
-			"-",
-		},
-		Stdin: prompt,
+		Argv:    argv,
+		Stdin:   prompt,
 	}, runner.RunOptions{Timeout: opts.Timeout, IdleTimeout: opts.IdleTimeout, StdoutPath: eventsPath})
 	if err != nil {
 		return nil, fmt.Errorf("codex supervisor failed: %w", err)
@@ -227,6 +240,13 @@ func runClaudeAdapterForOS(ctx context.Context, opts AdapterOptions, request []b
 		"--tools", "default",
 		"--disallowedTools", "Write,Edit,MultiEdit,NotebookEdit",
 		"--output-format", "text",
+	}
+	// A pinned model is applied through Claude's native --model option and
+	// omitted otherwise so Claude keeps its default. This path also serves the
+	// glm supervisor, which is this same Claude command redirected to GLM's
+	// endpoint, so a configured model reaches Claude and GLM identically.
+	if opts.Model != "" {
+		args = append(args, "--model", opts.Model)
 	}
 	if goos == "windows" {
 		systemPromptPath := filepath.Join(dir, ClaudeSupervisorSystemPromptFilename)

@@ -1,11 +1,16 @@
 package daemon
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/shinpr/galley/internal/galleyhome"
+	"github.com/shinpr/galley/internal/task"
 )
 
 func TestResolveProfileFilesUsesRepoProfilesWhenNoOverride(t *testing.T) {

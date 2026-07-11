@@ -14,6 +14,7 @@ import (
 	"github.com/shinpr/galley/internal/runner"
 	claudeguard "github.com/shinpr/galley/internal/runner/claude_guard_plugin"
 	"github.com/shinpr/galley/internal/task"
+	"github.com/shinpr/galley/internal/vcs"
 	"github.com/shinpr/galley/internal/workspace"
 )
 
@@ -32,6 +33,16 @@ type attemptOutcome struct {
 	// changes. The snapshot is a value rather than a pointer so an empty
 	// outcome stays a zero struct.
 	DiffSnapshot workspace.Snapshot
+}
+
+func defaultStageExecutorOutput(ctx context.Context, opts Options, workDir, attemptDir string, excludePaths []string) error {
+	bins := vcsBinaries(opts)
+	statusZ, err := vcs.StatusPorcelainZ(ctx, bins, workDir)
+	if err != nil {
+		return err
+	}
+	reviewable := reviewablePathsFromStatus(statusZ, excludePaths)
+	return vcs.StagePathsForReview(ctx, bins, workDir, attemptDir, reviewable)
 }
 
 func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, profiles profile.Bundle, workDir, baseSHA, attemptDir, prompt, taskFile string, preflight *skeletonpreflight.Result) (attemptOutcome, error) {
@@ -138,9 +149,9 @@ func mergeAttemptEvidence(loaded *task.Task, outcome attemptOutcome, runID, work
 		Number:            len(loaded.Attempts) + 1,
 		StartedAt:         outcome.Started.Format(time.RFC3339Nano),
 		CompletedAt:       outcome.Completed.Format(time.RFC3339Nano),
-		ClaudeStatus:      claudeStatus(outcome.RunResult, outcome.RunErr),
+		ClaudeStatus:      executorStatus(outcome.RunResult, outcome.RunErr),
 		SupervisorVerdict: "not_reviewed",
-		Summary:           fmt.Sprintf("Executor run %s; run_id=%s; workspace=%s", claudeStatus(outcome.RunResult, outcome.RunErr), runID, workDir),
+		Summary:           fmt.Sprintf("Executor run %s; run_id=%s; workspace=%s", executorStatus(outcome.RunResult, outcome.RunErr), runID, workDir),
 		Error:             executorAttemptError(outcome, attemptDir),
 	})
 	loaded.Verification.Commands = append(loaded.Verification.Commands, task.VerificationCommand{
@@ -230,7 +241,7 @@ func appendSupervisorFailureAttempt(loaded *task.Task, outcome attemptOutcome, e
 		Number:            len(loaded.Attempts) + 1,
 		StartedAt:         outcome.Started.Format(time.RFC3339Nano),
 		CompletedAt:       time.Now().UTC().Format(time.RFC3339Nano),
-		ClaudeStatus:      claudeStatus(outcome.RunResult, outcome.RunErr),
+		ClaudeStatus:      executorStatus(outcome.RunResult, outcome.RunErr),
 		SupervisorVerdict: kind,
 		Summary:           err.Error(),
 		Error:             attemptError("supervisor", kind, err, attemptDir),
@@ -261,7 +272,7 @@ func appendSupervisorIdleTimeoutAttempt(loaded *task.Task, outcome attemptOutcom
 		Number:            len(loaded.Attempts) + 1,
 		StartedAt:         outcome.Started.Format(time.RFC3339Nano),
 		CompletedAt:       time.Now().UTC().Format(time.RFC3339Nano),
-		ClaudeStatus:      claudeStatus(outcome.RunResult, outcome.RunErr),
+		ClaudeStatus:      executorStatus(outcome.RunResult, outcome.RunErr),
 		SupervisorVerdict: supervisorIdleTimeoutKind,
 		Summary:           message,
 		Error: &task.AttemptError{

@@ -278,7 +278,7 @@ func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) 
 	evidence := supervisor.Evidence{
 		Task:                   *req.Loaded,
 		Profiles:               req.Profiles,
-		Claude:                 outcome.ClaudeResult,
+		ExecutorResult:         outcome.ExecutorResult,
 		ParseError:             outcome.ParseErr,
 		RunError:               outcome.RunErr,
 		DiffDirty:              outcome.DiffDirty,

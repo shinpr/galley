@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,8 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shinpr/galley/internal/galleyhome"
-	"github.com/shinpr/galley/internal/queue"
 	"github.com/shinpr/galley/internal/runartifact"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/internal/workspace"

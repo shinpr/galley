@@ -22,17 +22,17 @@ func writeRunProfiles(t *testing.T, runDir string, checks []profile.RequiredChec
 	}
 }
 
-func writeAttemptResult(t *testing.T, runDir string, n int, verifications []runner.ClaudeVerification) {
+func writeAttemptResult(t *testing.T, runDir string, n int, verifications []runner.ExecutorVerification) {
 	writeAttemptResultFile(t, runDir, n, runartifact.ExecutorResultFilename, verifications)
 }
 
-func writeAttemptResultFile(t *testing.T, runDir string, n int, filename string, verifications []runner.ClaudeVerification) {
+func writeAttemptResultFile(t *testing.T, runDir string, n int, filename string, verifications []runner.ExecutorVerification) {
 	t.Helper()
 	dir := filepath.Join(runDir, "attempt-"+strconv.Itoa(n))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	res := runner.ClaudeResult{Status: "completed", Summary: "x", Verification: verifications}
+	res := runner.ExecutorResult{Status: "completed", Summary: "x", Verification: verifications}
 	if err := writeJSON(filepath.Join(dir, filename), res); err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestRequiredCheckEvidenceGateFallbackSemantics(t *testing.T) {
 	writeRunProfiles(t, runDir, []profile.RequiredCheck{
 		{ID: "test", PreferredCommands: []string{"make test", "go test ./..."}, Required: true},
 	})
-	writeAttemptResult(t, runDir, 1, []runner.ClaudeVerification{
+	writeAttemptResult(t, runDir, 1, []runner.ExecutorVerification{
 		{Command: "make test", Status: "passed", Reason: "ok"},
 	})
 	reason, ok := requiredCheckEvidenceGate(&task.Task{}, runDir)
@@ -67,7 +67,7 @@ func TestRequiredCheckEvidenceGateFailsWhenNoPass(t *testing.T) {
 	writeRunProfiles(t, runDir, []profile.RequiredCheck{
 		{ID: "test", PreferredCommands: []string{"make test", "go test ./..."}, Required: true},
 	})
-	writeAttemptResult(t, runDir, 1, []runner.ClaudeVerification{
+	writeAttemptResult(t, runDir, 1, []runner.ExecutorVerification{
 		{Command: "go test ./...", Status: "failed", Reason: "boom"},
 	})
 	reason, ok := requiredCheckEvidenceGate(&task.Task{}, runDir)
@@ -89,7 +89,7 @@ func TestRequiredCheckEvidenceGateFailsWhenNoEvidence(t *testing.T) {
 	writeRunProfiles(t, runDir, []profile.RequiredCheck{
 		{ID: "test", PreferredCommands: []string{"make test"}, Required: true},
 	})
-	writeAttemptResult(t, runDir, 1, []runner.ClaudeVerification{
+	writeAttemptResult(t, runDir, 1, []runner.ExecutorVerification{
 		{Command: "lint", Status: "passed", Reason: "ok"},
 	})
 	reason, ok := requiredCheckEvidenceGate(&task.Task{}, runDir)

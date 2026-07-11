@@ -36,7 +36,7 @@ func writeSetupEnvironmentProfile(t *testing.T, dir string, body string) string 
 }
 
 func runSetupPreflight(ctx context.Context, opts setuppreflight.Options) (*setuppreflight.Result, *setuppreflight.EnvironmentUpdate, error) {
-	opts.ExecutorRunner = setupExecutorRunner
+	opts.ExecutorRunner = testSetupExecutorRunner
 	return setuppreflight.Run(ctx, opts)
 }
 
@@ -135,7 +135,7 @@ setup:
 		t.Fatal(err)
 	}
 
-	if err := Run(context.Background(), Options{
+	if err := runTestDaemon(context.Background(), Options{
 		Root:                   root,
 		SystemPromptFile:       promptPath,
 		JSONSchemaFile:         schemaPath,

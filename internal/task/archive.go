@@ -83,7 +83,7 @@ func archiveCurrentSchema(path string, loaded Task, opts ArchiveOptions) (Archiv
 		SupervisorVerdict: "archived",
 		Summary:           strutil.FirstNonEmpty(opts.Reason, "Task archived."),
 	})
-	nextPath := siblingTaskPath(path, "archived")
+	nextPath := siblingTaskPath(path, WorkflowStateArchived)
 	if nextPath == path {
 		if err := Save(path, loaded); err != nil {
 			return ArchiveResult{}, err
@@ -102,11 +102,11 @@ func archiveUnreadable(path string, opts ArchiveOptions, loadErr error) (Archive
 	if readErr != nil {
 		return ArchiveResult{}, fmt.Errorf("read %s: %w", path, readErr)
 	}
-	nextPath := siblingTaskPath(path, "archived")
+	nextPath := siblingTaskPath(path, WorkflowStateArchived)
 
 	// Try the safe top-level status edit via a yaml.Node round-trip. This
 	// preserves the rest of the YAML document exactly as authored.
-	if updated, ok, editErr := editTopLevelStatus(data, "archived"); ok && editErr == nil {
+	if updated, ok, editErr := editTopLevelStatus(data, StatusArchived); ok && editErr == nil {
 		if nextPath == path {
 			// In-place lenient edit: overwrite the existing file. Lossy struct
 			// round-tripping is avoided because updated[] came from a YAML

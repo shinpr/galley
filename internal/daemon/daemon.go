@@ -21,6 +21,7 @@ import (
 	"github.com/shinpr/galley/internal/queue"
 	"github.com/shinpr/galley/internal/runartifact"
 	"github.com/shinpr/galley/internal/runner"
+	"github.com/shinpr/galley/internal/supervisor"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/internal/taskstate"
 	"github.com/shinpr/galley/internal/version"
@@ -121,7 +122,40 @@ type Options struct {
 	// waiting the full default bound.
 	notifyTimeout    time.Duration
 	notifyDispatcher *notificationDispatcher
+	dependencies     *daemonDependencies
 	Explicit         ExplicitOptions
+}
+
+type daemonDependencies struct {
+	stageExecutorOutput func(context.Context, Options, string, string, []string) error
+	supervisorRunner    func(context.Context, Options, supervisor.Evidence, string, string) (supervisor.Verdict, error)
+	setupExecutorRunner func(context.Context, setuppreflight.Options) (*setuppreflight.Result, error)
+}
+
+func defaultDaemonDependencies() daemonDependencies {
+	return daemonDependencies{
+		stageExecutorOutput: defaultStageExecutorOutput,
+		supervisorRunner:    defaultSupervisorRunner,
+		setupExecutorRunner: setuppreflight.RunExecutor,
+	}
+}
+
+func (opts Options) daemonDependencies() daemonDependencies {
+	defaults := defaultDaemonDependencies()
+	if opts.dependencies == nil {
+		return defaults
+	}
+	deps := *opts.dependencies
+	if deps.stageExecutorOutput == nil {
+		deps.stageExecutorOutput = defaults.stageExecutorOutput
+	}
+	if deps.supervisorRunner == nil {
+		deps.supervisorRunner = defaults.supervisorRunner
+	}
+	if deps.setupExecutorRunner == nil {
+		deps.setupExecutorRunner = defaults.setupExecutorRunner
+	}
+	return deps
 }
 
 type ExplicitOptions struct {
@@ -488,7 +522,11 @@ func queuedHasClaimConflict(root, queuedPath string) (bool, error) {
 	if exists, err := pathExistsForClaim(queuedPath + ".lock"); err != nil || exists {
 		return exists, err
 	}
-	runningPath := filepath.Join(root, "tasks", "running", filepath.Base(queuedPath))
+	runningState, err := task.WorkflowStateForTransition(task.StatusQueued, task.StatusRunning)
+	if err != nil {
+		return false, err
+	}
+	runningPath := task.TaskStatePath(root, runningState, filepath.Base(queuedPath))
 	if exists, err := pathExistsForClaim(runningPath); err != nil || exists {
 		return exists, err
 	}
@@ -533,34 +571,20 @@ func gracefulTaskContext(parent context.Context, timeout time.Duration) (context
 }
 
 func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningPath string) error {
-	// runDir is captured here so the deferred terminal notification can include
-	// the run directory in its payload. It stays empty for pre-run failures
-	// (e.g. a task that fails to load or validate before run evidence exists),
-	// in which case the notification reports an empty run_dir.
 	var runDir string
-	// Start the best-effort terminal notification hook after the task body
-	// returns. By this point every terminal publication has already happened
-	// through taskstate.Move / taskstate.FailMove, so the hook only observes a
-	// task that actually reached a published terminal state. The hook reads the
-	// published task from tasks/done|failed so a failed move (task still in
-	// running/) produces no notification, and a hook failure cannot affect the
-	// already-completed state transition. notifyTerminalPublication dispatches
-	// delivery on a detached goroutine and returns immediately, so a slow or
-	// stuck notifier cannot delay this goroutine's wg.Done() or the next daemon
-	// iteration. Daemon shutdown cancels any in-flight delivery and Run waits
-	// for cleanup before the process exits.
+	// Notification observes published terminal state and cannot change it.
 	defer func() { notifyTerminalPublication(ctx, opts, runningPath, &runDir) }()
 
 	loaded, err := loadClaimedTask(runningPath)
 	if err != nil {
-		return taskstate.FailMove(opts.Root, runningPath, nil, err)
+		return taskstate.RecoverUnreadableClaimToFailed(opts.Root, runningPath, err)
 	}
 	stopHeartbeat := startHeartbeat(ctx, runningPath, opts.HeartbeatInterval)
 	defer stopHeartbeat()
 
 	validation, err := validateClaimedTask(&loaded)
 	if err != nil {
-		return taskstate.FailMove(opts.Root, runningPath, &loaded, err)
+		return taskstate.FailMoveToStatus(opts.Root, runningPath, &loaded, err)
 	}
 	runID, runDir, err := initializeRunEvidence(opts.Root, runningPath, loaded, validation)
 	if err != nil {
@@ -576,11 +600,12 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	if err != nil {
 		return failClaimedStage(opts.Root, runningPath, &loaded, "run_evidence", "run_evidence_failed", err, runDir)
 	}
+	effectiveOpts := resolveEffectiveTaskOptions(opts, profiles).apply(opts)
 
 	// A per-task environment.yaml supervisor.default_cli: glm override bypasses
 	// startup Preflight, so validate the token here — before setup/executor —
 	// rather than failing at the supervisor call after a full attempt ran.
-	if effectiveOptionsForProfiles(opts, profiles).Supervisor == "glm" {
+	if effectiveOpts.Supervisor == "glm" {
 		if _, tokenErr := runner.ResolveGLMToken(opts.GLMAuthToken); tokenErr != nil {
 			return failClaimedStage(opts.Root, runningPath, &loaded, "supervisor_preflight", "supervisor_config_failed", fmt.Errorf("supervisor is \"glm\": %w", tokenErr), runDir)
 		}
@@ -588,7 +613,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 
 	prepared, err := prepareClaimedWorkspace(ctx, opts, profiles, runningPath, runDir, &loaded)
 	if err != nil {
-		return taskstate.FailMove(opts.Root, runningPath, &loaded, err)
+		return taskstate.FailMoveToStatus(opts.Root, runningPath, &loaded, err)
 	}
 	// Setup executor preflight runs after the worktree and input files are
 	// prepared, before acceptance skeleton preflight, and before any executor
@@ -607,7 +632,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 		CodexBin:               opts.CodexBin,
 		GLMAuthToken:           opts.GLMAuthToken,
 		EnvironmentProfilePath: resolvedProfiles.EnvironmentProfileFile,
-		ExecutorRunner:         setupExecutorRunner,
+		ExecutorRunner:         opts.daemonDependencies().setupExecutorRunner,
 	})
 	if setupErr != nil {
 		return failClaimedStage(opts.Root, runningPath, &loaded, setuppreflight.Phase, setuppreflight.FailedKind, setupErr, runDir)
@@ -648,12 +673,12 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 			}
 		}
 	}
-	return runSupervisorLoop(ctx, shutdownCtx, opts, runningPath, &loaded, prepared, profiles, runDir, runID)
+	return runSupervisorLoop(ctx, shutdownCtx, effectiveOpts, runningPath, &loaded, prepared, profiles, runDir, runID)
 }
 
 func failClaimedStage(root, runningPath string, loaded *task.Task, phase, kind string, err error, runDir string) error {
 	appendFailureAttempt(loaded, phase, kind, err, runDir)
-	return taskstate.FailMove(root, runningPath, loaded, err)
+	return taskstate.FailMoveToStatus(root, runningPath, loaded, err)
 }
 
 // loadAndPersistTaskProfiles resolves the quality and environment profiles for
@@ -859,7 +884,7 @@ func startHeartbeat(ctx context.Context, path string, interval time.Duration) fu
 	}
 }
 
-func claudeStatus(result runner.RunResult, err error) string {
+func executorStatus(result runner.RunResult, err error) string {
 	if err == nil {
 		return "completed"
 	}

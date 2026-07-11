@@ -24,7 +24,7 @@ func codexLastMessagePath(cli, attemptDir string) string {
 // `codex exec --output-last-message`, with stdout parsing only as an extraction
 // fallback. Galley does not synthesize executor results when no valid final
 // JSON exists.
-func resolveExecutorResult(cli, stdoutPath, stdoutTail, lastMessagePath string) (runner.ClaudeResult, error) {
+func resolveExecutorResult(cli, stdoutPath, stdoutTail, lastMessagePath string) (runner.ExecutorResult, error) {
 	var resultErrs []error
 	if cli == "codex" && lastMessagePath != "" {
 		if lastResult, lastErr := runner.ExtractCodexLastMessageFile(lastMessagePath); lastErr == nil {
@@ -34,17 +34,17 @@ func resolveExecutorResult(cli, stdoutPath, stdoutTail, lastMessagePath string) 
 		}
 	}
 
-	claudeResult, claudeErr := runner.ExtractClaudeResultFile(stdoutPath)
-	if claudeErr == nil {
-		return claudeResult, nil
+	fileResult, fileErr := runner.ExtractExecutorResultFile(stdoutPath)
+	if fileErr == nil {
+		return fileResult, nil
 	}
-	tailResult, tailErr := runner.ExtractClaudeResult(stdoutTail)
+	tailResult, tailErr := runner.ExtractExecutorResult(stdoutTail)
 	if tailErr == nil {
 		return tailResult, nil
 	}
 	resultErrs = append(resultErrs,
-		fmt.Errorf("stdout file parse failed: %w", claudeErr),
+		fmt.Errorf("stdout file parse failed: %w", fileErr),
 		fmt.Errorf("stdout tail parse failed: %w", tailErr),
 	)
-	return runner.ClaudeResult{}, errors.Join(resultErrs...)
+	return runner.ExecutorResult{}, errors.Join(resultErrs...)
 }

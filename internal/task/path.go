@@ -2,14 +2,14 @@ package task
 
 import "path/filepath"
 
-func siblingTaskPath(path, state string) string {
+func siblingTaskPath(path string, state WorkflowState) string {
 	dir := filepath.Dir(path)
-	if filepath.Base(dir) == state {
+	if filepath.Base(dir) == string(state) {
 		return path
 	}
 	parent := filepath.Dir(dir)
 	if filepath.Base(parent) == "tasks" {
-		return filepath.Join(parent, state, filepath.Base(path))
+		return filepath.Join(parent, string(state), filepath.Base(path))
 	}
 	return path
 }

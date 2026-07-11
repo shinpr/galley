@@ -77,7 +77,7 @@ func TestDaemonSupervisorStallRetryRecoversWithinSameAttempt(t *testing.T) {
 	codexBin := writeStallThenAcceptCodexSupervisor(t)
 	setLoopBudget(t, taskPath, 3)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -152,7 +152,7 @@ func TestDaemonSupervisorStallExhaustsRetryBudget(t *testing.T) {
 	codexBin := writeAlwaysStallCodexSupervisor(t)
 	setLoopBudget(t, taskPath, 3)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,

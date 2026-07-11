@@ -10,12 +10,6 @@ import (
 	"github.com/shinpr/galley/internal/task"
 )
 
-// TestRunProcessesTasksConcurrentlyAcrossRepos drives the core throughput path
-// that only shows up with MaxConcurrentTasks > 1: claimAvailableTasks spawning
-// one goroutine per claimed task over shared claim/count state, each writing its
-// own run-evidence directory. It is the daemon's central value and had no
-// behavioral coverage. Run under -race to surface data races on that shared
-// state; assert both tasks reach done with distinct run directories.
 func TestRunProcessesTasksConcurrentlyAcrossRepos(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
@@ -34,7 +28,7 @@ func TestRunProcessesTasksConcurrentlyAcrossRepos(t *testing.T) {
 		setLoopBudget(t, p, 2)
 	}
 
-	if err := Run(context.Background(), Options{
+	if err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -56,8 +50,6 @@ func TestRunProcessesTasksConcurrentlyAcrossRepos(t *testing.T) {
 			t.Fatalf("task %s status = %q, want accepted", name, dt.Status)
 		}
 	}
-	// Each task must get its own run-evidence directory (no collision under
-	// concurrent execution).
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "task.yaml"), 2)
 }
 

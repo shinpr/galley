@@ -1,6 +1,10 @@
 package task
 
-import "regexp"
+import (
+	"regexp"
+
+	"github.com/shinpr/galley/internal/provider"
+)
 
 const (
 	TaskSchemaPath = "plugins/galley/skills/galley/references/task.schema.json"
@@ -8,10 +12,10 @@ const (
 
 var (
 	validModes                  = []string{"afk"}
-	validStatuses               = []string{"draft", "queued", "running", "needs_supervisor_review", "accepted", "pr_opened", "failed", "closed", "merged", "archived"}
+	validStatuses               = AllStatuses()
 	validPermissions            = []string{"read-only", "edit", "sandbox-full-access"}
 	validPromptModes            = []string{"replace", "append"}
-	validExecutorCLIs           = []string{"claude", "codex", "glm"}
+	validExecutorCLIs           = provider.ExecutorIDs()
 	validClaudeEfforts          = []string{"low", "medium", "high", "xhigh", "max"}
 	validCodexEfforts           = []string{"low", "medium", "high"}
 	validAFKDecisionPolicies    = []string{"choose-smallest-reversible"}

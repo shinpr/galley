@@ -27,11 +27,8 @@ func runnerCommandErr(kind runner.CommandErrorKind, err error) error {
 // the second try succeeds, and not consume additional executor attempts.
 func TestSupervisorRetryRecoversAfterStallOnSecondTry(t *testing.T) {
 	attemptDir := t.TempDir()
-	originalRunner := supervisorRunner
-	t.Cleanup(func() { supervisorRunner = originalRunner })
-
 	calls := 0
-	supervisorRunner = func(ctx context.Context, opts Options, evidence supervisor.Evidence, tryDir, workDir string) (supervisor.Verdict, error) {
+	runnerForTest := func(ctx context.Context, opts Options, evidence supervisor.Evidence, tryDir, workDir string) (supervisor.Verdict, error) {
 		calls++
 		// Each invocation must receive a distinct supervisor-try-N directory so
 		// retry evidence does not overwrite prior output (R1).
@@ -48,7 +45,8 @@ func TestSupervisorRetryRecoversAfterStallOnSecondTry(t *testing.T) {
 		return supervisor.Verdict{Status: "accepted", Summary: "ok"}, nil
 	}
 
-	verdict, err := evaluateSupervisorWithRetry(context.Background(), Options{}, supervisor.Evidence{Task: task.Task{ID: "test"}}, attemptDir, attemptDir)
+	opts := Options{Supervisor: "claude", dependencies: &daemonDependencies{supervisorRunner: runnerForTest}}
+	verdict, err := evaluateSupervisorWithRetry(context.Background(), opts, supervisor.Evidence{Task: task.Task{ID: "test"}}, attemptDir, attemptDir)
 	if err != nil {
 		t.Fatalf("evaluateSupervisorWithRetry returned error: %v", err)
 	}
@@ -99,19 +97,16 @@ func TestSupervisorRetryRecoversAfterStallOnSecondTry(t *testing.T) {
 // supervisor-try-N, and surface a classified supervisor error. The follow-up
 // appendSupervisorFailureAttempt path is what stamps the attempt-level error
 // phase/kind that runSupervisorLoop persists into the task file before
-// taskstate.FailMove marks the task as failed, so we verify both halves.
 func TestSupervisorRetryExhaustedReturnsClassifiedFailure(t *testing.T) {
 	attemptDir := t.TempDir()
-	originalRunner := supervisorRunner
-	t.Cleanup(func() { supervisorRunner = originalRunner })
-
 	calls := 0
-	supervisorRunner = func(ctx context.Context, opts Options, evidence supervisor.Evidence, tryDir, workDir string) (supervisor.Verdict, error) {
+	runnerForTest := func(ctx context.Context, opts Options, evidence supervisor.Evidence, tryDir, workDir string) (supervisor.Verdict, error) {
 		calls++
 		return supervisor.Verdict{}, runnerCommandErr(runner.CommandErrorIdleTimeout, errors.New("command produced no output for 1s (idle timeout)"))
 	}
 
-	_, err := evaluateSupervisorWithRetry(context.Background(), Options{}, supervisor.Evidence{Task: task.Task{ID: "test"}}, attemptDir, attemptDir)
+	opts := Options{Supervisor: "claude", dependencies: &daemonDependencies{supervisorRunner: runnerForTest}}
+	_, err := evaluateSupervisorWithRetry(context.Background(), opts, supervisor.Evidence{Task: task.Task{ID: "test"}}, attemptDir, attemptDir)
 	if err == nil {
 		t.Fatal("expected exhausted retries to return an error")
 	}
@@ -178,21 +173,19 @@ func TestSupervisorRetryExhaustedReturnsClassifiedFailure(t *testing.T) {
 
 func TestSupervisorRetryMixedStallsDoNotReportSupervisorIdleTimeout(t *testing.T) {
 	attemptDir := t.TempDir()
-	originalRunner := supervisorRunner
-	t.Cleanup(func() { supervisorRunner = originalRunner })
-
 	stalls := []error{
 		context.DeadlineExceeded,
 		runnerCommandErr(runner.CommandErrorKilled, errors.New("supervisor process did not exit after cancellation")),
 		runnerCommandErr(runner.CommandErrorIdleTimeout, errors.New("command produced no output for 1s (idle timeout)")),
 	}
 	calls := 0
-	supervisorRunner = func(ctx context.Context, opts Options, evidence supervisor.Evidence, tryDir, workDir string) (supervisor.Verdict, error) {
+	runnerForTest := func(ctx context.Context, opts Options, evidence supervisor.Evidence, tryDir, workDir string) (supervisor.Verdict, error) {
 		calls++
 		return supervisor.Verdict{}, stalls[calls-1]
 	}
 
-	_, err := evaluateSupervisorWithRetry(context.Background(), Options{}, supervisor.Evidence{Task: task.Task{ID: "test"}}, attemptDir, attemptDir)
+	opts := Options{Supervisor: "claude", dependencies: &daemonDependencies{supervisorRunner: runnerForTest}}
+	_, err := evaluateSupervisorWithRetry(context.Background(), opts, supervisor.Evidence{Task: task.Task{ID: "test"}}, attemptDir, attemptDir)
 	if err == nil {
 		t.Fatal("expected exhausted mixed stalls to return an error")
 	}

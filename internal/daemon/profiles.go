@@ -167,9 +167,28 @@ func refExists(ctx context.Context, opts Options, sourceCWD, ref string) (bool, 
 	return true, nil
 }
 
-func effectiveOptionsForProfiles(opts Options, profiles profile.Bundle) Options {
-	effective := opts
-	effective.CleanupWorktrees = true
+type effectiveTaskOptions struct {
+	OpenPR           bool
+	CommitOnAccept   bool
+	PRBase           string
+	PollPRComments   bool
+	ReplyPRComments  bool
+	CleanupWorktrees bool
+	Supervisor       string
+	SupervisorSource string
+}
+
+func resolveEffectiveTaskOptions(opts Options, profiles profile.Bundle) effectiveTaskOptions {
+	effective := effectiveTaskOptions{
+		OpenPR:           opts.OpenPR,
+		CommitOnAccept:   opts.CommitOnAccept,
+		PRBase:           opts.PRBase,
+		PollPRComments:   opts.PollPRComments,
+		ReplyPRComments:  opts.ReplyPRComments,
+		CleanupWorktrees: true,
+		Supervisor:       opts.Supervisor,
+		SupervisorSource: opts.SupervisorSource,
+	}
 	if profiles.Environment != nil {
 		env := profiles.Environment
 		effective.OpenPR = env.PR.Enabled
@@ -179,11 +198,6 @@ func effectiveOptionsForProfiles(opts Options, profiles profile.Bundle) Options 
 		if env.Worktree.Cleanup != nil {
 			effective.CleanupWorktrees = *env.Worktree.Cleanup
 		}
-		// Per-task supervisor selection: when the resolved
-		// environment.yaml declares supervisor.default_cli, the daemon uses
-		// that adapter for this task even when CLI startup options or
-		// daemon.yaml chose a different supervisor. The override is recorded
-		// as `environment_profile` in run evidence.
 		if env.Supervisor != nil && env.Supervisor.DefaultCLI != "" {
 			effective.Supervisor = env.Supervisor.DefaultCLI
 			effective.SupervisorSource = SupervisorSourceRepoProfile
@@ -193,4 +207,20 @@ func effectiveOptionsForProfiles(opts Options, profiles profile.Bundle) Options 
 		effective.CommitOnAccept = true
 	}
 	return effective
+}
+
+func (effective effectiveTaskOptions) apply(opts Options) Options {
+	opts.OpenPR = effective.OpenPR
+	opts.CommitOnAccept = effective.CommitOnAccept
+	opts.PRBase = effective.PRBase
+	opts.PollPRComments = effective.PollPRComments
+	opts.ReplyPRComments = effective.ReplyPRComments
+	opts.CleanupWorktrees = effective.CleanupWorktrees
+	opts.Supervisor = effective.Supervisor
+	opts.SupervisorSource = effective.SupervisorSource
+	return opts
+}
+
+func effectiveOptionsForProfiles(opts Options, profiles profile.Bundle) Options {
+	return resolveEffectiveTaskOptions(opts, profiles).apply(opts)
 }

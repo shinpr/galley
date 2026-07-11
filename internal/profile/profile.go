@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/shinpr/galley/internal/daemonconfig"
+	"github.com/shinpr/galley/internal/provider"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -224,7 +225,7 @@ func ValidateEnvironment(env Environment) ValidationResult {
 	require(&result, env.Constraints.SecretsPolicy != "", "constraints.secrets_policy is required")
 	require(&result, env.Constraints.DestructiveCommands != "", "constraints.destructive_commands is required")
 	if env.Executor != nil && env.Executor.DefaultCLI != "" {
-		require(&result, validExecutorCLI(env.Executor.DefaultCLI), "executor.default_cli must be one of: claude, codex, glm")
+		require(&result, validExecutorCLI(env.Executor.DefaultCLI), "executor.default_cli must be one of: %s", strings.Join(provider.ExecutorIDs(), ", "))
 	}
 	if env.Supervisor != nil && env.Supervisor.DefaultCLI != "" {
 		require(&result, daemonconfig.IsValidSupervisor(env.Supervisor.DefaultCLI), "supervisor.default_cli must be one of: %s", strings.Join(daemonconfig.SupervisorCLIs(), ", "))
@@ -282,12 +283,7 @@ func validateSetupCommandText(result *ValidationResult, field, value string, max
 }
 
 func validExecutorCLI(value string) bool {
-	switch value {
-	case "claude", "codex", "glm":
-		return true
-	default:
-		return false
-	}
+	return provider.IsExecutor(value)
 }
 
 func validRequiredCheckShell(value string) bool {

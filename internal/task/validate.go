@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/shinpr/galley/internal/provider"
 )
 
 // normalizeLogicalPath converts a YAML-authored logical path to a slash-based
@@ -269,12 +271,13 @@ func validateSupervisor(result *ValidationResult, t Task) {
 func validateExecutor(result *ValidationResult, t Task) {
 	require(result, slices.Contains(validExecutorCLIs, t.Executor.CLI), "executor.cli must be one of: %s", strings.Join(validExecutorCLIs, ", "))
 	require(result, t.Executor.Effort != "", "executor.effort is required")
-	switch t.Executor.CLI {
-	case "claude", "glm":
+	transport, _ := provider.TransportFor(t.Executor.CLI)
+	switch transport {
+	case provider.TransportClaude:
 		// glm runs through the Claude Code binary against GLM's
 		// Anthropic-compatible endpoint, so it accepts the same effort values.
 		require(result, slices.Contains(validClaudeEfforts, t.Executor.Effort), "executor.effort for %s must be one of: %s", t.Executor.CLI, strings.Join(validClaudeEfforts, ", "))
-	case "codex":
+	case provider.TransportCodex:
 		require(result, slices.Contains(validCodexEfforts, t.Executor.Effort), "executor.effort for codex must be one of: %s", strings.Join(validCodexEfforts, ", "))
 	}
 	require(result, t.Executor.PromptProfile != "", "executor.prompt_profile is required")

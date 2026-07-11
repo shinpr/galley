@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/shinpr/galley/internal/task"
 )
 
 const ownerSuffix = ".owner"
@@ -72,7 +74,7 @@ func RemoveOwner(runningPath string) error {
 // once the claim is genuinely stale. Orphan owner sidecars (no matching task
 // file) are removed.
 func RecoverInterruptedRunning(root string, ownerLive func(Owner) (bool, error)) error {
-	runningDir := filepath.Join(root, "tasks", "running")
+	runningDir := task.TaskStateDir(root, task.WorkflowStateRunning)
 	entries, err := os.ReadDir(runningDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {

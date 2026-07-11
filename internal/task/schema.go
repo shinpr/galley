@@ -3,6 +3,8 @@ package task
 import (
 	"bytes"
 	"encoding/json"
+
+	"github.com/shinpr/galley/internal/provider"
 )
 
 // TaskJSONSchema returns the task YAML JSON Schema generated from the task
@@ -129,49 +131,32 @@ func executorSchema() map[string]any {
 			"prompt_mode":    enumSchema(validPromptModes),
 		}),
 		func(m map[string]any) {
-			m["allOf"] = []any{
-				map[string]any{
-					"if": map[string]any{
-						"properties": map[string]any{
-							"cli": map[string]any{"const": "claude"},
-						},
-						"required": []string{"cli"},
-					},
-					"then": map[string]any{
-						"properties": map[string]any{
-							"effort": enumSchema(validClaudeEfforts),
-						},
-					},
-				},
-				map[string]any{
-					"if": map[string]any{
-						"properties": map[string]any{
-							"cli": map[string]any{"const": "codex"},
-						},
-						"required": []string{"cli"},
-					},
-					"then": map[string]any{
-						"properties": map[string]any{
-							"effort": enumSchema(validCodexEfforts),
-						},
-					},
-				},
-				map[string]any{
-					"if": map[string]any{
-						"properties": map[string]any{
-							"cli": map[string]any{"const": "glm"},
-						},
-						"required": []string{"cli"},
-					},
-					"then": map[string]any{
-						"properties": map[string]any{
-							"effort": enumSchema(validClaudeEfforts),
-						},
-					},
-				},
-			}
+			m["allOf"] = executorEffortSchemas()
 		},
 	)
+}
+
+func executorEffortSchemas() []any {
+	var schemas []any
+	for _, descriptor := range provider.All() {
+		if !descriptor.Executor {
+			continue
+		}
+		efforts := validClaudeEfforts
+		if descriptor.Transport == provider.TransportCodex {
+			efforts = validCodexEfforts
+		}
+		schemas = append(schemas, map[string]any{
+			"if": map[string]any{
+				"properties": map[string]any{"cli": map[string]any{"const": descriptor.ID}},
+				"required":   []string{"cli"},
+			},
+			"then": map[string]any{
+				"properties": map[string]any{"effort": enumSchema(efforts)},
+			},
+		})
+	}
+	return schemas
 }
 
 func decisionSchema() map[string]any {

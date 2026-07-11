@@ -91,7 +91,7 @@ func TestDaemonDispatchesSelectedExecutorBinary(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			err = Run(context.Background(), Options{
+			err = runTestDaemon(context.Background(), Options{
 				Root:               root,
 				SystemPromptFile:   promptPath,
 				JSONSchemaFile:     schemaPath,
@@ -194,7 +194,7 @@ func TestDaemonRejectsUnknownExecutorCLIAtRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = Run(context.Background(), Options{
+	err = runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,

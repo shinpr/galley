@@ -1,10 +1,13 @@
 package daemon
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/shinpr/galley/internal/task"
 )
 
 func TestResolveExecutorResultIncludesCodexLastMessageParseError(t *testing.T) {
@@ -31,5 +34,18 @@ func TestResolveExecutorResultIncludesCodexLastMessageParseError(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("error missing %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestCodexParseFailureEvidenceUsesProviderSpecificVocabulary(t *testing.T) {
+	t.Parallel()
+	loaded := task.Task{Executor: task.Executor{CLI: "codex"}}
+	mergeAttemptEvidence(&loaded, attemptOutcome{ParseErr: errors.New("invalid output")}, "run", "/work", "/attempt")
+	if len(loaded.Risks) != 1 {
+		t.Fatalf("risks = %#v", loaded.Risks)
+	}
+	risk := loaded.Risks[0]
+	if !strings.HasPrefix(risk.ID, "executor-result-parse-") || !strings.Contains(risk.Mitigation, "codex executor") || strings.Contains(risk.Mitigation, "Claude") {
+		t.Fatalf("risk = %#v", risk)
 	}
 }

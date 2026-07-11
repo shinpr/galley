@@ -19,15 +19,12 @@ var ErrClaimConflict = errors.New("claim conflict")
 
 // EnsureLayout creates the file-backed queue directory layout.
 func EnsureLayout(root string) error {
-	for _, path := range []string{
-		filepath.Join(root, "tasks", "queued"),
-		filepath.Join(root, "tasks", "draft"),
-		filepath.Join(root, "tasks", "running"),
-		filepath.Join(root, "tasks", "done"),
-		filepath.Join(root, "tasks", "failed"),
-		filepath.Join(root, "tasks", "archived"),
-		filepath.Join(root, "runs"),
-	} {
+	paths := make([]string, 0, len(task.AllWorkflowStates())+1)
+	for _, state := range task.AllWorkflowStates() {
+		paths = append(paths, task.TaskStateDir(root, state))
+	}
+	paths = append(paths, filepath.Join(root, "runs"))
+	for _, path := range paths {
 		if err := os.MkdirAll(path, 0o755); err != nil {
 			return fmt.Errorf("create %s: %w", path, err)
 		}
@@ -64,7 +61,7 @@ func taskYAMLFiles(dir string) ([]string, error) {
 
 // QueuedTasks returns queued task YAML files in deterministic order.
 func QueuedTasks(root string) ([]string, error) {
-	matches, err := taskYAMLFiles(filepath.Join(root, "tasks", "queued"))
+	matches, err := taskYAMLFiles(task.TaskStateDir(root, task.WorkflowStateQueued))
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +78,7 @@ func QueuedTasks(root string) ([]string, error) {
 // physical repo referenced by different path spellings counts once.
 func RunningRepoCounts(root string) (map[string]int, error) {
 	counts := map[string]int{}
-	matches, err := taskYAMLFiles(filepath.Join(root, "tasks", "running"))
+	matches, err := taskYAMLFiles(task.TaskStateDir(root, task.WorkflowStateRunning))
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +107,11 @@ func RepoConcurrencyKey(cwd string) string {
 
 // ClaimTask claims a queued task into running without overwriting an existing running task.
 func ClaimTask(root, queuedPath string) (string, error) {
-	runningPath := filepath.Join(root, "tasks", "running", filepath.Base(queuedPath))
+	destination, err := task.WorkflowStateForTransition(task.StatusQueued, task.StatusRunning)
+	if err != nil {
+		return "", err
+	}
+	runningPath := task.TaskStatePath(root, destination, filepath.Base(queuedPath))
 	if err := noOverwriteRename(queuedPath, runningPath); err != nil {
 		if errors.Is(err, os.ErrExist) {
 			return "", fmt.Errorf("%w: running task already exists at %s", ErrClaimConflict, runningPath)
@@ -123,15 +124,15 @@ func ClaimTask(root, queuedPath string) (string, error) {
 // RecoverStaleClaims requeues stale running tasks and removes stale claim locks.
 func RecoverStaleClaims(root string, ttl time.Duration, now time.Time) error {
 	for _, dir := range []string{
-		filepath.Join(root, "tasks", "queued"),
-		filepath.Join(root, "tasks", "running"),
+		task.TaskStateDir(root, task.WorkflowStateQueued),
+		task.TaskStateDir(root, task.WorkflowStateRunning),
 	} {
 		if err := removeStaleLocks(dir, ttl, now); err != nil {
 			return err
 		}
 	}
 
-	runningDir := filepath.Join(root, "tasks", "running")
+	runningDir := task.TaskStateDir(root, task.WorkflowStateRunning)
 	entries, err := os.ReadDir(runningDir)
 	if err != nil {
 		return fmt.Errorf("read running dir %s: %w", runningDir, err)
@@ -186,11 +187,15 @@ func requeueRunningTask(root, runningPath string) error {
 	if err != nil {
 		return fmt.Errorf("load stale running task %s: %w", runningPath, err)
 	}
-	loaded.Status = "queued"
+	loaded.Status = task.StatusQueued
 	if err := task.Save(runningPath, loaded); err != nil {
 		return err
 	}
-	queuedPath := filepath.Join(root, "tasks", "queued", filepath.Base(runningPath))
+	queuedState, err := task.WorkflowStateForStatus(loaded.Status)
+	if err != nil {
+		return err
+	}
+	queuedPath := task.TaskStatePath(root, queuedState, filepath.Base(runningPath))
 	if err := noOverwriteRename(runningPath, queuedPath); err != nil {
 		return fmt.Errorf("requeue stale task %s: %w", runningPath, err)
 	}

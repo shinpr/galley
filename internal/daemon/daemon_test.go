@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,8 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shinpr/galley/internal/galleyhome"
-	"github.com/shinpr/galley/internal/queue"
 	"github.com/shinpr/galley/internal/runartifact"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/internal/workspace"
@@ -31,7 +28,7 @@ func TestRunOnceMovesTaskToDoneAndWritesRunEvidence(t *testing.T) {
 	writeDaemonTask(t, taskPath, repo)
 	setLoopBudget(t, taskPath, 2)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -112,7 +109,7 @@ echo '{"status":"completed","summary":"done","files_modified":["daemon-output.tx
 		t.Fatal(err)
 	}
 
-	err = Run(context.Background(), Options{
+	err = runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -154,7 +151,7 @@ func TestRunOnceUsesModelSupervisorProvider(t *testing.T) {
 	}
 	writeDaemonTask(t, taskPath, repo)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -190,7 +187,7 @@ func TestRunOnceRecordsSupervisorTimeoutInTaskAttempt(t *testing.T) {
 	writeDaemonTask(t, taskPath, repo)
 	setTimeoutMS(t, taskPath, 50)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -247,7 +244,7 @@ fi
 	writeDaemonTask(t, taskPath, repo)
 	setLoopBudget(t, taskPath, 2)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -287,7 +284,7 @@ func TestRunOncePreservesExecutorDecisionsWithVerificationEvidence(t *testing.T)
 	}
 	writeDaemonTask(t, taskPath, repo)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -326,7 +323,7 @@ func TestRunOnceOpenPRCommitsPushesAndUpdatesTask(t *testing.T) {
 	}
 	writeDaemonTask(t, taskPath, repo)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -387,7 +384,7 @@ fi
 	}
 	writeDaemonTask(t, taskPath, repo)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -437,7 +434,7 @@ func TestRunOnceOpenPRUsesExecutorCommit(t *testing.T) {
 	}
 	writeDaemonTask(t, taskPath, repo)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -492,7 +489,7 @@ func TestRunOnceOpenPRCommitsAcceptedDiffOutsideAllowedPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = Run(context.Background(), Options{
+	err = runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -554,7 +551,7 @@ func TestRunOnceCopiesInputFileAndRemovesBeforeCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = Run(context.Background(), Options{
+	err = runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -602,7 +599,7 @@ func TestRunOnceMovesInvalidTaskToFailed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := Run(context.Background(), Options{Root: root, Once: true})
+	err := runTestDaemon(context.Background(), Options{Root: root, Once: true})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -622,7 +619,7 @@ func TestRunOnceHardStopMovesTaskToFailed(t *testing.T) {
 	}
 	writeDaemonTask(t, taskPath, repo)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -654,7 +651,7 @@ func TestRunOnceParseFailureNeedsSupervisorReview(t *testing.T) {
 	}
 	writeDaemonTask(t, taskPath, repo)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -689,7 +686,7 @@ func TestRunOnceCompletedWithRisksNeedsSupervisorReview(t *testing.T) {
 	}
 	writeDaemonTask(t, taskPath, repo)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -724,7 +721,7 @@ func TestRunOnceCompletedWithoutDiffNeedsSupervisorReview(t *testing.T) {
 	}
 	writeDaemonTask(t, taskPath, repo)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -760,7 +757,7 @@ func TestRunOnceStopsAfterConsecutiveNoDiffAttempts(t *testing.T) {
 	writeDaemonTask(t, taskPath, repo)
 	setLoopBudget(t, taskPath, 5)
 
-	err := Run(context.Background(), Options{
+	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
 		JSONSchemaFile:     schemaPath,
@@ -784,1137 +781,6 @@ func TestRunOnceStopsAfterConsecutiveNoDiffAttempts(t *testing.T) {
 	}
 	if len(failedTask.Risks) == 0 || !strings.Contains(failedTask.Risks[len(failedTask.Risks)-1].Detail, "no git diff") {
 		t.Fatalf("progress risk missing: %#v", failedTask.Risks)
-	}
-}
-
-func TestRunOnceDrainsQueue(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo1 := initDaemonGitRepo(t)
-	repo2 := initDaemonGitRepo(t)
-	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
-	queueDir := filepath.Join(root, "tasks", "queued")
-	if err := os.MkdirAll(queueDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeDaemonTask(t, filepath.Join(queueDir, "task-1.yaml"), repo1)
-	writeDaemonTask(t, filepath.Join(queueDir, "task-2.yaml"), repo2)
-
-	err := Run(context.Background(), Options{
-		Root:               root,
-		SystemPromptFile:   promptPath,
-		JSONSchemaFile:     schemaPath,
-		Supervisor:         "claude",
-		ClaudeBin:          claudeBin,
-		Once:               true,
-		MaxConcurrentTasks: 1,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertGlobCount(t, filepath.Join(root, "tasks", "queued", "*.yaml"), 0)
-	assertGlobCount(t, filepath.Join(root, "tasks", "done", "*.yaml"), 2)
-}
-
-func TestRunOnceContinuesAfterTaskFailure(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
-	queueDir := filepath.Join(root, "tasks", "queued")
-	if err := os.MkdirAll(queueDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(queueDir, "bad.yaml"), []byte("id: broken\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	writeDaemonTask(t, filepath.Join(queueDir, "good.yaml"), repo)
-
-	err := Run(context.Background(), Options{
-		Root:               root,
-		SystemPromptFile:   promptPath,
-		JSONSchemaFile:     schemaPath,
-		Supervisor:         "claude",
-		ClaudeBin:          claudeBin,
-		Once:               true,
-		MaxConcurrentTasks: 1,
-	})
-	if err == nil {
-		t.Fatal("expected first task error")
-	}
-	assertGlobCount(t, filepath.Join(root, "tasks", "queued", "*.yaml"), 0)
-	assertGlobCount(t, filepath.Join(root, "tasks", "failed", "*.yaml"), 1)
-	assertGlobCount(t, filepath.Join(root, "tasks", "done", "*.yaml"), 1)
-}
-
-func TestRunOnceRecordsValidationErrorsInTaskAttempt(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	claudeBin := writeFakeClaude(t, "echo should-not-run\n")
-	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
-	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeDaemonTask(t, taskPath, repo)
-	loaded, err := task.Load(taskPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	loaded.Scope.CWD = ""
-	if err := task.Save(taskPath, loaded); err != nil {
-		t.Fatal(err)
-	}
-
-	err = Run(context.Background(), Options{
-		Root:               root,
-		SystemPromptFile:   promptPath,
-		JSONSchemaFile:     schemaPath,
-		Supervisor:         "claude",
-		ClaudeBin:          claudeBin,
-		Once:               true,
-		MaxConcurrentTasks: 1,
-	})
-	if err == nil {
-		t.Fatal("expected validation error")
-	}
-	failedTask, err := task.Load(filepath.Join(root, "tasks", "failed", "task.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(failedTask.Attempts) == 0 {
-		t.Fatal("expected validation attempt")
-	}
-	last := failedTask.Attempts[len(failedTask.Attempts)-1]
-	if last.SupervisorVerdict != "validation_failed" {
-		t.Fatalf("supervisor verdict got %q", last.SupervisorVerdict)
-	}
-	if last.Error == nil {
-		t.Fatalf("attempt error missing: %#v", last)
-	}
-	if last.Error.Phase != "validation" || last.Error.Kind != "validation_failed" {
-		t.Fatalf("attempt error got %#v", last.Error)
-	}
-	if !strings.Contains(last.Error.Message, "task validation failed") || !strings.Contains(last.Error.Message, "scope.cwd") {
-		t.Fatalf("attempt error message got %q", last.Error.Message)
-	}
-}
-
-func TestProcessAvailableSkipsClaimConflict(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	queueDir := filepath.Join(root, "tasks", "queued")
-	runningDir := filepath.Join(root, "tasks", "running")
-	if err := os.MkdirAll(queueDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(runningDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	queuedPath := filepath.Join(queueDir, "task.yaml")
-	runningPath := filepath.Join(runningDir, "task.yaml")
-	if err := os.WriteFile(queuedPath, []byte("queued"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := task.Save(runningPath, task.Task{ID: "task", Status: "running", Scope: task.Scope{CWD: t.TempDir()}}); err != nil {
-		t.Fatal(err)
-	}
-
-	processed, err := processAvailable(context.Background(), Options{Root: root, MaxConcurrentTasks: 1, ClaimTTL: time.Hour}.withDefaults())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if processed != 0 {
-		t.Fatalf("processed got %d", processed)
-	}
-}
-
-func TestProcessAvailableSkipsConflictAndClaimsLaterTask(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
-	queueDir := filepath.Join(root, "tasks", "queued")
-	runningDir := filepath.Join(root, "tasks", "running")
-	if err := os.MkdirAll(queueDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(runningDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(queueDir, "a-conflict.yaml"), []byte("queued"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := task.Save(filepath.Join(runningDir, "a-conflict.yaml"), task.Task{ID: "a-conflict", Status: "running", Scope: task.Scope{CWD: t.TempDir()}}); err != nil {
-		t.Fatal(err)
-	}
-	writeDaemonTask(t, filepath.Join(queueDir, "b-good.yaml"), repo)
-
-	processed, err := processAvailable(context.Background(), Options{
-		Root:               root,
-		SystemPromptFile:   promptPath,
-		JSONSchemaFile:     schemaPath,
-		Supervisor:         "claude",
-		ClaudeBin:          claudeBin,
-		MaxConcurrentTasks: 1,
-		ClaimTTL:           time.Hour,
-	}.withDefaults())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if processed != 1 {
-		t.Fatalf("processed got %d", processed)
-	}
-	assertGlobCount(t, filepath.Join(root, "tasks", "done", "b-good.yaml"), 1)
-	assertGlobCount(t, filepath.Join(root, "tasks", "queued", "a-conflict.yaml"), 1)
-}
-
-func TestProcessAvailableHonorsMaxConcurrentPerRepo(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
-	queueDir := filepath.Join(root, "tasks", "queued")
-	runningDir := filepath.Join(root, "tasks", "running")
-	if err := os.MkdirAll(queueDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(runningDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeDaemonTask(t, filepath.Join(runningDir, "active.yaml"), repo)
-	writeDaemonTask(t, filepath.Join(queueDir, "queued.yaml"), repo)
-
-	processed, err := processAvailable(context.Background(), Options{
-		Root:                 root,
-		SystemPromptFile:     promptPath,
-		JSONSchemaFile:       schemaPath,
-		Supervisor:           "claude",
-		ClaudeBin:            claudeBin,
-		MaxConcurrentTasks:   2,
-		MaxConcurrentPerRepo: 1,
-		ClaimTTL:             time.Hour,
-	}.withDefaults())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if processed != 0 {
-		t.Fatalf("processed got %d", processed)
-	}
-	assertGlobCount(t, filepath.Join(root, "tasks", "queued", "queued.yaml"), 1)
-}
-
-func TestProcessAvailableAllowsDifferentRepos(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo1 := initDaemonGitRepo(t)
-	repo2 := initDaemonGitRepo(t)
-	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
-	queueDir := filepath.Join(root, "tasks", "queued")
-	runningDir := filepath.Join(root, "tasks", "running")
-	if err := os.MkdirAll(queueDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(runningDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeDaemonTask(t, filepath.Join(runningDir, "active.yaml"), repo1)
-	writeDaemonTask(t, filepath.Join(queueDir, "queued.yaml"), repo2)
-
-	processed, err := processAvailable(context.Background(), Options{
-		Root:                 root,
-		SystemPromptFile:     promptPath,
-		JSONSchemaFile:       schemaPath,
-		Supervisor:           "claude",
-		ClaudeBin:            claudeBin,
-		MaxConcurrentTasks:   2,
-		MaxConcurrentPerRepo: 1,
-		ClaimTTL:             time.Hour,
-	}.withDefaults())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if processed != 1 {
-		t.Fatalf("processed got %d", processed)
-	}
-	assertGlobCount(t, filepath.Join(root, "tasks", "done", "queued.yaml"), 1)
-}
-
-func TestProcessAvailableDoesNotBlockOnMultipleClaimErrors(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	if err := queue.EnsureLayout(root); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"a.yaml", "b.yaml"} {
-		dirPath := filepath.Join(root, "tasks", "queued", name)
-		if err := os.MkdirAll(dirPath, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	done := make(chan error, 1)
-	go func() {
-		_, err := processAvailable(context.Background(), Options{
-			Root:               root,
-			MaxConcurrentTasks: 1,
-			ClaimTTL:           time.Hour,
-		}.withDefaults())
-		done <- err
-	}()
-	select {
-	case err := <-done:
-		if err == nil {
-			t.Fatal("expected claim error")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("processAvailable blocked on claim errors")
-	}
-}
-
-func TestProcessAvailableLetsClaimedTaskFinishAfterShutdown(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	started := filepath.Join(t.TempDir(), "claude-started")
-	claudeBin := writeFakeClaude(t, "touch "+started+"\nsleep 0.05\necho change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
-	queueDir := filepath.Join(root, "tasks", "queued")
-	if err := os.MkdirAll(queueDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeDaemonTask(t, filepath.Join(queueDir, "task.yaml"), repo)
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	processed, err := processAvailable(ctx, Options{
-		Root:               root,
-		SystemPromptFile:   promptPath,
-		JSONSchemaFile:     schemaPath,
-		Supervisor:         "claude",
-		ClaudeBin:          claudeBin,
-		MaxConcurrentTasks: 1,
-		ClaimTTL:           time.Hour,
-		ShutdownTimeout:    time.Second,
-	}.withDefaults())
-	if err == nil {
-		t.Fatal("expected canceled context before claim")
-	}
-	if processed != 0 {
-		t.Fatalf("processed got %d", processed)
-	}
-
-	ctx, cancel = context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() {
-		_, err := processAvailable(ctx, Options{
-			Root:               root,
-			SystemPromptFile:   promptPath,
-			JSONSchemaFile:     schemaPath,
-			Supervisor:         "claude",
-			ClaudeBin:          claudeBin,
-			MaxConcurrentTasks: 1,
-			ClaimTTL:           time.Hour,
-			ShutdownTimeout:    time.Second,
-		}.withDefaults())
-		done <- err
-	}()
-	waitForFileOrDone(t, started, done)
-	cancel()
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-	assertGlobCount(t, filepath.Join(root, "tasks", "done", "task.yaml"), 1)
-}
-
-func TestShutdownStopsBeforeRetryAttempt(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	attemptLog := filepath.Join(t.TempDir(), "attempts.log")
-	claudeBin := writeFakeClaude(t, "echo attempt >> "+attemptLog+"\nsleep 0.05\necho change >> daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
-	codexBin := writeFakeCodexSupervisor(t, `{"status":"needs_revision","summary":"codex wants retry","acceptance_gaps":["retry"],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[],"findings":[{"severity":"medium","category":"acceptance","file":"daemon-output.txt","summary":"retry","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"try again"}`)
-	queueDir := filepath.Join(root, "tasks", "queued")
-	if err := os.MkdirAll(queueDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeDaemonTask(t, filepath.Join(queueDir, "task.yaml"), repo)
-	setLoopBudget(t, filepath.Join(queueDir, "task.yaml"), 2)
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() {
-		_, err := processAvailable(ctx, Options{
-			Root:               root,
-			SystemPromptFile:   promptPath,
-			JSONSchemaFile:     schemaPath,
-			ClaudeBin:          claudeBin,
-			MaxConcurrentTasks: 1,
-			ClaimTTL:           time.Hour,
-			ShutdownTimeout:    5 * time.Second,
-			Supervisor:         "codex",
-			CodexBin:           codexBin,
-		}.withDefaults())
-		done <- err
-	}()
-	waitForFileOrDone(t, attemptLog, done)
-	cancel()
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-
-	data, err := os.ReadFile(attemptLog)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.Count(string(data), "attempt"); got != 1 {
-		t.Fatalf("attempt count got %d, log=%q", got, string(data))
-	}
-	failedTask, err := task.Load(filepath.Join(root, "tasks", "failed", "task.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if failedTask.Status != "needs_supervisor_review" {
-		t.Fatalf("status got %q", failedTask.Status)
-	}
-	if len(failedTask.Risks) == 0 || !strings.Contains(failedTask.Risks[len(failedTask.Risks)-1].ID, "shutdown-") {
-		t.Fatalf("shutdown risk missing: %#v", failedTask.Risks)
-	}
-}
-
-func TestRunOnceStopsWhenOnlyClaimConflictsRemain(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	queueDir := filepath.Join(root, "tasks", "queued")
-	runningDir := filepath.Join(root, "tasks", "running")
-	if err := os.MkdirAll(queueDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(runningDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(queueDir, "task.yaml"), []byte("queued"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := task.Save(filepath.Join(runningDir, "task.yaml"), task.Task{ID: "task", Status: "running", Scope: task.Scope{CWD: t.TempDir()}}); err != nil {
-		t.Fatal(err)
-	}
-
-	err := Run(context.Background(), Options{
-		Root:               root,
-		Once:               true,
-		MaxConcurrentTasks: 1,
-		ClaimTTL:           time.Hour,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertGlobCount(t, filepath.Join(root, "tasks", "queued", "*.yaml"), 1)
-	assertGlobCount(t, filepath.Join(root, "tasks", "running", "*.yaml"), 1)
-}
-
-func TestHeartbeatKeepsRunningTaskFresh(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	if err := queue.EnsureLayout(root); err != nil {
-		t.Fatal(err)
-	}
-	runningPath := filepath.Join(root, "tasks", "running", "task.yaml")
-	writeDaemonTask(t, runningPath, repo)
-	old := time.Now().Add(-2 * time.Hour)
-	if err := os.Chtimes(runningPath, old, old); err != nil {
-		t.Fatal(err)
-	}
-	stop := startHeartbeat(context.Background(), runningPath, 10*time.Millisecond)
-	time.Sleep(30 * time.Millisecond)
-	stop()
-
-	if err := queue.RecoverStaleClaims(root, time.Hour, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(runningPath); err != nil {
-		t.Fatalf("running task should remain fresh: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(root, "tasks", "queued", "task.yaml")); !os.IsNotExist(err) {
-		t.Fatalf("task should not be requeued, err=%v", err)
-	}
-}
-
-func TestCleanupWorktreesKeepsOpenPRWorktree(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	if err := queue.EnsureLayout(root); err != nil {
-		t.Fatal(err)
-	}
-	taskPath := filepath.Join(root, "tasks", "done", "task.yaml")
-	writeDaemonTask(t, taskPath, repo)
-	doneTask, worktreePath := prepareDonePRTask(t, taskPath, repo, "open")
-	ghBin := writeFakeCommand(t, "gh", "echo '{\"state\":\"open\",\"merged\":false}'\n")
-
-	if err := cleanupWorktrees(context.Background(), Options{Root: root, GHBin: ghBin}.withDefaults()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(worktreePath); err != nil {
-		t.Fatalf("open PR worktree should remain: %v", err)
-	}
-	reloaded, err := task.Load(taskPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if reloaded.PR.Status != doneTask.PR.Status || len(reloaded.Attempts) != len(doneTask.Attempts) {
-		t.Fatalf("open PR task should not be updated: %#v", reloaded.PR)
-	}
-}
-
-func TestCleanupWorktreesRemovesCleanMergedPRWorktree(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	if err := queue.EnsureLayout(root); err != nil {
-		t.Fatal(err)
-	}
-	taskPath := filepath.Join(root, "tasks", "done", "task.yaml")
-	writeDaemonTask(t, taskPath, repo)
-	_, worktreePath := prepareDonePRTask(t, taskPath, repo, "open")
-	ghBin := writeFakeCommand(t, "gh", "echo '{\"state\":\"closed\",\"merged\":true}'\n")
-
-	if err := cleanupWorktrees(context.Background(), Options{Root: root, GHBin: ghBin}.withDefaults()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
-		t.Fatalf("merged PR worktree should be removed, err=%v", err)
-	}
-	reloaded, err := task.Load(taskPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if reloaded.PR.Status != "merged" {
-		t.Fatalf("pr status got %q", reloaded.PR.Status)
-	}
-	if reloaded.Status != "merged" {
-		t.Fatalf("task status got %q", reloaded.Status)
-	}
-	if len(reloaded.Attempts) == 0 || reloaded.Attempts[len(reloaded.Attempts)-1].SupervisorVerdict != "cleanup" {
-		t.Fatalf("cleanup attempt missing: %#v", reloaded.Attempts)
-	}
-}
-
-func TestCleanupWorktreesRemovesDirtyClosedPRWorktree(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	if err := queue.EnsureLayout(root); err != nil {
-		t.Fatal(err)
-	}
-	taskPath := filepath.Join(root, "tasks", "done", "task.yaml")
-	writeDaemonTask(t, taskPath, repo)
-	_, worktreePath := prepareDonePRTask(t, taskPath, repo, "open")
-	if err := os.WriteFile(filepath.Join(worktreePath, "dirty.txt"), []byte("dirty\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	ghBin := writeFakeCommand(t, "gh", "echo '{\"state\":\"closed\",\"merged\":false}'\n")
-
-	if err := cleanupWorktrees(context.Background(), Options{Root: root, GHBin: ghBin}.withDefaults()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
-		t.Fatalf("dirty worktree should be removed, err=%v", err)
-	}
-	reloaded, err := task.Load(taskPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if reloaded.PR.Status != "closed" {
-		t.Fatalf("pr status got %q", reloaded.PR.Status)
-	}
-	if reloaded.Status != "closed" {
-		t.Fatalf("task status got %q", reloaded.Status)
-	}
-	if len(reloaded.Attempts) == 0 || reloaded.Attempts[len(reloaded.Attempts)-1].SupervisorVerdict != "cleanup" {
-		t.Fatalf("cleanup attempt missing: %#v", reloaded.Attempts)
-	}
-}
-
-// writeFailIfInvokedGH returns a fake `gh` binary that records every
-// invocation by creating a marker file and exits successfully so a buggy
-// caller does not pay the FetchPRState retry backoff. Tests assert the marker
-// is absent to prove the no-GitHub cleanup path never shelled out to `gh`.
-func writeFailIfInvokedGH(t *testing.T) (ghBin, marker string) {
-	t.Helper()
-	marker = filepath.Join(t.TempDir(), "gh-invoked")
-	ghBin = writeFakeCommand(t, "gh", "printf invoked > "+strconv.Quote(marker)+"\n"+
-		"echo '{\"state\":\"closed\",\"merged\":true}'\n")
-	return ghBin, marker
-}
-
-func assertGHNotInvoked(t *testing.T, marker string) {
-	t.Helper()
-	if _, err := os.Stat(marker); !os.IsNotExist(err) {
-		t.Fatalf("gh must not be invoked for a persisted-final task, marker err=%v", err)
-	}
-}
-
-// TestCleanupWorktreesSkipsAlreadyFinalMissingWorktreeWithoutGitHubAPI covers
-// AC1: a done task that already records pr.status merged/closed and whose
-// managed worktree path is already absent must complete cleanup without
-// invoking `gh api`.
-func TestCleanupWorktreesSkipsAlreadyFinalMissingWorktreeWithoutGitHubAPI(t *testing.T) {
-	for _, prStatus := range []string{"merged", "closed"} {
-		t.Run(prStatus, func(t *testing.T) {
-			root := filepath.Join(t.TempDir(), ".agent-workflow")
-			repo := initDaemonGitRepo(t)
-			if err := queue.EnsureLayout(root); err != nil {
-				t.Fatal(err)
-			}
-			taskPath := filepath.Join(root, "tasks", "done", "task.yaml")
-			writeDaemonTask(t, taskPath, repo)
-			_, worktreePath := prepareDonePRTask(t, taskPath, repo, prStatus)
-			// Simulate an already-final historical task whose worktree was
-			// already removed in a prior sweep.
-			if err := os.RemoveAll(worktreePath); err != nil {
-				t.Fatal(err)
-			}
-			ghBin, marker := writeFailIfInvokedGH(t)
-
-			if err := cleanupWorktrees(context.Background(), Options{Root: root, GHBin: ghBin}.withDefaults()); err != nil {
-				t.Fatal(err)
-			}
-			assertGHNotInvoked(t, marker)
-
-			reloaded, err := task.Load(taskPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if reloaded.Status != prStatus {
-				t.Fatalf("task status got %q want %q", reloaded.Status, prStatus)
-			}
-			if reloaded.PR.Status != prStatus {
-				t.Fatalf("pr status got %q want %q", reloaded.PR.Status, prStatus)
-			}
-		})
-	}
-}
-
-// TestCleanupWorktreesRemovesPersistedFinalWorktreeWithoutGitHubAPI covers
-// AC2: a done task that already records pr.status merged/closed and whose
-// managed worktree still exists must be removed using the persisted final PR
-// status, without first refreshing PR state from GitHub.
-func TestCleanupWorktreesRemovesPersistedFinalWorktreeWithoutGitHubAPI(t *testing.T) {
-	for _, prStatus := range []string{"merged", "closed"} {
-		t.Run(prStatus, func(t *testing.T) {
-			root := filepath.Join(t.TempDir(), ".agent-workflow")
-			repo := initDaemonGitRepo(t)
-			if err := queue.EnsureLayout(root); err != nil {
-				t.Fatal(err)
-			}
-			taskPath := filepath.Join(root, "tasks", "done", "task.yaml")
-			writeDaemonTask(t, taskPath, repo)
-			_, worktreePath := prepareDonePRTask(t, taskPath, repo, prStatus)
-			ghBin, marker := writeFailIfInvokedGH(t)
-
-			if err := cleanupWorktrees(context.Background(), Options{Root: root, GHBin: ghBin}.withDefaults()); err != nil {
-				t.Fatal(err)
-			}
-			assertGHNotInvoked(t, marker)
-
-			if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
-				t.Fatalf("persisted-final worktree should be removed, err=%v", err)
-			}
-			reloaded, err := task.Load(taskPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if reloaded.PR.Status != prStatus {
-				t.Fatalf("pr status got %q want %q", reloaded.PR.Status, prStatus)
-			}
-			if reloaded.Status != prStatus {
-				t.Fatalf("task status got %q want %q", reloaded.Status, prStatus)
-			}
-			if len(reloaded.Attempts) == 0 || reloaded.Attempts[len(reloaded.Attempts)-1].SupervisorVerdict != "cleanup" {
-				t.Fatalf("cleanup attempt missing: %#v", reloaded.Attempts)
-			}
-		})
-	}
-}
-
-// TestCleanupWorktreesErrorIncludesTaskContext covers AC5: an actionable
-// cleanup failure must identify the failing task (file or id) plus the PR URL
-// or resolved worktree path. The worktree path is pointed at the source
-// repository so workspace.Remove refuses removal deterministically.
-func TestCleanupWorktreesErrorIncludesTaskContext(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	if err := queue.EnsureLayout(root); err != nil {
-		t.Fatal(err)
-	}
-	taskPath := filepath.Join(root, "tasks", "done", "failing.yaml")
-	writeDaemonTask(t, taskPath, repo)
-	prepareDonePRTask(t, taskPath, repo, "merged")
-	pointWorktreeAtSourceRepo(t, taskPath, repo)
-	ghBin, _ := writeFailIfInvokedGH(t)
-
-	err := cleanupWorktrees(context.Background(), Options{Root: root, GHBin: ghBin}.withDefaults())
-	if err == nil {
-		t.Fatal("expected a contextualized cleanup error")
-	}
-	msg := err.Error()
-	if !strings.Contains(msg, taskPath) && !strings.Contains(msg, "task-daemon-test") {
-		t.Fatalf("error must name the task file or id, got %q", msg)
-	}
-	if !strings.Contains(msg, "https://github.com/example/galley/pull/123") && !strings.Contains(msg, repo) {
-		t.Fatalf("error must name the PR URL or resolved worktree path, got %q", msg)
-	}
-}
-
-// TestCleanupWorktreesContinuesAfterTaskFailure covers AC6: cleanup keeps
-// scanning remaining done tasks after a per-task failure and returns the first
-// contextualized failure once the sweep completes. The failing task sorts
-// before the removable task so the returned error is the contextualized one.
-func TestCleanupWorktreesContinuesAfterTaskFailure(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	if err := queue.EnsureLayout(root); err != nil {
-		t.Fatal(err)
-	}
-
-	failingPath := filepath.Join(root, "tasks", "done", "a-failing.yaml")
-	writeDaemonTask(t, failingPath, repo)
-	prepareDonePRTask(t, failingPath, repo, "merged")
-	pointWorktreeAtSourceRepo(t, failingPath, repo)
-
-	removablePath := filepath.Join(root, "tasks", "done", "b-removable.yaml")
-	writeDaemonTask(t, removablePath, repo)
-	_, removableWorktree := prepareDonePRTask(t, removablePath, repo, "merged")
-
-	ghBin, marker := writeFailIfInvokedGH(t)
-
-	err := cleanupWorktrees(context.Background(), Options{Root: root, GHBin: ghBin}.withDefaults())
-	if err == nil {
-		t.Fatal("expected the first contextualized failure to be returned")
-	}
-	if !strings.Contains(err.Error(), failingPath) && !strings.Contains(err.Error(), "a-failing.yaml") {
-		t.Fatalf("returned error must name the failing task, got %q", err)
-	}
-	assertGHNotInvoked(t, marker)
-
-	// The sweep continued past the failure and cleaned the later removable task.
-	if _, statErr := os.Stat(removableWorktree); !os.IsNotExist(statErr) {
-		t.Fatalf("later removable worktree should be cleaned, err=%v", statErr)
-	}
-	reloaded, err := task.Load(removablePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if reloaded.Status != "merged" {
-		t.Fatalf("removable task status got %q want merged", reloaded.Status)
-	}
-}
-
-func TestCleanupWorktreesLogsAdditionalTaskFailures(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	if err := queue.EnsureLayout(root); err != nil {
-		t.Fatal(err)
-	}
-
-	firstFailingPath := filepath.Join(root, "tasks", "done", "a-failing.yaml")
-	writeDaemonTask(t, firstFailingPath, repo)
-	prepareDonePRTask(t, firstFailingPath, repo, "merged")
-	pointWorktreeAtSourceRepo(t, firstFailingPath, repo)
-
-	secondFailingPath := filepath.Join(root, "tasks", "done", "b-failing.yaml")
-	writeDaemonTask(t, secondFailingPath, repo)
-	prepareDonePRTask(t, secondFailingPath, repo, "merged")
-	pointWorktreeAtSourceRepo(t, secondFailingPath, repo)
-
-	ghBin, marker := writeFailIfInvokedGH(t)
-
-	var cleanupErr error
-	stderr := captureStderr(t, func() {
-		cleanupErr = cleanupWorktrees(context.Background(), Options{Root: root, GHBin: ghBin}.withDefaults())
-	})
-	if cleanupErr == nil {
-		t.Fatal("expected the first contextualized failure to be returned")
-	}
-	if !strings.Contains(cleanupErr.Error(), firstFailingPath) {
-		t.Fatalf("returned error must keep the first failing task, got %q", cleanupErr)
-	}
-	if !strings.Contains(stderr, "galley: additional worktree cleanup failure:") {
-		t.Fatalf("stderr must log additional cleanup failures, got %q", stderr)
-	}
-	if !strings.Contains(stderr, secondFailingPath) {
-		t.Fatalf("stderr must name the second failing task, got %q", stderr)
-	}
-	assertGHNotInvoked(t, marker)
-}
-
-// pointWorktreeAtSourceRepo rewrites a done task's managed worktree path to the
-// source repository so workspace.Remove refuses to remove it, producing a
-// deterministic actionable cleanup failure for AC5/AC6.
-func pointWorktreeAtSourceRepo(t *testing.T, taskPath, repo string) {
-	t.Helper()
-	loaded, err := task.Load(taskPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	loaded.Worktree.Path = repo
-	if err := task.Save(taskPath, loaded); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// TestRunOnceBranchesNewWorktreeFromEnvironmentPRBaseOriginRef covers AC2 +
-// AC4 case (1): when the environment profile's pr.base resolves to an
-// origin/<base> ref, the new task worktree is branched from that ref's SHA
-// rather than the source repo's current HEAD. This also exercises the order
-// requirement: profile resolution must happen before workspace.Prepare.
-func TestRunOnceBranchesNewWorktreeFromEnvironmentPRBaseOriginRef(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	// Wire a real bare origin remote and publish feature-base at the initial
-	// commit. The daemon's pre-resolve `git fetch origin feature-base` must
-	// succeed against this remote so origin/feature-base remains the chosen
-	// start-point. Advance source HEAD so origin/feature-base SHA differs
-	// from the source repo HEAD SHA.
-	remote := filepath.Join(t.TempDir(), "remote.git")
-	runDaemonGit(t, t.TempDir(), "init", "--bare", remote)
-	runDaemonGit(t, repo, "remote", "add", "origin", remote)
-	baseSHA := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "HEAD")))
-	runDaemonGit(t, repo, "push", "origin", "HEAD:refs/heads/feature-base")
-	if err := os.WriteFile(filepath.Join(repo, "advance.txt"), []byte("advance\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	runDaemonGit(t, repo, "add", "advance.txt")
-	runDaemonGit(t, repo, "commit", "-m", "advance")
-	headSHA := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "HEAD")))
-	if baseSHA == headSHA {
-		t.Fatal("setup failed: baseSHA and headSHA should differ")
-	}
-	writeRepoEnvironmentProfile(t, root, repo, "feature-base")
-
-	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
-	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
-	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeDaemonTask(t, taskPath, repo)
-
-	if err := Run(context.Background(), Options{
-		Root:               root,
-		SystemPromptFile:   promptPath,
-		JSONSchemaFile:     schemaPath,
-		Supervisor:         "claude",
-		ClaudeBin:          claudeBin,
-		Once:               true,
-		MaxConcurrentTasks: 1,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	doneTask, err := task.Load(filepath.Join(root, "tasks", "done", "task.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	worktreePath := taskWorktreePath(repo, doneTask.Worktree.Path)
-	// The fake claude does not commit, so the new branch HEAD equals the
-	// start-point ref's SHA. If profile resolution were skipped or ordered
-	// after Prepare, the worktree HEAD would equal the source repo HEAD
-	// (headSHA) instead.
-	got := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", worktreePath, "rev-parse", "HEAD")))
-	if got != baseSHA {
-		t.Fatalf("worktree HEAD got %q, want origin/feature-base SHA %q (source HEAD=%q)", got, baseSHA, headSHA)
-	}
-	// AC7: profiles.json must still be written into the run directory.
-	matches, err := filepath.Glob(filepath.Join(root, "runs", "*", "profiles.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(matches) != 1 {
-		t.Fatalf("expected 1 profiles.json, got %d", len(matches))
-	}
-	var payload struct {
-		Bundle struct {
-			Environment *struct {
-				PR struct {
-					Base string `json:"base,omitempty"`
-				} `json:"pr"`
-			} `json:"environment,omitempty"`
-		} `json:"bundle"`
-	}
-	data, err := os.ReadFile(matches[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(data, &payload); err != nil {
-		t.Fatalf("decode profiles.json: %v", err)
-	}
-	if payload.Bundle.Environment == nil || payload.Bundle.Environment.PR.Base != "feature-base" {
-		t.Fatalf("profiles.json bundle.environment.pr.base got %#v", payload.Bundle)
-	}
-}
-
-// TestRunOnceBranchesNewWorktreeFromLocalHeadsFallback covers AC4 case (2):
-// when origin/<base> is missing but refs/heads/<base> exists, the local
-// branch is used as the start-point.
-func TestRunOnceBranchesNewWorktreeFromLocalHeadsFallback(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	baseSHA := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "HEAD")))
-	runDaemonGit(t, repo, "branch", "feature-local")
-	// Advance master/main so HEAD differs from feature-local tip.
-	if err := os.WriteFile(filepath.Join(repo, "advance.txt"), []byte("advance\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	runDaemonGit(t, repo, "add", "advance.txt")
-	runDaemonGit(t, repo, "commit", "-m", "advance")
-	headSHA := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "HEAD")))
-	if baseSHA == headSHA {
-		t.Fatal("setup failed: baseSHA and headSHA should differ")
-	}
-	writeRepoEnvironmentProfile(t, root, repo, "feature-local")
-
-	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
-	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
-	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeDaemonTask(t, taskPath, repo)
-
-	if err := Run(context.Background(), Options{
-		Root:               root,
-		SystemPromptFile:   promptPath,
-		JSONSchemaFile:     schemaPath,
-		Supervisor:         "claude",
-		ClaudeBin:          claudeBin,
-		Once:               true,
-		MaxConcurrentTasks: 1,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	doneTask, err := task.Load(filepath.Join(root, "tasks", "done", "task.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	worktreePath := taskWorktreePath(repo, doneTask.Worktree.Path)
-	got := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", worktreePath, "rev-parse", "HEAD")))
-	if got != baseSHA {
-		t.Fatalf("worktree HEAD got %q, want refs/heads/feature-local SHA %q", got, baseSHA)
-	}
-}
-
-// TestRunOnceFailsWhenPRBaseRefMissing covers AC4 case (3): when neither
-// origin/<base> nor refs/heads/<base> exists, the daemon must fail the
-// claimed task with a descriptive error and record the attempt as
-// phase=workspace.
-func TestRunOnceFailsWhenPRBaseRefMissing(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	writeRepoEnvironmentProfile(t, root, repo, "does-not-exist")
-
-	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	claudeBin := writeFakeClaude(t, "echo should-not-run\n")
-	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
-	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeDaemonTask(t, taskPath, repo)
-
-	err := Run(context.Background(), Options{
-		Root:               root,
-		SystemPromptFile:   promptPath,
-		JSONSchemaFile:     schemaPath,
-		Supervisor:         "claude",
-		ClaudeBin:          claudeBin,
-		Once:               true,
-		MaxConcurrentTasks: 1,
-	})
-	if err == nil {
-		t.Fatal("expected pr.base resolution failure")
-	}
-	failedTask, err := task.Load(filepath.Join(root, "tasks", "failed", "task.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(failedTask.Attempts) == 0 {
-		t.Fatalf("expected a workspace failure attempt: %#v", failedTask)
-	}
-	last := failedTask.Attempts[len(failedTask.Attempts)-1]
-	if last.Error == nil || last.Error.Phase != "workspace" {
-		t.Fatalf("attempt error got %#v", last.Error)
-	}
-	if !strings.Contains(last.Error.Message, "refs/remotes/origin/does-not-exist") || !strings.Contains(last.Error.Message, "refs/heads/does-not-exist") {
-		t.Fatalf("attempt error message missing both attempted refs: %q", last.Error.Message)
-	}
-}
-
-// TestRunOnceFailsWhenStaleOriginRefAndFetchFails covers the tightened
-// PR-review behavior: when the source repository has an origin remote, a
-// stale refs/remotes/origin/<pr.base> cached locally, and `git fetch origin
-// <pr.base>` cannot succeed (here, the configured origin URL is unreachable),
-// the daemon must refuse to use the stale remote-tracking ref and instead
-// fail the claimed task in the workspace phase. This prevents a stale local
-// origin/<base> from silently anchoring a new task branch behind the actual
-// remote tip when the daemon cannot confirm freshness.
-func TestRunOnceFailsWhenStaleOriginRefAndFetchFails(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	// Wire origin to a bogus URL so `git fetch origin feature-stale` fails.
-	bogusRemote := filepath.Join(t.TempDir(), "does-not-exist.git")
-	runDaemonGit(t, repo, "remote", "add", "origin", bogusRemote)
-	// Pre-create a stale refs/remotes/origin/feature-stale: if the daemon
-	// did not refuse on fetch failure, this stale ref would still be
-	// resolved as the start-point.
-	staleSHA := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "HEAD")))
-	runDaemonGit(t, repo, "update-ref", "refs/remotes/origin/feature-stale", staleSHA)
-
-	writeRepoEnvironmentProfile(t, root, repo, "feature-stale")
-
-	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	claudeBin := writeFakeClaude(t, "echo should-not-run\n")
-	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
-	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeDaemonTask(t, taskPath, repo)
-
-	err := Run(context.Background(), Options{
-		Root:               root,
-		SystemPromptFile:   promptPath,
-		JSONSchemaFile:     schemaPath,
-		Supervisor:         "claude",
-		ClaudeBin:          claudeBin,
-		Once:               true,
-		MaxConcurrentTasks: 1,
-	})
-	if err == nil {
-		t.Fatal("expected workspace failure when origin fetch fails and stale origin/<base> exists")
-	}
-	failedTask, err := task.Load(filepath.Join(root, "tasks", "failed", "task.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(failedTask.Attempts) == 0 {
-		t.Fatalf("expected a workspace failure attempt: %#v", failedTask)
-	}
-	last := failedTask.Attempts[len(failedTask.Attempts)-1]
-	if last.Error == nil || last.Error.Phase != "workspace" {
-		t.Fatalf("attempt error got %#v", last.Error)
-	}
-	// The error must surface the source repo path, the pr.base value, and
-	// the failed fetch operation so `galley task show` exposes the reason.
-	for _, want := range []string{repo, "feature-stale", "fetch", "refs/remotes/origin/feature-stale"} {
-		if !strings.Contains(last.Error.Message, want) {
-			t.Fatalf("attempt error message missing %q: %q", want, last.Error.Message)
-		}
-	}
-	// No worktree must have been created from the stale ref.
-	doneTask := filepath.Join(root, "tasks", "done", "task.yaml")
-	if _, statErr := os.Stat(doneTask); statErr == nil {
-		t.Fatalf("expected no done task, but found %s", doneTask)
-	}
-	// The stale local ref must remain untouched (the fetch failed, so no
-	// refresh could have updated it). This documents that we did not
-	// silently rewrite the stale ref while refusing to use it.
-	stillStale := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "refs/remotes/origin/feature-stale")))
-	if stillStale != staleSHA {
-		t.Fatalf("stale origin/feature-stale unexpectedly changed; got %q want %q", stillStale, staleSHA)
-	}
-}
-
-// TestRunOnceRefreshesStaleOriginRefBeforeWorktreeCreation covers the
-// PR-review revision request: when the source repository has an origin remote
-// and a stale refs/remotes/origin/<pr.base> cached locally, the daemon must
-// fetch origin <pr.base> before resolving the start-point so the new task
-// branch starts from the latest remote tip rather than the stale local copy.
-func TestRunOnceRefreshesStaleOriginRefBeforeWorktreeCreation(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	// Bare upstream remote and origin wiring on the source repo.
-	remote := filepath.Join(t.TempDir(), "remote.git")
-	runDaemonGit(t, t.TempDir(), "init", "--bare", remote)
-	runDaemonGit(t, repo, "remote", "add", "origin", remote)
-	// Seed the upstream feature-stale branch at SHA_A from the source repo.
-	runDaemonGit(t, repo, "push", "origin", "HEAD:refs/heads/feature-stale")
-	shaA := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "HEAD")))
-	// Pin the local remote-tracking ref at SHA_A so the cached origin/feature-stale
-	// is genuinely stale once the upstream advances below.
-	runDaemonGit(t, repo, "update-ref", "refs/remotes/origin/feature-stale", shaA)
-	// Advance feature-stale on the upstream via a separate publisher clone so
-	// the remote tip moves to SHA_B without touching the source repo.
-	publisher := filepath.Join(t.TempDir(), "publisher")
-	runDaemonGit(t, t.TempDir(), "clone", remote, publisher)
-	runDaemonGit(t, publisher, "config", "user.email", "test@example.com")
-	runDaemonGit(t, publisher, "config", "user.name", "Test User")
-	runDaemonGit(t, publisher, "checkout", "-b", "feature-stale", "origin/feature-stale")
-	if err := os.WriteFile(filepath.Join(publisher, "remote-advance.txt"), []byte("remote-advance\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	runDaemonGit(t, publisher, "add", "remote-advance.txt")
-	runDaemonGit(t, publisher, "commit", "-m", "remote-advance")
-	shaB := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", publisher, "rev-parse", "HEAD")))
-	runDaemonGit(t, publisher, "push", "origin", "feature-stale")
-	if shaA == shaB {
-		t.Fatal("setup failed: shaA and shaB should differ")
-	}
-	// Sanity check: the source repo still sees the stale SHA before the daemon runs.
-	cached := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "refs/remotes/origin/feature-stale")))
-	if cached != shaA {
-		t.Fatalf("setup failed: cached origin/feature-stale got %q, want stale SHA %q", cached, shaA)
-	}
-
-	writeRepoEnvironmentProfile(t, root, repo, "feature-stale")
-
-	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
-	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
-	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeDaemonTask(t, taskPath, repo)
-
-	if err := Run(context.Background(), Options{
-		Root:               root,
-		SystemPromptFile:   promptPath,
-		JSONSchemaFile:     schemaPath,
-		Supervisor:         "claude",
-		ClaudeBin:          claudeBin,
-		Once:               true,
-		MaxConcurrentTasks: 1,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	doneTask, err := task.Load(filepath.Join(root, "tasks", "done", "task.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	worktreePath := taskWorktreePath(repo, doneTask.Worktree.Path)
-	got := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", worktreePath, "rev-parse", "HEAD")))
-	if got != shaB {
-		t.Fatalf("worktree HEAD got %q, want refreshed origin/feature-stale tip %q (stale was %q)", got, shaB, shaA)
-	}
-	// The local remote-tracking ref must have been refreshed by the daemon's
-	// pre-resolve fetch, confirming refs/remotes/origin/feature-stale is no
-	// longer stale.
-	refreshed := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "refs/remotes/origin/feature-stale")))
-	if refreshed != shaB {
-		t.Fatalf("refs/remotes/origin/feature-stale not refreshed; got %q want %q", refreshed, shaB)
-	}
-}
-
-func writeRepoEnvironmentProfile(t *testing.T, root, repo, base string) {
-	t.Helper()
-	_, _, environmentPath, err := galleyhome.RepoProfilePaths(root, repo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Dir(environmentPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	body := "id: env-test\n" +
-		"cwd: " + strconv.Quote(repo) + "\n" +
-		"commands: {}\n" +
-		"constraints:\n" +
-		"  network: approval_required\n" +
-		"  secrets_policy: never_read_env_files\n" +
-		"  destructive_commands: deny\n" +
-		"pr:\n" +
-		"  enabled: false\n" +
-		"  base: " + base + "\n"
-	if err := os.WriteFile(environmentPath, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
 	}
 }
 

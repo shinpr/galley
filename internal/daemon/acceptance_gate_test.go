@@ -114,7 +114,7 @@ func TestAcceptanceGateDowngradesOnFailedRequiredCheckEvidence(t *testing.T) {
 	t.Parallel()
 	runDir := t.TempDir()
 	writeRunProfiles(t, runDir, []profile.RequiredCheck{{ID: "tests", Required: true, PreferredCommands: []string{"go test ./..."}}})
-	writeAttemptResult(t, runDir, 1, []runner.ClaudeVerification{{Command: "go test ./...", Status: "failed"}})
+	writeAttemptResult(t, runDir, 1, []runner.ExecutorVerification{{Command: "go test ./...", Status: "failed"}})
 	reason, ok := evaluateAcceptanceGate(acceptanceGateTask(false), runDir)
 	if ok || !strings.Contains(reason, "failed verification evidence") {
 		t.Fatalf("ok=%v reason=%q", ok, reason)
@@ -125,7 +125,7 @@ func TestAcceptanceGateAllowsWhenRequiredCheckPassed(t *testing.T) {
 	t.Parallel()
 	runDir := writeAcceptanceGateRun(t, "completed", []skeletonpreflight.Output{skeletonOutput()})
 	writeRunProfiles(t, runDir, []profile.RequiredCheck{{ID: "tests", Required: true, PreferredCommands: []string{"go test ./..."}}})
-	writeAttemptResult(t, runDir, 1, []runner.ClaudeVerification{{Command: "go test ./...", Status: "passed"}})
+	writeAttemptResult(t, runDir, 1, []runner.ExecutorVerification{{Command: "go test ./...", Status: "passed"}})
 	reason, ok := evaluateAcceptanceGate(acceptanceGateTask(true), runDir)
 	if !ok {
 		t.Fatalf("expected required-check gate to allow acceptance, reason=%q", reason)
@@ -140,7 +140,7 @@ func TestAcceptanceGateDefaultFlowIgnoresRequiredCheckEvidence(t *testing.T) {
 	t.Parallel()
 	runDir := t.TempDir()
 	writeRunProfiles(t, runDir, []profile.RequiredCheck{{ID: "tests", Required: true, PreferredCommands: []string{"go test ./..."}}})
-	writeAttemptResult(t, runDir, 1, []runner.ClaudeVerification{{Command: "go test ./...", Status: "failed"}})
+	writeAttemptResult(t, runDir, 1, []runner.ExecutorVerification{{Command: "go test ./...", Status: "failed"}})
 
 	if reason, ok := evaluateAcceptanceGate(&task.Task{ID: "no-preflight"}, runDir); !ok {
 		t.Fatalf("default-flow task downgraded by acceptance gate: %q", reason)
@@ -216,10 +216,10 @@ func TestAcceptanceGateLifecyclePreservesAcceptedPathWithoutPreflight(t *testing
 	t.Parallel()
 	for _, tc := range []struct {
 		name          string
-		verifications []runner.ClaudeVerification
+		verifications []runner.ExecutorVerification
 		writeResult   bool
 	}{
-		{name: "failed required-check evidence", verifications: []runner.ClaudeVerification{{Command: "go test ./...", Status: "failed"}}, writeResult: true},
+		{name: "failed required-check evidence", verifications: []runner.ExecutorVerification{{Command: "go test ./...", Status: "failed"}}, writeResult: true},
 		{name: "missing required-check evidence", writeResult: false},
 	} {
 		tc := tc

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/shinpr/galley/internal/daemonconfig"
+	"github.com/shinpr/galley/internal/provider"
 )
 
 const (
@@ -69,7 +70,7 @@ func EnvironmentJSONSchema() ([]byte, error) {
 			"commands": map[string]any{"type": "object", "additionalProperties": stringSchema("minLength", 1)},
 			"executor": object(
 				properties(map[string]any{
-					"default_cli": enumSchema([]string{"claude", "codex", "glm"}),
+					"default_cli": enumSchema(provider.ExecutorIDs()),
 				}),
 			),
 			"supervisor": object(

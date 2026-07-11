@@ -1,11 +1,5 @@
 package runner
 
-// AC: AC4 — The Codex executor command plan must wire the structured
-// executor-result schema through `codex exec --output-schema` and request a
-// `--output-last-message` capture file, and the captured final message must
-// parse back into a ClaudeResult so completed, completed_with_risks, and
-// hard_stop executor judgments survive supervisor handoff.
-
 import (
 	"encoding/json"
 	"os"
@@ -29,9 +23,6 @@ func TestCodexCommandPlanMaterializesEmbeddedSchemaWhenOnlyContentAvailable(t *t
 		t.Fatalf("CodexCommandPlan: %v", err)
 	}
 
-	// Argv must include --output-schema pointing at a real file under the
-	// attempt directory and --output-last-message under the same directory so
-	// `codex exec` can dereference both paths.
 	schemaFlag := flagValue(t, plan.Argv, "--output-schema")
 	if schemaFlag == "" {
 		t.Fatalf("argv missing --output-schema: %v", plan.Argv)
@@ -151,6 +142,19 @@ func TestCodexCompatibleOutputSchemaRecursivelyRequiresObjectProperties(t *testi
 	}
 }
 
+func TestCodexExecutorResultSchemaRemovesUnsupportedPatterns(t *testing.T) {
+	t.Parallel()
+	body, err := CodexExecutorResultSchema()
+	if err != nil {
+		t.Fatalf("CodexExecutorResultSchema: %v", err)
+	}
+	var doc any
+	if err := json.Unmarshal([]byte(body), &doc); err != nil {
+		t.Fatalf("compatible executor schema is not valid JSON: %v", err)
+	}
+	assertNoSchemaKeyword(t, doc, "pattern")
+}
+
 func TestCodexCommandPlanReusesCallerSuppliedSchemaFile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -240,6 +244,23 @@ func objectProp(t *testing.T, parent map[string]any, name string) map[string]any
 		t.Fatalf("property %q is not an object: %#v", name, parent[name])
 	}
 	return got
+}
+
+func assertNoSchemaKeyword(t *testing.T, node any, keyword string) {
+	t.Helper()
+	switch value := node.(type) {
+	case map[string]any:
+		if _, ok := value[keyword]; ok {
+			t.Fatalf("Codex output schema contains unsupported %q keyword: %#v", keyword, value)
+		}
+		for _, child := range value {
+			assertNoSchemaKeyword(t, child, keyword)
+		}
+	case []any:
+		for _, child := range value {
+			assertNoSchemaKeyword(t, child, keyword)
+		}
+	}
 }
 
 func requiredSet(t *testing.T, schema map[string]any) map[string]bool {

@@ -8,9 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/shinpr/galley/internal/profile"
+	"github.com/shinpr/galley/internal/provider"
 	"github.com/shinpr/galley/internal/runner"
 	claudeguard "github.com/shinpr/galley/internal/runner/claude_guard_plugin"
 	"github.com/shinpr/galley/internal/task"
@@ -45,21 +47,21 @@ type AdapterRequest struct {
 
 // AdapterEvidence is the serializable evidence passed to model supervisors.
 type AdapterEvidence struct {
-	Task                   task.Task           `json:"task"`
-	Profiles               profile.Bundle      `json:"profiles"`
-	Claude                 runner.ClaudeResult `json:"claude"`
-	ParseError             string              `json:"parse_error,omitempty"`
-	RunError               string              `json:"run_error,omitempty"`
-	DiffDirty              bool                `json:"diff_dirty"`
-	Diff                   string              `json:"diff"`
-	DiffError              string              `json:"diff_error,omitempty"`
-	Attempt                int                 `json:"attempt"`
-	AttemptsLeft           int                 `json:"attempts_left"`
-	SourceCWD              string              `json:"source_cwd,omitempty"`
-	WorktreeCWD            string              `json:"worktree_cwd,omitempty"`
-	PreflightResult        any                 `json:"preflight_result,omitempty"`
-	SetupResult            any                 `json:"setup_result,omitempty"`
-	SetupEnvironmentUpdate any                 `json:"setup_environment_update,omitempty"`
+	Task                   task.Task             `json:"task"`
+	Profiles               profile.Bundle        `json:"profiles"`
+	ExecutorResult         runner.ExecutorResult `json:"claude"`
+	ParseError             string                `json:"parse_error,omitempty"`
+	RunError               string                `json:"run_error,omitempty"`
+	DiffDirty              bool                  `json:"diff_dirty"`
+	Diff                   string                `json:"diff"`
+	DiffError              string                `json:"diff_error,omitempty"`
+	Attempt                int                   `json:"attempt"`
+	AttemptsLeft           int                   `json:"attempts_left"`
+	SourceCWD              string                `json:"source_cwd,omitempty"`
+	WorktreeCWD            string                `json:"worktree_cwd,omitempty"`
+	PreflightResult        any                   `json:"preflight_result,omitempty"`
+	SetupResult            any                   `json:"setup_result,omitempty"`
+	SetupEnvironmentUpdate any                   `json:"setup_environment_update,omitempty"`
 }
 
 // RunAdapter reviews evidence with a built-in model supervisor.
@@ -109,16 +111,19 @@ func RunAdapterPayload(ctx context.Context, opts AdapterOptions, request []byte)
 	if opts.ClaudeBin == "" {
 		opts.ClaudeBin = "claude"
 	}
-	switch opts.Provider {
-	case "codex":
+	transport, ok := provider.TransportFor(opts.Provider)
+	if !ok || !provider.IsSupervisor(opts.Provider) {
+		return nil, fmt.Errorf("supervisor provider must be one of: %s", strings.Join(provider.SupervisorIDs(), ", "))
+	}
+	switch transport {
+	case provider.TransportCodex:
 		return runCodexAdapter(ctx, opts, request)
-	case "claude", "glm":
+	case provider.TransportClaude:
 		// glm is the Claude review adapter pointed at GLM's endpoint; the
 		// redirect is applied inside runClaudeAdapterForOS based on Provider.
 		return runClaudeAdapter(ctx, opts, request)
-	default:
-		return nil, fmt.Errorf("supervisor provider must be one of: codex, claude, glm")
 	}
+	return nil, fmt.Errorf("supervisor provider %q has unsupported transport %q", opts.Provider, transport)
 }
 
 // NewAdapterRequest converts in-process evidence into the adapter JSON contract.
@@ -126,7 +131,7 @@ func NewAdapterRequest(evidence Evidence) AdapterRequest {
 	return AdapterRequest{Evidence: AdapterEvidence{
 		Task:                   evidence.Task,
 		Profiles:               evidence.Profiles,
-		Claude:                 evidence.Claude,
+		ExecutorResult:         evidence.ExecutorResult,
 		ParseError:             errorString(evidence.ParseError),
 		RunError:               errorString(evidence.RunError),
 		DiffDirty:              evidence.DiffDirty,

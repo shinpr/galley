@@ -197,3 +197,33 @@ func TestEffectiveOptionsForProfilesCleansWorktreesByDefault(t *testing.T) {
 		t.Fatalf("cleanup should default to true: %#v", effective)
 	}
 }
+
+func TestEffectiveSupervisorPrecedenceCharacterization(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		base       Options
+		repository string
+		want       string
+		wantSource string
+	}{
+		{name: "built-in default retained", base: Options{Supervisor: "claude", SupervisorSource: SupervisorSourceDefault}, want: "claude", wantSource: SupervisorSourceDefault},
+		{name: "daemon config retained", base: Options{Supervisor: "codex", SupervisorSource: SupervisorSourceDaemonConfig}, want: "codex", wantSource: SupervisorSourceDaemonConfig},
+		{name: "explicit CLI retained", base: Options{Supervisor: "codex", SupervisorSource: SupervisorSourceCLI}, want: "codex", wantSource: SupervisorSourceCLI},
+		{name: "repository overrides CLI", base: Options{Supervisor: "codex", SupervisorSource: SupervisorSourceCLI}, repository: "glm", want: "glm", wantSource: SupervisorSourceRepoProfile},
+	}
+	for _, tt := range tests {
+		current := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			bundle := profile.Bundle{Environment: &profile.Environment{}}
+			if current.repository != "" {
+				bundle.Environment.Supervisor = &profile.SupervisorDefault{DefaultCLI: current.repository}
+			}
+			got := effectiveOptionsForProfiles(current.base, bundle)
+			if got.Supervisor != current.want || got.SupervisorSource != current.wantSource {
+				t.Fatalf("resolved supervisor=%q source=%q; want %q/%q", got.Supervisor, got.SupervisorSource, current.want, current.wantSource)
+			}
+		})
+	}
+}

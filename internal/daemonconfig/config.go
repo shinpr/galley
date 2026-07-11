@@ -29,6 +29,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shinpr/galley/internal/provider"
+
 	"go.yaml.in/yaml/v3"
 )
 
@@ -36,7 +38,7 @@ import (
 // validation, daemon Preflight, and profile validation all consult so the
 // accepted set cannot drift between them. glm additionally needs a token,
 // enforced at startup/per task rather than by this list.
-var supervisorCLIs = []string{"claude", "codex", "glm"}
+var supervisorCLIs = provider.SupervisorIDs()
 
 // SupervisorCLIs returns the accepted supervisor adapter values in stable order.
 func SupervisorCLIs() []string { return slices.Clone(supervisorCLIs) }

@@ -8,7 +8,7 @@ const (
 
 var (
 	validModes                  = []string{"afk"}
-	validStatuses               = []string{"draft", "queued", "running", "needs_supervisor_review", "accepted", "pr_opened", "failed", "closed", "merged", "archived"}
+	validStatuses               = AllStatuses()
 	validPermissions            = []string{"read-only", "edit", "sandbox-full-access"}
 	validPromptModes            = []string{"replace", "append"}
 	validExecutorCLIs           = []string{"claude", "codex", "glm"}

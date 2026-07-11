@@ -179,7 +179,7 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 			if idle, ok := asSupervisorIdleTimeout(err); ok {
 				fmt.Fprintln(os.Stderr, idle.logLine(loaded.ID))
 			}
-			return taskstate.FailMove(opts.Root, runningPath, loaded, err)
+			return taskstate.FailMoveToStatus(opts.Root, runningPath, loaded, err)
 		}
 		mergeAttemptEvidence(loaded, review.Outcome, runID, prepared.CWD, review.AttemptDir)
 		// Progress detection. The dirty-diff
@@ -204,7 +204,7 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 		loaded.Attempts[len(loaded.Attempts)-1].SupervisorVerdict = review.Verdict.Status
 		loaded.Attempts[len(loaded.Attempts)-1].Summary = fmt.Sprintf("%s; run_id=%s; attempt=%d; workspace=%s", review.Verdict.Summary, runID, attempt, prepared.CWD)
 		if err := task.Save(runningPath, *loaded); err != nil {
-			return taskstate.FailMove(opts.Root, runningPath, loaded, err)
+			return taskstate.FailMoveToStatus(opts.Root, runningPath, loaded, err)
 		}
 		nextPrompt, done, err := applySupervisorVerdict(ctx, shutdownCtx, verdictApplication{
 			Opts:              effectiveOpts,
@@ -226,7 +226,7 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 	}
 	loaded.Status = "needs_supervisor_review"
 	fmt.Fprintf(os.Stderr, "galley: task %s exhausted attempts; needs supervisor review\n", loaded.ID)
-	return taskstate.Move(opts.Root, runningPath, "failed", loaded)
+	return taskstate.MoveToStatus(opts.Root, runningPath, loaded)
 }
 
 type attemptReview struct {
@@ -348,10 +348,10 @@ func applySupervisorVerdict(ctx, shutdownCtx context.Context, req verdictApplica
 		return req.Verdict.NextWorkOrder, false, nil
 	case "hard_stop":
 		req.Loaded.Status = "failed"
-		return "", true, taskstate.Move(req.Opts.Root, req.RunningPath, "failed", req.Loaded)
+		return "", true, taskstate.MoveToStatus(req.Opts.Root, req.RunningPath, req.Loaded)
 	case "needs_supervisor_review":
 		req.Loaded.Status = "needs_supervisor_review"
-		return "", true, taskstate.Move(req.Opts.Root, req.RunningPath, "failed", req.Loaded)
+		return "", true, taskstate.MoveToStatus(req.Opts.Root, req.RunningPath, req.Loaded)
 	default:
 		fmt.Fprintf(os.Stderr, "galley: task %s unknown supervisor verdict=%q\n", req.Loaded.ID, req.Verdict.Status)
 		return "", true, degradeToSupervisorReview(req, "supervisor-verdict", fmt.Sprintf("Supervisor returned unknown verdict status %q.", req.Verdict.Status), "Inspect supervisor_verdict.json and rerun after correcting the supervisor output.")
@@ -361,7 +361,7 @@ func applySupervisorVerdict(ctx, shutdownCtx context.Context, req verdictApplica
 func degradeToSupervisorReview(req verdictApplication, riskPrefix, detail, mitigation string) error {
 	req.Loaded.Status = "needs_supervisor_review"
 	appendRisk(req.Loaded, riskPrefix, "partial_verification", detail, mitigation, true)
-	return taskstate.Move(req.Opts.Root, req.RunningPath, "failed", req.Loaded)
+	return taskstate.MoveToStatus(req.Opts.Root, req.RunningPath, req.Loaded)
 }
 
 func acceptSupervisorVerdict(ctx context.Context, opts Options, runningPath string, loaded *task.Task, prepared workspace.Prepared, runDir string, verdict supervisor.Verdict) error {
@@ -373,19 +373,19 @@ func acceptSupervisorVerdict(ctx context.Context, opts Options, runningPath stri
 		if err := finalizeAcceptedChange(ctx, opts, loaded, prepared.CWD, prepared.BaseSHA, runDir); err != nil {
 			loaded.Status = "needs_supervisor_review"
 			appendRisk(loaded, "finalize", "partial_verification", err.Error(), "The executor diff and run evidence were stored; a supervisor should inspect and finish commit or PR creation.", true)
-			return taskstate.FailMove(opts.Root, runningPath, loaded, err)
+			return taskstate.FailMoveToStatus(opts.Root, runningPath, loaded, err)
 		}
 	} else if err := inputfiles.CleanupNonCommitted(prepared.CWD, loaded.Files); err != nil {
 		loaded.Status = "needs_supervisor_review"
 		appendRisk(loaded, "input-file-cleanup", "partial_verification", err.Error(), "Remove non-committed task input files from the execution workspace before archiving or reusing it.", true)
-		return taskstate.FailMove(opts.Root, runningPath, loaded, err)
+		return taskstate.FailMoveToStatus(opts.Root, runningPath, loaded, err)
 	}
 	loaded.Status = "accepted"
 	if opts.OpenPR {
 		loaded.Status = "pr_opened"
 	}
 	fmt.Fprintf(os.Stderr, "galley: task %s completed with status=%s\n", loaded.ID, loaded.Status)
-	return taskstate.Move(opts.Root, runningPath, "done", loaded)
+	return taskstate.MoveToStatus(opts.Root, runningPath, loaded)
 }
 
 func executionTask(loaded task.Task, workDir string) task.Task {

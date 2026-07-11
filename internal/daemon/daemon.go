@@ -488,7 +488,11 @@ func queuedHasClaimConflict(root, queuedPath string) (bool, error) {
 	if exists, err := pathExistsForClaim(queuedPath + ".lock"); err != nil || exists {
 		return exists, err
 	}
-	runningPath := filepath.Join(root, "tasks", "running", filepath.Base(queuedPath))
+	runningState, err := task.WorkflowStateForTransition(task.StatusQueued, task.StatusRunning)
+	if err != nil {
+		return false, err
+	}
+	runningPath := task.TaskStatePath(root, runningState, filepath.Base(queuedPath))
 	if exists, err := pathExistsForClaim(runningPath); err != nil || exists {
 		return exists, err
 	}
@@ -540,7 +544,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	var runDir string
 	// Start the best-effort terminal notification hook after the task body
 	// returns. By this point every terminal publication has already happened
-	// through taskstate.Move / taskstate.FailMove, so the hook only observes a
+	// through the taskstate publication APIs, so the hook only observes a
 	// task that actually reached a published terminal state. The hook reads the
 	// published task from tasks/done|failed so a failed move (task still in
 	// running/) produces no notification, and a hook failure cannot affect the
@@ -553,14 +557,14 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 
 	loaded, err := loadClaimedTask(runningPath)
 	if err != nil {
-		return taskstate.FailMove(opts.Root, runningPath, nil, err)
+		return taskstate.RecoverUnreadableClaimToFailed(opts.Root, runningPath, err)
 	}
 	stopHeartbeat := startHeartbeat(ctx, runningPath, opts.HeartbeatInterval)
 	defer stopHeartbeat()
 
 	validation, err := validateClaimedTask(&loaded)
 	if err != nil {
-		return taskstate.FailMove(opts.Root, runningPath, &loaded, err)
+		return taskstate.FailMoveToStatus(opts.Root, runningPath, &loaded, err)
 	}
 	runID, runDir, err := initializeRunEvidence(opts.Root, runningPath, loaded, validation)
 	if err != nil {
@@ -588,7 +592,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 
 	prepared, err := prepareClaimedWorkspace(ctx, opts, profiles, runningPath, runDir, &loaded)
 	if err != nil {
-		return taskstate.FailMove(opts.Root, runningPath, &loaded, err)
+		return taskstate.FailMoveToStatus(opts.Root, runningPath, &loaded, err)
 	}
 	// Setup executor preflight runs after the worktree and input files are
 	// prepared, before acceptance skeleton preflight, and before any executor
@@ -653,7 +657,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 
 func failClaimedStage(root, runningPath string, loaded *task.Task, phase, kind string, err error, runDir string) error {
 	appendFailureAttempt(loaded, phase, kind, err, runDir)
-	return taskstate.FailMove(root, runningPath, loaded, err)
+	return taskstate.FailMoveToStatus(root, runningPath, loaded, err)
 }
 
 // loadAndPersistTaskProfiles resolves the quality and environment profiles for

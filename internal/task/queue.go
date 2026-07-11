@@ -98,9 +98,13 @@ func rejectDuplicateTaskID(path, id, root string) error {
 
 // scanForDuplicateTaskID requests a rescan when an enumerated task has moved.
 func scanForDuplicateTaskID(root, current, id string) (string, bool, error) {
-	matches, err := filepath.Glob(filepath.Join(root, "tasks", "*", "*.y*ml"))
-	if err != nil {
-		return "", false, err
+	var matches []string
+	for _, state := range AllWorkflowStates() {
+		stateMatches, err := filepath.Glob(filepath.Join(TaskStateDir(root, state), "*.y*ml"))
+		if err != nil {
+			return "", false, err
+		}
+		matches = append(matches, stateMatches...)
 	}
 	for _, match := range matches {
 		absMatch, err := filepath.Abs(match)
@@ -159,9 +163,9 @@ func queueRoot(path, root string) string {
 
 func queuedPathFor(path, root string) string {
 	if root != "" {
-		return filepath.Join(root, "tasks", "queued", filepath.Base(path))
+		return TaskStatePath(root, WorkflowStateQueued, filepath.Base(path))
 	}
-	return siblingTaskPath(path, "queued")
+	return siblingTaskPath(path, WorkflowStateQueued)
 }
 
 func taskPathUnderRoot(path, root string) bool {

@@ -36,8 +36,8 @@ func pollPRComments(ctx context.Context, opts Options) error {
 
 func tasksWithPR(root string) ([]string, error) {
 	var paths []string
-	for _, state := range []string{"done", "failed"} {
-		matches, err := filepath.Glob(filepath.Join(root, "tasks", state, "*.yaml"))
+	for _, state := range []task.WorkflowState{task.WorkflowStateDone, task.WorkflowStateFailed} {
+		matches, err := filepath.Glob(filepath.Join(task.TaskStateDir(root, state), "*.yaml"))
 		if err != nil {
 			return nil, err
 		}

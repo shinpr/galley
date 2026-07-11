@@ -15,7 +15,7 @@ import (
 )
 
 func cleanupWorktrees(ctx context.Context, opts Options) error {
-	matches, err := filepath.Glob(filepath.Join(opts.Root, "tasks", "done", "*.yaml"))
+	matches, err := filepath.Glob(filepath.Join(task.TaskStateDir(opts.Root, task.WorkflowStateDone), "*.yaml"))
 	if err != nil {
 		return err
 	}

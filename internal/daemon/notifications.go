@@ -51,7 +51,7 @@ func (d *notificationDispatcher) Wait() {
 // notifyTerminalPublication starts the opt-in, best-effort notification command
 // hook for a claimed task that has finished processing. It is invoked from a
 // defer in processClaimedTask, so by the time it runs every terminal
-// publication has already happened through taskstate.Move / taskstate.FailMove.
+// publication has already happened through the taskstate publication APIs.
 //
 // Delivery runs on a dispatcher goroutine and this function returns
 // immediately. That is load-bearing: processClaimedTask must be free to return
@@ -129,8 +129,8 @@ func deliverTerminalNotification(ctx context.Context, opts Options, base, runDir
 // failed state directories. failed is checked first because both directories
 // cannot legitimately hold the same base at once; the first match wins.
 func findPublishedTask(root, base string) (task.Task, bool) {
-	for _, state := range []string{"failed", "done"} {
-		path := filepath.Join(root, "tasks", state, base)
+	for _, state := range []task.WorkflowState{task.WorkflowStateFailed, task.WorkflowStateDone} {
+		path := task.TaskStatePath(root, state, base)
 		if _, err := os.Stat(path); err != nil {
 			continue
 		}

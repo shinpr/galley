@@ -256,14 +256,14 @@ func newTaskShowCommand() *cobra.Command {
 }
 
 func listTaskItems(root, state string) ([]taskListItem, error) {
-	states := []string{"draft", "queued", "running", "done", "failed", "archived"}
+	states := task.AllWorkflowStates()
 	if state != "" {
-		states = []string{state}
+		states = []task.WorkflowState{task.WorkflowState(state)}
 	}
 
 	var items []taskListItem
 	for _, currentState := range states {
-		paths, err := taskFiles(filepath.Join(root, "tasks", currentState))
+		paths, err := taskFiles(task.TaskStateDir(root, currentState))
 		if err != nil {
 			return nil, err
 		}
@@ -274,7 +274,7 @@ func listTaskItems(root, state string) ([]taskListItem, error) {
 			loaded, err := task.Load(path)
 			if err != nil {
 				items = append(items, taskListItem{
-					State:       currentState,
+					State:       string(currentState),
 					File:        path,
 					DecodeError: err.Error(),
 				})

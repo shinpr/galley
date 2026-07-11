@@ -99,7 +99,7 @@ func TestSupervisorRetryRecoversAfterStallOnSecondTry(t *testing.T) {
 // supervisor-try-N, and surface a classified supervisor error. The follow-up
 // appendSupervisorFailureAttempt path is what stamps the attempt-level error
 // phase/kind that runSupervisorLoop persists into the task file before
-// taskstate.FailMove marks the task as failed, so we verify both halves.
+// FailMoveToStatus marks the task as failed, so we verify both halves.
 func TestSupervisorRetryExhaustedReturnsClassifiedFailure(t *testing.T) {
 	attemptDir := t.TempDir()
 	originalRunner := supervisorRunner

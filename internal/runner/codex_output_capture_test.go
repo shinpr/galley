@@ -151,6 +151,19 @@ func TestCodexCompatibleOutputSchemaRecursivelyRequiresObjectProperties(t *testi
 	}
 }
 
+func TestCodexExecutorResultSchemaRemovesUnsupportedPatterns(t *testing.T) {
+	t.Parallel()
+	body, err := CodexExecutorResultSchema()
+	if err != nil {
+		t.Fatalf("CodexExecutorResultSchema: %v", err)
+	}
+	var doc any
+	if err := json.Unmarshal([]byte(body), &doc); err != nil {
+		t.Fatalf("compatible executor schema is not valid JSON: %v", err)
+	}
+	assertNoSchemaKeyword(t, doc, "pattern")
+}
+
 func TestCodexCommandPlanReusesCallerSuppliedSchemaFile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -240,6 +253,23 @@ func objectProp(t *testing.T, parent map[string]any, name string) map[string]any
 		t.Fatalf("property %q is not an object: %#v", name, parent[name])
 	}
 	return got
+}
+
+func assertNoSchemaKeyword(t *testing.T, node any, keyword string) {
+	t.Helper()
+	switch value := node.(type) {
+	case map[string]any:
+		if _, ok := value[keyword]; ok {
+			t.Fatalf("Codex output schema contains unsupported %q keyword: %#v", keyword, value)
+		}
+		for _, child := range value {
+			assertNoSchemaKeyword(t, child, keyword)
+		}
+	case []any:
+		for _, child := range value {
+			assertNoSchemaKeyword(t, child, keyword)
+		}
+	}
 }
 
 func requiredSet(t *testing.T, schema map[string]any) map[string]bool {

@@ -201,14 +201,8 @@ func withDefaultEmbeddedCodexOptions(opts CodexOptions) (CodexOptions, error) {
 	return opts, nil
 }
 
-// CodexExecutorResultSchema returns the executor result schema shape accepted
-// by `codex exec --output-schema`. Codex currently rejects JSON Schema
-// conditionals such as allOf/if/then/else in response_format schemas and
-// requires every object property to be listed in required. The runner keeps
-// optional semantics by making originally optional properties nullable before
-// invoking Codex. Galley still validates the parsed result with
-// ExecutorResult.Validate(), which preserves semantic requirements after the
-// model responds.
+// CodexExecutorResultSchema adapts the result schema to Codex's stricter subset.
+// ExecutorResult.Validate preserves semantic checks after parsing.
 func CodexExecutorResultSchema() (string, error) {
 	return CodexCompatibleOutputSchema(schemas.ClaudeResult)
 }
@@ -232,6 +226,7 @@ func normalizeCodexOutputSchema(node any) {
 	switch v := node.(type) {
 	case map[string]any:
 		delete(v, "allOf")
+		delete(v, "pattern")
 		props, _ := v["properties"].(map[string]any)
 		originalRequired := requiredNameSet(v["required"])
 		if props != nil {

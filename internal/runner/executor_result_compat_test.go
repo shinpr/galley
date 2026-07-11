@@ -1,0 +1,33 @@
+package runner
+
+import (
+	"encoding/json"
+	"reflect"
+	"sort"
+	"testing"
+)
+
+func TestClaudeResultSerializedShapeCompatibility(t *testing.T) {
+	t.Parallel()
+	data, err := json.Marshal(ClaudeResult{
+		Status: "completed", Summary: "done", FilesModified: []string{},
+		AcceptanceCriteria: []ClaudeAcceptanceCriterion{}, Verification: []ClaudeVerification{},
+		ScopeExpansions: []ClaudeScopeExpansion{}, Decisions: []ClaudeDecision{}, Risks: []ClaudeRisk{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(decoded))
+	for key := range decoded {
+		got = append(got, key)
+	}
+	sort.Strings(got)
+	want := []string{"acceptance_criteria", "decisions", "files_modified", "risks", "scope_expansions", "status", "summary", "verification"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("serialized executor-result keys = %v; want %v", got, want)
+	}
+}

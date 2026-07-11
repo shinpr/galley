@@ -401,7 +401,7 @@ func evaluateSupervisorWithRetry(ctx context.Context, opts Options, evidence sup
 		if err := os.MkdirAll(tryDir, 0o700); err != nil {
 			return supervisor.Verdict{}, fmt.Errorf("create supervisor try dir %s: %w", tryDir, err)
 		}
-		verdict, err := supervisorRunner(ctx, opts, evidence, tryDir, workDir)
+		verdict, err := opts.daemonDependencies().supervisorRunner(ctx, opts, evidence, tryDir, workDir)
 		if err == nil {
 			// Per-retry verdict.
 			if writeErr := writeJSON(runartifact.Path(tryDir, runartifact.SupervisorVerdictFilename), verdict); writeErr != nil {

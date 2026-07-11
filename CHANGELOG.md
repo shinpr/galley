@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Added
+
+- Repository `environment.yaml` accepts an optional `supervisor.model` that pins the exact model for every built-in supervisor evaluation in that repository. Galley forwards the value unchanged to the Codex, Claude, and GLM supervisor adapters via their native `--model` option; accepted values are determined by the provider CLI. When absent or empty, the supervisor CLI's default model is preserved. The resolved model state is recorded in `runs/<run-id>/supervisor.json` (`model` and `model_source`).
+
 ### Changed
 
 - Packaged Claude and Codex Galley plugins are now versioned as `0.1.21`. General environment-profile examples and authoring guidance now use Claude as the default executor and supervisor backend.

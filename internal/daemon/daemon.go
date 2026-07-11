@@ -96,7 +96,12 @@ type Options struct {
 	// daemon CLI wiring before Preflight and then overridden per task when an
 	// environment.yaml supervisor.default_cli wins for that task. The value is
 	// persisted to runs/<run-id>/supervisor.json as evidence.
-	SupervisorSource     string
+	SupervisorSource string
+	// SupervisorModel optionally pins the exact model forwarded to every built-in
+	// supervisor evaluation, resolved per task from environment.yaml
+	// supervisor.model with empty meaning the CLI default governs review. The
+	// resolved state is persisted to runs/<run-id>/supervisor.json as evidence.
+	SupervisorModel      string
 	ShutdownTimeout      time.Duration
 	DisableClaudeGuard   bool
 	ClaudeGuardPluginDir string
@@ -192,6 +197,14 @@ const (
 	SupervisorSourceCLI          = "cli"
 	SupervisorSourceDaemonConfig = "daemon_config"
 	SupervisorSourceDefault      = "default"
+)
+
+// Supervisor model source labels. Persisted in run evidence so AFK users and
+// later agents can distinguish a repository-pinned supervisor model from the
+// supervisor CLI's own default.
+const (
+	SupervisorModelSourceRepoProfile = "environment_profile"
+	SupervisorModelSourceCLIDefault  = "cli_default"
 )
 
 // Run starts the daemon loop.

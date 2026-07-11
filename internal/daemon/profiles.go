@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/shinpr/galley/internal/fileutil"
 	"github.com/shinpr/galley/internal/galleyhome"
@@ -176,6 +177,7 @@ type effectiveTaskOptions struct {
 	CleanupWorktrees bool
 	Supervisor       string
 	SupervisorSource string
+	SupervisorModel  string
 }
 
 func resolveEffectiveTaskOptions(opts Options, profiles profile.Bundle) effectiveTaskOptions {
@@ -188,6 +190,7 @@ func resolveEffectiveTaskOptions(opts Options, profiles profile.Bundle) effectiv
 		CleanupWorktrees: true,
 		Supervisor:       opts.Supervisor,
 		SupervisorSource: opts.SupervisorSource,
+		SupervisorModel:  opts.SupervisorModel,
 	}
 	if profiles.Environment != nil {
 		env := profiles.Environment
@@ -198,9 +201,17 @@ func resolveEffectiveTaskOptions(opts Options, profiles profile.Bundle) effectiv
 		if env.Worktree.Cleanup != nil {
 			effective.CleanupWorktrees = *env.Worktree.Cleanup
 		}
-		if env.Supervisor != nil && env.Supervisor.DefaultCLI != "" {
-			effective.Supervisor = env.Supervisor.DefaultCLI
-			effective.SupervisorSource = SupervisorSourceRepoProfile
+		if env.Supervisor != nil {
+			if env.Supervisor.DefaultCLI != "" {
+				effective.Supervisor = env.Supervisor.DefaultCLI
+				effective.SupervisorSource = SupervisorSourceRepoProfile
+			}
+			// A whitespace-only model is treated as absent so it preserves the CLI
+			// default; a real value is forwarded unchanged per the exact-value
+			// contract, independent of whether default_cli is also set.
+			if strings.TrimSpace(env.Supervisor.Model) != "" {
+				effective.SupervisorModel = env.Supervisor.Model
+			}
 		}
 	}
 	if effective.OpenPR {
@@ -218,6 +229,7 @@ func (effective effectiveTaskOptions) apply(opts Options) Options {
 	opts.CleanupWorktrees = effective.CleanupWorktrees
 	opts.Supervisor = effective.Supervisor
 	opts.SupervisorSource = effective.SupervisorSource
+	opts.SupervisorModel = effective.SupervisorModel
 	return opts
 }
 

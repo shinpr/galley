@@ -99,6 +99,7 @@ var supervisorRunner = defaultSupervisorRunner
 func defaultSupervisorRunner(ctx context.Context, opts Options, evidence supervisor.Evidence, tryDir, workDir string) (supervisor.Verdict, error) {
 	return supervisor.RunAdapter(ctx, supervisor.AdapterOptions{
 		Provider:     opts.Supervisor,
+		Model:        opts.SupervisorModel,
 		WorkDir:      workDir,
 		Timeout:      time.Duration(evidence.Task.ExecutionPolicy.TimeoutMS) * time.Millisecond,
 		IdleTimeout:  opts.IdleTimeout,
@@ -509,9 +510,19 @@ func attemptsLeft(budget, attempt int) int {
 // determined the supervisor adapter Galley used. The function is
 // extracted from runSupervisorLoop so it can be unit-tested without driving a
 // full task through the daemon loop.
+//
+// model_source distinguishes a repository-pinned supervisor model from the
+// supervisor CLI default: an omitted override records an empty model with
+// cli_default so a later reader never mistakes the CLI default for a pin.
 func writeSupervisorEvidence(runDir string, effectiveOpts Options) error {
+	modelSource := SupervisorModelSourceCLIDefault
+	if effectiveOpts.SupervisorModel != "" {
+		modelSource = SupervisorModelSourceRepoProfile
+	}
 	return writeJSON(filepath.Join(runDir, "supervisor.json"), map[string]string{
-		"resolved": effectiveOpts.Supervisor,
-		"source":   effectiveOpts.SupervisorSource,
+		"resolved":     effectiveOpts.Supervisor,
+		"source":       effectiveOpts.SupervisorSource,
+		"model":        effectiveOpts.SupervisorModel,
+		"model_source": modelSource,
 	})
 }

@@ -95,6 +95,11 @@ type ExecutorDefault struct {
 // different supervisor. Allowed values are `claude`, `codex`, and `glm`.
 type SupervisorDefault struct {
 	DefaultCLI string `yaml:"default_cli,omitempty" json:"default_cli,omitempty"`
+	// Model optionally pins the exact model for this repository's built-in
+	// supervisor evaluations, forwarded unchanged as the provider CLI's native
+	// --model option without validation. Empty or absent preserves the supervisor
+	// CLI's default model.
+	Model string `yaml:"model,omitempty" json:"model,omitempty"`
 }
 
 type RequiredCheckEnvironment struct {

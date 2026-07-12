@@ -146,7 +146,7 @@ func TestForceStopOnLiveProcessKills(t *testing.T) {
 	if !Verify(meta, meta.Root, meta.Executable) {
 		t.Skip("process identity verification unavailable on this Windows runner")
 	}
-	if _, err := ForceStop(meta, 2*time.Second, ""); err != nil {
+	if _, err := ForceStop(meta, 2*time.Second); err != nil {
 		t.Fatalf("ForceStop: %v", err)
 	}
 	alive, err := Alive(cmd.Process.Pid)

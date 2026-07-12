@@ -8,7 +8,7 @@ This project follows semantic versioning.
 
 ### Fixed
 
-- `galley daemon stop` is idempotent for cooperating CLI callers: only the first normal stop sends the graceful signal; concurrent or repeated normal stops wait for the same shutdown. This prevents a second SIGTERM from taking the daemon's immediate-exit path and orphaning an active task claim. PID-file and stop-coordination cleanup use compare-and-remove under the shared start/stop lifecycle lock so a stale stop cannot delete a restarted daemon's records. Lifecycle locks record owner identity, reclaim only provably stale holders (transient ProcessInfo failure alone is not proof of staleness), and drop ownership through a generation-fenced handoff so a replacement claim cannot be unlinked mid-reclaim. Abandoned `.lock.drop.<claim>` fences left after a crash mid-handoff are reclaimed via dropper identity and lease checks so a stale tombstone cannot permanently veto later ReservePID, stop cleanup, or daemon start. Force escalation revalidates process-start identity immediately before SIGKILL so a recycled PID after a follower timeout is never killed. Daemon shutdown stops the PID heartbeat before RemovePID so a late refresh cannot recreate the PID file. Pre-signal identity checks fail closed when process metadata is unavailable, and unsignaled claims require a parseable coordinator lease or reclaim via a bounded filesystem-time lease. `galley daemon stop --force` still escalates to verified termination and child cleanup, and direct signals from a terminal or service manager are unchanged.
+- Repeated `galley daemon stop` commands now coordinate so only one normal stop signals the daemon; `--force` remains the explicit forced-termination path.
 
 ## v0.10.0 - 2026-07-12
 

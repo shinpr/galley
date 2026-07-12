@@ -23,6 +23,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var stopVerifiedForCommand = daemonctl.StopVerified
+var afterInitialStopInspectForCommand func()
+
 func NewCommand(use string) *cobra.Command {
 	var opts daemon.Options
 	var pollInterval time.Duration
@@ -115,13 +118,10 @@ func NewCommand(use string) *cobra.Command {
 				if err := daemonctl.Heartbeat(pidFile, meta); err != nil {
 					return err
 				}
-				// Stop the heartbeat before RemovePID so an in-flight refresh
-				// cannot recreate the PID file after cleanup (LIFO defer would
-				// remove first while the heartbeat goroutine still runs).
 				stopHeartbeat := startPIDHeartbeat(pidFile, meta)
 				defer func() {
 					stopHeartbeat()
-					_ = daemonctl.RemovePID(pidFile, meta)
+					_ = daemonctl.RemovePID(pidFile, os.Getpid())
 				}()
 			}
 			err := daemon.Run(ctx, opts)
@@ -297,18 +297,12 @@ func newStartCommand(opts *daemon.Options, pidFile, logFile *string, readinessTi
 					return fmt.Errorf("refusing to replace pid file for unverified live pid %d", status.Meta.PID)
 				}
 				if !status.Alive {
-					// Held variants: ReservePID already owns the lifecycle lock.
-					_ = daemonctl.ClearStopCoordinationHeld(paths.PIDFile, status.Meta)
-					if err := daemonctl.RemovePIDHeld(paths.PIDFile, status.Meta); err != nil {
+					if err := daemonctl.RemovePID(paths.PIDFile, status.Meta.PID); err != nil {
 						return err
 					}
 				}
 			} else if !errors.Is(err, daemonctl.ErrNotRunning) {
 				return err
-			} else {
-				// No PID file: still drop orphaned stop coordination so a prior
-				// interrupted stop cannot block a fresh start/stop cycle.
-				_ = daemonctl.ClearStopCoordinationHeld(paths.PIDFile, daemonctl.PIDFile{})
 			}
 			if err := os.MkdirAll(opts.Root, 0o700); err != nil {
 				return fmt.Errorf("create root: %w", err)
@@ -351,7 +345,7 @@ func newStartCommand(opts *daemon.Options, pidFile, logFile *string, readinessTi
 				// aborted `galley daemon start` and races a subsequent
 				// retry against a stale process.
 				_ = daemonctl.TerminateChildProcess(child.Process)
-				_ = daemonctl.RemovePIDHeld(paths.PIDFile, meta)
+				_ = daemonctl.RemovePID(paths.PIDFile, child.Process.Pid)
 				return fmt.Errorf("%w; see log file %s", err, paths.LogFile)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "galley daemon started pid=%d\npid_file=%s\nlog_file=%s\n", child.Process.Pid, paths.PIDFile, paths.LogFile)
@@ -373,13 +367,34 @@ func newStopCommand(opts *daemon.Options, pidFile *string, stopTimeout *time.Dur
 			if err != nil {
 				return err
 			}
-			status, err := daemonctl.Inspect(paths.PIDFile, opts.Root, exe)
+			initial, err := daemonctl.Inspect(paths.PIDFile, opts.Root, exe)
 			if errors.Is(err, daemonctl.ErrNotRunning) {
 				return daemonctl.ErrNotRunning
 			}
 			if err != nil {
 				return err
 			}
+			if afterInitialStopInspectForCommand != nil {
+				afterInitialStopInspectForCommand()
+			}
+			var release func()
+			if !force {
+				release, err = acquireStopLock(paths.PIDFile, *stopTimeout)
+				if err != nil {
+					return err
+				}
+				defer release()
+				status, inspectErr := daemonctl.Inspect(paths.PIDFile, opts.Root, exe)
+				if errors.Is(inspectErr, daemonctl.ErrNotRunning) || (inspectErr == nil && !sameDaemonIdentity(initial.Meta, status.Meta)) {
+					fmt.Fprintf(cmd.OutOrStdout(), "galley daemon stopped pid=%d\n", initial.Meta.PID)
+					return nil
+				}
+				if inspectErr != nil {
+					return inspectErr
+				}
+				initial = status
+			}
+			status := initial
 			if !status.Alive {
 				// A stale daemon record means the daemon process is gone, but
 				// it may have left behind executor/supervisor child process
@@ -390,8 +405,7 @@ func newStopCommand(opts *daemon.Options, pidFile *string, stopTimeout *time.Dur
 				if err := cleanupOnForce(cmd, force, opts.Root, status.Meta.PID, *stopTimeout); err != nil {
 					return err
 				}
-				_ = daemonctl.ClearStopCoordination(paths.PIDFile, status.Meta)
-				if err := daemonctl.RemovePID(paths.PIDFile, status.Meta); err != nil {
+				if err := daemonctl.RemovePID(paths.PIDFile, status.Meta.PID); err != nil {
 					return err
 				}
 				return daemonctl.ErrNotRunning
@@ -401,12 +415,12 @@ func newStopCommand(opts *daemon.Options, pidFile *string, stopTimeout *time.Dur
 			}
 			forced := false
 			if force {
-				wasForced, err := daemonctl.ForceStop(status.Meta, *stopTimeout, paths.PIDFile)
+				wasForced, err := daemonctl.ForceStop(status.Meta, *stopTimeout)
 				if err != nil && !errors.Is(err, daemonctl.ErrNotRunning) {
 					return err
 				}
 				forced = wasForced
-			} else if err := daemonctl.CoordinatedStopVerified(status.Meta, *stopTimeout, paths.PIDFile); err != nil && !errors.Is(err, daemonctl.ErrNotRunning) {
+			} else if err := stopVerifiedForCommand(status.Meta, *stopTimeout); err != nil && !errors.Is(err, daemonctl.ErrNotRunning) {
 				return err
 			}
 			// Force stop must clean up the daemon's known active child
@@ -421,7 +435,7 @@ func newStopCommand(opts *daemon.Options, pidFile *string, stopTimeout *time.Dur
 			if err := cleanupOnForce(cmd, force, opts.Root, status.Meta.PID, *stopTimeout); err != nil {
 				return err
 			}
-			if err := daemonctl.RemovePID(paths.PIDFile, status.Meta); err != nil {
+			if err := daemonctl.RemovePID(paths.PIDFile, status.Meta.PID); err != nil {
 				return err
 			}
 			if forced {

@@ -935,6 +935,10 @@ func TestSetupResultSchemaMatchesPersistedShape(t *testing.T) {
 		Provider:           "claude",
 		Source:             setuppreflight.SourceDiscovered,
 	}
+	// Stamp a resolved identity with an explicit empty model so the persisted
+	// shape includes executor_* keys (including empty executor_model) that the
+	// schema must accept for requeue reuse matching.
+	setuppreflight.ApplyExecutorIdentity(res, task.Executor{CLI: "claude", Model: "", Effort: "high"})
 	if err := setuppreflight.WriteResult(runDir, res); err != nil {
 		t.Fatalf("write setup result: %v", err)
 	}
@@ -945,6 +949,9 @@ func TestSetupResultSchemaMatchesPersistedShape(t *testing.T) {
 	var saved map[string]any
 	if err := json.Unmarshal(savedRaw, &saved); err != nil {
 		t.Fatalf("decode saved: %v", err)
+	}
+	if model, ok := saved["executor_model"]; !ok || model != "" {
+		t.Fatalf("persisted executor_model must be explicit empty string, got present=%v value=%#v", ok, model)
 	}
 	schemaPath, err := filepath.Abs("../../schemas/setup-result.schema.json")
 	if err != nil {
@@ -965,7 +972,7 @@ func TestSetupResultSchemaMatchesPersistedShape(t *testing.T) {
 	// source fields. This guards future drift where someone removes one of
 	// them from the schema without also removing it from the Go struct.
 	props, _ := schema["properties"].(map[string]any)
-	for _, requiredKey := range []string{"provider", "source", "successful_commands", "inspected_files", "readiness_evidence", "repair_guidance", "error"} {
+	for _, requiredKey := range []string{"provider", "source", "successful_commands", "inspected_files", "readiness_evidence", "repair_guidance", "error", "executor_cli", "executor_model", "executor_effort"} {
 		if _, ok := props[requiredKey]; !ok {
 			t.Fatalf("schema missing property %q that the runtime persists", requiredKey)
 		}

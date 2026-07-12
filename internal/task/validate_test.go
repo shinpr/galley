@@ -123,13 +123,6 @@ func TestValidateStructuralRejectsInvalidCases(t *testing.T) {
 			want: "scope.permission must be one of",
 		},
 		{
-			name: "invalid prompt mode",
-			mutate: func(task *Task) {
-				task.Executor.PromptMode = "merge"
-			},
-			want: "executor.prompt_mode must be one of",
-		},
-		{
 			name: "duplicate ac id",
 			mutate: func(task *Task) {
 				task.AcceptanceCriteria = append(task.AcceptanceCriteria, task.AcceptanceCriteria[0])
@@ -373,11 +366,9 @@ func validTask(t *testing.T) Task {
 		},
 		Supervisor: Supervisor{},
 		Executor: Executor{
-			CLI:           "claude",
-			Model:         "opus",
-			Effort:        "high",
-			PromptProfile: "codexized-claude-executor-v1",
-			PromptMode:    "replace",
+			CLI:    "claude",
+			Model:  "opus",
+			Effort: "high",
 		},
 	}
 }

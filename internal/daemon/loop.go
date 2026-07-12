@@ -112,7 +112,7 @@ func defaultSupervisorRunner(ctx context.Context, opts Options, evidence supervi
 	}, evidence)
 }
 
-func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPath string, loaded *task.Task, prepared workspace.Prepared, profiles profile.Bundle, runDir, runID string) error {
+func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPath string, loaded *task.Task, prepared workspace.Prepared, profiles profile.Bundle, runDir, runID string, effectiveExecutor task.Executor) error {
 	fmt.Fprintf(os.Stderr, "galley: task %s running in %s (run_id=%s)\n", loaded.ID, prepared.CWD, runID)
 	effectiveOpts := opts
 	// Persist the resolved supervisor and its source as run evidence.
@@ -131,7 +131,7 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 	// implementation work order so the executor sees the readiness facts and
 	// threaded into supervisor evidence so reviewers can verify them.
 	setupResultEvidence, setupUpdateEvidence := setuppreflight.LoadRunEvidence(runDir, runID)
-	promptTask := executionTask(*loaded, prepared.CWD)
+	promptTask := executionTask(*loaded, prepared.CWD, effectiveExecutor)
 	if preflightResult != nil {
 		// Runtime obligations below are the source of truth after preflight.
 		// Suppress static task-output rendering here to avoid duplicate
@@ -156,15 +156,16 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 	consecutiveNoDiff := 0
 	for attempt := 1; budget < 0 || attempt <= budget; attempt++ {
 		review, err := runOneSupervisorAttempt(ctx, supervisorAttemptRequest{
-			Opts:     effectiveOpts,
-			Loaded:   loaded,
-			Prepared: prepared,
-			Profiles: profiles,
-			RunDir:   runDir,
-			RunID:    runID,
-			Attempt:  attempt,
-			Budget:   budget,
-			Prompt:   prompt,
+			Opts:              effectiveOpts,
+			Loaded:            loaded,
+			Prepared:          prepared,
+			Profiles:          profiles,
+			RunDir:            runDir,
+			RunID:             runID,
+			Attempt:           attempt,
+			Budget:            budget,
+			Prompt:            prompt,
+			EffectiveExecutor: effectiveExecutor,
 		})
 		if err != nil {
 			// When an exhausted supervisor idle timeout fails the task,
@@ -230,15 +231,16 @@ type attemptReview struct {
 }
 
 type supervisorAttemptRequest struct {
-	Opts     Options
-	Loaded   *task.Task
-	Prepared workspace.Prepared
-	Profiles profile.Bundle
-	RunDir   string
-	RunID    string
-	Attempt  int
-	Budget   int
-	Prompt   string
+	Opts              Options
+	Loaded            *task.Task
+	Prepared          workspace.Prepared
+	Profiles          profile.Bundle
+	RunDir            string
+	RunID             string
+	Attempt           int
+	Budget            int
+	Prompt            string
+	EffectiveExecutor task.Executor
 }
 
 func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) (attemptReview, error) {
@@ -248,7 +250,7 @@ func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) 
 		appendFailureAttempt(req.Loaded, "attempt_setup", "attempt_setup_failed", err, req.RunDir)
 		return attemptReview{}, fmt.Errorf("create attempt dir %s: %w", attemptDir, err)
 	}
-	effectiveTask := executionTask(*req.Loaded, req.Prepared.CWD)
+	effectiveTask := executionTask(*req.Loaded, req.Prepared.CWD, req.EffectiveExecutor)
 	effectiveTaskPath := filepath.Join(attemptDir, "task.effective.yaml")
 	if err := task.Save(effectiveTaskPath, effectiveTask); err != nil {
 		appendFailureAttempt(req.Loaded, "attempt_setup", "attempt_setup_failed", err, attemptDir)
@@ -380,8 +382,11 @@ func acceptSupervisorVerdict(ctx context.Context, opts Options, runningPath stri
 	return taskstate.MoveToStatus(opts.Root, runningPath, loaded)
 }
 
-func executionTask(loaded task.Task, workDir string) task.Task {
+func executionTask(loaded task.Task, workDir string, effectiveExecutor task.Executor) task.Task {
 	loaded.Scope.CWD = workDir
+	// Apply the run-resolved executor so setup, skeleton, and implementation
+	// share one effective configuration without rewriting authored task YAML.
+	loaded.Executor = effectiveExecutor
 	return loaded
 }
 

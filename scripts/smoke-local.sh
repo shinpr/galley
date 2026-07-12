@@ -87,8 +87,6 @@ executor:
   cli: "claude"
   model: "opus"
   effort: "high"
-  prompt_profile: "codexized-claude-executor-v1"
-  prompt_mode: "replace"
 decisions: []
 risks: []
 attempts: []

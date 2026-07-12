@@ -31,8 +31,6 @@ supervisor:
 executor:
   cli: "claude"
   effort: "high"
-  prompt_profile: "codexized-claude-executor-v1"
-  prompt_mode: "replace"
 # Optional acceptance skeleton preflight. When enabled, Galley creates
 # AC-linked test skeletons before the executor starts. It is disabled by
 # default; set `enabled` to true and optionally add `required` or

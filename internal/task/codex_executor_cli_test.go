@@ -121,16 +121,19 @@ func TestExecutorCLISchemaEnumIncludesClaudeAndCodex(t *testing.T) {
 	execProps, _ := exec["properties"].(map[string]any)
 	cliNode, _ := execProps["cli"].(map[string]any)
 	rawEnum, _ := cliNode["enum"].([]any)
-	if len(rawEnum) != 4 {
-		t.Fatalf("expected 4-value enum, got %#v", rawEnum)
+	// Empty is included so explicit `cli: ""` matches Go structural validation
+	// (YAML zero values) and remains an independent optional override.
+	wantEnum := append([]string{""}, want...)
+	if len(rawEnum) != len(wantEnum) {
+		t.Fatalf("expected %d-value enum, got %#v", len(wantEnum), rawEnum)
 	}
 	gotEnum := []string{}
 	for _, v := range rawEnum {
 		s, _ := v.(string)
 		gotEnum = append(gotEnum, s)
 	}
-	if !reflect.DeepEqual(gotEnum, want) {
-		t.Fatalf("generated executor.cli enum = %#v, want %#v", gotEnum, want)
+	if !reflect.DeepEqual(gotEnum, wantEnum) {
+		t.Fatalf("generated executor.cli enum = %#v, want %#v", gotEnum, wantEnum)
 	}
 }
 
@@ -169,16 +172,28 @@ func TestExecutorEffortSchemaConditionDependsOnCLI(t *testing.T) {
 		}
 	}
 
-	if !reflect.DeepEqual(got["claude"], []string{"low", "medium", "high", "xhigh", "max"}) {
+	// Empty is included so authors can omit effort under a selected cli.
+	if !reflect.DeepEqual(got["claude"], []string{"", "low", "medium", "high", "xhigh", "max"}) {
 		t.Fatalf("claude effort enum drift: %#v", got["claude"])
 	}
-	if !reflect.DeepEqual(got["codex"], []string{"minimal", "low", "medium", "high", "xhigh", "max"}) {
+	if !reflect.DeepEqual(got["codex"], []string{"", "minimal", "low", "medium", "high", "xhigh", "max"}) {
 		t.Fatalf("codex effort enum drift: %#v", got["codex"])
 	}
-	if !reflect.DeepEqual(got["glm"], []string{"low", "medium", "high", "xhigh", "max"}) {
+	if !reflect.DeepEqual(got["glm"], []string{"", "low", "medium", "high", "xhigh", "max"}) {
 		t.Fatalf("glm effort enum drift: %#v", got["glm"])
 	}
-	if !reflect.DeepEqual(got["grok"], []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}) {
+	if !reflect.DeepEqual(got["grok"], []string{"", "none", "minimal", "low", "medium", "high", "xhigh", "max"}) {
 		t.Fatalf("grok effort enum drift: %#v", got["grok"])
+	}
+	// Retired prompt transport fields must not reappear on the task contract.
+	execProps, _ := exec["properties"].(map[string]any)
+	if _, ok := execProps["prompt_profile"]; ok {
+		t.Fatal("task schema must not expose executor.prompt_profile")
+	}
+	if _, ok := execProps["prompt_mode"]; ok {
+		t.Fatal("task schema must not expose executor.prompt_mode")
+	}
+	if required, _ := exec["required"].([]any); len(required) != 0 {
+		t.Fatalf("executor fields must be independently optional, required=%#v", required)
 	}
 }

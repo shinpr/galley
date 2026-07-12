@@ -31,8 +31,6 @@ supervisor:
 executor:
   cli: "codex"
   effort: "high"
-  prompt_profile: "codex-executor-v1"
-  prompt_mode: "replace"
 decisions: []
 risks: []
 attempts: []

@@ -618,12 +618,31 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	}
 	effectiveOpts := resolveEffectiveTaskOptions(opts, profiles).apply(opts)
 
+	// Resolve executor settings independently for this run. Authored task
+	// fields stay on loaded so Saves and requeues do not pin environment
+	// defaults; setup, skeleton, and implementation all receive the same
+	// effective values through task.WithExecutor copies.
+	var envExecutor *profile.ExecutorDefault
+	if profiles.Environment != nil {
+		envExecutor = profiles.Environment.Executor
+	}
+	effectiveExecutor := task.ResolveEffectiveExecutor(loaded.Executor, envExecutor)
+	if err := task.ValidateEffectiveExecutor(effectiveExecutor); err != nil {
+		return failClaimedStage(opts.Root, runningPath, &loaded, "executor_preflight", "executor_config_failed", err, runDir)
+	}
+
 	// A per-task environment.yaml supervisor.default_cli: glm override bypasses
 	// startup Preflight, so validate the token here — before setup/executor —
 	// rather than failing at the supervisor call after a full attempt ran.
 	if effectiveOpts.Supervisor == "glm" {
 		if _, tokenErr := runner.ResolveGLMToken(opts.GLMAuthToken); tokenErr != nil {
 			return failClaimedStage(opts.Root, runningPath, &loaded, "supervisor_preflight", "supervisor_config_failed", fmt.Errorf("supervisor is \"glm\": %w", tokenErr), runDir)
+		}
+	}
+	// Same for environment-selected glm executors: fail before any provider role.
+	if effectiveExecutor.CLI == "glm" {
+		if _, tokenErr := runner.ResolveGLMToken(opts.GLMAuthToken); tokenErr != nil {
+			return failClaimedStage(opts.Root, runningPath, &loaded, "executor_preflight", "executor_config_failed", fmt.Errorf("executor is \"glm\": %w", tokenErr), runDir)
 		}
 	}
 
@@ -633,8 +652,8 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	}
 	// Setup executor preflight runs after the worktree and input files are
 	// prepared, before acceptance skeleton preflight, and before any executor
-	// attempt. The daemon always delegates setup execution to the
-	// setup executor (Claude or Codex per task.executor.cli); any
+	// attempt. The daemon always delegates setup execution to the selected
+	// effective provider transport (claude, codex, glm, or grok); any
 	// environment.setup plan is passed as model-visible context so the executor
 	// can try, diagnose, and repair it before returning the successful plan for
 	// Galley to persist. Setup readiness excludes
@@ -643,7 +662,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	var setupUpdate *setuppreflight.EnvironmentUpdate
 	setupReused := false
 	if prepared.WorktreeReused {
-		setupRes, setupReused, err = reuseReadySetup(opts.Root, loaded.ID, runDir)
+		setupRes, setupReused, err = reuseReadySetup(opts.Root, loaded.ID, runDir, effectiveExecutor)
 		if err != nil {
 			return failClaimedStage(opts.Root, runningPath, &loaded, setuppreflight.Phase, setuppreflight.FailedKind, preflightReuseError(setuppreflight.Phase, err), runDir)
 		}
@@ -651,7 +670,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	var setupErr error
 	if !setupReused {
 		setupRes, setupUpdate, setupErr = setuppreflight.Run(ctx, setuppreflight.Options{
-			Task:                   loaded,
+			Task:                   task.WithExecutor(loaded, effectiveExecutor),
 			WorkDir:                prepared.CWD,
 			RunDir:                 runDir,
 			Profiles:               profiles,
@@ -685,7 +704,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 		var res *skeletonpreflight.Result
 		preflightReused := false
 		if prepared.WorktreeReused {
-			res, preflightReused, err = reuseCompletedAcceptanceSkeleton(opts.Root, loaded.ID, runDir)
+			res, preflightReused, err = reuseCompletedAcceptanceSkeleton(opts.Root, loaded.ID, runDir, effectiveExecutor)
 			if err != nil {
 				return failClaimedStage(opts.Root, runningPath, &loaded, "acceptance_skeleton_preflight", "acceptance_skeleton_preflight_failed", preflightReuseError("acceptance skeleton", err), runDir)
 			}
@@ -693,7 +712,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 		var perr error
 		if !preflightReused {
 			res, perr = skeletonpreflight.Run(ctx, skeletonpreflight.Options{
-				Task:         loaded,
+				Task:         task.WithExecutor(loaded, effectiveExecutor),
 				WorkDir:      prepared.CWD,
 				RunDir:       runDir,
 				Profiles:     profiles,
@@ -717,7 +736,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 			}
 		}
 	}
-	return runSupervisorLoop(ctx, shutdownCtx, effectiveOpts, runningPath, &loaded, prepared, profiles, runDir, runID)
+	return runSupervisorLoop(ctx, shutdownCtx, effectiveOpts, runningPath, &loaded, prepared, profiles, runDir, runID, effectiveExecutor)
 }
 
 func failClaimedStage(root, runningPath string, loaded *task.Task, phase, kind string, err error, runDir string) error {

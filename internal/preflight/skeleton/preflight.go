@@ -47,6 +47,44 @@ type Result struct {
 	NoSkeletons   []NoOutput      `json:"no_skeletons,omitempty" yaml:"no_skeletons,omitempty"`
 	Baseline      Baseline        `json:"baseline" yaml:"baseline"`
 	Error         *PreflightError `json:"error,omitempty" yaml:"error,omitempty"`
+	// ExecutorCLI/Model/Effort record the resolved executor identity used for
+	// this preflight so later requeues reuse completed evidence only when the
+	// current resolved identity still matches. These fields omit omitempty so
+	// an empty executor_model (provider CLI default) is persisted distinctly
+	// from an absent key.
+	ExecutorCLI    string `json:"executor_cli" yaml:"executor_cli"`
+	ExecutorModel  string `json:"executor_model" yaml:"executor_model"`
+	ExecutorEffort string `json:"executor_effort" yaml:"executor_effort"`
+}
+
+// ApplyExecutorIdentity stamps the resolved executor identity onto the result
+// before persistence.
+func ApplyExecutorIdentity(res *Result, exec task.Executor) {
+	if res == nil {
+		return
+	}
+	res.ExecutorCLI = exec.CLI
+	res.ExecutorModel = exec.Model
+	res.ExecutorEffort = exec.Effort
+}
+
+// ResolvedExecutor returns the executor identity recorded on this result.
+func (r *Result) ResolvedExecutor() task.Executor {
+	if r == nil {
+		return task.Executor{}
+	}
+	return task.Executor{CLI: r.ExecutorCLI, Model: r.ExecutorModel, Effort: r.ExecutorEffort}
+}
+
+// MatchesExecutor reports whether this result was produced under the given
+// resolved identity. Results with no known CLI never match so reuse falls
+// through to a fresh preflight.
+func (r *Result) MatchesExecutor(exec task.Executor) bool {
+	got := r.ResolvedExecutor()
+	if got.CLI == "" {
+		return false
+	}
+	return got.CLI == exec.CLI && got.Model == exec.Model && got.Effort == exec.Effort
 }
 
 // Output is one declared skeleton file with AC binding and
@@ -123,42 +161,42 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 
 	run, err := newAcceptanceSkeletonPreflightRun(opts, cfg.AcceptanceSkeleton)
 	if err != nil {
-		return preflightFailure(opts.RunDir, "acceptance_skeleton_preflight", err.Error())
+		return preflightFailure(opts, "acceptance_skeleton_preflight", err.Error())
 	}
 
 	before, snapErr := snapshotPreflightFiles(ctx, opts.WorkDir, opts.RunDir, opts.GitBin)
 	if snapErr != nil {
-		return preflightFailure(opts.RunDir, "acceptance_skeleton_preflight", snapErr.Error())
+		return preflightFailure(opts, "acceptance_skeleton_preflight", snapErr.Error())
 	}
 
 	declarations, noSkeletonDecls, perr := resolveSkeletonDeclarations(ctx, opts)
 	if perr != nil {
-		return preflightFailure(opts.RunDir, perr.phase, perr.message)
+		return preflightFailure(opts, perr.phase, perr.message)
 	}
 	after, snapErr := snapshotPreflightFiles(ctx, opts.WorkDir, opts.RunDir, opts.GitBin)
 	if snapErr != nil {
-		return preflightFailure(opts.RunDir, "acceptance_skeleton_preflight", snapErr.Error())
+		return preflightFailure(opts, "acceptance_skeleton_preflight", snapErr.Error())
 	}
 	if perr := run.requireDeclarations(declarations, noSkeletonDecls); perr != nil {
-		return preflightFailure(opts.RunDir, perr.phase, perr.message)
+		return preflightFailure(opts, perr.phase, perr.message)
 	}
 
 	noSkeletons, perr := run.validateNoSkeletonDeclarations(noSkeletonDecls)
 	if perr != nil {
-		return preflightFailure(opts.RunDir, perr.phase, perr.message)
+		return preflightFailure(opts, perr.phase, perr.message)
 	}
 	outputs, perr := run.validateDeclarations(declarations)
 	if perr != nil {
-		return preflightFailure(opts.RunDir, perr.phase, perr.message)
+		return preflightFailure(opts, perr.phase, perr.message)
 	}
 	if perr := run.validateCreatorWorkspaceChanges(diffPreflightSnapshots(before, after), declarations); perr != nil {
-		return preflightFailure(opts.RunDir, perr.phase, perr.message)
+		return preflightFailure(opts, perr.phase, perr.message)
 	}
 	if perr := run.checkOutputExistence(outputs); perr != nil {
-		return preflightFailure(opts.RunDir, perr.phase, perr.message)
+		return preflightFailure(opts, perr.phase, perr.message)
 	}
 	if perr := run.checkACCoverage(outputs, noSkeletons); perr != nil {
-		return preflightFailure(opts.RunDir, perr.phase, perr.message)
+		return preflightFailure(opts, perr.phase, perr.message)
 	}
 
 	// Multiple outputs may share the same skeleton path when a single test file
@@ -180,7 +218,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	}
 	hashes, err := HashSkeletonFiles(opts.WorkDir, paths)
 	if err != nil {
-		return preflightFailure(opts.RunDir, "acceptance_skeleton_baseline", err.Error())
+		return preflightFailure(opts, "acceptance_skeleton_baseline", err.Error())
 	}
 
 	res := &Result{
@@ -190,6 +228,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		NoSkeletons:   noSkeletons,
 		Baseline:      Baseline{SkeletonHashes: hashes},
 	}
+	ApplyExecutorIdentity(res, opts.Task.Executor)
 	if err := WriteResult(opts.RunDir, res); err != nil {
 		return nil, err
 	}
@@ -244,7 +283,7 @@ type preflightErr struct {
 
 func (e *preflightErr) Error() string { return e.phase + ": " + e.message }
 
-func preflightFailure(runDir, phase, message string) (*Result, error) {
+func preflightFailure(opts Options, phase, message string) (*Result, error) {
 	res := &Result{
 		Status:        "failed",
 		SourceOfTruth: true,
@@ -253,7 +292,8 @@ func preflightFailure(runDir, phase, message string) (*Result, error) {
 		Baseline:      Baseline{SkeletonHashes: []SkeletonHash{}},
 		Error:         &PreflightError{Phase: phase, Message: message},
 	}
-	if err := WriteResult(runDir, res); err != nil {
+	ApplyExecutorIdentity(res, opts.Task.Executor)
+	if err := WriteResult(opts.RunDir, res); err != nil {
 		return nil, err
 	}
 	return res, fmt.Errorf("acceptance skeleton preflight failed: %s", message)

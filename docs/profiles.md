@@ -90,6 +90,8 @@ commands:
   build: "go build ./cmd/galley"
 executor:
   default_cli: "claude"
+  # model: "claude-sonnet-4-5"
+  # effort: "high"
 supervisor:
   default_cli: "claude"
   model: "claude-sonnet-4-5"
@@ -115,7 +117,9 @@ Supported fields:
 - `id`: profile identifier.
 - `cwd`: absolute path to the repository this profile describes.
 - `commands`: named local commands the executor and supervisor can reference.
-- `executor.default_cli`: optional implementation executor default for new task authoring. Values are `claude`, `codex`, `glm`, and `grok`. Grok uses its logged-in CLI state. When unset, authoring uses Claude unless explicitly overridden.
+- `executor.default_cli`: optional repository runtime default for the implementation executor (`claude`, `codex`, `glm`, `grok`). Used at every run when the task omits `executor.cli`, and by new task authoring when no explicit backend is chosen. When unset, Galley uses Claude.
+- `executor.model`: optional model name passed unchanged to the selected executor CLI when the task omits `executor.model`. Empty keeps the CLI default.
+- `executor.effort`: optional reasoning effort used when the task omits `executor.effort`. Validated against the effective provider; invalid combinations fail before setup, skeleton, or implementation.
 - `supervisor.default_cli`: optional repository-scoped supervisor adapter. Values are `claude`, `codex`, `glm`, and `grok`. When set, it overrides daemon startup supervisor settings for tasks in this repository.
 - `supervisor.model`: optional model name passed unchanged to the selected Codex, Claude, or GLM supervisor CLI. Omit it or use an empty value to keep the CLI default; `runs/<run-id>/supervisor.json` records the effective setting.
 - `supervisor.effort`: optional reasoning effort. Claude and `glm` accept `low`, `medium`, `high`, `xhigh`, or `max`; Codex also accepts `minimal`. Empty uses the CLI default, invalid provider values fail before review, and `supervisor.json` records the value and source.

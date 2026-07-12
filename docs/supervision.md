@@ -4,17 +4,15 @@ Galley separates implementation from acceptance. The executor produces work and 
 
 ## Executors
 
-For newly authored tasks, Galley resolves the executor in this order:
+At every run start, Galley resolves each executor field independently:
 
-1. an explicit executor choice during task authoring
-2. `environment.yaml` `executor.default_cli`
-3. Claude
+1. explicit task `executor.cli` / `executor.model` / `executor.effort`
+2. current repository `environment.yaml` `executor.default_cli` / `executor.model` / `executor.effort`
+3. built-in defaults (`cli: claude`, `effort: high`; empty model keeps the CLI default)
 
-The generated task records the selected backend in `executor.cli`. After that, the task YAML is authoritative: existing tasks keep their configured executor unless the task file is edited.
+Resolved environment values are not written back into the task YAML, so partial task pins and requeues pick up current profile defaults. Setup, acceptance-skeleton creation, and implementation all use the same effective CLI, model, and effort. Invalid effective provider/effort pairs fail the task before any provider role starts.
 
-Galley supports Claude Code, Codex, and GLM as executor backends. GLM runs the `claude` binary against GLM's Z.ai endpoint and needs a `glm_api_key` in `daemon.yaml`. Acceptance skeleton preflight, structured executor results, run evidence, and supervisor review use the same contracts across all backends.
-
-The executor backend in `executor.cli` also drives acceptance skeleton preflight. A Codex task creates skeletons with Codex; a Claude or GLM task creates them with the Claude Code binary.
+Galley supports Claude Code, Codex, GLM, and Grok as executor backends. GLM runs the `claude` binary against GLM's Z.ai endpoint and needs a `glm_api_key` in `daemon.yaml`. Grok uses its logged-in CLI state. Acceptance skeleton preflight, structured executor results, run evidence, and supervisor review use the same contracts across all backends. Provider-specific prompt transport is Galley-owned and is not configured in task YAML.
 
 See [task-yaml.md](task-yaml.md) for the full `executor` block and [../examples/afk-task-codex.yaml](../examples/afk-task-codex.yaml) for a Codex task example.
 

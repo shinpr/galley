@@ -42,8 +42,6 @@ supervisor:
 executor:
   cli: "claude"
   effort: "high"
-  prompt_profile: "codexized-claude-executor-v1"
-  prompt_mode: "replace"
 decisions: []
 risks: []
 attempts: []
@@ -88,11 +86,11 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 - `execution_policy.stop_on_destructive_operation`: stop when the task would require out-of-scope destructive work.
 - `execution_policy.stop_on_missing_secret`: stop when a required secret is unavailable and cannot be replaced by safe local evidence.
 - `execution_policy.stop_on_external_service_unavailable`: stop when a required external service is unavailable and the task cannot proceed with local substitutes.
-- `executor.cli`: selects `claude`, `codex`, `glm`, or `grok`. Grok uses the logged-in `grok` CLI for setup, acceptance-skeleton creation, and implementation. New task authoring uses `environment.yaml` `executor.default_cli` when present, otherwise Claude. An explicit task value is authoritative.
+- `executor`: optional. The block may be omitted, empty, or contain any subset of `cli`, `model`, and `effort`. At each run start Galley resolves every field independently: explicit task value, then the current repository `environment.yaml` value, then the built-in default (`cli: claude`, `effort: high`; empty `model` keeps the selected CLI default). Resolved environment values are not written back into the task YAML.
+- `executor.cli`: selects `claude`, `codex`, `glm`, or `grok`. Grok uses the logged-in `grok` CLI for setup, acceptance-skeleton creation, and implementation.
 - `executor.model`: optional model override. Omit it to use the selected CLI's configured default model.
-- `executor.effort`: model effort hint. Claude and `glm` accept `low`, `medium`, `high`, `xhigh`, or `max`; Codex also accepts `minimal`. Model-specific rejection remains a Codex error.
-- `executor.prompt_profile`: prompt profile name recorded for evidence.
-- `executor.prompt_mode`: `replace` or `append`.
+- `executor.effort`: optional model effort hint. Claude and `glm` accept `low`, `medium`, `high`, `xhigh`, or `max`; Codex also accepts `minimal`; Grok also accepts `none`. Model-specific rejection remains a provider CLI error. Invalid effective provider/effort pairs fail the task before setup, skeleton, or implementation runs.
+- Prompt transport is Galley-owned. Task YAML no longer accepts `executor.prompt_profile` or `executor.prompt_mode`; older files that still include those keys are ignored by the unknown-field-tolerant decoder.
 
 ## Permissions
 

@@ -3,8 +3,12 @@ cwd: "/Users/shinpr/Projects/galley"
 commands:
   test_unit: "go test ./..."
   build: "go build ./cmd/galley"
+# Optional implementation executor runtime defaults. Tasks may override any
+# subset of these fields; omitted task fields resolve here, then to Galley built-ins.
 executor:
   default_cli: "claude"
+#   model: "claude-sonnet-4-5"
+#   effort: "high"
 # Optional repository review overrides; omitted values preserve existing defaults.
 # supervisor:
 #   default_cli: "claude"

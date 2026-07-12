@@ -79,6 +79,28 @@ func TestSupervisorEffortsUnionCoversEveryProviderValue(t *testing.T) {
 	}
 }
 
+func TestExecutorEffortsUnionCoversEveryProviderValue(t *testing.T) {
+	t.Parallel()
+	union := ExecutorEfforts()
+	seen := map[string]bool{}
+	for _, e := range union {
+		if seen[e] {
+			t.Fatalf("ExecutorEfforts has duplicate %q: %v", e, union)
+		}
+		seen[e] = true
+	}
+	for _, descriptor := range descriptors {
+		if !descriptor.Executor {
+			continue
+		}
+		for _, e := range EffortsForTransport(descriptor.Transport) {
+			if !seen[e] {
+				t.Fatalf("union %v missing %q from %s", union, e, descriptor.ID)
+			}
+		}
+	}
+}
+
 func TestAllReturnsDefensiveCopy(t *testing.T) {
 	all := All()
 	all[0].ID = "changed"

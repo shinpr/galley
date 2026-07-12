@@ -6,6 +6,18 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Added
+
+- Environment profiles accept optional `executor.model` and `executor.effort` runtime defaults alongside `executor.default_cli`. At each run, Galley resolves `executor.cli`, `executor.model`, and `executor.effort` independently from the task, then the current repository environment profile, then built-in defaults, without writing resolved environment values back into task YAML.
+- Setup and acceptance-skeleton preflight evidence records the resolved executor identity (`executor_cli` / `executor_model` / `executor_effort`). Worktree-reuse requeues only skip those preflights when the current resolved identity matches; otherwise Galley re-runs them with the fresh resolution.
+
+### Changed
+
+- Task `executor` fields are independently optional; omitted, partial, empty, and complete executor blocks are valid in both Go structural validation and the generated task JSON Schema. Setup, acceptance-skeleton, and implementation share one effective executor configuration, and invalid effective provider/effort pairs fail before any provider role starts.
+- The task skeleton generator still pins `executor.cli` for authoring convenience but omits `executor.effort` unless an author later pins it, so repository environment effort defaults remain effective at run time.
+- Provider-specific prompt transport is Galley-owned. Task contracts no longer expose `executor.prompt_profile` or `executor.prompt_mode`; older YAML that still includes those keys is ignored by the existing unknown-field-tolerant decoder.
+- Packaged Galley plugins are version `0.1.24` and document the optional executor runtime-default contract.
+
 ## v0.10.0 - 2026-07-12
 
 ### Added

@@ -6,12 +6,12 @@
 // preflight so setup readiness is verified independently of task-specific
 // skeleton obligations.
 //
-// The daemon delegates setup execution to the task executor provider
-// (Claude or Codex per task.executor.cli). environment.setup.commands, when
-// present, is passed as a prior plan for the setup executor to try, diagnose,
-// and repair in the same model context. On success the daemon persists
-// runs/<run-id>/setup_result.json and, when the successful plan differs from
-// the resolved environment profile, atomically rewrites the repository
-// environment.yaml setup field and records the change in
-// runs/<run-id>/environment_update.json.
+// The daemon delegates setup execution to the selected effective provider
+// transport (claude, codex, glm, or grok after environment/task resolution).
+// environment.setup.commands, when present, is passed as a prior plan for the
+// setup executor to try, diagnose, and repair in the same model context. On
+// success the daemon persists runs/<run-id>/setup_result.json and, when the
+// successful plan differs from the resolved environment profile, atomically
+// rewrites the repository environment.yaml setup field and records the change
+// in runs/<run-id>/environment_update.json.
 package setup

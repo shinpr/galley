@@ -85,8 +85,16 @@ const (
 	MaxSetupCommandWhyLength = 1024
 )
 
+// ExecutorDefault provides optional repository runtime defaults for the
+// implementation executor. Task fields override these independently at each
+// run; unset values keep Galley's built-in defaults (cli) or the selected
+// CLI's own defaults (model).
 type ExecutorDefault struct {
 	DefaultCLI string `yaml:"default_cli,omitempty" json:"default_cli,omitempty"`
+	// Model is passed unchanged to the provider CLI. Empty preserves its default.
+	Model string `yaml:"model,omitempty" json:"model,omitempty"`
+	// Effort is validated against the effective provider before execution; empty keeps Galley's built-in effort default after resolution.
+	Effort string `yaml:"effort,omitempty" json:"effort,omitempty"`
 }
 
 // SupervisorDefault selects the repository-scoped review supervisor for tasks
@@ -234,6 +242,16 @@ func ValidateEnvironment(env Environment) ValidationResult {
 	require(&result, env.Constraints.DestructiveCommands != "", "constraints.destructive_commands is required")
 	if env.Executor != nil && env.Executor.DefaultCLI != "" {
 		require(&result, validExecutorCLI(env.Executor.DefaultCLI), "executor.default_cli must be one of: %s", strings.Join(provider.ExecutorIDs(), ", "))
+	}
+	if env.Executor != nil && env.Executor.Effort != "" {
+		// Without default_cli, profile validation can enforce only the provider union; run-start resolution narrows it later.
+		if env.Executor.DefaultCLI != "" {
+			if efforts, ok := provider.EffortsForID(env.Executor.DefaultCLI); ok {
+				require(&result, slices.Contains(efforts, env.Executor.Effort), "executor.effort for %s must be one of: %s", env.Executor.DefaultCLI, strings.Join(efforts, ", "))
+			}
+		} else {
+			require(&result, slices.Contains(provider.ExecutorEfforts(), env.Executor.Effort), "executor.effort must be one of: %s", strings.Join(provider.ExecutorEfforts(), ", "))
+		}
 	}
 	if env.Supervisor != nil && env.Supervisor.DefaultCLI != "" {
 		require(&result, daemonconfig.IsValidSupervisor(env.Supervisor.DefaultCLI), "supervisor.default_cli must be one of: %s", strings.Join(daemonconfig.SupervisorCLIs(), ", "))

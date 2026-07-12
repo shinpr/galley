@@ -220,6 +220,7 @@
             "properties": {
               "effort": {
                 "enum": [
+                  "",
                   "low",
                   "medium",
                   "high",
@@ -246,6 +247,7 @@
             "properties": {
               "effort": {
                 "enum": [
+                  "",
                   "minimal",
                   "low",
                   "medium",
@@ -273,6 +275,7 @@
             "properties": {
               "effort": {
                 "enum": [
+                  "",
                   "low",
                   "medium",
                   "high",
@@ -299,6 +302,7 @@
             "properties": {
               "effort": {
                 "enum": [
+                  "",
                   "none",
                   "minimal",
                   "low",
@@ -316,6 +320,7 @@
       "properties": {
         "cli": {
           "enum": [
+            "",
             "claude",
             "codex",
             "glm",
@@ -324,31 +329,24 @@
           "type": "string"
         },
         "effort": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "model": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "prompt_mode": {
+          "description": "Optional reasoning effort override. Empty resolves from the environment profile or Galley's built-in default; the effective provider is validated before setup, skeleton, or implementation.",
           "enum": [
-            "replace",
-            "append"
+            "",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "minimal",
+            "none"
           ],
           "type": "string"
         },
-        "prompt_profile": {
-          "minLength": 1,
+        "model": {
+          "description": "Optional model override. Omit or leave empty to use the selected CLI's configured default model.",
           "type": "string"
         }
       },
-      "required": [
-        "cli",
-        "effort",
-        "prompt_profile",
-        "prompt_mode"
-      ],
       "type": "object"
     },
     "files": {
@@ -703,7 +701,6 @@
     "execution_policy",
     "worktree",
     "supervisor",
-    "executor",
     "decisions",
     "risks",
     "attempts",

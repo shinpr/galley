@@ -308,34 +308,13 @@ def resolved_executor_cli(explicit_cli: str | None, root: pathlib.Path, cwd: pat
 
 
 def executor_defaults(cli: str) -> dict[str, Any]:
-    if cli == "codex":
-        return {
-            "cli": "codex",
-            "effort": "high",
-            "prompt_profile": "codex-executor-v1",
-            "prompt_mode": "replace",
-        }
-    # glm runs the Claude Code binary against GLM's endpoint, so it shares
-    # Claude's prompt profile, effort set, and prompt mode; only the cli differs.
-    if cli == "glm":
-        return {
-            "cli": "glm",
-            "effort": "high",
-            "prompt_profile": "codexized-claude-executor-v1",
-            "prompt_mode": "replace",
-        }
-    if cli == "grok":
-        return {
-            "cli": "grok",
-            "effort": "high",
-            "prompt_profile": "grok-executor-v1",
-            "prompt_mode": "replace",
-        }
+    # Prompt transport is Galley-owned and is not authored into task YAML.
+    # cli/model/effort remain independently optional at runtime. The skeleton
+    # pins only cli for authoring convenience; model and effort are omitted so
+    # the current repository environment.yaml (then built-in defaults) apply at
+    # run time unless the author later pins them explicitly.
     return {
-        "cli": "claude",
-        "effort": "high",
-        "prompt_profile": "codexized-claude-executor-v1",
-        "prompt_mode": "replace",
+        "cli": cli if cli in VALID_EXECUTOR_CLIS else "claude",
     }
 
 

@@ -46,7 +46,55 @@ type Result struct {
 	RepairGuidance     string                 `json:"repair_guidance,omitempty" yaml:"repair_guidance,omitempty"`
 	Error              string                 `json:"error,omitempty" yaml:"error,omitempty"`
 	Provider           string                 `json:"provider,omitempty" yaml:"provider,omitempty"`
-	Source             string                 `json:"source,omitempty" yaml:"source,omitempty"`
+	// ExecutorCLI/Model/Effort record the resolved executor identity used for
+	// this preflight so later requeues can reuse ready evidence only when the
+	// current resolved identity still matches. These fields omit omitempty so
+	// an empty executor_model (provider CLI default) is persisted distinctly
+	// from an absent key. Provider remains the historical CLI mirror for older
+	// consumers.
+	ExecutorCLI    string `json:"executor_cli" yaml:"executor_cli"`
+	ExecutorModel  string `json:"executor_model" yaml:"executor_model"`
+	ExecutorEffort string `json:"executor_effort" yaml:"executor_effort"`
+	Source         string `json:"source,omitempty" yaml:"source,omitempty"`
+}
+
+// ApplyExecutorIdentity stamps the resolved executor identity onto the result
+// before persistence. Provider is kept as a CLI mirror for evidence consumers
+// that still read that field.
+func ApplyExecutorIdentity(res *Result, exec task.Executor) {
+	if res == nil {
+		return
+	}
+	res.ExecutorCLI = exec.CLI
+	res.ExecutorModel = exec.Model
+	res.ExecutorEffort = exec.Effort
+	if exec.CLI != "" {
+		res.Provider = exec.CLI
+	}
+}
+
+// ResolvedExecutor returns the executor identity recorded on this result.
+// When executor_cli is absent, Provider is used as a legacy CLI derivation.
+func (r *Result) ResolvedExecutor() task.Executor {
+	if r == nil {
+		return task.Executor{}
+	}
+	cli := r.ExecutorCLI
+	if cli == "" {
+		cli = r.Provider
+	}
+	return task.Executor{CLI: cli, Model: r.ExecutorModel, Effort: r.ExecutorEffort}
+}
+
+// MatchesExecutor reports whether this result was produced under the given
+// resolved identity. Results with no known CLI never match so reuse falls
+// through to a fresh preflight.
+func (r *Result) MatchesExecutor(exec task.Executor) bool {
+	got := r.ResolvedExecutor()
+	if got.CLI == "" {
+		return false
+	}
+	return got.CLI == exec.CLI && got.Model == exec.Model && got.Effort == exec.Effort
 }
 
 // CommandAttempt is one command the setup executor attempted. Stdout/stderr

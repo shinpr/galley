@@ -42,14 +42,146 @@
     },
     "executor": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "default_cli": {
+                "const": "claude"
+              }
+            },
+            "required": [
+              "default_cli"
+            ]
+          },
+          "then": {
+            "properties": {
+              "effort": {
+                "enum": [
+                  "",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ],
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "default_cli": {
+                "const": "codex"
+              }
+            },
+            "required": [
+              "default_cli"
+            ]
+          },
+          "then": {
+            "properties": {
+              "effort": {
+                "enum": [
+                  "",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ],
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "default_cli": {
+                "const": "glm"
+              }
+            },
+            "required": [
+              "default_cli"
+            ]
+          },
+          "then": {
+            "properties": {
+              "effort": {
+                "enum": [
+                  "",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ],
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "default_cli": {
+                "const": "grok"
+              }
+            },
+            "required": [
+              "default_cli"
+            ]
+          },
+          "then": {
+            "properties": {
+              "effort": {
+                "enum": [
+                  "",
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ],
+                "type": "string"
+              }
+            }
+          }
+        }
+      ],
       "properties": {
         "default_cli": {
           "enum": [
+            "",
             "claude",
             "codex",
             "glm",
             "grok"
           ],
+          "type": "string"
+        },
+        "effort": {
+          "description": "Optional reasoning effort used as a repository runtime default. Empty leaves resolution to the task or Galley's built-in default; the effective provider is validated before setup, skeleton, or implementation.",
+          "enum": [
+            "",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "minimal",
+            "none"
+          ],
+          "type": "string"
+        },
+        "model": {
+          "description": "Optional model name passed unchanged to the selected executor CLI. Omit or leave empty to use the CLI default; accepted values depend on the provider.",
           "type": "string"
         }
       },
@@ -269,6 +401,7 @@
       "properties": {
         "default_cli": {
           "enum": [
+            "",
             "claude",
             "codex",
             "glm",

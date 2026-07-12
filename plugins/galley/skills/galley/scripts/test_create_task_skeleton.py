@@ -58,12 +58,27 @@ def generate_skeleton(tmpdir: pathlib.Path, *extra_args: str, root: pathlib.Path
     return task_path.read_text(encoding="utf-8")
 
 
-def write_environment_default(root: pathlib.Path, cwd: pathlib.Path, cli: str, *, inline_executor: bool = False) -> None:
+def write_environment_default(
+    root: pathlib.Path,
+    cwd: pathlib.Path,
+    cli: str,
+    *,
+    inline_executor: bool = False,
+    effort: str | None = None,
+) -> None:
     # Share the production repo-key helper so these tests fail if skeleton
     # resolution drifts from the Galley home profile directory contract.
     env_dir = root / "profiles" / create_task_skeleton.repo_key_for(cwd)
     env_dir.mkdir(parents=True, exist_ok=True)
-    executor_lines = [f"executor: {{default_cli: {cli}}}"] if inline_executor else ["executor:", f'  default_cli: "{cli}"']
+    if inline_executor:
+        fields = [f"default_cli: {cli}"]
+        if effort is not None:
+            fields.append(f"effort: {effort}")
+        executor_lines = [f"executor: {{{', '.join(fields)}}}"]
+    else:
+        executor_lines = ["executor:", f'  default_cli: "{cli}"']
+        if effort is not None:
+            executor_lines.append(f'  effort: "{effort}"')
     (env_dir / "environment.yaml").write_text(
         "\n".join(
             [
@@ -208,6 +223,9 @@ def main() -> int:
     if generated_executor_cli(yaml_text) != "claude":
         raise SystemExit("regression: unset environment executor default should generate executor.cli: claude")
     assert_not_matches(yaml_text, r"^\s+max_budget_usd:", "executor.max_budget_usd in default skeleton")
+    # Effort is resolved at run time from environment.yaml then built-ins; the
+    # skeleton must not pin the built-in default or copy environment effort.
+    assert_not_matches(yaml_text, r"^\s+effort:", "executor.effort in default skeleton")
 
     with tempfile.TemporaryDirectory() as tmp:
         tmpdir = pathlib.Path(tmp)
@@ -218,6 +236,32 @@ def main() -> int:
         yaml_text = generate_skeleton(tmpdir, root=root)
     if generated_executor_cli(yaml_text) != "claude":
         raise SystemExit("regression: environment executor default should generate executor.cli: claude")
+    assert_not_matches(yaml_text, r"^\s+effort:", "executor.effort when environment only sets default_cli")
+
+    # Non-default environment effort must not be authored into the task YAML.
+    # Runtime resolution still sees the environment value because the skeleton
+    # leaves executor.effort unpinned.
+    with tempfile.TemporaryDirectory() as tmp:
+        tmpdir = pathlib.Path(tmp)
+        fake_cwd = tmpdir / "repo"
+        fake_cwd.mkdir(parents=True, exist_ok=True)
+        root = tmpdir / "galley"
+        write_environment_default(root, fake_cwd, "codex", effort="medium")
+        yaml_text = generate_skeleton(tmpdir, root=root)
+    if generated_executor_cli(yaml_text) != "codex":
+        raise SystemExit(
+            "regression: environment default_cli codex with non-default effort "
+            "should still generate executor.cli: codex"
+        )
+    assert_not_matches(
+        yaml_text,
+        r"^\s+effort:",
+        "executor.effort when environment sets a non-default effort",
+    )
+    if "medium" in yaml_text:
+        raise SystemExit(
+            "regression: non-default environment effort must not be copied into the generated skeleton"
+        )
 
     with tempfile.TemporaryDirectory() as tmp:
         tmpdir = pathlib.Path(tmp)

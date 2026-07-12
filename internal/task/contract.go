@@ -14,7 +14,6 @@ var (
 	validModes                  = []string{"afk"}
 	validStatuses               = AllStatuses()
 	validPermissions            = []string{"read-only", "edit", "sandbox-full-access"}
-	validPromptModes            = []string{"replace", "append"}
 	validExecutorCLIs           = provider.ExecutorIDs()
 	validClaudeEfforts          = provider.EffortsForTransport(provider.TransportClaude)
 	validCodexEfforts           = provider.EffortsForTransport(provider.TransportCodex)

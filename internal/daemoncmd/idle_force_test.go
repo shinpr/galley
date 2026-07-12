@@ -5,6 +5,7 @@ package daemoncmd
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -35,13 +36,28 @@ func startUnresponsiveDaemon(t *testing.T) (root, pidFile string, pid int) {
 	if err != nil {
 		t.Skip("sh not available")
 	}
-	cmd := exec.Command(shPath, "-c", `trap "" TERM; sleep 30`)
+	cmd := exec.Command(shPath, "-c", `trap "" TERM; printf ready; exec sleep 30`)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	ready := make([]byte, len("ready"))
+	if _, err := io.ReadFull(stdout, ready); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		t.Fatalf("wait for unresponsive daemon readiness: %v", err)
+	}
+	done := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(done)
+	}()
 	t.Cleanup(func() {
 		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
+		<-done
 	})
 	root = t.TempDir()
 	pidFile = filepath.Join(root, "galley-daemon.pid")

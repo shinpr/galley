@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Fixed
+
+- Repeated `galley daemon stop` commands now coordinate so only one normal stop signals the daemon; `--force` remains the explicit forced-termination path.
+
 ## v0.10.0 - 2026-07-12
 
 ### Added

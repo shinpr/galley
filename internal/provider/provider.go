@@ -23,6 +23,16 @@ var descriptors = []Descriptor{
 	{ID: "glm", Transport: TransportClaude, Executor: true, Supervisor: true},
 }
 
+// Provider-level reasoning effort sets, keyed by transport. These are the
+// values Galley accepts; per-model compatibility is delegated to the CLI so a
+// Galley-maintained per-model table cannot go stale. codexEfforts is the
+// official Codex set (minimal..max); claudeEfforts is the Claude Code set,
+// which glm reuses because it runs the Claude binary against GLM's endpoint.
+var (
+	claudeEfforts = []string{"low", "medium", "high", "xhigh", "max"}
+	codexEfforts  = []string{"minimal", "low", "medium", "high", "xhigh", "max"}
+)
+
 func All() []Descriptor { return slices.Clone(descriptors) }
 
 func Lookup(id string) (Descriptor, bool) {
@@ -51,6 +61,50 @@ func IsSupervisor(id string) bool {
 func TransportFor(id string) (Transport, bool) {
 	descriptor, ok := Lookup(id)
 	return descriptor.Transport, ok
+}
+
+// EffortsForTransport returns the accepted reasoning-effort values for a
+// transport in stable order. An unknown transport returns nil.
+func EffortsForTransport(t Transport) []string {
+	switch t {
+	case TransportClaude:
+		return slices.Clone(claudeEfforts)
+	case TransportCodex:
+		return slices.Clone(codexEfforts)
+	default:
+		return nil
+	}
+}
+
+// EffortsForID returns the accepted reasoning-effort values for a provider id.
+// The bool is false when the id is unknown.
+func EffortsForID(id string) ([]string, bool) {
+	descriptor, ok := Lookup(id)
+	if !ok {
+		return nil, false
+	}
+	return EffortsForTransport(descriptor.Transport), true
+}
+
+// SupervisorEfforts returns the union of accepted effort values across every
+// supervisor provider, in stable first-seen order. It is the provider-agnostic
+// floor for validating a supervisor.effort whose effective provider is not
+// fixed in the same source; the effective provider is validated separately.
+func SupervisorEfforts() []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, descriptor := range descriptors {
+		if !descriptor.Supervisor {
+			continue
+		}
+		for _, effort := range EffortsForTransport(descriptor.Transport) {
+			if !seen[effort] {
+				seen[effort] = true
+				out = append(out, effort)
+			}
+		}
+	}
+	return out
 }
 
 func roleIDs(include func(Descriptor) bool) []string {

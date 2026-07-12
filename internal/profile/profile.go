@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/shinpr/galley/internal/daemonconfig"
@@ -97,6 +98,11 @@ type SupervisorDefault struct {
 	DefaultCLI string `yaml:"default_cli,omitempty" json:"default_cli,omitempty"`
 	// Model is passed unchanged to the provider CLI. Empty preserves its default.
 	Model string `yaml:"model,omitempty" json:"model,omitempty"`
+	// Effort is the reasoning-effort override passed to the effective supervisor
+	// (--effort for claude/glm, model_reasoning_effort for codex). Empty preserves
+	// the CLI default. It is validated against the effective supervisor before the
+	// review subprocess starts; accepted values depend on the selected provider.
+	Effort string `yaml:"effort,omitempty" json:"effort,omitempty"`
 }
 
 type RequiredCheckEnvironment struct {
@@ -234,6 +240,20 @@ func ValidateEnvironment(env Environment) ValidationResult {
 	}
 	if env.Supervisor != nil && env.Supervisor.DefaultCLI != "" {
 		require(&result, daemonconfig.IsValidSupervisor(env.Supervisor.DefaultCLI), "supervisor.default_cli must be one of: %s", strings.Join(daemonconfig.SupervisorCLIs(), ", "))
+	}
+	if env.Supervisor != nil && env.Supervisor.Effort != "" {
+		// When default_cli fixes the effective supervisor in this profile,
+		// validate the effort against that provider's set. Otherwise the
+		// effective supervisor is resolved at daemon startup, so validate against
+		// the provider-agnostic union here and let supervisor preflight enforce
+		// the effective provider's set before the subprocess starts.
+		if env.Supervisor.DefaultCLI != "" {
+			if efforts, ok := provider.EffortsForID(env.Supervisor.DefaultCLI); ok {
+				require(&result, slices.Contains(efforts, env.Supervisor.Effort), "supervisor.effort for %s must be one of: %s", env.Supervisor.DefaultCLI, strings.Join(efforts, ", "))
+			}
+		} else {
+			require(&result, slices.Contains(provider.SupervisorEfforts(), env.Supervisor.Effort), "supervisor.effort must be one of: %s", strings.Join(provider.SupervisorEfforts(), ", "))
+		}
 	}
 	if env.RequiredChecks.Shell != "" {
 		require(&result, validRequiredCheckShell(env.RequiredChecks.Shell), "required_checks.shell must be one of: auto, sh, bash, cmd, powershell, pwsh")

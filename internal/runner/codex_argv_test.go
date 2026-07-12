@@ -73,6 +73,44 @@ func TestCodexArgvDoesNotEmitUnsupportedFlags(t *testing.T) {
 
 }
 
+// TestCodexCommandPlanPassesExpandedEffortLiterals proves AC4: every officially
+// supported Codex effort — including the newly accepted minimal, xhigh, and max
+// — reaches the shared codex command plan unchanged as a quoted
+// model_reasoning_effort override. Setup and acceptance-skeleton roles build
+// their argv through this same CodexCommandPlan, so a literal preserved here is
+// preserved for all three Codex executor roles.
+func TestCodexCommandPlanPassesExpandedEffortLiterals(t *testing.T) {
+	t.Parallel()
+	for _, effort := range []string{"minimal", "low", "medium", "high", "xhigh", "max"} {
+		effort := effort
+		t.Run(effort, func(t *testing.T) {
+			t.Parallel()
+			base := minimalCodexTask()
+			base.Executor.Effort = effort
+			opts := CodexFromTask(base)
+			opts.Bin = "/usr/local/bin/codex"
+			opts.WorkDir = "/tmp/codex-argv"
+			opts.Prompt = "work order body"
+
+			plan, err := CodexCommandPlan(opts)
+			if err != nil {
+				t.Fatalf("CodexCommandPlan: %v", err)
+			}
+			want := `model_reasoning_effort="` + effort + `"`
+			found := false
+			for i := 0; i+1 < len(plan.Argv); i++ {
+				if plan.Argv[i] == "-c" && plan.Argv[i+1] == want {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("codex argv missing quoted literal %q: %v", want, plan.Argv)
+			}
+		})
+	}
+}
+
 func TestCodexArgvWarnsWhenPromptModeAppendIsFlattened(t *testing.T) {
 	t.Parallel()
 	base := minimalCodexTask()

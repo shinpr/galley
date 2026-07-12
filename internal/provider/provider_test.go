@@ -22,6 +22,56 @@ func TestProviderRoleOrderAndTransport(t *testing.T) {
 	}
 }
 
+func TestEffortsForTransportAndID(t *testing.T) {
+	t.Parallel()
+	wantClaude := []string{"low", "medium", "high", "xhigh", "max"}
+	wantCodex := []string{"minimal", "low", "medium", "high", "xhigh", "max"}
+	if got := EffortsForTransport(TransportClaude); !reflect.DeepEqual(got, wantClaude) {
+		t.Fatalf("claude efforts = %v; want %v", got, wantClaude)
+	}
+	if got := EffortsForTransport(TransportCodex); !reflect.DeepEqual(got, wantCodex) {
+		t.Fatalf("codex efforts = %v; want %v", got, wantCodex)
+	}
+	if got := EffortsForTransport(Transport("unknown")); got != nil {
+		t.Fatalf("unknown transport efforts = %v; want nil", got)
+	}
+	// glm rides the Claude transport, so it exposes the Claude effort set.
+	if got, ok := EffortsForID("glm"); !ok || !reflect.DeepEqual(got, wantClaude) {
+		t.Fatalf("glm efforts = %v, ok=%t; want %v", got, ok, wantClaude)
+	}
+	if got, ok := EffortsForID("codex"); !ok || !reflect.DeepEqual(got, wantCodex) {
+		t.Fatalf("codex efforts = %v, ok=%t; want %v", got, ok, wantCodex)
+	}
+	if _, ok := EffortsForID("unknown"); ok {
+		t.Fatal("unknown provider must not report an effort set")
+	}
+}
+
+func TestSupervisorEffortsUnionCoversEveryProviderValue(t *testing.T) {
+	t.Parallel()
+	union := SupervisorEfforts()
+	seen := map[string]bool{}
+	for _, e := range union {
+		if seen[e] {
+			t.Fatalf("SupervisorEfforts has duplicate %q: %v", e, union)
+		}
+		seen[e] = true
+	}
+	// Every supervisor provider's effort value must appear in the union so
+	// profile validation without a fixed default_cli never rejects a value the
+	// effective supervisor would accept.
+	for _, descriptor := range descriptors {
+		if !descriptor.Supervisor {
+			continue
+		}
+		for _, e := range EffortsForTransport(descriptor.Transport) {
+			if !seen[e] {
+				t.Fatalf("union %v missing %q from %s", union, e, descriptor.ID)
+			}
+		}
+	}
+}
+
 func TestAllReturnsDefensiveCopy(t *testing.T) {
 	all := All()
 	all[0].ID = "changed"

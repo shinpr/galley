@@ -172,6 +172,45 @@ func TestValidateEnvironmentRejectsInvalidSupervisorDefault(t *testing.T) {
 	}
 }
 
+func TestValidateEnvironmentSupervisorEffortOptionalityAndValidation(t *testing.T) {
+	cases := []struct {
+		name       string
+		supervisor *SupervisorDefault
+		wantValid  bool
+		wantErr    string
+	}{
+		{name: "no supervisor block", supervisor: nil, wantValid: true},
+		{name: "empty effort preserves default", supervisor: &SupervisorDefault{DefaultCLI: "codex", Effort: ""}, wantValid: true},
+		{name: "codex accepts minimal", supervisor: &SupervisorDefault{DefaultCLI: "codex", Effort: "minimal"}, wantValid: true},
+		{name: "claude accepts max", supervisor: &SupervisorDefault{DefaultCLI: "claude", Effort: "max"}, wantValid: true},
+		{name: "glm accepts xhigh", supervisor: &SupervisorDefault{DefaultCLI: "glm", Effort: "xhigh"}, wantValid: true},
+		{name: "claude rejects minimal", supervisor: &SupervisorDefault{DefaultCLI: "claude", Effort: "minimal"}, wantErr: "supervisor.effort for claude must be one of"},
+		{name: "codex rejects unknown", supervisor: &SupervisorDefault{DefaultCLI: "codex", Effort: "turbo"}, wantErr: "supervisor.effort for codex must be one of"},
+		{name: "effort without default_cli accepts union value", supervisor: &SupervisorDefault{Effort: "minimal"}, wantValid: true},
+		{name: "effort without default_cli rejects unknown", supervisor: &SupervisorDefault{Effort: "turbo"}, wantErr: "supervisor.effort must be one of"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			env := validEnvironmentForTest()
+			env.Supervisor = tc.supervisor
+			result := ValidateEnvironment(env)
+			if tc.wantValid {
+				if !result.Valid() {
+					t.Fatalf("expected valid, got errors: %#v", result.Errors)
+				}
+				return
+			}
+			if result.Valid() {
+				t.Fatal("expected invalid supervisor.effort")
+			}
+			if !strings.Contains(strings.Join(result.Errors, "\n"), tc.wantErr) {
+				t.Fatalf("errors missing %q: %#v", tc.wantErr, result.Errors)
+			}
+		})
+	}
+}
+
 func TestValidateEnvironmentAcceptsRequiredCheckShell(t *testing.T) {
 	env := validEnvironmentForTest()
 	env.RequiredChecks.Shell = "bash"

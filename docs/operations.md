@@ -159,7 +159,7 @@ The `command` string is operator-owned. Task content is untrusted and is deliver
 3. The `supervisor` field in `daemon.yaml`.
 4. The built-in default (`claude`).
 
-`galley daemon status` omits startup defaults it cannot report accurately, such as effective supervisor and concurrency. `runs/<run-id>/supervisor.json` records the adapter that ran, its model, and whether the model came from `environment.yaml` or the provider CLI default.
+`galley daemon status` omits startup defaults it cannot report accurately, such as effective supervisor and concurrency. `runs/<run-id>/supervisor.json` records the adapter that ran, its model and effort, and whether each of the model and effort came from `environment.yaml` or the provider CLI default.
 
 Set `supervisor.model` in the repository profile to pass an exact model name to every built-in supervisor evaluation. See [profiles.md](profiles.md#environmentyaml) for fallback behavior.
 

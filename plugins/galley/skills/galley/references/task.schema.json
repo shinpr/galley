@@ -246,9 +246,12 @@
             "properties": {
               "effort": {
                 "enum": [
+                  "minimal",
                   "low",
                   "medium",
-                  "high"
+                  "high",
+                  "xhigh",
+                  "max"
                 ],
                 "type": "string"
               }

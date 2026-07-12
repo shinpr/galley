@@ -267,6 +267,80 @@ func TestWriteSupervisorEvidenceRecordsModelState(t *testing.T) {
 	}
 }
 
+func TestEffectiveOptionsForProfilesResolvesSupervisorEffort(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		env        *profile.Environment
+		wantEffort string
+	}{
+		{
+			name:       "explicit effort from profile",
+			env:        &profile.Environment{Supervisor: &profile.SupervisorDefault{DefaultCLI: "codex", Effort: "minimal"}},
+			wantEffort: "minimal",
+		},
+		{
+			name:       "empty effort preserves CLI default",
+			env:        &profile.Environment{Supervisor: &profile.SupervisorDefault{DefaultCLI: "claude", Effort: ""}},
+			wantEffort: "",
+		},
+		{
+			name:       "no supervisor block",
+			env:        &profile.Environment{},
+			wantEffort: "",
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			effective := effectiveOptionsForProfiles(Options{Root: t.TempDir()}, profile.Bundle{Environment: tc.env})
+			if effective.SupervisorEffort != tc.wantEffort {
+				t.Fatalf("supervisor effort got %q, want %q", effective.SupervisorEffort, tc.wantEffort)
+			}
+		})
+	}
+}
+
+func TestWriteSupervisorEvidenceRecordsEffortState(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name             string
+		effort           string
+		wantEffort       string
+		wantEffortSource string
+	}{
+		{name: "explicit", effort: "minimal", wantEffort: "minimal", wantEffortSource: SupervisorEffortSourceRepoProfile},
+		{name: "omitted", effort: "", wantEffort: "", wantEffortSource: SupervisorEffortSourceCLIDefault},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			runDir := t.TempDir()
+			if err := writeSupervisorEvidence(runDir, Options{
+				Supervisor:       "codex",
+				SupervisorSource: SupervisorSourceRepoProfile,
+				SupervisorEffort: tc.effort,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(filepath.Join(runDir, "supervisor.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got map[string]string
+			if err := json.Unmarshal(data, &got); err != nil {
+				t.Fatal(err)
+			}
+			if got["effort"] != tc.wantEffort {
+				t.Fatalf("effort got %q, want %q (evidence %#v)", got["effort"], tc.wantEffort, got)
+			}
+			if got["effort_source"] != tc.wantEffortSource {
+				t.Fatalf("effort_source got %q, want %q (evidence %#v)", got["effort_source"], tc.wantEffortSource, got)
+			}
+		})
+	}
+}
+
 func TestEffectiveOptionsForProfilesCleansWorktreesByDefault(t *testing.T) {
 	t.Parallel()
 	effective := effectiveOptionsForProfiles(Options{Root: t.TempDir()}, profile.Bundle{})

@@ -100,6 +100,7 @@ func defaultSupervisorRunner(ctx context.Context, opts Options, evidence supervi
 	return supervisor.RunAdapter(ctx, supervisor.AdapterOptions{
 		Provider:     opts.Supervisor,
 		Model:        opts.SupervisorModel,
+		Effort:       opts.SupervisorEffort,
 		WorkDir:      workDir,
 		Timeout:      time.Duration(evidence.Task.ExecutionPolicy.TimeoutMS) * time.Millisecond,
 		IdleTimeout:  opts.IdleTimeout,
@@ -515,10 +516,16 @@ func writeSupervisorEvidence(runDir string, effectiveOpts Options) error {
 	if effectiveOpts.SupervisorModel != "" {
 		modelSource = SupervisorModelSourceRepoProfile
 	}
+	effortSource := SupervisorEffortSourceCLIDefault
+	if effectiveOpts.SupervisorEffort != "" {
+		effortSource = SupervisorEffortSourceRepoProfile
+	}
 	return writeJSON(filepath.Join(runDir, "supervisor.json"), map[string]string{
-		"resolved":     effectiveOpts.Supervisor,
-		"source":       effectiveOpts.SupervisorSource,
-		"model":        effectiveOpts.SupervisorModel,
-		"model_source": modelSource,
+		"resolved":      effectiveOpts.Supervisor,
+		"source":        effectiveOpts.SupervisorSource,
+		"model":         effectiveOpts.SupervisorModel,
+		"model_source":  modelSource,
+		"effort":        effectiveOpts.SupervisorEffort,
+		"effort_source": effortSource,
 	})
 }

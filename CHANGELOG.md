@@ -6,6 +6,15 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Added
+
+- Environment profiles accept an optional `supervisor.effort`. When set, it reaches the effective supervisor as `--effort` (claude, glm) or the `model_reasoning_effort` config override (codex); an unsupported provider/effort combination fails before the supervisor subprocess starts. Omitting the field or setting it empty preserves the CLI default, and the bundled environment schema accepts the empty value for every supervisor `default_cli`. `runs/<run-id>/supervisor.json` now records the effective `effort` and its `effort_source`.
+
+### Changed
+
+- Codex executors now accept `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` effort values, matching the official Codex provider-level set; the requested literal passes through unchanged to implementation, setup, and acceptance-skeleton roles. Model-specific rejection of a provider-valid effort remains an upstream Codex error.
+- Packaged Claude and Codex plugins are now `0.1.23`.
+
 ## v0.9.3 - 2026-07-11
 
 ### Changed

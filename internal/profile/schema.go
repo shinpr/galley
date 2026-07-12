@@ -73,12 +73,7 @@ func EnvironmentJSONSchema() ([]byte, error) {
 					"default_cli": enumSchema(provider.ExecutorIDs()),
 				}),
 			),
-			"supervisor": object(
-				properties(map[string]any{
-					"default_cli": enumSchema(daemonconfig.SupervisorCLIs()),
-					"model":       stringSchema("description", "Optional model name passed unchanged to the selected supervisor CLI. Omit or leave empty to use the CLI default; accepted values depend on the provider."),
-				}),
-			),
+			"supervisor": supervisorSchema(),
 			"required_checks": object(
 				properties(map[string]any{
 					"shell":      enumSchema([]string{"auto", "sh", "bash", "cmd", "powershell", "pwsh"}),
@@ -136,6 +131,47 @@ func EnvironmentJSONSchema() ([]byte, error) {
 	schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
 	schema["title"] = "Galley Environment Profile YAML"
 	return marshalSchema(schema)
+}
+
+// supervisorSchema describes the optional repository-scoped supervisor block.
+// effort carries a base string type plus per-provider conditional enums so an
+// editor constrains it to the selected default_cli's accepted values; when
+// default_cli is omitted the effective supervisor is resolved at daemon startup
+// and Galley validates the effort against it before the review subprocess runs.
+func supervisorSchema() map[string]any {
+	m := object(
+		properties(map[string]any{
+			"default_cli": enumSchema(daemonconfig.SupervisorCLIs()),
+			"model":       stringSchema("description", "Optional model name passed unchanged to the selected supervisor CLI. Omit or leave empty to use the CLI default; accepted values depend on the provider."),
+			"effort":      stringSchema("description", "Optional reasoning effort passed to the selected supervisor CLI (--effort for claude/glm, model_reasoning_effort for codex). Omit or leave empty to keep the CLI default. Accepted values depend on the selected default_cli and are validated against the effective supervisor before review starts."),
+		}),
+	)
+	m["allOf"] = supervisorEffortSchemas()
+	return m
+}
+
+func supervisorEffortSchemas() []any {
+	var schemas []any
+	for _, descriptor := range provider.All() {
+		if !descriptor.Supervisor {
+			continue
+		}
+		// Permit the empty CLI-default value alongside the provider's
+		// authoritative effort set so an explicitly empty effort stays valid
+		// under the conditional, matching the runtime that treats an empty
+		// effort as "keep the CLI default" rather than validating it.
+		efforts := append([]string{""}, provider.EffortsForTransport(descriptor.Transport)...)
+		schemas = append(schemas, map[string]any{
+			"if": map[string]any{
+				"properties": map[string]any{"default_cli": map[string]any{"const": descriptor.ID}},
+				"required":   []string{"default_cli"},
+			},
+			"then": map[string]any{
+				"properties": map[string]any{"effort": enumSchema(efforts)},
+			},
+		})
+	}
+	return schemas
 }
 
 func marshalSchema(schema map[string]any) ([]byte, error) {

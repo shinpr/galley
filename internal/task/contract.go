@@ -16,8 +16,8 @@ var (
 	validPermissions            = []string{"read-only", "edit", "sandbox-full-access"}
 	validPromptModes            = []string{"replace", "append"}
 	validExecutorCLIs           = provider.ExecutorIDs()
-	validClaudeEfforts          = []string{"low", "medium", "high", "xhigh", "max"}
-	validCodexEfforts           = []string{"low", "medium", "high"}
+	validClaudeEfforts          = provider.EffortsForTransport(provider.TransportClaude)
+	validCodexEfforts           = provider.EffortsForTransport(provider.TransportCodex)
 	validAFKDecisionPolicies    = []string{"choose-smallest-reversible"}
 	validPreflightSkeletonModes = []string{"skeleton"}
 	validTaskIDPattern          = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)

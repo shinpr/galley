@@ -2,7 +2,7 @@ package daemoncmd
 
 import (
 	"bytes"
-	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -93,42 +93,68 @@ func TestRepeatedStopCommandsUseOneStopOperation(t *testing.T) {
 	}
 }
 
-func TestStopLockReclaimsDeadOwner(t *testing.T) {
+func TestTimedOutStopIntentPreventsAnotherSignal(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "galley-daemon.pid")
-	owner := stopLockOwner{PID: 1 << 30, Claim: "dead"}
-	data, err := json.Marshal(owner)
+	target := daemonctl.PIDFile{PID: 42, StartedAt: "first", TokenHash: "token"}
+	path, leader, err := claimStopIntent(pidFile, target)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Mkdir(stopLockPath(pidFile), 0o700); err != nil {
-		t.Fatal(err)
+	if !leader {
+		t.Fatal("first caller must own the stop intent")
 	}
-	if err := os.WriteFile(stopLockOwnerPath(stopLockPath(pidFile)), data, 0o600); err != nil {
-		t.Fatal(err)
+	if _, leader, err := claimStopIntent(pidFile, target); err != nil || leader {
+		t.Fatalf("second claim = leader:%v err:%v, want follower", leader, err)
 	}
-	release, err := acquireStopLock(pidFile, time.Second)
+
+	replacement := target
+	replacement.TokenHash = "replacement"
+	replacementPath, leader, err := claimStopIntent(pidFile, replacement)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer release()
+	if !leader || replacementPath == path {
+		t.Fatal("replacement daemon must have an independent stop intent")
+	}
 }
 
-func TestStopLockDoesNotStealLiveOwner(t *testing.T) {
-	pidFile := filepath.Join(t.TempDir(), "galley-daemon.pid")
-	release, err := acquireStopLock(pidFile, time.Second)
+func TestStopTimeoutKeepsIntentForLaterNormalStop(t *testing.T) {
+	root := t.TempDir()
+	pidFile := filepath.Join(root, "galley-daemon.pid")
+	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer release()
-	old := time.Now().Add(-time.Hour)
-	if err := os.Chtimes(stopLockPath(pidFile), old, old); err != nil {
+	meta := daemonctl.NewPIDFile(os.Getpid(), exe, root, []string{exe}).WithToken("timeout-test")
+	if err := daemonctl.WritePID(pidFile, meta); err != nil {
 		t.Fatal(err)
 	}
-	stale, err := stopLockIsStale(stopLockPath(pidFile))
-	if err != nil {
+	if err := daemonctl.Heartbeat(pidFile, meta); err != nil {
 		t.Fatal(err)
 	}
-	if stale {
-		t.Fatal("live lock must not become stale based on age")
+
+	var calls atomic.Int32
+	previous := stopVerifiedForCommand
+	stopVerifiedForCommand = func(daemonctl.PIDFile, time.Duration) error {
+		calls.Add(1)
+		return errors.New("stop timed out")
+	}
+	defer func() { stopVerifiedForCommand = previous }()
+
+	runStop := func() error {
+		cmd := NewCommand("daemon")
+		cmd.SetOut(&bytes.Buffer{})
+		cmd.SetErr(&bytes.Buffer{})
+		cmd.SetArgs([]string{"--root", root, "--stop-timeout", "25ms", "stop"})
+		return cmd.Execute()
+	}
+	if err := runStop(); err == nil {
+		t.Fatal("first stop must report its timeout")
+	}
+	if err := runStop(); err == nil {
+		t.Fatal("later stop must time out while observing the original shutdown")
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("stop operation count = %d, want 1", got)
 	}
 }

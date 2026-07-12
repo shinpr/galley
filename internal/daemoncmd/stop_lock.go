@@ -1,6 +1,8 @@
 package daemoncmd
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,115 +13,58 @@ import (
 	"github.com/shinpr/galley/internal/daemonctl"
 )
 
-type stopLockOwner struct {
-	PID              int    `json:"pid"`
-	ProcessStartedAt string `json:"process_started_at,omitempty"`
-	Claim            string `json:"claim"`
+func stopIntentPath(pidFile string, target daemonctl.PIDFile) string {
+	identity, _ := json.Marshal(struct {
+		PID              int    `json:"pid"`
+		ProcessStartedAt string `json:"process_started_at"`
+		StartedAt        string `json:"started_at"`
+		TokenHash        string `json:"token_hash"`
+	}{target.PID, target.ProcessStartedAt, target.StartedAt, target.TokenHash})
+	sum := sha256.Sum256(identity)
+	return pidFile + ".stop-" + hex.EncodeToString(sum[:8])
 }
 
-func stopLockPath(pidFile string) string       { return pidFile + ".stop.lock" }
-func stopLockOwnerPath(lockPath string) string { return filepath.Join(lockPath, "owner.json") }
-
-// acquireStopLock serializes cooperating stop commands. A dead owner's lock is
-// reclaimed; a live owner is never displaced by a time-based lease.
-func acquireStopLock(pidFile string, timeout time.Duration) (release func(), err error) {
-	path := stopLockPath(pidFile)
+// claimStopIntent makes a stop signal single-owner for one daemon identity.
+// The intent remains after a timeout so a later normal stop cannot re-signal.
+func claimStopIntent(pidFile string, target daemonctl.PIDFile) (path string, leader bool, err error) {
+	path = stopIntentPath(pidFile, target)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, err
+		return "", false, err
 	}
-	owner := currentStopLockOwner()
+	err = os.Mkdir(path, 0o700)
+	if err == nil {
+		return path, true, nil
+	}
+	if errors.Is(err, os.ErrExist) {
+		return path, false, nil
+	}
+	return "", false, err
+}
+
+func waitForDaemonStop(pidFile, root, executable string, target daemonctl.PIDFile, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
-		openErr := os.Mkdir(path, 0o700)
-		if openErr == nil {
-			data, marshalErr := json.Marshal(owner)
-			if marshalErr == nil {
-				marshalErr = os.WriteFile(stopLockOwnerPath(path), append(data, '\n'), 0o600)
-			}
-			if marshalErr != nil {
-				_ = os.RemoveAll(path)
-				return nil, marshalErr
-			}
-			return func() { releaseStopLock(path, owner) }, nil
+		status, err := daemonctl.Inspect(pidFile, root, executable)
+		if errors.Is(err, daemonctl.ErrNotRunning) {
+			return nil
 		}
-		if !errors.Is(openErr, os.ErrExist) {
-			return nil, openErr
+		if err != nil {
+			return err
 		}
-		stale, staleErr := stopLockIsStale(path)
-		if staleErr != nil {
-			return nil, staleErr
-		}
-		if stale {
-			tomb := fmt.Sprintf("%s.stale-%d-%d", path, os.Getpid(), time.Now().UnixNano())
-			if renameErr := os.Rename(path, tomb); renameErr == nil {
-				_ = os.RemoveAll(tomb)
-			}
-			continue
+		if !sameDaemonIdentity(target, status.Meta) || !status.Alive {
+			return nil
 		}
 		if timeout <= 0 || !time.Now().Before(deadline) {
-			return nil, errors.New("timed out waiting for active daemon stop")
+			return fmt.Errorf("daemon pid %d did not stop within %s", target.PID, timeout)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
 }
 
-func currentStopLockOwner() stopLockOwner {
-	owner := stopLockOwner{PID: os.Getpid(), Claim: fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano())}
-	if info, err := daemonctl.ProcessInfo(owner.PID); err == nil {
-		owner.ProcessStartedAt = info.StartedAt
-	}
-	return owner
-}
-
-func stopLockIsStale(path string) (bool, error) {
-	data, err := os.ReadFile(stopLockOwnerPath(path))
-	if err != nil {
-		info, statErr := os.Stat(path)
-		if errors.Is(statErr, os.ErrNotExist) {
-			return true, nil
-		}
-		if statErr != nil {
-			return false, statErr
-		}
-		return time.Since(info.ModTime()) >= time.Second, nil
-	}
-	var owner stopLockOwner
-	if err := json.Unmarshal(data, &owner); err != nil || owner.PID <= 0 || owner.Claim == "" {
-		info, statErr := os.Stat(path)
-		if statErr != nil {
-			return false, statErr
-		}
-		return time.Since(info.ModTime()) >= time.Second, nil
-	}
-	alive, err := daemonctl.Alive(owner.PID)
-	if err != nil {
-		return false, err
-	}
-	if !alive {
-		return true, nil
-	}
-	if owner.ProcessStartedAt == "" {
-		return false, nil
-	}
-	info, err := daemonctl.ProcessInfo(owner.PID)
-	if err != nil {
-		return false, nil
-	}
-	return info.StartedAt != "" && info.StartedAt != owner.ProcessStartedAt, nil
-}
-
-func releaseStopLock(path string, expected stopLockOwner) {
-	data, err := os.ReadFile(stopLockOwnerPath(path))
-	if err != nil {
-		return
-	}
-	var current stopLockOwner
-	if json.Unmarshal(data, &current) == nil && current.Claim == expected.Claim {
-		_ = os.Remove(stopLockOwnerPath(path))
-		_ = os.Remove(path)
-	}
+func removeStopIntent(path string) {
+	_ = os.Remove(path)
 }
 
 func sameDaemonIdentity(a, b daemonctl.PIDFile) bool {
-	return a.PID == b.PID && a.ProcessStartedAt == b.ProcessStartedAt && a.TokenHash == b.TokenHash && a.Executable == b.Executable && a.Root == b.Root
+	return a.PID == b.PID && a.ProcessStartedAt == b.ProcessStartedAt && a.StartedAt == b.StartedAt && a.TokenHash == b.TokenHash && a.Executable == b.Executable && a.Root == b.Root
 }

@@ -377,25 +377,40 @@ func newStopCommand(opts *daemon.Options, pidFile *string, stopTimeout *time.Dur
 			if afterInitialStopInspectForCommand != nil {
 				afterInitialStopInspectForCommand()
 			}
-			var release func()
+			var intentPath string
+			leader := false
 			if !force {
-				release, err = acquireStopLock(paths.PIDFile, *stopTimeout)
+				intentPath, leader, err = claimStopIntent(paths.PIDFile, initial.Meta)
 				if err != nil {
 					return err
 				}
-				defer release()
 				status, inspectErr := daemonctl.Inspect(paths.PIDFile, opts.Root, exe)
 				if errors.Is(inspectErr, daemonctl.ErrNotRunning) || (inspectErr == nil && !sameDaemonIdentity(initial.Meta, status.Meta)) {
+					removeStopIntent(intentPath)
 					fmt.Fprintf(cmd.OutOrStdout(), "galley daemon stopped pid=%d\n", initial.Meta.PID)
 					return nil
 				}
 				if inspectErr != nil {
+					if leader {
+						removeStopIntent(intentPath)
+					}
 					return inspectErr
 				}
 				initial = status
+				if !leader {
+					if err := waitForDaemonStop(paths.PIDFile, opts.Root, exe, initial.Meta, *stopTimeout); err != nil {
+						return err
+					}
+					removeStopIntent(intentPath)
+					fmt.Fprintf(cmd.OutOrStdout(), "galley daemon stopped pid=%d\n", initial.Meta.PID)
+					return nil
+				}
 			}
 			status := initial
 			if !status.Alive {
+				if intentPath != "" {
+					removeStopIntent(intentPath)
+				}
 				// A stale daemon record means the daemon process is gone, but
 				// it may have left behind executor/supervisor child process
 				// groups it can no longer reap. Force stop must clean those up
@@ -411,6 +426,9 @@ func newStopCommand(opts *daemon.Options, pidFile *string, stopTimeout *time.Dur
 				return daemonctl.ErrNotRunning
 			}
 			if !status.Verified {
+				if leader {
+					removeStopIntent(intentPath)
+				}
 				return fmt.Errorf("%w: pid=%d", daemonctl.ErrUnverifiedProcess, status.Meta.PID)
 			}
 			forced := false
@@ -420,8 +438,11 @@ func newStopCommand(opts *daemon.Options, pidFile *string, stopTimeout *time.Dur
 					return err
 				}
 				forced = wasForced
-			} else if err := stopVerifiedForCommand(status.Meta, *stopTimeout); err != nil && !errors.Is(err, daemonctl.ErrNotRunning) {
-				return err
+			} else {
+				if err := stopVerifiedForCommand(status.Meta, *stopTimeout); err != nil && !errors.Is(err, daemonctl.ErrNotRunning) {
+					return err
+				}
+				defer removeStopIntent(intentPath)
 			}
 			// Force stop must clean up the daemon's known active child
 			// process groups before reporting a stopped state or removing the

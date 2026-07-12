@@ -24,6 +24,7 @@ import (
 )
 
 var stopVerifiedForCommand = daemonctl.StopVerified
+var forceStopForCommand = daemonctl.ForceStop
 var afterInitialStopInspectForCommand func()
 
 func NewCommand(use string) *cobra.Command {
@@ -433,10 +434,11 @@ func newStopCommand(opts *daemon.Options, pidFile *string, stopTimeout *time.Dur
 			}
 			forced := false
 			if force {
-				wasForced, err := daemonctl.ForceStop(status.Meta, *stopTimeout)
+				wasForced, err := forceStopForCommand(status.Meta, *stopTimeout)
 				if err != nil && !errors.Is(err, daemonctl.ErrNotRunning) {
 					return err
 				}
+				defer removeStopIntent(stopIntentPath(paths.PIDFile, status.Meta))
 				forced = wasForced
 			} else {
 				if err := stopVerifiedForCommand(status.Meta, *stopTimeout); err != nil && !errors.Is(err, daemonctl.ErrNotRunning) {

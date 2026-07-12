@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -156,5 +157,66 @@ func TestStopTimeoutKeepsIntentForLaterNormalStop(t *testing.T) {
 	}
 	if got := calls.Load(); got != 1 {
 		t.Fatalf("stop operation count = %d, want 1", got)
+	}
+}
+
+func TestAbandonedStopIntentRequiresForceRecovery(t *testing.T) {
+	root := t.TempDir()
+	pidFile := filepath.Join(root, "galley-daemon.pid")
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta := daemonctl.NewPIDFile(os.Getpid(), exe, root, []string{exe}).WithToken("abandoned-intent-test")
+	if err := daemonctl.WritePID(pidFile, meta); err != nil {
+		t.Fatal(err)
+	}
+	if err := daemonctl.Heartbeat(pidFile, meta); err != nil {
+		t.Fatal(err)
+	}
+	intentPath, leader, err := claimStopIntent(pidFile, meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !leader {
+		t.Fatal("fixture must create the abandoned leader intent")
+	}
+
+	var normalCalls atomic.Int32
+	previousStop := stopVerifiedForCommand
+	previousForce := forceStopForCommand
+	stopVerifiedForCommand = func(daemonctl.PIDFile, time.Duration) error {
+		normalCalls.Add(1)
+		return nil
+	}
+	forceStopForCommand = func(daemonctl.PIDFile, time.Duration) (bool, error) {
+		return true, nil
+	}
+	defer func() {
+		stopVerifiedForCommand = previousStop
+		forceStopForCommand = previousForce
+	}()
+
+	normal := NewCommand("daemon")
+	normal.SetOut(&bytes.Buffer{})
+	normal.SetErr(&bytes.Buffer{})
+	normal.SetArgs([]string{"--root", root, "--stop-timeout", "25ms", "stop"})
+	err = normal.Execute()
+	if err == nil || !strings.Contains(err.Error(), "use stop --force to recover") {
+		t.Fatalf("normal stop error = %v, want force recovery guidance", err)
+	}
+	if got := normalCalls.Load(); got != 0 {
+		t.Fatalf("normal stop signal count = %d, want 0", got)
+	}
+
+	force := NewCommand("daemon")
+	force.SetOut(&bytes.Buffer{})
+	force.SetErr(&bytes.Buffer{})
+	force.SetArgs([]string{"--root", root, "--stop-timeout", "25ms", "stop", "--force"})
+	if err := force.Execute(); err != nil {
+		t.Fatalf("force recovery: %v", err)
+	}
+	if _, err := os.Stat(intentPath); !os.IsNotExist(err) {
+		t.Fatalf("stop intent must be removed after force recovery: %v", err)
 	}
 }

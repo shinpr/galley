@@ -55,7 +55,7 @@ func waitForDaemonStop(pidFile, root, executable string, target daemonctl.PIDFil
 			return nil
 		}
 		if timeout <= 0 || !time.Now().Before(deadline) {
-			return fmt.Errorf("daemon pid %d did not stop within %s", target.PID, timeout)
+			return fmt.Errorf("daemon pid %d did not stop within %s; shutdown intent remains, so normal stop will not signal again; use stop --force to recover", target.PID, timeout)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}

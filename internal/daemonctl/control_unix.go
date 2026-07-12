@@ -32,8 +32,8 @@ func Alive(pid int) (bool, error) {
 	return false, err
 }
 
-// Stop sends SIGTERM and waits for process exit until timeout.
-func Stop(pid int, timeout time.Duration) error {
+// signalStop sends SIGTERM to pid without waiting for exit.
+func signalStop(pid int) error {
 	process, err := os.FindProcess(pid)
 	if err != nil {
 		return err
@@ -42,6 +42,14 @@ func Stop(pid int, timeout time.Duration) error {
 		if errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ESRCH) {
 			return ErrNotRunning
 		}
+		return err
+	}
+	return nil
+}
+
+// Stop sends SIGTERM and waits for process exit until timeout.
+func Stop(pid int, timeout time.Duration) error {
+	if err := signalStop(pid); err != nil {
 		return err
 	}
 	return waitExit(pid, timeout, "stop")

@@ -52,14 +52,10 @@ func Alive(pid int) (bool, error) {
 	return code == stillActive, nil
 }
 
-// Stop terminates pid. Windows does not have a SIGTERM equivalent that can
-// be delivered to a console-less background process, so background daemon
-// stop performs an immediate TerminateProcess (the same primitive used by
-// `Kill`). Operators that need a graceful shutdown should run the daemon in
-// the foreground via `galley daemon run` and use Ctrl+C instead of
-// `galley daemon start`/`stop`. This limitation is documented in
-// CHANGELOG.md and docs/operations.md.
-func Stop(pid int, timeout time.Duration) error {
+// signalStop terminates pid without waiting for exit. Windows has no SIGTERM
+// equivalent for a console-less background process, so this uses
+// TerminateProcess (same as Kill).
+func signalStop(pid int) error {
 	alive, err := Alive(pid)
 	if err != nil {
 		return err
@@ -75,6 +71,20 @@ func Stop(pid int, timeout time.Duration) error {
 		if errors.Is(err, os.ErrProcessDone) {
 			return ErrNotRunning
 		}
+		return err
+	}
+	return nil
+}
+
+// Stop terminates pid. Windows does not have a SIGTERM equivalent that can
+// be delivered to a console-less background process, so background daemon
+// stop performs an immediate TerminateProcess (the same primitive used by
+// `Kill`). Operators that need a graceful shutdown should run the daemon in
+// the foreground via `galley daemon run` and use Ctrl+C instead of
+// `galley daemon start`/`stop`. This limitation is documented in
+// CHANGELOG.md and docs/operations.md.
+func Stop(pid int, timeout time.Duration) error {
+	if err := signalStop(pid); err != nil {
 		return err
 	}
 	return waitExit(pid, timeout, "stop")

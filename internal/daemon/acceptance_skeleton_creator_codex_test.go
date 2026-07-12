@@ -293,6 +293,14 @@ printf 'package foo_test\n' > internal/foo/foo_test.go`
 			// Codex exposes --model and the -c model_reasoning_effort override.
 			wantInSeq: [][2]string{{"--model", "gpt-5-codex"}, {"-c", `model_reasoning_effort="high"`}},
 		},
+		{
+			name:      "codex minimal",
+			cli:       "codex",
+			model:     "gpt-5-codex",
+			effort:    "minimal",
+			opts:      skeletonpreflight.Options{CodexBin: fakeCodexCreator(t, codexCreatorManifest(codexOutputs), fileWrite)},
+			wantInSeq: [][2]string{{"-c", `model_reasoning_effort="minimal"`}},
+		},
 	} {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {

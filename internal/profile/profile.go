@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/shinpr/galley/internal/daemonconfig"
@@ -97,6 +98,8 @@ type SupervisorDefault struct {
 	DefaultCLI string `yaml:"default_cli,omitempty" json:"default_cli,omitempty"`
 	// Model is passed unchanged to the provider CLI. Empty preserves its default.
 	Model string `yaml:"model,omitempty" json:"model,omitempty"`
+	// Effort is validated against the effective provider before review; empty keeps its CLI default.
+	Effort string `yaml:"effort,omitempty" json:"effort,omitempty"`
 }
 
 type RequiredCheckEnvironment struct {
@@ -234,6 +237,16 @@ func ValidateEnvironment(env Environment) ValidationResult {
 	}
 	if env.Supervisor != nil && env.Supervisor.DefaultCLI != "" {
 		require(&result, daemonconfig.IsValidSupervisor(env.Supervisor.DefaultCLI), "supervisor.default_cli must be one of: %s", strings.Join(daemonconfig.SupervisorCLIs(), ", "))
+	}
+	if env.Supervisor != nil && env.Supervisor.Effort != "" {
+		// Without default_cli, profile validation can enforce only the provider union; preflight narrows it later.
+		if env.Supervisor.DefaultCLI != "" {
+			if efforts, ok := provider.EffortsForID(env.Supervisor.DefaultCLI); ok {
+				require(&result, slices.Contains(efforts, env.Supervisor.Effort), "supervisor.effort for %s must be one of: %s", env.Supervisor.DefaultCLI, strings.Join(efforts, ", "))
+			}
+		} else {
+			require(&result, slices.Contains(provider.SupervisorEfforts(), env.Supervisor.Effort), "supervisor.effort must be one of: %s", strings.Join(provider.SupervisorEfforts(), ", "))
+		}
 	}
 	if env.RequiredChecks.Shell != "" {
 		require(&result, validRequiredCheckShell(env.RequiredChecks.Shell), "required_checks.shell must be one of: auto, sh, bash, cmd, powershell, pwsh")

@@ -23,6 +23,12 @@ var descriptors = []Descriptor{
 	{ID: "glm", Transport: TransportClaude, Executor: true, Supervisor: true},
 }
 
+// Galley validates provider-level values and leaves model compatibility to each CLI.
+var (
+	claudeEfforts = []string{"low", "medium", "high", "xhigh", "max"}
+	codexEfforts  = []string{"minimal", "low", "medium", "high", "xhigh", "max"}
+)
+
 func All() []Descriptor { return slices.Clone(descriptors) }
 
 func Lookup(id string) (Descriptor, bool) {
@@ -51,6 +57,47 @@ func IsSupervisor(id string) bool {
 func TransportFor(id string) (Transport, bool) {
 	descriptor, ok := Lookup(id)
 	return descriptor.Transport, ok
+}
+
+// EffortsForTransport returns the accepted reasoning-effort values for a
+// transport in stable order. An unknown transport returns nil.
+func EffortsForTransport(t Transport) []string {
+	switch t {
+	case TransportClaude:
+		return slices.Clone(claudeEfforts)
+	case TransportCodex:
+		return slices.Clone(codexEfforts)
+	default:
+		return nil
+	}
+}
+
+// EffortsForID returns the accepted reasoning-effort values for a provider id.
+// The bool is false when the id is unknown.
+func EffortsForID(id string) ([]string, bool) {
+	descriptor, ok := Lookup(id)
+	if !ok {
+		return nil, false
+	}
+	return EffortsForTransport(descriptor.Transport), true
+}
+
+// SupervisorEfforts returns the stable union used before an effective provider is known.
+func SupervisorEfforts() []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, descriptor := range descriptors {
+		if !descriptor.Supervisor {
+			continue
+		}
+		for _, effort := range EffortsForTransport(descriptor.Transport) {
+			if !seen[effort] {
+				seen[effort] = true
+				out = append(out, effort)
+			}
+		}
+	}
+	return out
 }
 
 func roleIDs(include func(Descriptor) bool) []string {

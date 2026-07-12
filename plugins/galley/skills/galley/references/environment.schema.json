@@ -152,12 +152,109 @@
     },
     "supervisor": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "default_cli": {
+                "const": "claude"
+              }
+            },
+            "required": [
+              "default_cli"
+            ]
+          },
+          "then": {
+            "properties": {
+              "effort": {
+                "enum": [
+                  "",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ],
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "default_cli": {
+                "const": "codex"
+              }
+            },
+            "required": [
+              "default_cli"
+            ]
+          },
+          "then": {
+            "properties": {
+              "effort": {
+                "enum": [
+                  "",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ],
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "default_cli": {
+                "const": "glm"
+              }
+            },
+            "required": [
+              "default_cli"
+            ]
+          },
+          "then": {
+            "properties": {
+              "effort": {
+                "enum": [
+                  "",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ],
+                "type": "string"
+              }
+            }
+          }
+        }
+      ],
       "properties": {
         "default_cli": {
           "enum": [
             "claude",
             "codex",
             "glm"
+          ],
+          "type": "string"
+        },
+        "effort": {
+          "description": "Optional reasoning effort. Empty keeps the CLI default; the effective provider is validated before review.",
+          "enum": [
+            "",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "minimal"
           ],
           "type": "string"
         },

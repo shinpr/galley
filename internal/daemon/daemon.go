@@ -99,7 +99,9 @@ type Options struct {
 	SupervisorSource string
 	// SupervisorModel is the repository's exact provider model override. Empty
 	// preserves the supervisor CLI default.
-	SupervisorModel      string
+	SupervisorModel string
+	// SupervisorEffort is the profile override persisted in supervisor.json; empty keeps the CLI default.
+	SupervisorEffort     string
 	ShutdownTimeout      time.Duration
 	DisableClaudeGuard   bool
 	ClaudeGuardPluginDir string
@@ -200,6 +202,11 @@ const (
 const (
 	SupervisorModelSourceRepoProfile = "environment_profile"
 	SupervisorModelSourceCLIDefault  = "cli_default"
+)
+
+const (
+	SupervisorEffortSourceRepoProfile = "environment_profile"
+	SupervisorEffortSourceCLIDefault  = "cli_default"
 )
 
 // Run starts the daemon loop.

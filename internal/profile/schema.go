@@ -73,12 +73,7 @@ func EnvironmentJSONSchema() ([]byte, error) {
 					"default_cli": enumSchema(provider.ExecutorIDs()),
 				}),
 			),
-			"supervisor": object(
-				properties(map[string]any{
-					"default_cli": enumSchema(daemonconfig.SupervisorCLIs()),
-					"model":       stringSchema("description", "Optional model name passed unchanged to the selected supervisor CLI. Omit or leave empty to use the CLI default; accepted values depend on the provider."),
-				}),
-			),
+			"supervisor": supervisorSchema(),
 			"required_checks": object(
 				properties(map[string]any{
 					"shell":      enumSchema([]string{"auto", "sh", "bash", "cmd", "powershell", "pwsh"}),
@@ -136,6 +131,46 @@ func EnvironmentJSONSchema() ([]byte, error) {
 	schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
 	schema["title"] = "Galley Environment Profile YAML"
 	return marshalSchema(schema)
+}
+
+// supervisorSchema uses the provider union as its base and narrows effort when default_cli is selected.
+func supervisorSchema() map[string]any {
+	m := object(
+		properties(map[string]any{
+			"default_cli": enumSchema(daemonconfig.SupervisorCLIs()),
+			"model":       stringSchema("description", "Optional model name passed unchanged to the selected supervisor CLI. Omit or leave empty to use the CLI default; accepted values depend on the provider."),
+			"effort":      supervisorEffortBaseSchema(),
+		}),
+	)
+	m["allOf"] = supervisorEffortSchemas()
+	return m
+}
+
+func supervisorEffortBaseSchema() map[string]any {
+	m := enumSchema(append([]string{""}, provider.SupervisorEfforts()...))
+	m["description"] = "Optional reasoning effort. Empty keeps the CLI default; the effective provider is validated before review."
+	return m
+}
+
+func supervisorEffortSchemas() []any {
+	var schemas []any
+	for _, descriptor := range provider.All() {
+		if !descriptor.Supervisor {
+			continue
+		}
+		// Empty preserves the CLI default under each conditional enum.
+		efforts := append([]string{""}, provider.EffortsForTransport(descriptor.Transport)...)
+		schemas = append(schemas, map[string]any{
+			"if": map[string]any{
+				"properties": map[string]any{"default_cli": map[string]any{"const": descriptor.ID}},
+				"required":   []string{"default_cli"},
+			},
+			"then": map[string]any{
+				"properties": map[string]any{"effort": enumSchema(efforts)},
+			},
+		})
+	}
+	return schemas
 }
 
 func marshalSchema(schema map[string]any) ([]byte, error) {

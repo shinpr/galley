@@ -63,8 +63,12 @@ func TestExecutorEffortValidationDependsOnCLI(t *testing.T) {
 	}{
 		{name: "claude accepts max", cli: "claude", effort: "max", wantValid: true},
 		{name: "claude accepts xhigh", cli: "claude", effort: "xhigh", wantValid: true},
+		{name: "claude rejects minimal", cli: "claude", effort: "minimal", wantError: "executor.effort for claude must be one of"},
 		{name: "codex accepts high", cli: "codex", effort: "high", wantValid: true},
-		{name: "codex rejects xhigh", cli: "codex", effort: "xhigh", wantError: "executor.effort for codex must be one of"},
+		{name: "codex accepts minimal", cli: "codex", effort: "minimal", wantValid: true},
+		{name: "codex accepts xhigh", cli: "codex", effort: "xhigh", wantValid: true},
+		{name: "codex accepts max", cli: "codex", effort: "max", wantValid: true},
+		{name: "codex rejects unknown", cli: "codex", effort: "turbo", wantError: "executor.effort for codex must be one of"},
 		{name: "claude rejects unknown", cli: "claude", effort: "turbo", wantError: "executor.effort for claude must be one of"},
 		{name: "glm accepts xhigh", cli: "glm", effort: "xhigh", wantValid: true},
 		{name: "glm rejects unknown", cli: "glm", effort: "turbo", wantError: "executor.effort for glm must be one of"},
@@ -168,7 +172,7 @@ func TestExecutorEffortSchemaConditionDependsOnCLI(t *testing.T) {
 	if !reflect.DeepEqual(got["claude"], []string{"low", "medium", "high", "xhigh", "max"}) {
 		t.Fatalf("claude effort enum drift: %#v", got["claude"])
 	}
-	if !reflect.DeepEqual(got["codex"], []string{"low", "medium", "high"}) {
+	if !reflect.DeepEqual(got["codex"], []string{"minimal", "low", "medium", "high", "xhigh", "max"}) {
 		t.Fatalf("codex effort enum drift: %#v", got["codex"])
 	}
 	if !reflect.DeepEqual(got["glm"], []string{"low", "medium", "high", "xhigh", "max"}) {

@@ -177,6 +177,7 @@ type effectiveTaskOptions struct {
 	Supervisor       string
 	SupervisorSource string
 	SupervisorModel  string
+	SupervisorEffort string
 }
 
 func resolveEffectiveTaskOptions(opts Options, profiles profile.Bundle) effectiveTaskOptions {
@@ -190,6 +191,7 @@ func resolveEffectiveTaskOptions(opts Options, profiles profile.Bundle) effectiv
 		Supervisor:       opts.Supervisor,
 		SupervisorSource: opts.SupervisorSource,
 		SupervisorModel:  opts.SupervisorModel,
+		SupervisorEffort: opts.SupervisorEffort,
 	}
 	if profiles.Environment != nil {
 		env := profiles.Environment
@@ -207,6 +209,9 @@ func resolveEffectiveTaskOptions(opts Options, profiles profile.Bundle) effectiv
 			}
 			if env.Supervisor.Model != "" {
 				effective.SupervisorModel = env.Supervisor.Model
+			}
+			if env.Supervisor.Effort != "" {
+				effective.SupervisorEffort = env.Supervisor.Effort
 			}
 		}
 	}
@@ -226,6 +231,7 @@ func (effective effectiveTaskOptions) apply(opts Options) Options {
 	opts.Supervisor = effective.Supervisor
 	opts.SupervisorSource = effective.SupervisorSource
 	opts.SupervisorModel = effective.SupervisorModel
+	opts.SupervisorEffort = effective.SupervisorEffort
 	return opts
 }
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -29,7 +30,9 @@ const ClaudeSupervisorSystemPromptFilename = "claude_supervisor_system_prompt.md
 type AdapterOptions struct {
 	Provider string
 	// Model is passed unchanged to the provider CLI. Empty preserves its default.
-	Model       string
+	Model string
+	// Effort is the provider-specific reasoning override; empty keeps the CLI default.
+	Effort      string
 	WorkDir     string
 	Timeout     time.Duration
 	IdleTimeout time.Duration
@@ -117,6 +120,9 @@ func RunAdapterPayload(ctx context.Context, opts AdapterOptions, request []byte)
 	if !ok || !provider.IsSupervisor(opts.Provider) {
 		return nil, fmt.Errorf("supervisor provider must be one of: %s", strings.Join(provider.SupervisorIDs(), ", "))
 	}
+	if err := PreflightEffort(opts.Provider, opts.Effort); err != nil {
+		return nil, err
+	}
 	switch transport {
 	case provider.TransportCodex:
 		return runCodexAdapter(ctx, opts, request)
@@ -155,6 +161,21 @@ func appendSupervisorModel(args []string, model string) []string {
 	return append(args, "--model", model)
 }
 
+// PreflightEffort rejects values outside the resolved provider's set before spawning the supervisor.
+func PreflightEffort(providerID, effort string) error {
+	if effort == "" {
+		return nil
+	}
+	efforts, ok := provider.EffortsForID(providerID)
+	if !ok {
+		return fmt.Errorf("supervisor provider must be one of: %s", strings.Join(provider.SupervisorIDs(), ", "))
+	}
+	if !slices.Contains(efforts, effort) {
+		return fmt.Errorf("supervisor.effort %q is not accepted by supervisor %q; accepted values: %s", effort, providerID, strings.Join(efforts, ", "))
+	}
+	return nil
+}
+
 func runCodexAdapter(ctx context.Context, opts AdapterOptions, request []byte) ([]byte, error) {
 	dir, cleanup, err := supervisorArtifactDir(opts.ArtifactDir, "galley-codex-supervisor-*")
 	if err != nil {
@@ -187,6 +208,11 @@ func runCodexAdapter(ctx context.Context, opts AdapterOptions, request []byte) (
 		"--output-last-message", outPath,
 	}
 	args = appendSupervisorModel(args, opts.Model)
+	// `codex exec` has no --effort flag; the reasoning effort is delivered
+	// through the generic config override, matching the codex executor runner.
+	if opts.Effort != "" {
+		args = append(args, "-c", fmt.Sprintf("model_reasoning_effort=%q", opts.Effort))
+	}
 	args = append(args, "-")
 	_, err = runner.RunCommand(ctx, runner.Command{
 		WorkDir: opts.WorkDir,
@@ -240,6 +266,10 @@ func runClaudeAdapterForOS(ctx context.Context, opts AdapterOptions, request []b
 		"--output-format", "text",
 	}
 	args = appendSupervisorModel(args, opts.Model)
+	// glm reuses this Claude command shape, so --effort covers both providers.
+	if opts.Effort != "" {
+		args = append(args, "--effort", opts.Effort)
+	}
 	if goos == "windows" {
 		systemPromptPath := filepath.Join(dir, ClaudeSupervisorSystemPromptFilename)
 		if err := writeSupervisorFile(systemPromptPath, []byte(prompts.ClaudeSupervisor())); err != nil {

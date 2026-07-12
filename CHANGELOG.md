@@ -6,6 +6,14 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Added
+
+- Environment profiles accept optional `supervisor.effort`; omission keeps the CLI default, invalid provider values fail before review, and run evidence records the resolved setting and source.
+
+### Changed
+
+- Codex executors accept `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` across implementation, setup, and acceptance-skeleton roles; model-specific rejection remains a Codex error.
+
 ## v0.9.3 - 2026-07-11
 
 ### Changed

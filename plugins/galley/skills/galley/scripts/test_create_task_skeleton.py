@@ -51,12 +51,9 @@ def generate_skeleton(tmpdir: pathlib.Path, *extra_args: str, root: pathlib.Path
     if root is not None:
         command.extend(["--root", str(root)])
     command.extend(extra_args)
-    proc = subprocess.run(
-        command,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    proc = subprocess.run(command, capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise SystemExit(f"skeleton generation failed: {proc.stderr.strip()}")
     task_path = pathlib.Path(proc.stdout.strip())
     return task_path.read_text(encoding="utf-8")
 
@@ -263,6 +260,15 @@ def main() -> int:
         yaml_text = generate_skeleton(tmpdir, "--executor-cli", "glm", root=root)
     if generated_executor_cli(yaml_text) != "glm":
         raise SystemExit("regression: explicit --executor-cli glm should generate executor.cli: glm")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmpdir = pathlib.Path(tmp)
+        fake_cwd = tmpdir / "repo"
+        fake_cwd.mkdir(parents=True, exist_ok=True)
+        root = tmpdir / "galley"
+        yaml_text = generate_skeleton(tmpdir, "--executor-cli", "grok", root=root)
+    if generated_executor_cli(yaml_text) != "grok":
+        raise SystemExit("regression: explicit --executor-cli grok should generate executor.cli: grok")
 
     assert_fallback_parser_executor_default(
         'id: "test"\ncwd: "/tmp/repo"\ncommands: {}\nexecutor:\n  default_cli: "claude"\n',

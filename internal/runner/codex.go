@@ -303,6 +303,10 @@ func containsNull(items []any) bool {
 }
 
 func combinePromptForCodex(systemPrompt, workOrder string) string {
+	return combineRolePrompt(systemPrompt, workOrder)
+}
+
+func combineRolePrompt(systemPrompt, workOrder string) string {
 	if systemPrompt == "" {
 		return workOrder
 	}

@@ -8,6 +8,7 @@ type Transport string
 const (
 	TransportClaude Transport = "claude"
 	TransportCodex  Transport = "codex"
+	TransportGrok   Transport = "grok"
 )
 
 type Descriptor struct {
@@ -21,12 +22,14 @@ var descriptors = []Descriptor{
 	{ID: "claude", Transport: TransportClaude, Executor: true, Supervisor: true},
 	{ID: "codex", Transport: TransportCodex, Executor: true, Supervisor: true},
 	{ID: "glm", Transport: TransportClaude, Executor: true, Supervisor: true},
+	{ID: "grok", Transport: TransportGrok, Executor: true, Supervisor: true},
 }
 
 // Galley validates provider-level values and leaves model compatibility to each CLI.
 var (
 	claudeEfforts = []string{"low", "medium", "high", "xhigh", "max"}
 	codexEfforts  = []string{"minimal", "low", "medium", "high", "xhigh", "max"}
+	grokEfforts   = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 )
 
 func All() []Descriptor { return slices.Clone(descriptors) }
@@ -67,6 +70,8 @@ func EffortsForTransport(t Transport) []string {
 		return slices.Clone(claudeEfforts)
 	case TransportCodex:
 		return slices.Clone(codexEfforts)
+	case TransportGrok:
+		return slices.Clone(grokEfforts)
 	default:
 		return nil
 	}

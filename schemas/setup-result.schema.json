@@ -69,7 +69,7 @@
     },
     "provider": {
       "type": "string",
-      "enum": ["claude", "codex"],
+      "enum": ["claude", "codex", "glm", "grok"],
       "description": "Daemon-owned provider metadata. If a setup executor emits this field, the daemon overwrites it from task.executor.cli before persisting setup_result.json."
     },
     "source": {

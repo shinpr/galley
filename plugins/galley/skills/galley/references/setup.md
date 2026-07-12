@@ -41,7 +41,7 @@ Use `galley` for later commands when it works on `PATH`; otherwise use the verif
 
 The installer installs the `galley` binary. By default it downloads a prebuilt GitHub Release asset; `--local` builds from the current checkout. Daemon operations are available under `<galley-bin> daemon ...`.
 
-Check provider CLIs after the user chooses execution backends: run `claude --version` when Claude is selected as implementation executor or daemon supervisor, and `codex --version` when Codex is selected as implementation executor or daemon supervisor. `glm` uses the same `claude` binary, so `claude --version` covers it; when `glm` is selected, additionally confirm `glm_api_key` is set in `daemon.yaml`. If it is unset or unknown, ask the user to set it, choose `claude`/`codex`, or defer daemon start. Check `gh auth status` when the accepted profile proposal enables PR automation.
+Check the selected provider CLI with `claude --version`, `codex --version`, or `grok --version`. GLM uses the Claude binary and also requires `glm_api_key` in `daemon.yaml`; Grok uses its normal logged-in CLI state. Check `gh auth status` when the accepted profile proposal enables PR automation.
 
 ## Repository Layout
 
@@ -93,15 +93,15 @@ Setup includes repository profiles. After resolving the profile paths:
 When setup needs to ask for both backend choices, use this shape during profile intake:
 
 ```markdown
-Galley can use `claude`, `codex`, or `glm` separately for implementation and review. `glm` runs the Claude Code binary against GLM's Anthropic-compatible endpoint (Z.ai) and requires `glm_api_key` in `daemon.yaml`; it is valid for both roles. The supervisor is the acceptance gate, so its backend is the user's choice; the daemon default is `claude`.
+Galley can use `claude`, `codex`, `glm`, or `grok` separately for implementation and review. Grok requires its installed, authenticated CLI. The supervisor is the acceptance gate, so its backend is the user's choice; the daemon default is `claude`.
 
 - Implementation executor: writes the task changes in the worktree, stored in `environment.yaml` as `executor.default_cli`.
 - Review supervisor: the acceptance gate. Its backend is saved either as a repository default (`environment.yaml` `supervisor.default_cli`) or for daemon startup only (`--supervisor` / `daemon.yaml`).
 
 Answer each separately:
 
-- Implementation executor: `claude`, `codex`, `glm`, or unset (unset → new task authoring uses Claude).
-- Review supervisor backend: `claude`, `codex`, `glm`, or unset (unset → the daemon uses Claude).
+- Implementation executor: `claude`, `codex`, `glm`, `grok`, or unset (unset → Claude).
+- Review supervisor backend: `claude`, `codex`, `glm`, `grok`, or unset (unset → Claude).
 - Review supervisor save target: repository default (`supervisor.default_cli`) or daemon startup only.
 ```
 

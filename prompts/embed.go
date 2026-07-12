@@ -17,17 +17,29 @@ var claudeExecutorFull string
 //go:embed codex-executor-full.md
 var codexExecutorFull string
 
+//go:embed grok-executor.md
+var grokExecutor string
+
 //go:embed acceptance-skeleton-creator.md
 var acceptanceSkeletonCreator string
 
 //go:embed acceptance-skeleton-creator-codex.md
 var acceptanceSkeletonCreatorCodex string
 
+//go:embed acceptance-skeleton-creator-grok.md
+var acceptanceSkeletonCreatorGrok string
+
 //go:embed setup-executor.md
 var setupExecutorClaude string
 
 //go:embed setup-executor-codex.md
 var setupExecutorCodex string
+
+//go:embed setup-executor-grok.md
+var setupExecutorGrok string
+
+//go:embed grok-supervisor-review.md
+var grokSupervisorReview string
 
 // ClaudeExecutorFull returns the built-in Claude executor system prompt.
 func ClaudeExecutorFull() string {
@@ -38,6 +50,9 @@ func ClaudeExecutorFull() string {
 func CodexExecutorFull() string {
 	return codexExecutorFull
 }
+
+// GrokExecutorFull returns the standalone Grok executor prompt.
+func GrokExecutorFull() string { return grokExecutor }
 
 // AcceptanceSkeletonCreator returns the built-in test-skeleton creator prompt
 // used when the task implementation executor backend is Claude.
@@ -54,6 +69,8 @@ func AcceptanceSkeletonCreatorCodex() string {
 	return acceptanceSkeletonCreatorCodex
 }
 
+func AcceptanceSkeletonCreatorGrok() string { return acceptanceSkeletonCreatorGrok }
+
 // CodexSupervisor returns the built-in Codex supervisor prompt.
 func CodexSupervisor() string {
 	return supervisorReviewCommon + "\n\n" + codexSupervisorReview
@@ -63,6 +80,8 @@ func CodexSupervisor() string {
 func ClaudeSupervisor() string {
 	return supervisorReviewCommon + "\n\n" + claudeSupervisorReview
 }
+
+func GrokSupervisor() string { return supervisorReviewCommon + "\n\n" + grokSupervisorReview }
 
 // SetupExecutorClaude returns the built-in setup executor system prompt for
 // the Claude provider. The prompt is authored from Claude executor, Claude
@@ -81,3 +100,5 @@ func SetupExecutorClaude() string {
 func SetupExecutorCodex() string {
 	return setupExecutorCodex
 }
+
+func SetupExecutorGrok() string { return setupExecutorGrok }

@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -97,6 +98,58 @@ printf '%s\n' '{"event":"done"}'
 	if _, err := os.Stat(filepath.Join(artifactDir, "supervisor-verdict.schema.json")); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestRunAdapterPayloadGrokUsesEnvelopeAndReadOnlySandbox(t *testing.T) {
+	skipPOSIXFakeSupervisorOnWindows(t)
+	bin := filepath.Join(t.TempDir(), "grok")
+	argsPath := filepath.Join(t.TempDir(), "args")
+	verdict := `{"status":"accepted","summary":"ok","acceptance_gaps":[],"reviewed_files":["README.md"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["checked"]}],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"medium","next_work_order":""}`
+	script := "#!/bin/sh\nprintf '%s' \"$*\" > '" + argsPath + "'\nprintf '%s' '" + `{"text":` + shellJSONQuote(verdict) + `,"stopReason":"EndTurn","sessionId":"s"}` + "'\n"
+	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	output, err := RunAdapterPayload(context.Background(), AdapterOptions{Provider: "grok", WorkDir: t.TempDir(), ArtifactDir: t.TempDir(), GrokBin: bin, Effort: "high"}, []byte(`{"evidence":{}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(output), `"status":"accepted"`) {
+		t.Fatalf("output = %s", output)
+	}
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"--permission-mode bypassPermissions", "--sandbox read-only"} {
+		if !strings.Contains(string(args), want) {
+			t.Fatalf("Grok supervisor args missing %q: %s", want, args)
+		}
+	}
+}
+
+func TestRunAdapterPayloadGrokPersistsNonEndTurnMetadata(t *testing.T) {
+	skipPOSIXFakeSupervisorOnWindows(t)
+	bin := filepath.Join(t.TempDir(), "grok")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf '%s\\n' '{\"text\":\"{}\",\"stopReason\":\"Cancelled\",\"sessionId\":\"cancelled-session\"}'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	artifacts := t.TempDir()
+	_, err := RunAdapterPayload(context.Background(), AdapterOptions{Provider: "grok", WorkDir: t.TempDir(), ArtifactDir: artifacts, GrokBin: bin}, []byte(`{"evidence":{}}`))
+	if err == nil || !strings.Contains(err.Error(), "Cancelled") {
+		t.Fatalf("error = %v", err)
+	}
+	metadata, readErr := os.ReadFile(filepath.Join(artifacts, "grok_supervisor_completion.json"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !strings.Contains(string(metadata), "cancelled-session") {
+		t.Fatalf("metadata = %s", metadata)
+	}
+}
+
+func shellJSONQuote(text string) string {
+	b, _ := json.Marshal(text)
+	return string(b)
 }
 
 func TestRunAdapterPayloadClaudeUsesEmbeddedPromptAndSchema(t *testing.T) {

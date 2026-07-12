@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -68,6 +69,8 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 		commandPlan, stdoutPath, stderrPath, err = prepareGLMExecutorPlan(opts, loaded, workDir, prompt, attemptDir)
 	case "codex":
 		commandPlan, stdoutPath, stderrPath, err = prepareCodexExecutorPlan(opts, loaded, workDir, prompt, attemptDir)
+	case "grok":
+		commandPlan, stdoutPath, stderrPath, err = prepareGrokExecutorPlan(opts, loaded, workDir, prompt, attemptDir)
 	default:
 		return attemptOutcome{}, fmt.Errorf("unsupported executor.cli %q; must be one of: %s", cli, strings.Join(task.ExecutorCLIEnum(), ", "))
 	}
@@ -84,6 +87,15 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 	})
 	if err != nil {
 		return attemptOutcome{}, err
+	}
+	if cli == "grok" {
+		data, readErr := os.ReadFile(stdoutPath)
+		if readErr != nil {
+			data = []byte(run.RunResult.Stdout)
+		}
+		if metaErr := runner.WriteGrokCompletionMetadata(runartifact.Path(attemptDir, runartifact.GrokCompletionMetadataFilename), data); metaErr != nil {
+			return attemptOutcome{}, metaErr
+		}
 	}
 
 	resultPath := runartifact.Path(attemptDir, runartifact.ExecutorResultFilename)
@@ -201,6 +213,8 @@ func executorVerificationCmd(cli string) string {
 		return "codex exec"
 	case "glm":
 		return "claude -p (glm)"
+	case "grok":
+		return "grok"
 	case "", "claude":
 		return "claude -p"
 	default:
@@ -312,4 +326,19 @@ func prepareCodexExecutorPlan(opts Options, loaded task.Task, workDir, prompt, a
 		return runner.Command{}, "", "", err
 	}
 	return plan, filepath.Join(attemptDir, "codex.stdout.jsonl"), filepath.Join(attemptDir, "codex.stderr.log"), nil
+}
+
+func prepareGrokExecutorPlan(opts Options, loaded task.Task, workDir, prompt, attemptDir string) (runner.Command, string, string, error) {
+	grokOpts := runner.GrokFromTask(loaded)
+	grokOpts.Bin = opts.GrokBin
+	grokOpts.WorkDir = workDir
+	grokOpts.SystemPromptFile = opts.SystemPromptFile
+	grokOpts.JSONSchemaFile = opts.JSONSchemaFile
+	grokOpts.AttemptDir = attemptDir
+	grokOpts.Prompt = prompt
+	plan, err := runner.GrokCommandPlan(grokOpts)
+	if err != nil {
+		return runner.Command{}, "", "", err
+	}
+	return plan, filepath.Join(attemptDir, "grok.stdout.json"), filepath.Join(attemptDir, "grok.stderr.log"), nil
 }

@@ -65,7 +65,7 @@ galley task archive ~/.galley/tasks/done/TASK.yaml
 
 `galley task show` accepts a task file or task ID and prints the latest attempt, supervisor verdict, risk, and failed verification context. Accepted terminal tasks show prior attempt errors as audit history, not active failures.
 
-`galley task requeue` accepts a task ID or task file, returns a reviewed task from `tasks/failed`, `tasks/done`, or `tasks/running` to `tasks/queued`, records an optional reason, and increments `supervisor.review_iterations`.
+`galley task requeue` accepts a task ID or task file, returns a reviewed task from `tasks/failed`, `tasks/done`, or `tasks/running` to `tasks/queued`, records an optional reason, and increments `supervisor.review_iterations`. When the task worktree is reused, successful setup and acceptance-skeleton phases are reused rather than repeated.
 
 ## Profiles
 
@@ -152,7 +152,7 @@ The `command` string is operator-owned. Task content is untrusted and is deliver
 
 ### Supervisor resolution
 
-`--supervisor` selects the built-in supervisor adapter (`claude`, `codex`, or `glm`). `glm` runs the `claude` binary against GLM's Z.ai endpoint and needs a `glm_api_key` in `daemon.yaml`. The daemon resolves the supervisor for each task in this order:
+`--supervisor` selects the built-in supervisor adapter (`claude`, `codex`, `glm`, or `grok`). Grok uses the logged-in `grok` CLI. The daemon resolves the supervisor for each task in this order:
 
 1. The repository `environment.yaml` `supervisor.default_cli` (resolved from `scope.cwd`). This overrides every layer below for that task only.
 2. The daemon CLI `--supervisor` startup flag.

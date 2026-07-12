@@ -142,10 +142,7 @@ func executorEffortSchemas() []any {
 		if !descriptor.Executor {
 			continue
 		}
-		efforts := validClaudeEfforts
-		if descriptor.Transport == provider.TransportCodex {
-			efforts = validCodexEfforts
-		}
+		efforts := provider.EffortsForTransport(descriptor.Transport)
 		schemas = append(schemas, map[string]any{
 			"if": map[string]any{
 				"properties": map[string]any{"cli": map[string]any{"const": descriptor.ID}},

@@ -88,7 +88,7 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 - `execution_policy.stop_on_destructive_operation`: stop when the task would require out-of-scope destructive work.
 - `execution_policy.stop_on_missing_secret`: stop when a required secret is unavailable and cannot be replaced by safe local evidence.
 - `execution_policy.stop_on_external_service_unavailable`: stop when a required external service is unavailable and the task cannot proceed with local substitutes.
-- `executor.cli`: selects `claude` (Claude Code), `codex` (`codex exec`), or `glm`. `glm` runs the `claude` binary against GLM's Z.ai endpoint, so it needs `claude` on PATH and a `glm_api_key` in `daemon.yaml`. New task authoring uses `environment.yaml` `executor.default_cli` when present, otherwise Claude. An explicit task YAML value is authoritative for that task.
+- `executor.cli`: selects `claude`, `codex`, `glm`, or `grok`. Grok uses the logged-in `grok` CLI for setup, acceptance-skeleton creation, and implementation. New task authoring uses `environment.yaml` `executor.default_cli` when present, otherwise Claude. An explicit task value is authoritative.
 - `executor.model`: optional model override. Omit it to use the selected CLI's configured default model.
 - `executor.effort`: model effort hint. Claude and `glm` accept `low`, `medium`, `high`, `xhigh`, or `max`; Codex also accepts `minimal`. Model-specific rejection remains a Codex error.
 - `executor.prompt_profile`: prompt profile name recorded for evidence.
@@ -166,6 +166,8 @@ preflight:
 
 Disabled preflight has the same daemon behavior as omitting `preflight` entirely. Set `enabled` to `true` when the task should create acceptance-criterion-linked skeleton files before the executor starts.
 
+When a task reuses its existing worktree after a requeue, Galley reuses previously completed setup and acceptance-skeleton evidence instead of running those phases again. A new worktree, or a phase with no prior successful result, still runs normal preflight.
+
 ```yaml
 preflight:
   acceptance_skeleton:
@@ -187,9 +189,9 @@ The built-in creator writes AC-linked skeleton files and returns a manifest. Gen
 
 The skeleton creator follows `executor.cli` and reuses `executor.model` and `executor.effort`. The daemon supervisor backend controls only review.
 
-When this stage is enabled, required quality-profile checks must have passing verification evidence before an accepted verdict can stay accepted. `preferred_commands` are ordered fallbacks: the first passing command satisfies the check.
+Required quality checks remain executor evidence for supervisor review; the skeleton stage does not add a second command-matching gate.
 
-`required: false` relaxes AC coverage only: Galley no longer requires every AC to have an output or a `no_skeletons[]` reason. It does not disable required quality-check gating.
+`required: false` relaxes AC coverage: Galley no longer requires every AC to have an output or a `no_skeletons[]` reason.
 
 ## Loop Budget
 

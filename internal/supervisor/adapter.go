@@ -39,6 +39,7 @@ type AdapterOptions struct {
 	ArtifactDir string
 	CodexBin    string
 	ClaudeBin   string
+	GrokBin     string
 	// GLMAuthToken is the Z.ai token used when Provider is "glm". A glm
 	// supervisor is the Claude adapter pointed at GLM's endpoint, so it reuses
 	// the entire Claude review path and only redirects via the child env.
@@ -116,6 +117,9 @@ func RunAdapterPayload(ctx context.Context, opts AdapterOptions, request []byte)
 	if opts.ClaudeBin == "" {
 		opts.ClaudeBin = "claude"
 	}
+	if opts.GrokBin == "" {
+		opts.GrokBin = "grok"
+	}
 	transport, ok := provider.TransportFor(opts.Provider)
 	if !ok || !provider.IsSupervisor(opts.Provider) {
 		return nil, fmt.Errorf("supervisor provider must be one of: %s", strings.Join(provider.SupervisorIDs(), ", "))
@@ -130,8 +134,54 @@ func RunAdapterPayload(ctx context.Context, opts AdapterOptions, request []byte)
 		// glm is the Claude review adapter pointed at GLM's endpoint; the
 		// redirect is applied inside runClaudeAdapterForOS based on Provider.
 		return runClaudeAdapter(ctx, opts, request)
+	case provider.TransportGrok:
+		return runGrokAdapter(ctx, opts, request)
 	}
 	return nil, fmt.Errorf("supervisor provider %q has unsupported transport %q", opts.Provider, transport)
+}
+
+func runGrokAdapter(ctx context.Context, opts AdapterOptions, request []byte) ([]byte, error) {
+	dir, cleanup, err := supervisorArtifactDir(opts.ArtifactDir, "galley-grok-supervisor-*")
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	promptPath := filepath.Join(dir, "grok_supervisor_prompt.md")
+	stdoutPath := filepath.Join(dir, "grok_supervisor_stdout.json")
+	stderrPath := filepath.Join(dir, "grok_supervisor_stderr.log")
+	prompt := prompts.GrokSupervisor() + "\n\n# Evidence JSON\n\n" + string(request)
+	if err := writeSupervisorFile(promptPath, []byte(prompt)); err != nil {
+		return nil, err
+	}
+	args := []string{opts.GrokBin, "--cwd", opts.WorkDir, "--permission-mode", "bypassPermissions", "--sandbox", "read-only", "--prompt-file", promptPath, "--verbatim", "--json-schema", strings.TrimSpace(schemas.SupervisorVerdict)}
+	args = appendSupervisorModel(args, opts.Model)
+	if opts.Effort != "" {
+		args = append(args, "--reasoning-effort", opts.Effort)
+	}
+	command := runner.Command{WorkDir: opts.WorkDir, Argv: args}
+	plan, err := json.MarshalIndent(command, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("encode grok supervisor command plan: %w", err)
+	}
+	if err := writeSupervisorFile(filepath.Join(dir, "grok_supervisor_command_plan.json"), plan); err != nil {
+		return nil, err
+	}
+	run, err := runner.RunCommand(ctx, command, runner.RunOptions{Timeout: opts.Timeout, IdleTimeout: opts.IdleTimeout, StdoutPath: stdoutPath, StderrPath: stderrPath})
+	if err != nil {
+		return nil, fmt.Errorf("grok supervisor failed: %w", err)
+	}
+	data, readErr := os.ReadFile(stdoutPath)
+	if readErr != nil {
+		data = []byte(run.Stdout)
+	}
+	if err := runner.WriteGrokCompletionMetadata(filepath.Join(dir, "grok_supervisor_completion.json"), data); err != nil {
+		return nil, err
+	}
+	envelope, err := runner.DecodeGrokEnvelope(data)
+	if err != nil {
+		return nil, fmt.Errorf("decode grok supervisor output: %w", err)
+	}
+	return runner.GrokResultPayload(envelope), nil
 }
 
 // NewAdapterRequest converts in-process evidence into the adapter JSON contract.

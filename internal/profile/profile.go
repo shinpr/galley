@@ -93,7 +93,7 @@ type ExecutorDefault struct {
 // whose `scope.cwd` resolves to this environment profile. When `default_cli`
 // is set, the daemon uses it for that task even when daemon CLI startup
 // options, `daemon.yaml`, or the built-in default would otherwise pick a
-// different supervisor. Allowed values are `claude`, `codex`, and `glm`.
+// different supervisor. Allowed values come from the provider registry.
 type SupervisorDefault struct {
 	DefaultCLI string `yaml:"default_cli,omitempty" json:"default_cli,omitempty"`
 	// Model is passed unchanged to the provider CLI. Empty preserves its default.

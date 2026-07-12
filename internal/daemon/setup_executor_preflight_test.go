@@ -381,6 +381,20 @@ func TestSetupExecutorCommandPlanClaudeAndCodex(t *testing.T) {
 	if !strings.Contains(joined, runner.CodexLastMessageFilename) {
 		t.Fatalf("codex argv missing capture filename: %v", codexPlan.Argv)
 	}
+
+	grokTask := setupTask()
+	grokTask.Executor.CLI = "grok"
+	grokPlan, provider, err := setuppreflight.BuildExecutorCommandPlan(setuppreflight.Options{Task: grokTask, WorkDir: work, RunDir: t.TempDir(), GrokBin: "/path/to/grok"}, payload)
+	if err != nil {
+		t.Fatalf("grok plan: %v", err)
+	}
+	if provider != "grok" || grokPlan.Argv[0] != "/path/to/grok" {
+		t.Fatalf("grok routing = %q %#v", provider, grokPlan.Argv)
+	}
+	grokArgs := strings.Join(grokPlan.Argv, " ")
+	if !strings.Contains(grokArgs, "--prompt-file") || !strings.Contains(grokArgs, "--json-schema") || !strings.Contains(grokArgs, "--permission-mode bypassPermissions") || !strings.Contains(grokArgs, "--sandbox workspace") {
+		t.Fatalf("grok setup argv = %#v", grokPlan.Argv)
+	}
 }
 
 // TestSetupExecutorResolveResultClaudeAndCodex proves the second part of AC4:

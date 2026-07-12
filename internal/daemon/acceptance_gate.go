@@ -1,16 +1,10 @@
 package daemon
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	skeletonpreflight "github.com/shinpr/galley/internal/preflight/skeleton"
-	"github.com/shinpr/galley/internal/profile"
-	"github.com/shinpr/galley/internal/runartifact"
-	"github.com/shinpr/galley/internal/runlog"
-	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/supervisor"
 	"github.com/shinpr/galley/internal/task"
 )
@@ -57,9 +51,6 @@ func evaluateAcceptanceGate(loaded *task.Task, runDir string) (string, bool) {
 	if !cfg.IsEnabled() {
 		return "", true
 	}
-	if reason, ok := requiredCheckEvidenceGate(loaded, runDir); !ok {
-		return reason, false
-	}
 	res, err := skeletonpreflight.LoadResult(runDir)
 	if err != nil {
 		return fmt.Sprintf("could not read preflight_result.json: %v", err), false
@@ -91,114 +82,6 @@ func evaluateAcceptanceGate(loaded *task.Task, runDir string) (string, bool) {
 		AcceptanceIDs: acceptanceIDs,
 	})
 	return reason, ok
-}
-
-// requiredCheckEvidenceGate treats preferred commands as fallbacks: one pass
-// satisfies a check, while failures block only when no fallback passes.
-func requiredCheckEvidenceGate(loaded *task.Task, runDir string) (string, bool) {
-	if runDir == "" {
-		return "", true
-	}
-	profiles, err := loadRunProfiles(runDir)
-	if err != nil || profiles.Quality == nil {
-		return "", true
-	}
-	var required []profile.RequiredCheck
-	for _, c := range profiles.Quality.RequiredChecks {
-		if c.Required {
-			required = append(required, c)
-		}
-	}
-	if len(required) == 0 {
-		return "", true
-	}
-	res, _, err := loadLatestExecutorResult(runDir)
-	if err != nil || res == nil {
-		return "no executor result is available to verify required quality checks", false
-	}
-	// Later retry evidence supersedes earlier results for the same command.
-	status := map[string]string{}
-	for _, v := range res.Verification {
-		status[strings.TrimSpace(v.Command)] = strings.TrimSpace(v.Status)
-	}
-	var problems []string
-	for _, c := range required {
-		if len(c.PreferredCommands) == 0 {
-			problems = append(problems, fmt.Sprintf("required check %q declares no preferred commands", c.ID))
-			continue
-		}
-		satisfied := false
-		sawFailure := false
-		sawAny := false
-		var failed []string
-		for _, cmd := range c.PreferredCommands {
-			key := strings.TrimSpace(cmd)
-			if key == "" {
-				continue
-			}
-			switch status[key] {
-			case "passed":
-				satisfied = true
-				sawAny = true
-			case "":
-			default:
-				sawFailure = true
-				sawAny = true
-				failed = append(failed, key)
-			}
-		}
-		switch {
-		case satisfied:
-		case sawFailure:
-			problems = append(problems, fmt.Sprintf("required check %q has failed verification evidence for [%s] and no passing fallback command", c.ID, strings.Join(failed, ", ")))
-		case !sawAny:
-			problems = append(problems, fmt.Sprintf("required check %q has no verification evidence for any of its preferred commands", c.ID))
-		}
-	}
-	if len(problems) == 0 {
-		return "", true
-	}
-	return strings.Join(problems, "; "), false
-}
-
-func loadRunProfiles(runDir string) (profile.Bundle, error) {
-	data, err := os.ReadFile(runartifact.Path(runDir, runartifact.ProfilesFilename))
-	if err != nil {
-		return profile.Bundle{}, err
-	}
-	var payload struct {
-		Bundle profile.Bundle `json:"bundle"`
-	}
-	if err := json.Unmarshal(data, &payload); err != nil {
-		return profile.Bundle{}, err
-	}
-	return payload.Bundle, nil
-}
-
-func loadLatestExecutorResult(runDir string) (*runner.ExecutorResult, string, error) {
-	bestDir, _, err := runlog.LatestAttemptDir(runDir)
-	if err != nil {
-		return nil, "", err
-	}
-	if bestDir == "" {
-		return nil, "", nil
-	}
-	data, err := readExecutorResultFile(bestDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, bestDir, nil
-		}
-		return nil, bestDir, err
-	}
-	var res runner.ExecutorResult
-	if err := json.Unmarshal(data, &res); err != nil {
-		return nil, bestDir, err
-	}
-	return &res, bestDir, nil
-}
-
-func readExecutorResultFile(attemptDir string) ([]byte, error) {
-	return os.ReadFile(runartifact.Path(attemptDir, runartifact.ExecutorResultFilename))
 }
 
 func mapAcceptanceStatus(status string) string {

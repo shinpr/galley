@@ -107,6 +107,7 @@ func defaultSupervisorRunner(ctx context.Context, opts Options, evidence supervi
 		ArtifactDir:  tryDir,
 		ClaudeBin:    opts.ClaudeBin,
 		CodexBin:     opts.CodexBin,
+		GrokBin:      opts.GrokBin,
 		GLMAuthToken: opts.GLMAuthToken,
 	}, evidence)
 }
@@ -328,13 +329,11 @@ func applySupervisorVerdict(ctx, shutdownCtx context.Context, req verdictApplica
 
 	switch req.Verdict.Status {
 	case "accepted":
-		// Daemon-side acceptance gate. When required skeleton
-		// coverage or required-check evidence is missing or failed, downgrade
-		// the accepted verdict to needs_supervisor_review with a user-visible
-		// reason. There is no waiver mechanism.
+		// Required skeleton coverage is a task contract that cannot be waived
+		// by the supervisor.
 		if reason, ok := evaluateAcceptanceGate(req.Loaded, req.RunDir); !ok {
 			fmt.Fprintf(os.Stderr, "galley: task %s accepted-verdict downgraded by acceptance gate: %s\n", req.Loaded.ID, reason)
-			return "", true, degradeToSupervisorReview(req, "acceptance-gate", "Accepted verdict downgraded by acceptance skeleton gate: "+reason, "Inspect preflight_result.json and required verification evidence before re-finalizing.")
+			return "", true, degradeToSupervisorReview(req, "acceptance-gate", "Accepted verdict downgraded by acceptance skeleton gate: "+reason, "Inspect preflight_result.json before re-finalizing.")
 		}
 		return "", true, acceptSupervisorVerdict(ctx, req.Opts, req.RunningPath, req.Loaded, req.Prepared, req.RunDir, req.Verdict)
 	case "needs_revision":

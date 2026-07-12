@@ -7,7 +7,7 @@ import (
 
 func TestProviderRoleOrderAndTransport(t *testing.T) {
 	t.Parallel()
-	want := []string{"claude", "codex", "glm"}
+	want := []string{"claude", "codex", "glm", "grok"}
 	if got := ExecutorIDs(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("executor IDs = %v; want %v", got, want)
 	}
@@ -16,6 +16,9 @@ func TestProviderRoleOrderAndTransport(t *testing.T) {
 	}
 	if transport, ok := TransportFor("glm"); !ok || transport != TransportClaude {
 		t.Fatalf("GLM transport = %q, %t", transport, ok)
+	}
+	if transport, ok := TransportFor("grok"); !ok || transport != TransportGrok {
+		t.Fatalf("Grok transport = %q, %t", transport, ok)
 	}
 	if _, ok := TransportFor("unknown"); ok {
 		t.Fatal("unknown provider must not have a transport")
@@ -26,11 +29,15 @@ func TestEffortsForTransportAndID(t *testing.T) {
 	t.Parallel()
 	wantClaude := []string{"low", "medium", "high", "xhigh", "max"}
 	wantCodex := []string{"minimal", "low", "medium", "high", "xhigh", "max"}
+	wantGrok := []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 	if got := EffortsForTransport(TransportClaude); !reflect.DeepEqual(got, wantClaude) {
 		t.Fatalf("claude efforts = %v; want %v", got, wantClaude)
 	}
 	if got := EffortsForTransport(TransportCodex); !reflect.DeepEqual(got, wantCodex) {
 		t.Fatalf("codex efforts = %v; want %v", got, wantCodex)
+	}
+	if got := EffortsForTransport(TransportGrok); !reflect.DeepEqual(got, wantGrok) {
+		t.Fatalf("grok efforts = %v; want %v", got, wantGrok)
 	}
 	if got := EffortsForTransport(Transport("unknown")); got != nil {
 		t.Fatalf("unknown transport efforts = %v; want nil", got)

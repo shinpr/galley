@@ -83,6 +83,7 @@ type Options struct {
 	Profiles               profile.Bundle
 	ClaudeBin              string
 	CodexBin               string
+	GrokBin                string
 	GLMAuthToken           string
 	EnvironmentProfilePath string
 	// RepositorySignals is an optional list of repository setup signal paths

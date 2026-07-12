@@ -1,0 +1,22 @@
+{
+  "name": "galley-tools",
+  "description": "Local Galley workflow plugins.",
+  "owner": {
+    "name": "Shinsuke Kagawa",
+    "url": "https://github.com/shinpr"
+  },
+  "plugins": [
+    {
+      "name": "galley",
+      "description": "Create, validate, queue, set up, and troubleshoot Galley AFK task workflows.",
+      "version": "0.1.23",
+      "category": "development",
+      "source": {
+        "source": "local",
+        "path": "./plugins/galley"
+      },
+      "homepage": "https://github.com/shinpr/galley",
+      "keywords": ["galley", "agent-workflow", "task-authoring", "afk"]
+    }
+  ]
+}

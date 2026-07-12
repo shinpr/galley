@@ -22,7 +22,7 @@ import (
 
 func TestExecutorCLIAcceptsClaudeAndCodex(t *testing.T) {
 	t.Parallel()
-	for _, cli := range []string{"claude", "codex", "glm"} {
+	for _, cli := range []string{"claude", "codex", "glm", "grok"} {
 		cli := cli
 		t.Run(cli, func(t *testing.T) {
 			base := validTask(t)
@@ -103,7 +103,7 @@ func TestExecutorEffortValidationDependsOnCLI(t *testing.T) {
 func TestExecutorCLISchemaEnumIncludesClaudeAndCodex(t *testing.T) {
 	t.Parallel()
 	got := ExecutorCLIEnum()
-	want := []string{"claude", "codex", "glm"}
+	want := []string{"claude", "codex", "glm", "grok"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ExecutorCLIEnum() = %#v, want %#v", got, want)
 	}
@@ -121,8 +121,8 @@ func TestExecutorCLISchemaEnumIncludesClaudeAndCodex(t *testing.T) {
 	execProps, _ := exec["properties"].(map[string]any)
 	cliNode, _ := execProps["cli"].(map[string]any)
 	rawEnum, _ := cliNode["enum"].([]any)
-	if len(rawEnum) != 3 {
-		t.Fatalf("expected 3-value enum, got %#v", rawEnum)
+	if len(rawEnum) != 4 {
+		t.Fatalf("expected 4-value enum, got %#v", rawEnum)
 	}
 	gotEnum := []string{}
 	for _, v := range rawEnum {
@@ -147,8 +147,8 @@ func TestExecutorEffortSchemaConditionDependsOnCLI(t *testing.T) {
 	props, _ := doc["properties"].(map[string]any)
 	exec, _ := props["executor"].(map[string]any)
 	allOf, _ := exec["allOf"].([]any)
-	if len(allOf) != 3 {
-		t.Fatalf("executor schema allOf = %#v, want 3 conditional effort rules", allOf)
+	if len(allOf) != 4 {
+		t.Fatalf("executor schema allOf = %#v, want 4 conditional effort rules", allOf)
 	}
 
 	got := map[string][]string{}
@@ -177,5 +177,8 @@ func TestExecutorEffortSchemaConditionDependsOnCLI(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got["glm"], []string{"low", "medium", "high", "xhigh", "max"}) {
 		t.Fatalf("glm effort enum drift: %#v", got["glm"])
+	}
+	if !reflect.DeepEqual(got["grok"], []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}) {
+		t.Fatalf("grok effort enum drift: %#v", got["grok"])
 	}
 }

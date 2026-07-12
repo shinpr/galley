@@ -1,7 +1,7 @@
 {
   "name": "galley",
-  "description": "Create, validate, queue, set up, and troubleshoot Galley AFK task workflows.",
   "version": "0.1.23",
+  "description": "Create, validate, queue, set up, and troubleshoot Galley AFK task workflows.",
   "author": {
     "name": "Shinsuke Kagawa",
     "url": "https://github.com/shinpr"
@@ -14,7 +14,7 @@
     "agent-workflow",
     "task-authoring",
     "afk",
-    "supervisor",
-    "automation"
-  ]
+    "grok"
+  ],
+  "skills": "./skills/"
 }

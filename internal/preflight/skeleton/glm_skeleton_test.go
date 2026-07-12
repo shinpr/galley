@@ -1,6 +1,9 @@
 package skeleton
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -17,6 +20,21 @@ func glmSkeletonOptions(t *testing.T, token string) Options {
 		WorkDir:      t.TempDir(),
 		RunDir:       t.TempDir(),
 		GLMAuthToken: token,
+	}
+}
+
+func TestResolveGrokCreatorManifestRejectsProseWrappedJSON(t *testing.T) {
+	runDir := t.TempDir()
+	manifest := `{"outputs":[],"no_skeletons":[]}`
+	text, _ := json.Marshal("prefix " + manifest + " suffix")
+	envelope := `{"text":` + string(text) + `,"stopReason":"EndTurn","sessionId":"s"}`
+	stdoutPath := filepath.Join(runDir, "grok.stdout.json")
+	if err := os.WriteFile(stdoutPath, []byte(envelope), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := resolveCreatorManifest(Options{Task: task.Task{Executor: task.Executor{CLI: "grok"}}, RunDir: runDir}, envelope, stdoutPath)
+	if err == nil {
+		t.Fatal("prose-wrapped Grok manifest accepted")
 	}
 }
 
@@ -50,5 +68,19 @@ func TestBuildBuiltinCreatorCommandPlanGLMFailsFastWithoutToken(t *testing.T) {
 	}
 	if !strings.Contains(perr.Error(), "glm_api_key") {
 		t.Fatalf("error must name the missing config key, got %q", perr)
+	}
+}
+
+func TestBuildBuiltinCreatorCommandPlanGrok(t *testing.T) {
+	work, runDir := t.TempDir(), t.TempDir()
+	cmd, perr := buildBuiltinCreatorCommandPlan(Options{Task: task.Task{ID: "task-grok", Executor: task.Executor{CLI: "grok", Effort: "high"}}, WorkDir: work, RunDir: runDir, GrokBin: "/path/to/grok"}, []byte("{}"))
+	if perr != nil {
+		t.Fatal(perr)
+	}
+	joined := strings.Join(cmd.Argv, " ")
+	for _, want := range []string{"/path/to/grok", "--prompt-file", "--json-schema", "--permission-mode bypassPermissions", "--sandbox workspace"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("grok creator argv missing %q: %v", want, cmd.Argv)
+		}
 	}
 }

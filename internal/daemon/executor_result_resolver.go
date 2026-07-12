@@ -3,6 +3,7 @@ package daemon
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/shinpr/galley/internal/runner"
@@ -25,6 +26,13 @@ func codexLastMessagePath(cli, attemptDir string) string {
 // fallback. Galley does not synthesize executor results when no valid final
 // JSON exists.
 func resolveExecutorResult(cli, stdoutPath, stdoutTail, lastMessagePath string) (runner.ExecutorResult, error) {
+	if cli == "grok" {
+		data, err := os.ReadFile(stdoutPath)
+		if err != nil {
+			data = []byte(stdoutTail)
+		}
+		return runner.ExtractGrokExecutorResult(data)
+	}
 	var resultErrs []error
 	if cli == "codex" && lastMessagePath != "" {
 		if lastResult, lastErr := runner.ExtractCodexLastMessageFile(lastMessagePath); lastErr == nil {

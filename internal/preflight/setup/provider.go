@@ -41,6 +41,9 @@ func BuildExecutorCommandPlan(opts Options, payload []byte) (runner.Command, str
 	case "codex":
 		cmd, err := buildCodexSetupExecutorCommandPlan(opts, payload)
 		return cmd, provider, err
+	case "grok":
+		cmd, err := buildGrokSetupExecutorCommandPlan(opts, payload)
+		return cmd, provider, err
 	default:
 		cmd, err := buildClaudeSetupExecutorCommandPlan(opts, payload)
 		if err != nil {
@@ -56,6 +59,23 @@ func BuildExecutorCommandPlan(opts Options, payload []byte) (runner.Command, str
 		}
 		return cmd, "claude", nil
 	}
+}
+
+func buildGrokSetupExecutorCommandPlan(opts Options, payload []byte) (runner.Command, error) {
+	grokOpts := runner.GrokFromTask(opts.Task)
+	grokOpts.Bin = opts.GrokBin
+	grokOpts.WorkDir = opts.WorkDir
+	grokOpts.Prompt = string(payload)
+	grokOpts.SystemPrompt = prompts.SetupExecutorGrok()
+	grokOpts.JSONSchema = schemas.SetupResult
+	grokOpts.PermissionMode = "bypassPermissions"
+	grokOpts.AttemptDir = opts.RunDir
+	grokOpts.PromptFilename = "grok.setup.prompt.md"
+	plan, err := runner.GrokCommandPlan(grokOpts)
+	if err != nil {
+		return runner.Command{}, fmt.Errorf("plan setup executor: %w", err)
+	}
+	return plan, nil
 }
 
 func buildClaudeSetupExecutorCommandPlan(opts Options, payload []byte) (runner.Command, error) {

@@ -94,6 +94,9 @@ func marshalBuiltinCreatorRequest(opts Options, allowed []string) ([]byte, *pref
 // Codex path runs through the Codex command planner; the Claude path keeps the
 // existing Claude creator behavior including the JSON guard plugin.
 func buildBuiltinCreatorCommandPlan(opts Options, payload []byte) (runner.Command, *preflightErr) {
+	if task.ExecutorProvider(opts.Task) == "grok" {
+		return buildGrokCreatorCommandPlan(opts, payload)
+	}
 	if task.ExecutorProvider(opts.Task) == "codex" {
 		return buildCodexCreatorCommandPlan(opts, payload)
 	}
@@ -185,6 +188,27 @@ func runBuiltinCreatorCommand(ctx context.Context, opts Options, commandPlan run
 // that file first and only falls back to the JSON event stream. Claude streams
 // the manifest directly on stdout.
 func resolveCreatorManifest(opts Options, stdoutTail, stdoutPath string) (creatorManifest, error) {
+	if task.ExecutorProvider(opts.Task) == "grok" {
+		data, readErr := os.ReadFile(stdoutPath)
+		if readErr != nil {
+			data = []byte(stdoutTail)
+		}
+		if err := runner.WriteGrokCompletionMetadata(filepath.Join(opts.RunDir, runartifact.GrokSkeletonCompletionFilename), data); err != nil {
+			return creatorManifest{}, err
+		}
+		envelope, err := runner.DecodeGrokEnvelope(data)
+		if err != nil {
+			return creatorManifest{}, err
+		}
+		var manifest creatorManifest
+		if err := json.Unmarshal(runner.GrokResultPayload(envelope), &manifest); err != nil {
+			return creatorManifest{}, fmt.Errorf("decode grok creator manifest: %w", err)
+		}
+		if manifest.Outputs == nil || manifest.NoSkeletons == nil {
+			return creatorManifest{}, fmt.Errorf("invalid grok creator manifest: outputs and no_skeletons are required")
+		}
+		return manifest, nil
+	}
 	if task.ExecutorProvider(opts.Task) == "codex" {
 		lastMessagePath := filepath.Join(opts.RunDir, runner.CodexLastMessageFilename)
 		return extractCodexCreatorManifest(lastMessagePath, stdoutTail, stdoutPath)

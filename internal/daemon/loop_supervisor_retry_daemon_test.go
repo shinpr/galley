@@ -232,3 +232,47 @@ func TestDaemonSupervisorStallExhaustsRetryBudget(t *testing.T) {
 		t.Fatalf("model_supervisor_verdict.json must not be written after exhaustion, stat err=%v", err)
 	}
 }
+
+func TestGrokSupervisorIdleTimeoutExhaustsRetriesWithSupervisorErrorEvidence(t *testing.T) {
+	root, taskPath, _ := newDaemonRetryTask(t)
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
+	setLoopBudget(t, taskPath, 1)
+	grokBin := writeFakeCommand(t, "grok", "sleep 5\n")
+	err := runTestDaemon(context.Background(), Options{Root: root, SystemPromptFile: promptPath, JSONSchemaFile: schemaPath, Once: true, MaxConcurrentTasks: 1, Supervisor: "grok", ClaudeBin: claudeBin, GrokBin: grokBin, IdleTimeout: 100 * time.Millisecond})
+	if err == nil {
+		t.Fatal("expected exhausted Grok supervisor idle timeout")
+	}
+	failed, loadErr := task.Load(filepath.Join(root, "tasks", "failed", "task.yaml"))
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if failed.Status != "needs_supervisor_review" || len(failed.Attempts) != 1 || failed.Attempts[0].Error == nil || failed.Attempts[0].Error.Kind != "supervisor_idle_timeout" {
+		t.Fatalf("failed task = %#v", failed)
+	}
+	for try := 1; try <= supervisorTotalAttempts; try++ {
+		pattern := filepath.Join(root, "runs", "*", "attempt-1", fmt.Sprintf("supervisor-try-%d", try), "supervisor_error.json")
+		data := mustReadSingleGlob(t, pattern)
+		if !strings.Contains(string(data), "grok supervisor failed") || !strings.Contains(string(data), "idle timeout") {
+			t.Fatalf("try %d error evidence = %s", try, data)
+		}
+	}
+	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", "supervisor-try-*", "grok_supervisor_completion.json"), 0)
+}
+
+func TestGrokSupervisorStartFailureIsPermanentAndOwnedBySupervisorError(t *testing.T) {
+	root, taskPath, _ := newDaemonRetryTask(t)
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
+	setLoopBudget(t, taskPath, 1)
+	err := runTestDaemon(context.Background(), Options{Root: root, SystemPromptFile: promptPath, JSONSchemaFile: schemaPath, Once: true, MaxConcurrentTasks: 1, Supervisor: "grok", ClaudeBin: claudeBin, GrokBin: filepath.Join(t.TempDir(), "missing-grok")})
+	if err == nil {
+		t.Fatal("expected Grok supervisor start failure")
+	}
+	data := mustReadSingleGlob(t, filepath.Join(root, "runs", "*", "attempt-1", "supervisor-try-1", "supervisor_error.json"))
+	if !strings.Contains(string(data), `"kind": "supervisor_failed"`) || !strings.Contains(string(data), "start") {
+		t.Fatalf("supervisor error evidence = %s", data)
+	}
+	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", "supervisor-try-2"), 0)
+	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", "supervisor-try-1", "grok_supervisor_completion.json"), 0)
+}

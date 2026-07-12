@@ -4,6 +4,7 @@
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Plugin-purple)](https://claude.ai/code)
 [![Codex CLI](https://img.shields.io/badge/Codex%20CLI-Supported-10a37f)](https://developers.openai.com/codex/cli)
+[![Grok Build](https://img.shields.io/badge/Grok%20Build-Plugin-black)](https://x.ai/)
 [![Agent Skills](https://img.shields.io/badge/Agent%20Skills-Spec%20Compliant-blue)](https://developers.openai.com/codex/skills/)
 [![CI](https://github.com/shinpr/galley/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/shinpr/galley/actions/workflows/ci.yml)
 [![GitHub Release](https://img.shields.io/github/v/release/shinpr/galley)](https://github.com/shinpr/galley/releases)
@@ -11,7 +12,7 @@
 
 Galley is a local runtime for supervised AI coding tasks.
 
-It runs Claude Code, Codex, or GLM in a git worktree, records evidence for each attempt, and asks a supervisor model to accept, retry, or escalate the result before the work is treated as done.
+It runs Claude Code, Codex, GLM, or Grok Build in a git worktree, records evidence for each attempt, and asks a supervisor model to accept, retry, or escalate the result before the work is treated as done.
 
 Galley is for tasks where the output should be inspectable later: the request, scope, checks, diffs, and supervisor verdict stay on disk.
 
@@ -45,6 +46,19 @@ Then start or return to Codex, open the plugin picker, install `Galley`, and ask
 $galley Set up Galley for this repository.
 ```
 
+Grok Build:
+
+```sh
+grok plugin marketplace add shinpr/galley
+grok plugin install galley --trust
+```
+
+Then start Grok Build and ask the Galley skill to set up the repository:
+
+```text
+/galley Set up Galley for this repository.
+```
+
 ## First Task
 
 After setup, start with a small, reviewable task in an existing repository.
@@ -61,11 +75,17 @@ Codex:
 $galley Create a Galley task for a small bug fix or test improvement in this repository. Use the repository's normal checks, keep the scope narrow, and queue it after I approve.
 ```
 
+Grok Build:
+
+```text
+/galley Create a Galley task for a small bug fix or test improvement in this repository. Use the repository's normal checks, keep the scope narrow, and queue it after I approve.
+```
+
 The skill will inspect the repository, draft a task file, show the acceptance criteria and execution settings, and ask before queueing it.
 
 ## Skill Workflow
 
-The Galley plugin packages one Agent Skill for Claude Code and Codex. The skill is the recommended path for setup and task authoring because it handles the pieces that are easy to get wrong by hand:
+The Galley plugin packages one Agent Skill for Claude Code, Codex, and Grok Build. The skill is the recommended path for setup and task authoring because it handles the pieces that are easy to get wrong by hand:
 
 - repository setup, CLI checks, and profile paths
 - task YAML drafting and validation
@@ -105,7 +125,7 @@ queued task
     v
 isolated git worktree
     |
-    | Claude Code or Codex implements
+    | Claude Code, Codex, GLM, or Grok implements
     v
 run evidence + git diff
     |
@@ -121,8 +141,8 @@ run evidence + git diff
 - **Task YAML**: trusted local input describing the goal, acceptance criteria, scope, executor, verification, worktree, and PR behavior. See [docs/task-yaml.md](docs/task-yaml.md).
 - **Quality profile**: optional repository expectations for required checks, review dimensions, evidence, and pass policy. See [docs/profiles.md](docs/profiles.md).
 - **Environment profile**: optional repository defaults for command names, executor choice, local constraints, PR behavior, and cleanup policy. See [docs/profiles.md](docs/profiles.md).
-- **Executor**: Claude Code, Codex, or GLM backend that implements the task. New tasks use `environment.yaml` `executor.default_cli` when configured, otherwise Claude. GLM runs the `claude` binary against GLM's Z.ai endpoint, so it needs `claude` on your PATH and a `glm_api_key` in `daemon.yaml`.
-- **Supervisor**: Claude, Codex, or GLM backend that reviews the result against acceptance criteria, required checks, and recorded evidence. It is the acceptance gate; the default is Claude.
+- **Executor**: Claude Code, Codex, GLM, or Grok Build backend that implements the task. New tasks use `environment.yaml` `executor.default_cli` when configured, otherwise Claude. GLM requires `glm_api_key`; Grok uses its logged-in CLI state.
+- **Supervisor**: Claude, Codex, GLM, or Grok Build backend that reviews the result against acceptance criteria, required checks, and recorded evidence. It is the acceptance gate; the default is Claude.
 - **Worktree**: isolated git checkout used for AFK execution so the source repository stays clean.
 - **Evidence**: files under `runs/<run-id>/` that make each attempt auditable after the fact.
 

@@ -101,7 +101,9 @@ jobs:
           "$python_bin" -m json.tool plugins/galley/skills/galley/references/environment.schema.json >/dev/null
           "$python_bin" -m json.tool plugins/galley/.claude-plugin/plugin.json >/dev/null
           "$python_bin" -m json.tool plugins/galley/.codex-plugin/plugin.json >/dev/null
+          "$python_bin" -m json.tool plugins/galley/plugin.json >/dev/null
           "$python_bin" -m json.tool .claude-plugin/marketplace.json >/dev/null
+          "$python_bin" -m json.tool .grok-plugin/marketplace.json >/dev/null
           "$python_bin" -m json.tool .agents/plugins/marketplace.json >/dev/null
 
       - name: Smoke test

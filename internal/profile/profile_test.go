@@ -110,7 +110,7 @@ constraints:
 }
 
 func TestValidateEnvironmentAcceptsExecutorDefaultCLI(t *testing.T) {
-	for _, value := range []string{"claude", "codex", "glm"} {
+	for _, value := range []string{"claude", "codex", "glm", "grok"} {
 		value := value
 		t.Run(value, func(t *testing.T) {
 			env := validEnvironmentForTest()

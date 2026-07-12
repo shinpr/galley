@@ -70,8 +70,7 @@ func (c *AcceptanceSkeletonConfig) IsEnabled() bool {
 }
 
 // IsRequired reports whether the stage requires every AC to have a skeleton
-// output or no_skeletons reason. Required quality-check evidence still gates
-// acceptance whenever the stage is enabled.
+// output or no_skeletons reason.
 // Defaults to true when the stage is enabled.
 func (c *AcceptanceSkeletonConfig) IsRequired() bool {
 	if c == nil || !c.Enabled {

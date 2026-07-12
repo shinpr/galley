@@ -25,16 +25,19 @@ const (
 	SetupExecutorPlanFilename      = "setup_executor_command_plan.json"
 	SetupExecutorStdoutFilename    = "setup_executor.stdout.jsonl"
 	SetupExecutorStderrFilename    = "setup_executor.stderr.log"
+	GrokSetupCompletionFilename    = "grok_setup_completion.json"
 
 	// Acceptance skeleton preflight artifacts.
 	PreflightResultFilename          = "preflight_result.json"
 	PreflightCreatorPlanFilename     = "preflight_creator_command_plan.json"
 	PreflightCreatorManifestFilename = "preflight_creator_manifest.json"
+	GrokSkeletonCompletionFilename   = "grok_acceptance_skeleton_completion.json"
 
 	// Executor and supervisor attempt artifacts.
 	ExecutorResultFilename         = "executor_result.json"
 	RunResultFilename              = "run_result.json"
 	CommandPlanFilename            = "command_plan.json"
+	GrokCompletionMetadataFilename = "grok_completion.json"
 	SupervisorVerdictFilename      = "supervisor_verdict.json"
 	ModelSupervisorVerdictFilename = "model_supervisor_verdict.json"
 	SupervisorErrorFilename        = "supervisor_error.json"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -35,15 +36,17 @@ func runPreflightWithOptions(t *testing.T, tk task.Task, opts skeletonpreflight.
 	t.Helper()
 	work := t.TempDir()
 	runDir := t.TempDir()
-	opts.Task = tk
-	opts.WorkDir = work
-	opts.RunDir = runDir
-	res, err := skeletonpreflight.Run(context.Background(), opts)
+	res, err := runPreflightInWorkdir(t, tk, opts, work, runDir)
 	return res, err, runDir
 }
 
 func runPreflightInWorkdir(t *testing.T, tk task.Task, opts skeletonpreflight.Options, work, runDir string) (*skeletonpreflight.Result, error) {
 	t.Helper()
+	if err := exec.Command("git", "-C", work, "rev-parse", "--git-dir").Run(); err != nil {
+		if err := exec.Command("git", "init", work).Run(); err != nil {
+			t.Fatalf("initialize test repository: %v", err)
+		}
+	}
 	opts.Task = tk
 	opts.WorkDir = work
 	opts.RunDir = runDir

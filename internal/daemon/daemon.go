@@ -107,6 +107,7 @@ type Options struct {
 	ClaudeGuardPluginDir string
 	ClaudeBin            string
 	CodexBin             string
+	GrokBin              string
 	GitBin               string
 	GHBin                string
 	// GLMAuthToken is the Z.ai API token used when a task selects executor.cli
@@ -638,25 +639,40 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	// can try, diagnose, and repair it before returning the successful plan for
 	// Galley to persist. Setup readiness excludes
 	// acceptance skeleton obligations.
-	setupRes, setupUpdate, setupErr := setuppreflight.Run(ctx, setuppreflight.Options{
-		Task:                   loaded,
-		WorkDir:                prepared.CWD,
-		RunDir:                 runDir,
-		Profiles:               profiles,
-		ClaudeBin:              opts.ClaudeBin,
-		CodexBin:               opts.CodexBin,
-		GLMAuthToken:           opts.GLMAuthToken,
-		EnvironmentProfilePath: resolvedProfiles.EnvironmentProfileFile,
-		ExecutorRunner:         opts.daemonDependencies().setupExecutorRunner,
-	})
+	var setupRes *setuppreflight.Result
+	var setupUpdate *setuppreflight.EnvironmentUpdate
+	setupReused := false
+	if prepared.WorktreeReused {
+		setupRes, setupReused, err = reuseReadySetup(opts.Root, loaded.ID, runDir)
+		if err != nil {
+			return failClaimedStage(opts.Root, runningPath, &loaded, setuppreflight.Phase, setuppreflight.FailedKind, preflightReuseError(setuppreflight.Phase, err), runDir)
+		}
+	}
+	var setupErr error
+	if !setupReused {
+		setupRes, setupUpdate, setupErr = setuppreflight.Run(ctx, setuppreflight.Options{
+			Task:                   loaded,
+			WorkDir:                prepared.CWD,
+			RunDir:                 runDir,
+			Profiles:               profiles,
+			ClaudeBin:              opts.ClaudeBin,
+			CodexBin:               opts.CodexBin,
+			GrokBin:                opts.GrokBin,
+			GLMAuthToken:           opts.GLMAuthToken,
+			EnvironmentProfilePath: resolvedProfiles.EnvironmentProfileFile,
+			ExecutorRunner:         opts.daemonDependencies().setupExecutorRunner,
+		})
+	}
 	if setupErr != nil {
 		return failClaimedStage(opts.Root, runningPath, &loaded, setuppreflight.Phase, setuppreflight.FailedKind, setupErr, runDir)
 	}
 	// Apply setup readiness evidence (and any persisted profile change) to the
 	// running task before the implementation work order is built so the
 	// supervisor and executor share the same readiness facts.
-	applySetupResultToTask(&loaded, setupRes, setupUpdate)
-	if setupRes != nil {
+	if !setupReused {
+		applySetupResultToTask(&loaded, setupRes, setupUpdate)
+	}
+	if setupRes != nil && !setupReused {
 		if err := task.Save(runningPath, loaded); err != nil {
 			return failClaimedStage(opts.Root, runningPath, &loaded, setuppreflight.Phase, setuppreflight.FailedKind, err, runDir)
 		}
@@ -666,19 +682,32 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	// omits preflight.acceptance_skeleton.enabled or sets it to false. When the stage fails the daemon does not run the executor and
 	// surfaces the failure through task status and run evidence.
 	if cfg := loaded.Preflight; cfg != nil && cfg.AcceptanceSkeleton.IsEnabled() {
-		res, perr := skeletonpreflight.Run(ctx, skeletonpreflight.Options{
-			Task:         loaded,
-			WorkDir:      prepared.CWD,
-			RunDir:       runDir,
-			Profiles:     profiles,
-			ClaudeBin:    opts.ClaudeBin,
-			CodexBin:     opts.CodexBin,
-			GLMAuthToken: opts.GLMAuthToken,
-		})
+		var res *skeletonpreflight.Result
+		preflightReused := false
+		if prepared.WorktreeReused {
+			res, preflightReused, err = reuseCompletedAcceptanceSkeleton(opts.Root, loaded.ID, runDir)
+			if err != nil {
+				return failClaimedStage(opts.Root, runningPath, &loaded, "acceptance_skeleton_preflight", "acceptance_skeleton_preflight_failed", preflightReuseError("acceptance skeleton", err), runDir)
+			}
+		}
+		var perr error
+		if !preflightReused {
+			res, perr = skeletonpreflight.Run(ctx, skeletonpreflight.Options{
+				Task:         loaded,
+				WorkDir:      prepared.CWD,
+				RunDir:       runDir,
+				Profiles:     profiles,
+				GitBin:       opts.GitBin,
+				ClaudeBin:    opts.ClaudeBin,
+				CodexBin:     opts.CodexBin,
+				GrokBin:      opts.GrokBin,
+				GLMAuthToken: opts.GLMAuthToken,
+			})
+		}
 		if perr != nil {
 			return failClaimedStage(opts.Root, runningPath, &loaded, "acceptance_skeleton_preflight", "acceptance_skeleton_preflight_failed", perr, runDir)
 		}
-		if res != nil {
+		if res != nil && !preflightReused {
 			skeletonpreflight.ApplyToTask(&loaded, res)
 			if err := task.Save(runningPath, loaded); err != nil {
 				return failClaimedStage(opts.Root, runningPath, &loaded, "acceptance_skeleton_preflight", "acceptance_skeleton_preflight_failed", err, runDir)

@@ -1,6 +1,7 @@
 package skeleton
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -8,6 +9,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/shinpr/galley/internal/runner"
 )
 
 // HashSkeletonFiles computes sha256 hashes for each worktree-relative path.
@@ -38,53 +41,43 @@ type preflightFileFingerprint struct {
 	Hash string
 }
 
-func snapshotPreflightFiles(root, excludeRoot string) (map[string]preflightFileFingerprint, error) {
+func snapshotPreflightFiles(ctx context.Context, root, excludeRoot, gitBin string) (map[string]preflightFileFingerprint, error) {
 	files := map[string]preflightFileFingerprint{}
 	if root == "" {
 		return files, fmt.Errorf("workdir is required for preflight snapshot")
 	}
 	excludeRel := cleanContainedRel(root, excludeRoot)
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
+	result, err := runner.RunCommand(ctx, runner.Command{
+		WorkDir: root,
+		Argv:    runner.GitArgs(gitBin, "-C", root, "ls-files", "--cached", "--others", "--exclude-standard", "-z"),
+	}, runner.RunOptions{TailBytes: -1})
+	if err != nil {
+		return nil, fmt.Errorf("list git-visible preflight files: %w", err)
+	}
+	for _, raw := range strings.Split(result.Stdout, "\x00") {
+		if raw == "" {
+			continue
 		}
-		if path == root {
-			return nil
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		rel = filepath.Clean(rel)
+		rel := filepath.Clean(filepath.FromSlash(raw))
 		if excludeRel != "" && (rel == excludeRel || strings.HasPrefix(rel, excludeRel+string(filepath.Separator))) {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
+			continue
 		}
-		// Never treat git metadata as a creator change: it is never a valid
-		// declared output, and in non-worktree runs git operations rewrite
-		// .git/index between the before/after snapshots, which would otherwise
-		// be reported as an undeclared change and fail the whole preflight.
-		if rel == ".git" || strings.HasPrefix(rel, ".git"+string(filepath.Separator)) {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if d.IsDir() {
-			return nil
-		}
+		path := filepath.Join(root, rel)
 		info, err := os.Lstat(path)
 		if err != nil {
-			return err
+			return nil, fmt.Errorf("snapshot preflight file %s: %w", rel, err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			if err := ensureRealPathInsideWorktree(root, path); err != nil {
+				return nil, fmt.Errorf("snapshot preflight file %s: %w", rel, err)
+			}
 		}
 		fp := preflightFileFingerprint{Mode: info.Mode(), Size: info.Size()}
 		switch {
 		case info.Mode().IsRegular():
 			data, err := os.ReadFile(path)
 			if err != nil {
-				return err
+				return nil, fmt.Errorf("snapshot preflight file %s: %w", rel, err)
 			}
 			sum := sha256.Sum256(data)
 			fp.Kind = "file"
@@ -92,7 +85,7 @@ func snapshotPreflightFiles(root, excludeRoot string) (map[string]preflightFileF
 		case info.Mode()&os.ModeSymlink != 0:
 			target, err := os.Readlink(path)
 			if err != nil {
-				return err
+				return nil, fmt.Errorf("snapshot preflight file %s: %w", rel, err)
 			}
 			fp.Kind = "symlink"
 			fp.Hash = target
@@ -100,10 +93,6 @@ func snapshotPreflightFiles(root, excludeRoot string) (map[string]preflightFileF
 			fp.Kind = info.Mode().String()
 		}
 		files[rel] = fp
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("snapshot preflight files: %w", err)
 	}
 	return files, nil
 }

@@ -283,6 +283,34 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "cli": {
+                "const": "grok"
+              }
+            },
+            "required": [
+              "cli"
+            ]
+          },
+          "then": {
+            "properties": {
+              "effort": {
+                "enum": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ],
+                "type": "string"
+              }
+            }
+          }
         }
       ],
       "properties": {
@@ -290,7 +318,8 @@
           "enum": [
             "claude",
             "codex",
-            "glm"
+            "glm",
+            "grok"
           ],
           "type": "string"
         },

@@ -33,7 +33,7 @@ galley daemon status --output json
 
 If the daemon is already running, compare it with the approved execution settings. Surface mismatches that affect the user-visible plan, such as supervisor provider or PR automation. If the daemon is not running, ask whether to start it after queueing or only queue the task. Explain the main choices:
 
-- supervisor: `claude` by default, or `codex`/`glm` when the user chooses. `glm` is the Claude Code binary against GLM's Z.ai endpoint and requires `glm_api_key` in `daemon.yaml`. The supervisor is the acceptance gate; present it as the user's choice.
+- supervisor: `claude` by default, or `codex`/`glm`/`grok` when the user chooses. Grok uses its logged-in CLI state. The supervisor is the acceptance gate; present it as the user's choice.
 - PR automation, PR comment handling, base branch, and worktree cleanup come from the repository `environment.yaml`.
 - execution mode: `galley daemon start` for background execution, or `galley daemon run --once` for one queue drain.
 - concurrency: use defaults for ordinary tasks; increase parallelism when the user explicitly asks for it.
@@ -103,7 +103,7 @@ Trust boundary:
 | `files[n].source is required` | Add the source path or remove the file entry. |
 | `files[n].destination is required` | Add the destination path where Galley should copy the input file in the worktree. |
 | `files[n].destination must stay within scope.allowed_paths` | Move the destination under an allowed path or expand `scope.allowed_paths` deliberately. |
-| `executor.cli must be one of: claude, codex, glm` | Use `executor.cli: claude`, `codex`, or `glm` (`glm` requires `glm_api_key` in `daemon.yaml`). |
+| `executor.cli must be one of: claude, codex, glm, grok` | Use a listed backend; Grok requires an installed, authenticated `grok` CLI. |
 | `execution_policy.loop_budget must be >= 0` | Use an integer greater than or equal to `0`; `0` means unlimited. |
 
 Schema/decode errors such as `field text not found in type task.Decision` mean a nested object has the wrong shape. Use the skill-bundled `references/task.schema.json`. Inspect Galley implementation source only when the task target is Galley itself.

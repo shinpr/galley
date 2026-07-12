@@ -104,8 +104,10 @@ type Options struct {
 	WorkDir      string
 	RunDir       string
 	Profiles     profile.Bundle
+	GitBin       string
 	ClaudeBin    string
 	CodexBin     string
+	GrokBin      string
 	GLMAuthToken string
 }
 
@@ -124,7 +126,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		return preflightFailure(opts.RunDir, "acceptance_skeleton_preflight", err.Error())
 	}
 
-	before, snapErr := snapshotPreflightFiles(opts.WorkDir, opts.RunDir)
+	before, snapErr := snapshotPreflightFiles(ctx, opts.WorkDir, opts.RunDir, opts.GitBin)
 	if snapErr != nil {
 		return preflightFailure(opts.RunDir, "acceptance_skeleton_preflight", snapErr.Error())
 	}
@@ -133,7 +135,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	if perr != nil {
 		return preflightFailure(opts.RunDir, perr.phase, perr.message)
 	}
-	after, snapErr := snapshotPreflightFiles(opts.WorkDir, opts.RunDir)
+	after, snapErr := snapshotPreflightFiles(ctx, opts.WorkDir, opts.RunDir, opts.GitBin)
 	if snapErr != nil {
 		return preflightFailure(opts.RunDir, "acceptance_skeleton_preflight", snapErr.Error())
 	}

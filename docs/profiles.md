@@ -57,8 +57,8 @@ pass_policy:
 Supported fields:
 
 - `id`: profile identifier.
-- `required_checks[]`: named checks Galley runs after an executor attempt, records as verification evidence, and asks the supervisor to evaluate.
-- `required_checks[].preferred_commands[]`: ordered fallback commands for that check. Galley records the first passing command, or the last failure when all commands fail.
+- `required_checks[]`: named checks the executor should run and report as verification evidence for supervisor review.
+- `required_checks[].preferred_commands[]`: ordered command suggestions. The executor may use a repository-supported equivalent when it reports what ran and why.
 - `required_checks[].required`: whether missing evidence should count against acceptance.
 - `review_dimensions[]`: repository-specific review dimensions such as acceptance, regression, security, or UI behavior.
 - `review_dimensions[].weight`: non-negative relative weight for reporting.
@@ -115,8 +115,8 @@ Supported fields:
 - `id`: profile identifier.
 - `cwd`: absolute path to the repository this profile describes.
 - `commands`: named local commands the executor and supervisor can reference.
-- `executor.default_cli`: optional implementation executor default for new task authoring. Values are `claude`, `codex`, and `glm`. `glm` runs the `claude` binary against GLM's Z.ai endpoint and needs a `glm_api_key` in `daemon.yaml`. When it is unset, new task authoring uses Claude unless the author explicitly chooses another backend. An explicit task YAML `executor.cli` remains authoritative for that task.
-- `supervisor.default_cli`: optional repository-scoped supervisor adapter. Values are `claude`, `codex`, and `glm`. When set, it overrides daemon startup supervisor settings for tasks in this repository.
+- `executor.default_cli`: optional implementation executor default for new task authoring. Values are `claude`, `codex`, `glm`, and `grok`. Grok uses its logged-in CLI state. When unset, authoring uses Claude unless explicitly overridden.
+- `supervisor.default_cli`: optional repository-scoped supervisor adapter. Values are `claude`, `codex`, `glm`, and `grok`. When set, it overrides daemon startup supervisor settings for tasks in this repository.
 - `supervisor.model`: optional model name passed unchanged to the selected Codex, Claude, or GLM supervisor CLI. Omit it or use an empty value to keep the CLI default; `runs/<run-id>/supervisor.json` records the effective setting.
 - `supervisor.effort`: optional reasoning effort. Claude and `glm` accept `low`, `medium`, `high`, `xhigh`, or `max`; Codex also accepts `minimal`. Empty uses the CLI default, invalid provider values fail before review, and `supervisor.json` records the value and source.
 - `required_checks.shell`: optional shell for Galley-owned `quality.required_checks` execution. Values are `auto`, `sh`, `bash`, `cmd`, `powershell`, and `pwsh`.

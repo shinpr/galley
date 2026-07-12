@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/shinpr/galley/internal/runartifact"
 	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/task"
 )
@@ -16,6 +17,28 @@ import (
 // message through `--output-last-message`; Claude streams the JSON through
 // stdout JSONL.
 func ResolveExecutorResult(opts Options, stdoutTail string) (*Result, error) {
+	if task.ExecutorProvider(opts.Task) == "grok" {
+		data, readErr := os.ReadFile(runartifact.Path(opts.RunDir, runartifact.SetupExecutorStdoutFilename))
+		if readErr != nil {
+			data = []byte(stdoutTail)
+		}
+		if err := runner.WriteGrokCompletionMetadata(runartifact.Path(opts.RunDir, runartifact.GrokSetupCompletionFilename), data); err != nil {
+			return nil, err
+		}
+		envelope, err := runner.DecodeGrokEnvelope(data)
+		if err != nil {
+			return nil, err
+		}
+		var result Result
+		if err := json.Unmarshal(runner.GrokResultPayload(envelope), &result); err != nil {
+			return nil, fmt.Errorf("decode grok setup result: %w", err)
+		}
+		if result.Status == "" || result.Commands == nil {
+			return nil, fmt.Errorf("invalid grok setup result")
+		}
+		normalizeResult(&result)
+		return &result, nil
+	}
 	if task.ExecutorProvider(opts.Task) == "codex" {
 		lastMessagePath := filepath.Join(opts.RunDir, runner.CodexLastMessageFilename)
 		if data, err := os.ReadFile(lastMessagePath); err == nil {

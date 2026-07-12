@@ -6,13 +6,23 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.10.0 - 2026-07-12
+
 ### Added
 
 - Environment profiles accept optional `supervisor.effort`; omission keeps the CLI default, invalid provider values fail before review, and run evidence records the resolved setting and source.
+- Grok Build is available as an executor for setup, acceptance-skeleton, and implementation roles, and as a supervisor. Galley uses prompt files, schema-constrained output, and the Grok completion envelope without storing authentication in task YAML.
 
 ### Changed
 
 - Codex executors accept `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` across implementation, setup, and acceptance-skeleton roles; model-specific rejection remains a Codex error.
+- Packaged Galley plugins are version `0.1.23` and include Grok task/profile authoring guidance.
+- Requeued tasks that retain their worktree reuse prior successful setup and acceptance-skeleton evidence instead of repeating those one-time phases.
+- Required quality checks remain executor-reported evidence for supervisor review; the acceptance-skeleton gate no longer rejects an accepted verdict by matching executor command strings against `preferred_commands`.
+
+### Fixed
+
+- `/galley` reruns no longer fail when an acceptance skeleton already exists and the creator correctly leaves it unchanged.
 
 ## v0.9.3 - 2026-07-11
 

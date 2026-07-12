@@ -134,19 +134,31 @@ func EnvironmentJSONSchema() ([]byte, error) {
 }
 
 // supervisorSchema describes the optional repository-scoped supervisor block.
-// effort carries a base string type plus per-provider conditional enums so an
-// editor constrains it to the selected default_cli's accepted values; when
-// default_cli is omitted the effective supervisor is resolved at daemon startup
-// and Galley validates the effort against it before the review subprocess runs.
+// effort carries a base enum (the empty CLI-default value plus the provider-level
+// supervisor effort union) so a value accepted by no supervisor provider is
+// rejected even when default_cli is omitted, matching the runtime union check;
+// per-provider conditional enums then narrow the accepted set once default_cli is
+// selected. When default_cli is omitted the effective supervisor is resolved at
+// daemon startup and Galley validates the effort against it before review runs.
 func supervisorSchema() map[string]any {
 	m := object(
 		properties(map[string]any{
 			"default_cli": enumSchema(daemonconfig.SupervisorCLIs()),
 			"model":       stringSchema("description", "Optional model name passed unchanged to the selected supervisor CLI. Omit or leave empty to use the CLI default; accepted values depend on the provider."),
-			"effort":      stringSchema("description", "Optional reasoning effort passed to the selected supervisor CLI (--effort for claude/glm, model_reasoning_effort for codex). Omit or leave empty to keep the CLI default. Accepted values depend on the selected default_cli and are validated against the effective supervisor before review starts."),
+			"effort":      supervisorEffortBaseSchema(),
 		}),
 	)
 	m["allOf"] = supervisorEffortSchemas()
+	return m
+}
+
+// supervisorEffortBaseSchema constrains the base supervisor.effort to the empty
+// CLI-default value plus the provider-level supervisor effort union. This keeps
+// the JSON Schema in sync with ValidateEnvironment, which rejects any effort
+// outside provider.SupervisorEfforts() when default_cli is omitted.
+func supervisorEffortBaseSchema() map[string]any {
+	m := enumSchema(append([]string{""}, provider.SupervisorEfforts()...))
+	m["description"] = "Optional reasoning effort passed to the selected supervisor CLI (--effort for claude/glm, model_reasoning_effort for codex). Omit or leave empty to keep the CLI default. Accepted values depend on the selected default_cli and are validated against the effective supervisor before review starts."
 	return m
 }
 

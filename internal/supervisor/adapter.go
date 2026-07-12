@@ -31,9 +31,7 @@ type AdapterOptions struct {
 	Provider string
 	// Model is passed unchanged to the provider CLI. Empty preserves its default.
 	Model string
-	// Effort is the reasoning-effort override for the supervisor CLI. Empty
-	// preserves the CLI default. It reaches claude/glm via --effort and codex via
-	// the model_reasoning_effort config override.
+	// Effort is the provider-specific reasoning override; empty keeps the CLI default.
 	Effort      string
 	WorkDir     string
 	Timeout     time.Duration
@@ -122,9 +120,6 @@ func RunAdapterPayload(ctx context.Context, opts AdapterOptions, request []byte)
 	if !ok || !provider.IsSupervisor(opts.Provider) {
 		return nil, fmt.Errorf("supervisor provider must be one of: %s", strings.Join(provider.SupervisorIDs(), ", "))
 	}
-	// Fail an unsupported provider/effort combination before spawning the paid
-	// supervisor subprocess so operators get an actionable diagnostic instead of
-	// an upstream error after review work has already started.
 	if err := PreflightEffort(opts.Provider, opts.Effort); err != nil {
 		return nil, err
 	}
@@ -166,13 +161,7 @@ func appendSupervisorModel(args []string, model string) []string {
 	return append(args, "--model", model)
 }
 
-// PreflightEffort verifies a configured supervisor effort is a provider-level
-// value the resolved supervisor accepts. An empty effort preserves the CLI
-// default and always passes. A rejected value returns an error naming the
-// field, provider, and accepted values so an invalid environment.yaml fails
-// before any supervisor subprocess starts rather than after paid model work.
-// Model-specific rejection of a provider-valid value stays an upstream runtime
-// error per design decision D2.
+// PreflightEffort rejects values outside the resolved provider's set before spawning the supervisor.
 func PreflightEffort(providerID, effort string) error {
 	if effort == "" {
 		return nil

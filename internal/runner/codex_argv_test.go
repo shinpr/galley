@@ -73,12 +73,6 @@ func TestCodexArgvDoesNotEmitUnsupportedFlags(t *testing.T) {
 
 }
 
-// TestCodexCommandPlanPassesExpandedEffortLiterals proves AC4: every officially
-// supported Codex effort — including the newly accepted minimal, xhigh, and max
-// — reaches the shared codex command plan unchanged as a quoted
-// model_reasoning_effort override. Setup and acceptance-skeleton roles build
-// their argv through this same CodexCommandPlan, so a literal preserved here is
-// preserved for all three Codex executor roles.
 func TestCodexCommandPlanPassesExpandedEffortLiterals(t *testing.T) {
 	t.Parallel()
 	for _, effort := range []string{"minimal", "low", "medium", "high", "xhigh", "max"} {

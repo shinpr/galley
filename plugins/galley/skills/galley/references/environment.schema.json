@@ -246,7 +246,7 @@
           "type": "string"
         },
         "effort": {
-          "description": "Optional reasoning effort passed to the selected supervisor CLI (--effort for claude/glm, model_reasoning_effort for codex). Omit or leave empty to keep the CLI default. Accepted values depend on the selected default_cli and are validated against the effective supervisor before review starts.",
+          "description": "Optional reasoning effort. Empty keeps the CLI default; the effective provider is validated before review.",
           "enum": [
             "",
             "low",

@@ -23,11 +23,7 @@ var descriptors = []Descriptor{
 	{ID: "glm", Transport: TransportClaude, Executor: true, Supervisor: true},
 }
 
-// Provider-level reasoning effort sets, keyed by transport. These are the
-// values Galley accepts; per-model compatibility is delegated to the CLI so a
-// Galley-maintained per-model table cannot go stale. codexEfforts is the
-// official Codex set (minimal..max); claudeEfforts is the Claude Code set,
-// which glm reuses because it runs the Claude binary against GLM's endpoint.
+// Galley validates provider-level values and leaves model compatibility to each CLI.
 var (
 	claudeEfforts = []string{"low", "medium", "high", "xhigh", "max"}
 	codexEfforts  = []string{"minimal", "low", "medium", "high", "xhigh", "max"}
@@ -86,10 +82,7 @@ func EffortsForID(id string) ([]string, bool) {
 	return EffortsForTransport(descriptor.Transport), true
 }
 
-// SupervisorEfforts returns the union of accepted effort values across every
-// supervisor provider, in stable first-seen order. It is the provider-agnostic
-// floor for validating a supervisor.effort whose effective provider is not
-// fixed in the same source; the effective provider is validated separately.
+// SupervisorEfforts returns the stable union used before an effective provider is known.
 func SupervisorEfforts() []string {
 	var out []string
 	seen := map[string]bool{}

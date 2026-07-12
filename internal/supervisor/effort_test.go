@@ -8,9 +8,6 @@ import (
 	"testing"
 )
 
-// fakeVerdictBin writes its argv to capturePath and emits a minimal accepted
-// verdict so RunAdapterPayload succeeds. For codex the verdict is written to the
-// --output-last-message path; for claude it is printed to stdout.
 func fakeVerdictBin(t *testing.T, capturePath string, codex bool) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -48,10 +45,6 @@ printf '%s\n' '` + verdict + `'
 	return path
 }
 
-// TestRunAdapterPayloadPassesSupervisorEffort proves AC2: a configured effort
-// reaches the effective supervisor through its supported invocation surface —
-// --effort for claude/glm and the model_reasoning_effort config override for
-// codex.
 func TestRunAdapterPayloadPassesSupervisorEffort(t *testing.T) {
 	skipPOSIXFakeSupervisorOnWindows(t)
 	cases := []struct {
@@ -94,10 +87,6 @@ func TestRunAdapterPayloadPassesSupervisorEffort(t *testing.T) {
 	}
 }
 
-// TestPreflightEffortRejectsUnsupportedCombinations proves AC2's negative path:
-// an unsupported provider/effort combination fails with an error that names the
-// field, provider, and accepted values, while an empty effort and every
-// provider-valid value pass.
 func TestPreflightEffortRejectsUnsupportedCombinations(t *testing.T) {
 	t.Parallel()
 	if err := PreflightEffort("claude", ""); err != nil {
@@ -130,9 +119,6 @@ func TestPreflightEffortRejectsUnsupportedCombinations(t *testing.T) {
 	}
 }
 
-// TestRunAdapterPayloadRejectsInvalidEffortBeforeSubprocess proves the invalid
-// combination fails before any supervisor binary runs: the fake binary would
-// write to capturePath if invoked, and it must not.
 func TestRunAdapterPayloadRejectsInvalidEffortBeforeSubprocess(t *testing.T) {
 	skipPOSIXFakeSupervisorOnWindows(t)
 	capturePath := filepath.Join(t.TempDir(), "args")

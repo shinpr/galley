@@ -294,8 +294,6 @@ printf 'package foo_test\n' > internal/foo/foo_test.go`
 			wantInSeq: [][2]string{{"--model", "gpt-5-codex"}, {"-c", `model_reasoning_effort="high"`}},
 		},
 		{
-			// Skeleton creator role must carry a newly accepted Codex literal
-			// (minimal) unchanged, matching AC4's expanded effort set.
 			name:      "codex minimal",
 			cli:       "codex",
 			model:     "gpt-5-codex",

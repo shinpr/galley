@@ -133,13 +133,7 @@ func EnvironmentJSONSchema() ([]byte, error) {
 	return marshalSchema(schema)
 }
 
-// supervisorSchema describes the optional repository-scoped supervisor block.
-// effort carries a base enum (the empty CLI-default value plus the provider-level
-// supervisor effort union) so a value accepted by no supervisor provider is
-// rejected even when default_cli is omitted, matching the runtime union check;
-// per-provider conditional enums then narrow the accepted set once default_cli is
-// selected. When default_cli is omitted the effective supervisor is resolved at
-// daemon startup and Galley validates the effort against it before review runs.
+// supervisorSchema uses the provider union as its base and narrows effort when default_cli is selected.
 func supervisorSchema() map[string]any {
 	m := object(
 		properties(map[string]any{
@@ -152,13 +146,9 @@ func supervisorSchema() map[string]any {
 	return m
 }
 
-// supervisorEffortBaseSchema constrains the base supervisor.effort to the empty
-// CLI-default value plus the provider-level supervisor effort union. This keeps
-// the JSON Schema in sync with ValidateEnvironment, which rejects any effort
-// outside provider.SupervisorEfforts() when default_cli is omitted.
 func supervisorEffortBaseSchema() map[string]any {
 	m := enumSchema(append([]string{""}, provider.SupervisorEfforts()...))
-	m["description"] = "Optional reasoning effort passed to the selected supervisor CLI (--effort for claude/glm, model_reasoning_effort for codex). Omit or leave empty to keep the CLI default. Accepted values depend on the selected default_cli and are validated against the effective supervisor before review starts."
+	m["description"] = "Optional reasoning effort. Empty keeps the CLI default; the effective provider is validated before review."
 	return m
 }
 
@@ -168,10 +158,7 @@ func supervisorEffortSchemas() []any {
 		if !descriptor.Supervisor {
 			continue
 		}
-		// Permit the empty CLI-default value alongside the provider's
-		// authoritative effort set so an explicitly empty effort stays valid
-		// under the conditional, matching the runtime that treats an empty
-		// effort as "keep the CLI default" rather than validating it.
+		// Empty preserves the CLI default under each conditional enum.
 		efforts := append([]string{""}, provider.EffortsForTransport(descriptor.Transport)...)
 		schemas = append(schemas, map[string]any{
 			"if": map[string]any{

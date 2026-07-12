@@ -100,9 +100,7 @@ type Options struct {
 	// SupervisorModel is the repository's exact provider model override. Empty
 	// preserves the supervisor CLI default.
 	SupervisorModel string
-	// SupervisorEffort is the repository's supervisor reasoning-effort override
-	// resolved from the environment profile. Empty preserves the supervisor CLI
-	// default. It is persisted to runs/<run-id>/supervisor.json as evidence.
+	// SupervisorEffort is the profile override persisted in supervisor.json; empty keeps the CLI default.
 	SupervisorEffort     string
 	ShutdownTimeout      time.Duration
 	DisableClaudeGuard   bool
@@ -206,8 +204,6 @@ const (
 	SupervisorModelSourceCLIDefault  = "cli_default"
 )
 
-// Supervisor effort source labels. Persisted in run evidence so operators can
-// distinguish an explicit environment.yaml override from CLI-default behavior.
 const (
 	SupervisorEffortSourceRepoProfile = "environment_profile"
 	SupervisorEffortSourceCLIDefault  = "cli_default"

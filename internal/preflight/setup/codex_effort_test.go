@@ -6,10 +6,6 @@ import (
 	"github.com/shinpr/galley/internal/task"
 )
 
-// TestBuildExecutorCommandPlanCodexPassesExpandedEfforts proves AC4 for the
-// setup executor role: each officially supported Codex effort, including the
-// newly accepted minimal/xhigh/max, reaches the setup command plan unchanged as
-// a quoted model_reasoning_effort override.
 func TestBuildExecutorCommandPlanCodexPassesExpandedEfforts(t *testing.T) {
 	for _, effort := range []string{"minimal", "low", "medium", "high", "xhigh", "max"} {
 		effort := effort

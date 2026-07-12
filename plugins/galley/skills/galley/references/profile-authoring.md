@@ -20,7 +20,7 @@ Backend defaults are intentionally separate:
 - Implementation executor default: stored in `environment.yaml` as `executor.default_cli`; unset resolves to Claude when a new task is authored.
 - Review supervisor default: optionally stored in `environment.yaml` as `supervisor.default_cli`; unset falls back to daemon startup state and then Claude.
 - Review supervisor model: set `supervisor.model` to an exact provider model name; omit it or use an empty value to keep that CLI's default.
-- Review supervisor effort: set `supervisor.effort` to a reasoning-effort value for the selected supervisor CLI (`--effort` for `claude`/`glm`, `model_reasoning_effort` for `codex`); omit it or use an empty value to keep that CLI's default. `claude` and `glm` accept `low`, `medium`, `high`, `xhigh`, `max`; `codex` also accepts `minimal`. An unsupported provider/effort combination fails before review starts.
+- Review supervisor effort: set `supervisor.effort` to `low`, `medium`, `high`, `xhigh`, or `max`; Codex also accepts `minimal`. Empty keeps the CLI default, and invalid provider values fail before review.
 - Valid backends for either default are `claude`, `codex`, and `glm`. `glm` runs the Claude Code binary against GLM's Anthropic-compatible endpoint (Z.ai) and requires `glm_api_key` in `daemon.yaml`. The supervisor is the acceptance gate, so its default is the user's choice; the daemon default is `claude`.
 
 Use the bundled schemas as the profile field contract:

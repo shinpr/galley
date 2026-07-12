@@ -90,7 +90,7 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 - `execution_policy.stop_on_external_service_unavailable`: stop when a required external service is unavailable and the task cannot proceed with local substitutes.
 - `executor.cli`: selects `claude` (Claude Code), `codex` (`codex exec`), or `glm`. `glm` runs the `claude` binary against GLM's Z.ai endpoint, so it needs `claude` on PATH and a `glm_api_key` in `daemon.yaml`. New task authoring uses `environment.yaml` `executor.default_cli` when present, otherwise Claude. An explicit task YAML value is authoritative for that task.
 - `executor.model`: optional model override. Omit it to use the selected CLI's configured default model.
-- `executor.effort`: model effort hint. Claude and `glm` accept `low`, `medium`, `high`, `xhigh`, or `max`; Codex accepts `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. Individual models may reject a provider-valid effort they do not support; that stays an upstream Codex runtime error.
+- `executor.effort`: model effort hint. Claude and `glm` accept `low`, `medium`, `high`, `xhigh`, or `max`; Codex also accepts `minimal`. Model-specific rejection remains a Codex error.
 - `executor.prompt_profile`: prompt profile name recorded for evidence.
 - `executor.prompt_mode`: `replace` or `append`.
 

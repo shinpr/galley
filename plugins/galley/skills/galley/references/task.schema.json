@@ -168,24 +168,9 @@
     "execution_policy": {
       "additionalProperties": false,
       "properties": {
-        "afk_decision_policy": {
-          "enum": [
-            "choose-smallest-reversible"
-          ],
-          "type": "string"
-        },
         "loop_budget": {
           "minimum": 0,
           "type": "integer"
-        },
-        "stop_on_destructive_operation": {
-          "type": "boolean"
-        },
-        "stop_on_external_service_unavailable": {
-          "type": "boolean"
-        },
-        "stop_on_missing_secret": {
-          "type": "boolean"
         },
         "timeout_ms": {
           "minimum": 1,
@@ -194,11 +179,7 @@
       },
       "required": [
         "loop_budget",
-        "timeout_ms",
-        "afk_decision_policy",
-        "stop_on_destructive_operation",
-        "stop_on_missing_secret",
-        "stop_on_external_service_unavailable"
+        "timeout_ms"
       ],
       "type": "object"
     },
@@ -422,21 +403,8 @@
         "acceptance_skeleton": {
           "additionalProperties": false,
           "properties": {
-            "allowed_paths": {
-              "items": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "type": "array"
-            },
             "enabled": {
               "type": "boolean"
-            },
-            "mode": {
-              "enum": [
-                "skeleton"
-              ],
-              "type": "string"
             },
             "outputs": {
               "items": {
@@ -483,9 +451,6 @@
                 "type": "object"
               },
               "type": "array"
-            },
-            "required": {
-              "type": "boolean"
             }
           },
           "required": [
@@ -684,7 +649,6 @@
         }
       },
       "required": [
-        "enabled",
         "branch",
         "path"
       ],
@@ -693,19 +657,13 @@
   },
   "required": [
     "id",
-    "mode",
-    "status",
     "goal",
     "acceptance_criteria",
     "scope",
     "execution_policy",
     "worktree",
-    "supervisor",
     "decisions",
-    "risks",
-    "attempts",
-    "verification",
-    "pr"
+    "risks"
   ],
   "title": "Galley Task YAML",
   "type": "object"

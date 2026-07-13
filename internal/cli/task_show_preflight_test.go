@@ -32,10 +32,8 @@ func writePreflightEnabledTask(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 	loaded.Status = "running"
-	required := true
 	loaded.Preflight = &taskpkg.Preflight{AcceptanceSkeleton: &taskpkg.AcceptanceSkeletonConfig{
-		Enabled:  true,
-		Required: &required,
+		Enabled: true,
 		Outputs: []taskpkg.AcceptanceSkeletonOutputDef{{
 			ACID:                   "AC1",
 			Path:                   "internal/foo/foo_test.go",

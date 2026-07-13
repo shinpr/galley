@@ -1,6 +1,4 @@
 id: "task-20260514-afk-codex-001"
-mode: "afk"
-status: "queued"
 goal: "Implement a small, self-contained maintenance task with the Codex executor and open a PR with evidence."
 acceptance_criteria:
   - id: "AC1"
@@ -18,24 +16,11 @@ scope:
 execution_policy:
   loop_budget: 10
   timeout_ms: 1200000
-  afk_decision_policy: "choose-smallest-reversible"
-  stop_on_destructive_operation: true
-  stop_on_missing_secret: false
-  stop_on_external_service_unavailable: false
 worktree:
-  enabled: true
   branch: "agent/task-20260514-afk-codex-001"
   path: "../galley.worktrees/task-20260514-afk-codex-001"
-supervisor:
-  review_iterations: 0
 executor:
   cli: "codex"
   effort: "high"
 decisions: []
 risks: []
-attempts: []
-verification:
-  commands: []
-pr:
-  url: ""
-  status: ""

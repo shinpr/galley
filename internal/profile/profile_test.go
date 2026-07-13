@@ -48,6 +48,200 @@ func TestLoadAndValidateEnvironmentExample(t *testing.T) {
 	}
 }
 
+func TestLoadProfilesIgnoreUnknownFields(t *testing.T) {
+	t.Run("quality", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "quality.yaml")
+		body := `id: compatible
+required_checks:
+  - id: tests
+    preferred_commands: ["go test ./..."]
+    required: true
+    future_check_option: enabled
+review_dimensions:
+  - id: acceptance
+    weight: 1
+    required: true
+    pass: Acceptance criteria pass.
+evidence_requirements:
+  file_line_references: true
+  command_outputs: true
+pass_policy:
+  required_dimensions_must_pass: true
+  min_score: 85
+  unresolved_high_findings_allowed: 0
+  blocking_severities: [critical, high]
+future_profile_option: enabled
+`
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		quality, err := LoadQuality(path)
+		if err != nil {
+			t.Fatalf("unknown quality fields should be ignored: %v", err)
+		}
+		if result := ValidateQuality(quality); !result.Valid() {
+			t.Fatalf("quality errors got %#v", result.Errors)
+		}
+		if quality.ID != "compatible" || quality.PassPolicy.MinScore != 85 {
+			t.Fatalf("known quality fields got %#v", quality)
+		}
+	})
+
+	t.Run("environment", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "environment.yaml")
+		body := `id: compatible
+cwd: /tmp/repo
+commands:
+  test: go test ./...
+constraints:
+  network: approval_required
+  secrets_policy: never_read_env_files
+  destructive_commands: deny
+  future_constraint: enabled
+worktree:
+  cleanup: true
+  future_worktree_option: enabled
+future_profile_option: enabled
+`
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		env, err := LoadEnvironment(path)
+		if err != nil {
+			t.Fatalf("unknown environment fields should be ignored: %v", err)
+		}
+		if result := ValidateEnvironment(env); !result.Valid() {
+			t.Fatalf("environment errors got %#v", result.Errors)
+		}
+		if env.ID != "compatible" || env.Commands["test"] != "go test ./..." {
+			t.Fatalf("known environment fields got %#v", env)
+		}
+	})
+}
+
+func TestLoadProfilesRejectMissingRequiredFields(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		load func(string) error
+		want string
+	}{
+		{
+			name: "quality nested boolean",
+			body: `id: missing-required
+required_checks:
+  - id: tests
+    preferred_commands: ["go test ./..."]
+    required: null
+review_dimensions: []
+evidence_requirements:
+  file_line_references: true
+  command_outputs: true
+pass_policy:
+  required_dimensions_must_pass: true
+  min_score: 85
+  blocking_severities: [high]
+`,
+			load: func(path string) error {
+				_, err := LoadQuality(path)
+				return err
+			},
+			want: "required_checks[0].required",
+		},
+		{
+			name: "environment nested string",
+			body: `id: missing-required
+cwd: /tmp/repo
+constraints:
+  network: approval_required
+  destructive_commands: deny
+`,
+			load: func(path string) error {
+				_, err := LoadEnvironment(path)
+				return err
+			},
+			want: "constraints.secrets_policy",
+		},
+		{
+			name: "empty quality document",
+			body: "",
+			load: func(path string) error {
+				_, err := LoadQuality(path)
+				return err
+			},
+			want: "missing required fields: id",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "profile.yaml")
+			if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			err := tc.load(path)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected error containing %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestLoadProfileRejectsKnownFieldTypeMismatch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "quality.yaml")
+	body := `id: invalid-type
+required_checks: []
+review_dimensions: []
+evidence_requirements:
+  file_line_references: true
+  command_outputs: true
+pass_policy:
+  required_dimensions_must_pass: true
+  min_score: high
+  blocking_severities: [high]
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadQuality(path); err == nil || !strings.Contains(err.Error(), "cannot unmarshal") {
+		t.Fatalf("expected known-field type error, got %v", err)
+	}
+}
+
+func TestUpdateEnvironmentSetupPreservesUnknownFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "environment.yaml")
+	body := `# repository environment
+id: compatible
+cwd: /tmp/repo
+constraints:
+  network: approval_required
+  secrets_policy: never_read_env_files
+  destructive_commands: deny
+  future_constraint: enabled
+future_profile_option: enabled
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plan := SetupPlan{Commands: []SetupCommand{{Run: "go mod download", Why: "prepare dependencies"}}}
+	prior, err := UpdateEnvironmentSetup(path, plan)
+	if err != nil {
+		t.Fatalf("update setup with unknown fields: %v", err)
+	}
+	if prior != nil {
+		t.Fatalf("prior setup got %#v, want nil", prior)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	for _, want := range []string{"# repository environment", "future_constraint: enabled", "future_profile_option: enabled", "run: go mod download"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("rewritten environment missing %q:\n%s", want, content)
+		}
+	}
+}
+
 func TestLoadBundleRejectsInvalidQuality(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "quality.yaml")
 	body := `id: bad
@@ -56,8 +250,13 @@ required_checks:
     preferred_commands: []
     required: true
 review_dimensions: []
+evidence_requirements:
+  file_line_references: true
+  command_outputs: true
 pass_policy:
+  required_dimensions_must_pass: true
   min_score: 85
+  blocking_severities: [high]
 `
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)

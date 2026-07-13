@@ -1,6 +1,4 @@
 id: "task-20260508-afk-001"
-mode: "afk"
-status: "queued"
 goal: "Implement a small, self-contained maintenance task and open a PR with evidence."
 acceptance_criteria:
   - id: "AC1"
@@ -18,50 +16,17 @@ scope:
 execution_policy:
   loop_budget: 10
   timeout_ms: 1200000
-  afk_decision_policy: "choose-smallest-reversible"
-  stop_on_destructive_operation: true
-  stop_on_missing_secret: false
-  stop_on_external_service_unavailable: false
 worktree:
-  enabled: true
   branch: "agent/task-20260508-afk-001"
   path: "../galley.worktrees/task-20260508-afk-001"
-supervisor:
-  review_iterations: 0
 executor:
   cli: "claude"
   effort: "high"
 # Optional acceptance skeleton preflight. When enabled, Galley creates
-# AC-linked test skeletons before the executor starts. It is disabled by
-# default; set `enabled` to true and optionally add `required` or
-# `allowed_paths` to opt in. See docs/task-yaml.md.
+# AC-linked test skeletons before the executor starts. Paths come from
+# scope.allowed_paths; outputs are written by the daemon.
 preflight:
   acceptance_skeleton:
     enabled: false
-# Example opt-in shape:
-#   acceptance_skeleton:
-#     enabled: true
-#     required: true
-#     # allowed_paths defaults to scope.allowed_paths when omitted.
-#     # allowed_paths:
-#     #   - "internal"
-#     # With only enabled: true, Galley runs the built-in test creator and writes
-#     # generated outputs[] plus AC verification annotations back to the running task.
-#     # outputs is daemon-owned runtime metadata, shown here only as an example
-#     # of what the built-in creator writes back before the executor starts.
-#     # outputs:
-#       - ac_id: "AC1"
-#         path: "internal/foo/foo_test.go"
-#         kind: "go-test"
-#         purpose: "Verify the AC1 behavior boundary"
-#         satisfies: "AC1 observable behavior"
-#         integration_point: "Executor completes this skeleton before acceptance"
-#         implementation_required: true
 decisions: []
 risks: []
-attempts: []
-verification:
-  commands: []
-pr:
-  url: ""
-  status: ""

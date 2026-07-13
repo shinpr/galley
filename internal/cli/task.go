@@ -178,6 +178,8 @@ func newTaskShowCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Display resolves the same fixed defaults as validation and queueing.
+			task.ApplyDefaults(&loaded)
 			item := taskSummary(path, loaded)
 			preflight := preflightSummary(loaded)
 			if preflight != nil {
@@ -280,6 +282,7 @@ func listTaskItems(root, state string) ([]taskListItem, error) {
 				})
 				continue
 			}
+			task.ApplyDefaults(&loaded)
 			items = append(items, taskSummary(path, loaded))
 		}
 	}

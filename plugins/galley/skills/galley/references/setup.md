@@ -141,3 +141,4 @@ Explicit Claude supervisor:
 For a single queue drain, use the same command shape with `run --once` instead of `start`.
 
 Repository profiles under the Galley root are loaded automatically from `scope.cwd`.
+Unknown `daemon.yaml` keys are ignored at runtime; invalid values for known keys still fail startup.

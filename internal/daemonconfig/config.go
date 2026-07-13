@@ -59,7 +59,6 @@ type File struct {
 	MaxConcurrentPerRepo *int   `yaml:"max_concurrent_per_repo,omitempty"`
 	PollInterval         string `yaml:"poll_interval,omitempty"`
 	ClaimTTL             string `yaml:"claim_ttl,omitempty"`
-	HeartbeatInterval    string `yaml:"heartbeat_interval,omitempty"`
 	ShutdownTimeout      string `yaml:"shutdown_timeout,omitempty"`
 	IdleTimeout          string `yaml:"idle_timeout,omitempty"`
 	// GLMAPIKey is the Z.ai token used when glm is the executor or supervisor.
@@ -147,7 +146,6 @@ func Defaults() File {
 		MaxConcurrentPerRepo: &one,
 		PollInterval:         "10s",
 		ClaimTTL:             "30m",
-		HeartbeatInterval:    "1m",
 		ShutdownTimeout:      "5m",
 		IdleTimeout:          "10m",
 		Notifications: &NotificationConfig{
@@ -200,9 +198,8 @@ func EnsureDefault(root string) (bool, error) {
 	return true, nil
 }
 
-// Load reads daemon.yaml under root. The boolean reports whether the file was
-// present. A missing file is not an error; the caller proceeds with built-in
-// defaults.
+// Load reads daemon.yaml under root and reports whether it was present. Missing
+// files use built-in defaults, and unknown fields are ignored for compatibility.
 func Load(root string) (File, bool, error) {
 	if root == "" {
 		return File{}, false, errors.New("daemonconfig: root is required")
@@ -217,7 +214,6 @@ func Load(root string) (File, bool, error) {
 	}
 	var file File
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	if err := decoder.Decode(&file); err != nil {
 		return File{}, true, fmt.Errorf("decode %s: %w", path, err)
 	}
@@ -258,7 +254,6 @@ func (f File) Validate() error {
 	}{
 		{"poll_interval", f.PollInterval},
 		{"claim_ttl", f.ClaimTTL},
-		{"heartbeat_interval", f.HeartbeatInterval},
 		{"shutdown_timeout", f.ShutdownTimeout},
 		{"idle_timeout", f.IdleTimeout},
 	} {

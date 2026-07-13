@@ -7,11 +7,11 @@ import (
 	"github.com/shinpr/galley/internal/provider"
 )
 
-// TaskJSONSchema returns the task YAML JSON Schema generated from the task
-// contract used by structural validation.
+// TaskJSONSchema returns the generated schema for author input and persisted
+// lifecycle state. Fixed defaults and daemon-owned fields remain optional.
 func TaskJSONSchema() ([]byte, error) {
 	schema := object(
-		required("id", "mode", "status", "goal", "acceptance_criteria", "scope", "execution_policy", "worktree", "supervisor", "decisions", "risks", "attempts", "verification", "pr"),
+		required("id", "goal", "acceptance_criteria", "scope", "execution_policy", "worktree", "decisions", "risks"),
 		properties(map[string]any{
 			"$schema": map[string]any{"const": "https://json-schema.org/draft/2020-12/schema"},
 		}),
@@ -88,21 +88,17 @@ func scopeSchema() map[string]any {
 
 func executionPolicySchema() map[string]any {
 	return object(
-		required("loop_budget", "timeout_ms", "afk_decision_policy", "stop_on_destructive_operation", "stop_on_missing_secret", "stop_on_external_service_unavailable"),
+		required("loop_budget", "timeout_ms"),
 		properties(map[string]any{
-			"loop_budget":                          integerSchema("minimum", 0),
-			"timeout_ms":                           integerSchema("minimum", 1),
-			"afk_decision_policy":                  enumSchema(validAFKDecisionPolicies),
-			"stop_on_destructive_operation":        map[string]any{"type": "boolean"},
-			"stop_on_missing_secret":               map[string]any{"type": "boolean"},
-			"stop_on_external_service_unavailable": map[string]any{"type": "boolean"},
+			"loop_budget": integerSchema("minimum", 0),
+			"timeout_ms":  integerSchema("minimum", 1),
 		}),
 	)
 }
 
 func worktreeSchema() map[string]any {
 	return object(
-		required("enabled", "branch", "path"),
+		required("branch", "path"),
 		properties(map[string]any{
 			"enabled": map[string]any{"type": "boolean"},
 			"branch":  stringSchema("minLength", 1),
@@ -257,11 +253,8 @@ func preflightSchema() map[string]any {
 			"acceptance_skeleton": object(
 				required("enabled"),
 				properties(map[string]any{
-					"enabled":       map[string]any{"type": "boolean"},
-					"mode":          enumSchema(validPreflightSkeletonModes),
-					"required":      map[string]any{"type": "boolean"},
-					"allowed_paths": arraySchema(stringSchema("minLength", 1)),
-					"outputs":       arraySchema(preflightOutputSchema()),
+					"enabled": map[string]any{"type": "boolean"},
+					"outputs": arraySchema(preflightOutputSchema()),
 				}),
 			),
 		}),

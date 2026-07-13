@@ -56,8 +56,6 @@ git -C "$REPO_DIR" commit -m initial >/dev/null
 
 cat > "$WORKFLOW_DIR/tasks/draft/smoke.yaml" <<YAML
 id: "task-smoke"
-mode: "afk"
-status: "draft"
 goal: "Create a smoke output file."
 acceptance_criteria:
   - id: "AC1"
@@ -73,28 +71,15 @@ scope:
 execution_policy:
   loop_budget: 1
   timeout_ms: 120000
-  afk_decision_policy: "choose-smallest-reversible"
-  stop_on_destructive_operation: true
-  stop_on_missing_secret: false
-  stop_on_external_service_unavailable: false
 worktree:
-  enabled: true
   branch: "agent/smoke"
   path: "../worktrees/smoke"
-supervisor:
-  review_iterations: 0
 executor:
   cli: "claude"
   model: "opus"
   effort: "high"
 decisions: []
 risks: []
-attempts: []
-verification:
-  commands: []
-pr:
-  url: ""
-  status: ""
 YAML
 
 "$TMP_DIR/galley" task validate "$WORKFLOW_DIR/tasks/draft/smoke.yaml" >/dev/null

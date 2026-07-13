@@ -138,9 +138,8 @@ func runtimeTaskExecutorValid(c executorFieldCase) bool {
 			Permission:   "edit",
 		},
 		ExecutionPolicy: ExecutionPolicy{
-			LoopBudget:        LoopBudget{Count: 1, Set: true},
-			TimeoutMS:         1000,
-			AFKDecisionPolicy: "choose-smallest-reversible",
+			LoopBudget: LoopBudget{Count: 1, Set: true},
+			TimeoutMS:  1000,
 		},
 		Worktree: Worktree{
 			Enabled: true,

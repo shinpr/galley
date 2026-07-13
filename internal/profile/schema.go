@@ -14,6 +14,10 @@ const (
 )
 
 func QualityJSONSchema() ([]byte, error) {
+	return marshalSchema(qualitySchemaDocument())
+}
+
+func qualitySchemaDocument() map[string]any {
 	schema := object(
 		required("id", "required_checks", "review_dimensions", "evidence_requirements", "pass_policy"),
 		properties(map[string]any{
@@ -43,22 +47,25 @@ func QualityJSONSchema() ([]byte, error) {
 				}),
 			),
 			"pass_policy": object(
-				required("required_dimensions_must_pass", "min_score", "unresolved_high_findings_allowed", "blocking_severities"),
+				required("required_dimensions_must_pass", "min_score", "blocking_severities"),
 				properties(map[string]any{
-					"required_dimensions_must_pass":    boolSchema("default", true),
-					"min_score":                        integerSchema("minimum", 0, "maximum", 100, "default", 85),
-					"unresolved_high_findings_allowed": integerSchema("minimum", 0, "default", 0),
-					"blocking_severities":              arraySchema(enumSchema([]string{"critical", "high", "medium", "low"}), "default", []string{"critical", "high", "medium"}),
+					"required_dimensions_must_pass": boolSchema("default", true),
+					"min_score":                     integerSchema("minimum", 0, "maximum", 100, "default", 85),
+					"blocking_severities":           arraySchema(enumSchema([]string{"critical", "high", "medium", "low"}), "default", []string{"critical", "high", "medium"}),
 				}),
 			),
 		}),
 	)
 	schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
 	schema["title"] = "Galley Quality Profile YAML"
-	return marshalSchema(schema)
+	return schema
 }
 
 func EnvironmentJSONSchema() ([]byte, error) {
+	return marshalSchema(environmentSchemaDocument())
+}
+
+func environmentSchemaDocument() map[string]any {
 	schema := object(
 		// commands is not required here: ValidateEnvironment treats an empty
 		// commands map as a warning, not an error, so an editor validating
@@ -126,7 +133,7 @@ func EnvironmentJSONSchema() ([]byte, error) {
 	)
 	schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
 	schema["title"] = "Galley Environment Profile YAML"
-	return marshalSchema(schema)
+	return schema
 }
 
 func executorSchema() map[string]any {

@@ -47,7 +47,6 @@ evidence_requirements:
 pass_policy:
   required_dimensions_must_pass: true
   min_score: 85
-  unresolved_high_findings_allowed: 0
   blocking_severities:
     - critical
     - high
@@ -69,8 +68,8 @@ Supported fields:
 - `evidence_requirements.command_outputs`: ask for command output evidence.
 - `pass_policy.required_dimensions_must_pass`: require all mandatory dimensions to pass.
 - `pass_policy.min_score`: 0-100 threshold over all configured dimension weights. A dimension contributes its weight when no finding uses its ID as `category`; total configured weight of zero scores 100.
-- `pass_policy.unresolved_high_findings_allowed`: number of unresolved high findings allowed.
 - `pass_policy.blocking_severities`: severities that block acceptance. Values are `critical`, `high`, `medium`, and `low`.
+- Runtime loading ignores unknown keys while rejecting missing required keys and invalid known values.
 
 Validate a quality profile:
 

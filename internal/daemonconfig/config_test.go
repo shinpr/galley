@@ -42,13 +42,15 @@ func TestEnsureDefaultCreatesFileWithDocumentedDefaults(t *testing.T) {
 		"max_concurrent_per_repo: 1",
 		"poll_interval: 10s",
 		"claim_ttl: 30m",
-		"heartbeat_interval: 1m",
 		"shutdown_timeout: 5m",
 		"idle_timeout: 10m",
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("daemon.yaml missing %q\ncontent:\n%s", want, content)
 		}
+	}
+	if strings.Contains(content, "heartbeat_interval") {
+		t.Fatalf("daemon.yaml must not expose heartbeat_interval; cadence is derived from claim_ttl\ncontent:\n%s", content)
 	}
 }
 
@@ -87,7 +89,7 @@ func TestEnsureDefaultThenLoadRoundTripsDocumentedDefaults(t *testing.T) {
 	if file.MaxConcurrentPerRepo == nil || *file.MaxConcurrentPerRepo != 1 {
 		t.Fatalf("max_concurrent_per_repo got %#v, want 1", file.MaxConcurrentPerRepo)
 	}
-	if file.PollInterval != "10s" || file.ClaimTTL != "30m" || file.HeartbeatInterval != "1m" ||
+	if file.PollInterval != "10s" || file.ClaimTTL != "30m" ||
 		file.ShutdownTimeout != "5m" || file.IdleTimeout != "10m" {
 		t.Fatalf("duration defaults drifted: %#v", file)
 	}
@@ -156,7 +158,6 @@ max_concurrent_tasks: 4
 max_concurrent_per_repo: 2
 poll_interval: 30s
 claim_ttl: 1h
-heartbeat_interval: 15s
 shutdown_timeout: 2m
 idle_timeout: 5m
 `
@@ -179,8 +180,34 @@ idle_timeout: 5m
 	if file.MaxConcurrentPerRepo == nil || *file.MaxConcurrentPerRepo != 2 {
 		t.Fatalf("max_concurrent_per_repo got %#v", file.MaxConcurrentPerRepo)
 	}
-	if file.PollInterval != "30s" || file.ClaimTTL != "1h" || file.HeartbeatInterval != "15s" || file.ShutdownTimeout != "2m" || file.IdleTimeout != "5m" {
+	if file.PollInterval != "30s" || file.ClaimTTL != "1h" || file.ShutdownTimeout != "2m" || file.IdleTimeout != "5m" {
 		t.Fatalf("durations got %#v", file)
+	}
+}
+
+func TestLoadIgnoresUnknownFields(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	body := `supervisor: claude
+claim_ttl: 1h
+heartbeat_interval: 15s
+future_setting: enabled
+notifications:
+  enabled: false
+  future_delivery: webhook
+`
+	if err := os.WriteFile(filepath.Join(root, Filename), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, present, err := Load(root)
+	if err != nil {
+		t.Fatalf("unknown fields should be ignored, got %v", err)
+	}
+	if !present {
+		t.Fatalf("expected present=true")
+	}
+	if file.ClaimTTL != "1h" {
+		t.Fatalf("claim_ttl got %q, want 1h", file.ClaimTTL)
 	}
 }
 
@@ -203,6 +230,18 @@ func TestLoadRejectsBadDuration(t *testing.T) {
 	}
 	if _, _, err := Load(root); err == nil {
 		t.Fatalf("expected error for invalid duration")
+	}
+}
+
+func TestLoadRejectsKnownFieldTypeMismatch(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, Filename), []byte("max_concurrent_tasks: many\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := Load(root)
+	if err == nil || !strings.Contains(err.Error(), "cannot unmarshal") {
+		t.Fatalf("expected known-field type error, got %v", err)
 	}
 }
 

@@ -42,7 +42,6 @@ type EvidenceRequirements struct {
 type PassPolicy struct {
 	RequiredDimensionsMustPass bool     `yaml:"required_dimensions_must_pass" json:"required_dimensions_must_pass"`
 	MinScore                   int      `yaml:"min_score" json:"min_score"`
-	UnresolvedHighAllowed      int      `yaml:"unresolved_high_findings_allowed" json:"unresolved_high_findings_allowed"`
 	BlockingSeverities         []string `yaml:"blocking_severities" json:"blocking_severities"`
 }
 
@@ -151,7 +150,7 @@ func (r ValidationResult) Valid() bool {
 
 func LoadQuality(path string) (Quality, error) {
 	var q Quality
-	if err := loadYAML(path, &q); err != nil {
+	if err := loadYAML(path, &q, qualitySchemaDocument()); err != nil {
 		return Quality{}, err
 	}
 	return q, nil
@@ -159,7 +158,7 @@ func LoadQuality(path string) (Quality, error) {
 
 func LoadEnvironment(path string) (Environment, error) {
 	var env Environment
-	if err := loadYAML(path, &env); err != nil {
+	if err := loadYAML(path, &env, environmentSchemaDocument()); err != nil {
 		return Environment{}, err
 	}
 	return env, nil
@@ -381,16 +380,10 @@ func UpdateEnvironmentSetup(path string, plan SetupPlan) (*SetupPlan, error) {
 	if err := enc.Close(); err != nil {
 		return nil, fmt.Errorf("flush environment profile %s: %w", path, err)
 	}
-	// Validate the rewritten bytes in memory before publication. This is the
-	// publication boundary: parse the new document with the same KnownFields
-	// decoder used by LoadEnvironment, then run ValidateEnvironment on the
-	// decoded value. If either step fails the rewrite is rejected without
-	// touching the on-disk file at path, so the original file remains the
-	// canonical state for any reader.
+	// Validate rewritten bytes with the same required-field and known-value
+	// checks as LoadEnvironment before publishing the atomic replacement.
 	var updated Environment
-	decoder := yaml.NewDecoder(bytes.NewReader(buf.Bytes()))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&updated); err != nil {
+	if err := decodeProfileYAML(buf.Bytes(), &updated, environmentSchemaDocument()); err != nil {
 		return nil, fmt.Errorf("decode rewritten environment profile: %w", err)
 	}
 	if vr := ValidateEnvironment(updated); !vr.Valid() {
@@ -484,17 +477,115 @@ func filepathDir(path string) string {
 	return "."
 }
 
-func loadYAML(path string, out any) error {
+func loadYAML(path string, out any, schema map[string]any) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", path, err)
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(out); err != nil {
+	if err := decodeProfileYAML(data, out, schema); err != nil {
 		return fmt.Errorf("decode %s: %w", path, err)
 	}
 	return nil
+}
+
+// decodeProfileYAML uses the schema to distinguish missing keys from valid zero values.
+// ValidateQuality and ValidateEnvironment own decoded-value semantics.
+func decodeProfileYAML(data []byte, out any, schema map[string]any) error {
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return err
+	}
+	if err := root.Decode(out); err != nil {
+		return err
+	}
+	missing := missingRequiredYAMLFields(&root, schema, "")
+	if len(missing) > 0 {
+		return fmt.Errorf("missing required fields: %s", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+func missingRequiredYAMLFields(node *yaml.Node, schema map[string]any, path string) []string {
+	if isYAMLNull(node) {
+		node = nil
+	}
+	if node != nil && node.Kind == yaml.DocumentNode {
+		if len(node.Content) == 0 {
+			node = nil
+		} else {
+			node = node.Content[0]
+		}
+	}
+
+	schemaType, _ := schema["type"].(string)
+	switch schemaType {
+	case "object":
+		if node == nil {
+			var missing []string
+			for _, key := range schemaRequiredFields(schema) {
+				missing = append(missing, yamlFieldPath(path, key))
+			}
+			return missing
+		}
+		if node.Kind != yaml.MappingNode {
+			return nil
+		}
+		var missing []string
+		for _, key := range schemaRequiredFields(schema) {
+			if isYAMLNull(yamlMappingValue(node, key)) {
+				missing = append(missing, yamlFieldPath(path, key))
+			}
+		}
+		properties, _ := schema["properties"].(map[string]any)
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			childSchema, ok := properties[node.Content[i].Value].(map[string]any)
+			if !ok {
+				continue
+			}
+			missing = append(missing, missingRequiredYAMLFields(node.Content[i+1], childSchema, yamlFieldPath(path, node.Content[i].Value))...)
+		}
+		return missing
+	case "array":
+		if node == nil || node.Kind != yaml.SequenceNode {
+			return nil
+		}
+		itemSchema, ok := schema["items"].(map[string]any)
+		if !ok {
+			return nil
+		}
+		var missing []string
+		for i, item := range node.Content {
+			missing = append(missing, missingRequiredYAMLFields(item, itemSchema, fmt.Sprintf("%s[%d]", path, i))...)
+		}
+		return missing
+	default:
+		return nil
+	}
+}
+
+func schemaRequiredFields(schema map[string]any) []string {
+	fields, _ := schema["required"].([]string)
+	return fields
+}
+
+func yamlMappingValue(node *yaml.Node, key string) *yaml.Node {
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return node.Content[i+1]
+		}
+	}
+	return nil
+}
+
+func isYAMLNull(node *yaml.Node) bool {
+	return node == nil || node.Kind == 0 || node.Tag == "!!null"
+}
+
+func yamlFieldPath(parent, field string) string {
+	if parent == "" {
+		return field
+	}
+	return parent + "." + field
 }
 
 func require(result *ValidationResult, ok bool, format string, args ...any) {

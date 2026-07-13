@@ -37,11 +37,12 @@ func queue(path string, opts QueueOptions, readTaskID func(string) (string, erro
 	if err != nil {
 		return QueueResult{}, err
 	}
+	// Resolve omitted status before checking queue eligibility.
+	ApplyDefaults(&loaded)
 	if !CanQueue(loaded.Status) {
 		return QueueResult{}, fmt.Errorf("task %s status %q cannot be queued with task queue; use task requeue for reviewed tasks", loaded.ID, loaded.Status)
 	}
 	ResolveFileSources(path, &loaded)
-	ApplyDefaults(&loaded)
 	loaded.Status = StatusQueued
 	validation := Validate(loaded)
 	if !validation.Valid() {

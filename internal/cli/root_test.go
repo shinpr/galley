@@ -639,8 +639,13 @@ required_checks:
     preferred_commands: []
     required: true
 review_dimensions: []
+evidence_requirements:
+  file_line_references: true
+  command_outputs: true
 pass_policy:
+  required_dimensions_must_pass: true
   min_score: 85
+  blocking_severities: [high]
 `
 	if err := os.WriteFile(qualityPath, []byte(body), 0o600); err != nil {
 		t.Fatal(err)

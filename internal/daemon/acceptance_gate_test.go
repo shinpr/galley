@@ -12,17 +12,12 @@ import (
 	"github.com/shinpr/galley/internal/task"
 )
 
-func acceptanceGateBoolPtr(b bool) *bool { return &b }
-
-// acceptanceGateTask builds a minimal task with the acceptance skeleton stage
-// enabled so evaluateAcceptanceGate exercises the skeleton branch.
-func acceptanceGateTask(required bool) *task.Task {
+func acceptanceGateTask() *task.Task {
 	return &task.Task{
 		ID:                 "acceptance-gate-test",
 		AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "x", Status: "pending"}},
 		Preflight: &task.Preflight{AcceptanceSkeleton: &task.AcceptanceSkeletonConfig{
-			Enabled:  true,
-			Required: acceptanceGateBoolPtr(required),
+			Enabled: true,
 		}},
 	}
 }
@@ -58,7 +53,7 @@ func skeletonOutput() skeletonpreflight.Output {
 func TestAcceptanceGateDowngradesOnMissingRequiredSkeletonCoverage(t *testing.T) {
 	t.Parallel()
 	runDir := writeAcceptanceGateRun(t, "completed", nil)
-	reason, ok := evaluateAcceptanceGate(acceptanceGateTask(true), runDir)
+	reason, ok := evaluateAcceptanceGate(acceptanceGateTask(), runDir)
 	if ok {
 		t.Fatalf("expected missing skeleton coverage to block acceptance, reason=%q", reason)
 	}
@@ -70,7 +65,7 @@ func TestAcceptanceGateDowngradesOnMissingRequiredSkeletonCoverage(t *testing.T)
 func TestAcceptanceGateAllowsWhenRequiredSkeletonCoverageExists(t *testing.T) {
 	t.Parallel()
 	runDir := writeAcceptanceGateRun(t, "completed", []skeletonpreflight.Output{skeletonOutput()})
-	reason, ok := evaluateAcceptanceGate(acceptanceGateTask(true), runDir)
+	reason, ok := evaluateAcceptanceGate(acceptanceGateTask(), runDir)
 	if !ok {
 		t.Fatalf("expected gate to allow acceptance, reason=%q", reason)
 	}
@@ -88,7 +83,7 @@ func TestAcceptanceGateDowngradesOnFailedPreflightResult(t *testing.T) {
 	if err := skeletonpreflight.WriteResult(runDir, res); err != nil {
 		t.Fatal(err)
 	}
-	reason, ok := evaluateAcceptanceGate(acceptanceGateTask(true), runDir)
+	reason, ok := evaluateAcceptanceGate(acceptanceGateTask(), runDir)
 	if ok || !strings.Contains(reason, "preflight failed") {
 		t.Fatalf("ok=%v reason=%q", ok, reason)
 	}
@@ -106,7 +101,7 @@ func TestAcceptanceGateLifecycleDowngradesAcceptedVerdictBeforeFinalize(t *testi
 		t.Fatal(err)
 	}
 	runningPath := filepath.Join(runningDir, "task.yaml")
-	loaded := acceptanceGateTask(true)
+	loaded := acceptanceGateTask()
 	loaded.Status = "running"
 	loaded.Attempts = []task.Attempt{{Number: 1}}
 	if err := task.Save(runningPath, *loaded); err != nil {

@@ -193,18 +193,6 @@ func TestValidateRelativePathRejectsWindowsAbsoluteFormsOnNonWindowsHost(t *test
 			wantSub: "files[0].destination contains absolute path",
 		},
 		{
-			name: "preflight.acceptance_skeleton.allowed_paths",
-			mutate: func(task *Task, p string) {
-				task.Preflight = &Preflight{
-					AcceptanceSkeleton: &AcceptanceSkeletonConfig{
-						Enabled:      true,
-						AllowedPaths: []string{p},
-					},
-				}
-			},
-			wantSub: "preflight.acceptance_skeleton.allowed_paths[0] contains absolute path",
-		},
-		{
 			name: "preflight.acceptance_skeleton.outputs[].path",
 			mutate: func(task *Task, p string) {
 				task.Preflight = &Preflight{

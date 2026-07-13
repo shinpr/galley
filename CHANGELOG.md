@@ -13,6 +13,8 @@ This project follows semantic versioning.
 ### Changed
 
 - Task executor fields are optional, each provider uses its fixed Galley prompt construction, and reused preflight evidence must match the resolved executor identity.
+- User-authored task, profile, and daemon YAML ignore unknown keys while continuing to reject missing required fields and invalid known values.
+- Packaged Galley plugins are version `0.1.24`, combining runtime executor defaults with simplified author-owned task drafts, enabled-only acceptance-skeleton preflight, and claim-TTL-derived heartbeat cadence.
 
 ### Fixed
 

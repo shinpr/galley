@@ -203,12 +203,6 @@ func validateExecutionPolicy(result *ValidationResult, t Task) {
 	}
 	require(result, budget.Count >= 0, "execution_policy.loop_budget must be >= 0; use 0 for unlimited")
 	require(result, t.ExecutionPolicy.TimeoutMS > 0, "execution_policy.timeout_ms must be positive")
-	if t.Mode == "afk" {
-		require(result, t.ExecutionPolicy.AFKDecisionPolicy != "", "execution_policy.afk_decision_policy is required for AFK tasks")
-		if t.ExecutionPolicy.AFKDecisionPolicy != "" {
-			require(result, slices.Contains(validAFKDecisionPolicies, t.ExecutionPolicy.AFKDecisionPolicy), "execution_policy.afk_decision_policy must be one of: %s", strings.Join(validAFKDecisionPolicies, ", "))
-		}
-	}
 }
 
 func validateWorktree(result *ValidationResult, t Task) {
@@ -311,40 +305,9 @@ func validatePreflight(result *ValidationResult, t Task) {
 	if cfg == nil {
 		return
 	}
-	prefix := "preflight.acceptance_skeleton"
-	if cfg.Mode != "" {
-		require(result, slices.Contains(validPreflightSkeletonModes, cfg.Mode), "%s.mode must be one of: %s", prefix, strings.Join(validPreflightSkeletonModes, ", "))
-	}
-	if !cfg.Enabled {
-		// When the section is disabled, fields like allowed_paths still validate
-		// statically so authors who later toggle enabled get immediate feedback.
-	}
-	for i, p := range cfg.AllowedPaths {
-		field := fmt.Sprintf("%s.allowed_paths[%d]", prefix, i)
-		validateRelativePath(result, field, p)
-		if p == "" {
-			continue
-		}
-		if filepath.IsAbs(p) {
-			continue
-		}
-		clean := normalizeLogicalPath(p)
-		if logicalPathEscapes(clean) {
-			continue
-		}
-		if !pathAllowedByScope(p, t.Scope.AllowedPaths) {
-			result.Errors = append(result.Errors, fmt.Sprintf("%s value %q must be inside scope.allowed_paths", field, p))
-		}
-		if pathForbiddenByScope(p, t.Scope.ForbiddenPaths) {
-			result.Errors = append(result.Errors, fmt.Sprintf("%s value %q must not be inside scope.forbidden_paths", field, p))
-		}
-	}
-	validatePreflightOutputs(result, t, cfg, prefix)
+	validatePreflightOutputs(result, t, cfg, "preflight.acceptance_skeleton")
 }
 
-// validatePreflightOutputs validates each declared skeleton output against
-// the AC list and scope. Effective allowed paths are preflight.allowed_paths
-// when present, else scope.allowed_paths.
 func validatePreflightOutputs(result *ValidationResult, t Task, cfg *AcceptanceSkeletonConfig, prefix string) {
 	if len(cfg.Outputs) == 0 {
 		return
@@ -352,10 +315,6 @@ func validatePreflightOutputs(result *ValidationResult, t Task, cfg *AcceptanceS
 	acIDs := map[string]bool{}
 	for _, ac := range t.AcceptanceCriteria {
 		acIDs[ac.ID] = true
-	}
-	effectiveAllowed := cfg.AllowedPaths
-	if len(effectiveAllowed) == 0 {
-		effectiveAllowed = t.Scope.AllowedPaths
 	}
 	// Multiple skeleton outputs may share the same normalized path because a
 	// single test file naturally covers more than one acceptance criterion.
@@ -377,8 +336,8 @@ func validatePreflightOutputs(result *ValidationResult, t Task, cfg *AcceptanceS
 			if !filepath.IsAbs(out.Path) {
 				clean := normalizeLogicalPath(out.Path)
 				if !logicalPathEscapes(clean) {
-					if !pathAllowedByScope(out.Path, effectiveAllowed) {
-						result.Errors = append(result.Errors, fmt.Sprintf("%s.path %q must be inside the effective preflight allowed paths", field, out.Path))
+					if !pathAllowedByScope(out.Path, t.Scope.AllowedPaths) {
+						result.Errors = append(result.Errors, fmt.Sprintf("%s.path %q must be inside scope.allowed_paths", field, out.Path))
 					}
 					if pathForbiddenByScope(out.Path, t.Scope.ForbiddenPaths) {
 						result.Errors = append(result.Errors, fmt.Sprintf("%s.path %q must not be inside scope.forbidden_paths", field, out.Path))

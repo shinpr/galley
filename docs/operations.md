@@ -106,6 +106,8 @@ Both `galley daemon run` and `galley daemon start` create `daemon.yaml` under th
 
 CLI flags on `galley daemon run` or `galley daemon start` always override the matching `daemon.yaml` field for that run (including `--shutdown-timeout`). Anything you do not set on the CLI falls back to `daemon.yaml`; anything `daemon.yaml` does not set falls back to the built-in default.
 
+Runtime loading ignores unknown `daemon.yaml` keys while rejecting invalid values for known keys.
+
 ### Notifications
 
 The daemon can run an opt-in, best-effort command hook after a task reaches a terminal published status. Notifications are configured only in `daemon.yaml`.
@@ -211,7 +213,7 @@ If every supervisor try is killed by the idle-output watchdog, Galley records `e
 
 - Running multiple daemon processes is supported by claim conflict handling.
 - Background control uses a local PID file. Avoid sharing the same `--pid-file` across unrelated processes, and prefer one workflow root per managed daemon.
-- Running tasks heartbeat their YAML mtime while the executor loop is active. `--heartbeat-interval` defaults to `min(claim-ttl/4, 1m)`.
+- Running tasks refresh their YAML mtime at `min(claim_ttl / 4, 1m)` while the executor loop is active. Heartbeat cadence has no separate daemon or CLI setting.
 - Each claimed running task records the owning daemon. On startup the daemon immediately requeues running tasks whose recorded owner is dead or cannot be verified, while leaving tasks still owned by a verified live daemon untouched.
 
 ### External Services

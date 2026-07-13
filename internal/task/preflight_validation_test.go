@@ -27,9 +27,8 @@ func baseValidPreflightTask(t *testing.T) Task {
 			Permission:     "edit",
 		},
 		ExecutionPolicy: ExecutionPolicy{
-			LoopBudget:        LoopBudget{Count: 1, Set: true},
-			TimeoutMS:         1000,
-			AFKDecisionPolicy: "choose-smallest-reversible",
+			LoopBudget: LoopBudget{Count: 1, Set: true},
+			TimeoutMS:  1000,
 		},
 		Worktree: Worktree{
 			Enabled: true,
@@ -53,44 +52,48 @@ func TestPreflightValidationAbsentIsValid(t *testing.T) {
 	}
 }
 
-func TestPreflightValidationModeRejectsUnknown(t *testing.T) {
+func TestPreflightValidationEnabledOnlyIsValid(t *testing.T) {
 	tk := baseValidPreflightTask(t)
 	tk.Preflight = &Preflight{AcceptanceSkeleton: &AcceptanceSkeletonConfig{
 		Enabled: true,
-		Mode:    "deadbeef",
 	}}
 	res := ValidateStructural(tk)
-	if res.Valid() {
-		t.Fatalf("expected validation error for unknown mode, got none")
-	}
-	if !containsErr(res.Errors, "preflight.acceptance_skeleton.mode") {
-		t.Fatalf("expected mode validation error, got %v", res.Errors)
+	if !res.Valid() {
+		t.Fatalf("expected enabled-only preflight to validate, got %v", res.Errors)
 	}
 }
 
-func TestPreflightValidationAllowedPathOutsideScopeIsRejected(t *testing.T) {
+func TestPreflightValidationOutputOutsideScopeIsRejected(t *testing.T) {
 	tk := baseValidPreflightTask(t)
 	tk.Preflight = &Preflight{AcceptanceSkeleton: &AcceptanceSkeletonConfig{
-		Enabled:      true,
-		Mode:         "skeleton",
-		AllowedPaths: []string{"outside"},
+		Enabled: true,
+		Outputs: []AcceptanceSkeletonOutputDef{{
+			ACID:    "AC1",
+			Path:    "outside/foo_test.go",
+			Kind:    "go-test",
+			Purpose: "verify AC1",
+		}},
 	}}
 	res := ValidateStructural(tk)
 	if res.Valid() {
 		t.Fatalf("expected validation error, got none")
 	}
 	if !containsErr(res.Errors, "must be inside scope.allowed_paths") {
-		t.Fatalf("expected allowed_paths error, got %v", res.Errors)
+		t.Fatalf("expected scope.allowed_paths error, got %v", res.Errors)
 	}
 }
 
-func TestPreflightValidationAllowedPathForbiddenIsRejected(t *testing.T) {
+func TestPreflightValidationOutputForbiddenIsRejected(t *testing.T) {
 	tk := baseValidPreflightTask(t)
 	tk.Scope.AllowedPaths = []string{"."}
 	tk.Preflight = &Preflight{AcceptanceSkeleton: &AcceptanceSkeletonConfig{
-		Enabled:      true,
-		Mode:         "skeleton",
-		AllowedPaths: []string{".env"},
+		Enabled: true,
+		Outputs: []AcceptanceSkeletonOutputDef{{
+			ACID:    "AC1",
+			Path:    ".env/secret_test.go",
+			Kind:    "go-test",
+			Purpose: "verify AC1",
+		}},
 	}}
 	res := ValidateStructural(tk)
 	if res.Valid() {
@@ -98,19 +101,6 @@ func TestPreflightValidationAllowedPathForbiddenIsRejected(t *testing.T) {
 	}
 	if !containsErr(res.Errors, "must not be inside scope.forbidden_paths") {
 		t.Fatalf("expected forbidden_paths error, got %v", res.Errors)
-	}
-}
-
-func TestPreflightValidationAllowedSubsetAccepted(t *testing.T) {
-	tk := baseValidPreflightTask(t)
-	tk.Preflight = &Preflight{AcceptanceSkeleton: &AcceptanceSkeletonConfig{
-		Enabled:      true,
-		Mode:         "skeleton",
-		AllowedPaths: []string{"internal"},
-	}}
-	res := ValidateStructural(tk)
-	if !res.Valid() {
-		t.Fatalf("expected valid preflight, got %v", res.Errors)
 	}
 }
 
@@ -122,7 +112,6 @@ func TestPreflightValidationDuplicateOutputPathsAcrossACsAccepted(t *testing.T) 
 	}
 	tk.Preflight = &Preflight{AcceptanceSkeleton: &AcceptanceSkeletonConfig{
 		Enabled: true,
-		Mode:    "skeleton",
 		Outputs: []AcceptanceSkeletonOutputDef{
 			{
 				ACID:    "AC1",
@@ -157,7 +146,6 @@ func TestPreflightValidationDuplicateOutputPathsSeparatorEquivalentAccepted(t *t
 	}
 	tk.Preflight = &Preflight{AcceptanceSkeleton: &AcceptanceSkeletonConfig{
 		Enabled: true,
-		Mode:    "skeleton",
 		Outputs: []AcceptanceSkeletonOutputDef{
 			{
 				ACID:    "AC1",
@@ -187,7 +175,6 @@ func TestPreflightValidationDuplicateOutputPathStillEnforcesSafetyChecks(t *test
 	}
 	tk.Preflight = &Preflight{AcceptanceSkeleton: &AcceptanceSkeletonConfig{
 		Enabled: true,
-		Mode:    "skeleton",
 		Outputs: []AcceptanceSkeletonOutputDef{
 			{
 				ACID:    "AC1",
@@ -227,7 +214,6 @@ func TestPreflightValidationDuplicateOutputPathStillEnforcesPathSafety(t *testin
 	}
 	tk.Preflight = &Preflight{AcceptanceSkeleton: &AcceptanceSkeletonConfig{
 		Enabled: true,
-		Mode:    "skeleton",
 		Outputs: []AcceptanceSkeletonOutputDef{
 			{
 				ACID:    "AC1",
@@ -264,12 +250,11 @@ func TestAcceptanceSkeletonConfigDefaults(t *testing.T) {
 	}
 	cfg := &AcceptanceSkeletonConfig{Enabled: true}
 	if !cfg.IsRequired() {
-		t.Fatalf("enabled config should default to required")
+		t.Fatalf("enabled config should always be required")
 	}
-	val := false
-	cfg.Required = &val
+	cfg.Enabled = false
 	if cfg.IsRequired() {
-		t.Fatalf("explicit false required should override default")
+		t.Fatalf("disabled config should not be required")
 	}
 }
 

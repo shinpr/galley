@@ -38,6 +38,8 @@ galley profile validate --kind quality <profile.yaml>
 galley profile validate --kind environment <profile.yaml>
 ```
 
+Runtime loading ignores unknown profile keys while rejecting missing required keys and invalid known values.
+
 ## Authoring Flow
 
 1. Explain the two profiles before reading or writing them:

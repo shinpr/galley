@@ -106,6 +106,8 @@ Both `galley daemon run` and `galley daemon start` create `daemon.yaml` under th
 
 CLI flags on `galley daemon run` or `galley daemon start` always override the matching `daemon.yaml` field for that run (including `--shutdown-timeout`). Anything you do not set on the CLI falls back to `daemon.yaml`; anything `daemon.yaml` does not set falls back to the built-in default.
 
+Runtime loading ignores unknown `daemon.yaml` keys while rejecting invalid values for known keys.
+
 ### Notifications
 
 The daemon can run an opt-in, best-effort command hook after a task reaches a terminal published status. Notifications are configured only in `daemon.yaml`.

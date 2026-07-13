@@ -185,19 +185,23 @@ idle_timeout: 5m
 	}
 }
 
-func TestLoadStripsLegacyHeartbeatInterval(t *testing.T) {
+func TestLoadIgnoresUnknownFields(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	body := `supervisor: claude
 claim_ttl: 1h
 heartbeat_interval: 15s
+future_setting: enabled
+notifications:
+  enabled: false
+  future_delivery: webhook
 `
 	if err := os.WriteFile(filepath.Join(root, Filename), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	file, present, err := Load(root)
 	if err != nil {
-		t.Fatalf("legacy heartbeat_interval should be stripped, got %v", err)
+		t.Fatalf("unknown fields should be ignored, got %v", err)
 	}
 	if !present {
 		t.Fatalf("expected present=true")
@@ -226,6 +230,18 @@ func TestLoadRejectsBadDuration(t *testing.T) {
 	}
 	if _, _, err := Load(root); err == nil {
 		t.Fatalf("expected error for invalid duration")
+	}
+}
+
+func TestLoadRejectsKnownFieldTypeMismatch(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, Filename), []byte("max_concurrent_tasks: many\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := Load(root)
+	if err == nil || !strings.Contains(err.Error(), "cannot unmarshal") {
+		t.Fatalf("expected known-field type error, got %v", err)
 	}
 }
 

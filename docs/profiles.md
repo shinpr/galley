@@ -69,7 +69,7 @@ Supported fields:
 - `pass_policy.required_dimensions_must_pass`: require all mandatory dimensions to pass.
 - `pass_policy.min_score`: 0-100 threshold over all configured dimension weights. A dimension contributes its weight when no finding uses its ID as `category`; total configured weight of zero scores 100.
 - `pass_policy.blocking_severities`: severities that block acceptance. Values are `critical`, `high`, `medium`, and `low`.
-- Remove `pass_policy.unresolved_high_findings_allowed` from existing profiles; strict decoding rejects it.
+- Runtime loading ignores unknown keys while rejecting missing required keys and invalid known values.
 
 Validate a quality profile:
 

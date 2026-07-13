@@ -199,7 +199,7 @@ func EnsureDefault(root string) (bool, error) {
 }
 
 // Load reads daemon.yaml under root and reports whether it was present. Missing
-// files use built-in defaults; legacy heartbeat_interval is ignored for compatibility.
+// files use built-in defaults, and unknown fields are ignored for compatibility.
 func Load(root string) (File, bool, error) {
 	if root == "" {
 		return File{}, false, errors.New("daemonconfig: root is required")
@@ -212,10 +212,8 @@ func Load(root string) (File, bool, error) {
 		}
 		return File{}, false, fmt.Errorf("read %s: %w", path, err)
 	}
-	data = stripLegacyHeartbeatInterval(data)
 	var file File
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	if err := decoder.Decode(&file); err != nil {
 		return File{}, true, fmt.Errorf("decode %s: %w", path, err)
 	}
@@ -223,36 +221,6 @@ func Load(root string) (File, bool, error) {
 		return File{}, true, fmt.Errorf("validate %s: %w", path, err)
 	}
 	return file, true, nil
-}
-
-func stripLegacyHeartbeatInterval(data []byte) []byte {
-	var root yaml.Node
-	if err := yaml.Unmarshal(data, &root); err != nil {
-		return data
-	}
-	doc := &root
-	if root.Kind == yaml.DocumentNode && len(root.Content) > 0 {
-		doc = root.Content[0]
-	}
-	if doc.Kind != yaml.MappingNode {
-		return data
-	}
-	filtered := make([]*yaml.Node, 0, len(doc.Content))
-	for i := 0; i+1 < len(doc.Content); i += 2 {
-		if doc.Content[i].Value == "heartbeat_interval" {
-			continue
-		}
-		filtered = append(filtered, doc.Content[i], doc.Content[i+1])
-	}
-	if len(filtered) == len(doc.Content) {
-		return data
-	}
-	doc.Content = filtered
-	out, err := yaml.Marshal(&root)
-	if err != nil {
-		return data
-	}
-	return out
 }
 
 // Validate checks that the fields present in the file are well-formed. An

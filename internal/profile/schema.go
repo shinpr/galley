@@ -14,6 +14,10 @@ const (
 )
 
 func QualityJSONSchema() ([]byte, error) {
+	return marshalSchema(qualitySchemaDocument())
+}
+
+func qualitySchemaDocument() map[string]any {
 	schema := object(
 		required("id", "required_checks", "review_dimensions", "evidence_requirements", "pass_policy"),
 		properties(map[string]any{
@@ -54,10 +58,14 @@ func QualityJSONSchema() ([]byte, error) {
 	)
 	schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
 	schema["title"] = "Galley Quality Profile YAML"
-	return marshalSchema(schema)
+	return schema
 }
 
 func EnvironmentJSONSchema() ([]byte, error) {
+	return marshalSchema(environmentSchemaDocument())
+}
+
+func environmentSchemaDocument() map[string]any {
 	schema := object(
 		// commands is not required here: ValidateEnvironment treats an empty
 		// commands map as a warning, not an error, so an editor validating
@@ -125,7 +133,7 @@ func EnvironmentJSONSchema() ([]byte, error) {
 	)
 	schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
 	schema["title"] = "Galley Environment Profile YAML"
-	return marshalSchema(schema)
+	return schema
 }
 
 func executorSchema() map[string]any {

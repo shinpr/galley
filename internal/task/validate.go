@@ -269,9 +269,6 @@ func validateSupervisor(result *ValidationResult, t Task) {
 }
 
 func validateExecutor(result *ValidationResult, t Task) {
-	// Each field is independently optional. Omitted values resolve at run start
-	// from the repository environment profile and built-in defaults. When a
-	// field is present, validate it now so authoring catches bad pins early.
 	if t.Executor.CLI != "" {
 		require(result, slices.Contains(validExecutorCLIs, t.Executor.CLI), "executor.cli must be one of: %s", strings.Join(validExecutorCLIs, ", "))
 	}
@@ -288,10 +285,7 @@ func validateExecutor(result *ValidationResult, t Task) {
 	require(result, slices.Contains(provider.ExecutorEfforts(), t.Executor.Effort), "executor.effort must be one of: %s", strings.Join(provider.ExecutorEfforts(), ", "))
 }
 
-// ValidateEffectiveExecutor checks the post-resolution provider and effort
-// pair used for setup, acceptance-skeleton, and implementation. Call this
-// before any provider role runs; invalid configuration must fail the task
-// without starting a provider process.
+// ValidateEffectiveExecutor validates the provider and effort used by all executor roles.
 func ValidateEffectiveExecutor(exec Executor) error {
 	if !slices.Contains(validExecutorCLIs, exec.CLI) {
 		return fmt.Errorf("executor.cli must be one of: %s", strings.Join(validExecutorCLIs, ", "))

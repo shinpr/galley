@@ -23,6 +23,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var stopVerifiedForCommand = daemonctl.StopVerified
+var forceStopForCommand = daemonctl.ForceStop
+var afterInitialStopInspectForCommand func()
+
 func NewCommand(use string) *cobra.Command {
 	var opts daemon.Options
 	var pollInterval time.Duration
@@ -115,8 +119,11 @@ func NewCommand(use string) *cobra.Command {
 				if err := daemonctl.Heartbeat(pidFile, meta); err != nil {
 					return err
 				}
-				defer startPIDHeartbeat(pidFile, meta)()
-				defer daemonctl.RemovePID(pidFile, os.Getpid())
+				stopHeartbeat := startPIDHeartbeat(pidFile, meta)
+				defer func() {
+					stopHeartbeat()
+					_ = daemonctl.RemovePID(pidFile, os.Getpid())
+				}()
 			}
 			err := daemon.Run(ctx, opts)
 			close(done)
@@ -361,14 +368,50 @@ func newStopCommand(opts *daemon.Options, pidFile *string, stopTimeout *time.Dur
 			if err != nil {
 				return err
 			}
-			status, err := daemonctl.Inspect(paths.PIDFile, opts.Root, exe)
+			initial, err := daemonctl.Inspect(paths.PIDFile, opts.Root, exe)
 			if errors.Is(err, daemonctl.ErrNotRunning) {
 				return daemonctl.ErrNotRunning
 			}
 			if err != nil {
 				return err
 			}
+			if afterInitialStopInspectForCommand != nil {
+				afterInitialStopInspectForCommand()
+			}
+			var intentPath string
+			leader := false
+			if !force {
+				intentPath, leader, err = claimStopIntent(paths.PIDFile, initial.Meta)
+				if err != nil {
+					return err
+				}
+				status, inspectErr := daemonctl.Inspect(paths.PIDFile, opts.Root, exe)
+				if errors.Is(inspectErr, daemonctl.ErrNotRunning) || (inspectErr == nil && !sameDaemonIdentity(initial.Meta, status.Meta)) {
+					removeStopIntent(intentPath)
+					fmt.Fprintf(cmd.OutOrStdout(), "galley daemon stopped pid=%d\n", initial.Meta.PID)
+					return nil
+				}
+				if inspectErr != nil {
+					if leader {
+						removeStopIntent(intentPath)
+					}
+					return inspectErr
+				}
+				initial = status
+				if !leader {
+					if err := waitForDaemonStop(paths.PIDFile, opts.Root, exe, initial.Meta, *stopTimeout); err != nil {
+						return err
+					}
+					removeStopIntent(intentPath)
+					fmt.Fprintf(cmd.OutOrStdout(), "galley daemon stopped pid=%d\n", initial.Meta.PID)
+					return nil
+				}
+			}
+			status := initial
 			if !status.Alive {
+				if intentPath != "" {
+					removeStopIntent(intentPath)
+				}
 				// A stale daemon record means the daemon process is gone, but
 				// it may have left behind executor/supervisor child process
 				// groups it can no longer reap. Force stop must clean those up
@@ -384,17 +427,24 @@ func newStopCommand(opts *daemon.Options, pidFile *string, stopTimeout *time.Dur
 				return daemonctl.ErrNotRunning
 			}
 			if !status.Verified {
+				if leader {
+					removeStopIntent(intentPath)
+				}
 				return fmt.Errorf("%w: pid=%d", daemonctl.ErrUnverifiedProcess, status.Meta.PID)
 			}
 			forced := false
 			if force {
-				wasForced, err := daemonctl.ForceStop(status.Meta, *stopTimeout)
+				wasForced, err := forceStopForCommand(status.Meta, *stopTimeout)
 				if err != nil && !errors.Is(err, daemonctl.ErrNotRunning) {
 					return err
 				}
+				defer removeStopIntent(stopIntentPath(paths.PIDFile, status.Meta))
 				forced = wasForced
-			} else if err := daemonctl.StopVerified(status.Meta, *stopTimeout); err != nil && !errors.Is(err, daemonctl.ErrNotRunning) {
-				return err
+			} else {
+				if err := stopVerifiedForCommand(status.Meta, *stopTimeout); err != nil && !errors.Is(err, daemonctl.ErrNotRunning) {
+					return err
+				}
+				defer removeStopIntent(intentPath)
 			}
 			// Force stop must clean up the daemon's known active child
 			// process groups before reporting a stopped state or removing the

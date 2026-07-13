@@ -86,10 +86,10 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 - `execution_policy.stop_on_destructive_operation`: stop when the task would require out-of-scope destructive work.
 - `execution_policy.stop_on_missing_secret`: stop when a required secret is unavailable and cannot be replaced by safe local evidence.
 - `execution_policy.stop_on_external_service_unavailable`: stop when a required external service is unavailable and the task cannot proceed with local substitutes.
-- `executor`: optional. The block may be omitted, empty, or contain any subset of `cli`, `model`, and `effort`. At each run start Galley resolves every field independently: explicit task value, then the current repository `environment.yaml` value, then the built-in default (`cli: claude`, `effort: high`; empty `model` keeps the selected CLI default). Resolved environment values are not written back into the task YAML.
+- `executor`: optional. Each `cli`, `model`, and `effort` field resolves from the task, current `environment.yaml`, then built-in defaults (`cli: claude`, `effort: high`, CLI-default model). Environment values remain runtime-only.
 - `executor.cli`: selects `claude`, `codex`, `glm`, or `grok`. Grok uses the logged-in `grok` CLI for setup, acceptance-skeleton creation, and implementation.
 - `executor.model`: optional model override. Omit it to use the selected CLI's configured default model.
-- `executor.effort`: optional model effort hint. Claude and `glm` accept `low`, `medium`, `high`, `xhigh`, or `max`; Codex also accepts `minimal`; Grok also accepts `none`. Model-specific rejection remains a provider CLI error. Invalid effective provider/effort pairs fail the task before setup, skeleton, or implementation runs.
+- `executor.effort`: optional effort hint. Claude and `glm` accept `low`, `medium`, `high`, `xhigh`, and `max`; Codex also accepts `minimal`; Grok also accepts `none`. Invalid provider combinations fail before executor roles run.
 - Prompt transport is Galley-owned. Task YAML no longer accepts `executor.prompt_profile` or `executor.prompt_mode`; older files that still include those keys are ignored by the unknown-field-tolerant decoder.
 
 ## Permissions

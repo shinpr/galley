@@ -169,10 +169,7 @@ type Supervisor struct {
 	ReviewIterations int `yaml:"review_iterations" json:"review_iterations"`
 }
 
-// Executor configures the implementation worker for a task. Each field is an
-// independent optional override: empty values resolve at run start from the
-// repository environment profile and then Galley's built-in defaults. Prompt
-// transport is owned by Galley and is not task-configurable.
+// Executor contains optional task overrides for the implementation worker.
 type Executor struct {
 	CLI    string `yaml:"cli,omitempty" json:"cli,omitempty"`
 	Model  string `yaml:"model,omitempty" json:"model,omitempty"`

@@ -618,10 +618,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	}
 	effectiveOpts := resolveEffectiveTaskOptions(opts, profiles).apply(opts)
 
-	// Resolve executor settings independently for this run. Authored task
-	// fields stay on loaded so Saves and requeues do not pin environment
-	// defaults; setup, skeleton, and implementation all receive the same
-	// effective values through task.WithExecutor copies.
+	// Keep authored fields unchanged while all provider roles use this run's resolution.
 	var envExecutor *profile.ExecutorDefault
 	if profiles.Environment != nil {
 		envExecutor = profiles.Environment.Executor
@@ -639,7 +636,6 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 			return failClaimedStage(opts.Root, runningPath, &loaded, "supervisor_preflight", "supervisor_config_failed", fmt.Errorf("supervisor is \"glm\": %w", tokenErr), runDir)
 		}
 	}
-	// Same for environment-selected glm executors: fail before any provider role.
 	if effectiveExecutor.CLI == "glm" {
 		if _, tokenErr := runner.ResolveGLMToken(opts.GLMAuthToken); tokenErr != nil {
 			return failClaimedStage(opts.Root, runningPath, &loaded, "executor_preflight", "executor_config_failed", fmt.Errorf("executor is \"glm\": %w", tokenErr), runDir)
@@ -650,14 +646,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	if err != nil {
 		return taskstate.FailMoveToStatus(opts.Root, runningPath, &loaded, err)
 	}
-	// Setup executor preflight runs after the worktree and input files are
-	// prepared, before acceptance skeleton preflight, and before any executor
-	// attempt. The daemon always delegates setup execution to the selected
-	// effective provider transport (claude, codex, glm, or grok); any
-	// environment.setup plan is passed as model-visible context so the executor
-	// can try, diagnose, and repair it before returning the successful plan for
-	// Galley to persist. Setup readiness excludes
-	// acceptance skeleton obligations.
+	// Setup runs after workspace preparation and before skeleton or implementation roles.
 	var setupRes *setuppreflight.Result
 	var setupUpdate *setuppreflight.EnvironmentUpdate
 	setupReused := false

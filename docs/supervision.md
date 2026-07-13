@@ -10,9 +10,9 @@ At every run start, Galley resolves each executor field independently:
 2. current repository `environment.yaml` `executor.default_cli` / `executor.model` / `executor.effort`
 3. built-in defaults (`cli: claude`, `effort: high`; empty model keeps the CLI default)
 
-Resolved environment values are not written back into the task YAML, so partial task pins and requeues pick up current profile defaults. Setup, acceptance-skeleton creation, and implementation all use the same effective CLI, model, and effort. Invalid effective provider/effort pairs fail the task before any provider role starts.
+Environment values remain runtime-only, so requeues pick up current profile defaults. All executor roles use the same resolution, validated before invocation.
 
-Galley supports Claude Code, Codex, GLM, and Grok as executor backends. GLM runs the `claude` binary against GLM's Z.ai endpoint and needs a `glm_api_key` in `daemon.yaml`. Grok uses its logged-in CLI state. Acceptance skeleton preflight, structured executor results, run evidence, and supervisor review use the same contracts across all backends. Provider-specific prompt transport is Galley-owned and is not configured in task YAML.
+Galley supports Claude Code, Codex, GLM, and Grok. GLM uses the `claude` binary and `glm_api_key`; Grok uses its logged-in CLI state. Galley owns provider prompt transport.
 
 See [task-yaml.md](task-yaml.md) for the full `executor` block and [../examples/afk-task-codex.yaml](../examples/afk-task-codex.yaml) for a Codex task example.
 

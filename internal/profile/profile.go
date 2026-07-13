@@ -85,16 +85,11 @@ const (
 	MaxSetupCommandWhyLength = 1024
 )
 
-// ExecutorDefault provides optional repository runtime defaults for the
-// implementation executor. Task fields override these independently at each
-// run; unset values keep Galley's built-in defaults (cli) or the selected
-// CLI's own defaults (model).
+// ExecutorDefault provides repository defaults for omitted task executor fields.
 type ExecutorDefault struct {
 	DefaultCLI string `yaml:"default_cli,omitempty" json:"default_cli,omitempty"`
-	// Model is passed unchanged to the provider CLI. Empty preserves its default.
-	Model string `yaml:"model,omitempty" json:"model,omitempty"`
-	// Effort is validated against the effective provider before execution; empty keeps Galley's built-in effort default after resolution.
-	Effort string `yaml:"effort,omitempty" json:"effort,omitempty"`
+	Model      string `yaml:"model,omitempty" json:"model,omitempty"`
+	Effort     string `yaml:"effort,omitempty" json:"effort,omitempty"`
 }
 
 // SupervisorDefault selects the repository-scoped review supervisor for tasks
@@ -244,7 +239,7 @@ func ValidateEnvironment(env Environment) ValidationResult {
 		require(&result, validExecutorCLI(env.Executor.DefaultCLI), "executor.default_cli must be one of: %s", strings.Join(provider.ExecutorIDs(), ", "))
 	}
 	if env.Executor != nil && env.Executor.Effort != "" {
-		// Without default_cli, profile validation can enforce only the provider union; run-start resolution narrows it later.
+		// Provider-specific validation happens after task overrides are resolved.
 		if env.Executor.DefaultCLI != "" {
 			if efforts, ok := provider.EffortsForID(env.Executor.DefaultCLI); ok {
 				require(&result, slices.Contains(efforts, env.Executor.Effort), "executor.effort for %s must be one of: %s", env.Executor.DefaultCLI, strings.Join(efforts, ", "))

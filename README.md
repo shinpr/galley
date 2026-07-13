@@ -140,8 +140,8 @@ run evidence + git diff
 
 - **Task YAML**: trusted local input describing the goal, acceptance criteria, scope, executor, verification, worktree, and PR behavior. See [docs/task-yaml.md](docs/task-yaml.md).
 - **Quality profile**: optional repository expectations for required checks, review dimensions, evidence, and pass policy. See [docs/profiles.md](docs/profiles.md).
-- **Environment profile**: optional repository defaults for command names, executor CLI/model/effort runtime defaults, local constraints, PR behavior, and cleanup policy. See [docs/profiles.md](docs/profiles.md).
-- **Executor**: Claude Code, Codex, GLM, or Grok Build backend that implements the task. At each run, Galley resolves `executor.cli`, `executor.model`, and `executor.effort` independently from the task, then `environment.yaml`, then built-in defaults. GLM requires `glm_api_key`; Grok uses its logged-in CLI state.
+- **Environment profile**: optional repository defaults for commands, executor CLI/model/effort, constraints, PR behavior, and cleanup. See [docs/profiles.md](docs/profiles.md).
+- **Executor**: Claude Code, Codex, GLM, or Grok Build backend that implements the task. Each executor field resolves from the task, environment profile, then built-in defaults. GLM requires `glm_api_key`; Grok uses its logged-in CLI state.
 - **Supervisor**: Claude, Codex, GLM, or Grok Build backend that reviews the result against acceptance criteria, required checks, and recorded evidence. It is the acceptance gate; the default is Claude.
 - **Worktree**: isolated git checkout used for AFK execution so the source repository stays clean.
 - **Evidence**: files under `runs/<run-id>/` that make each attempt auditable after the fact.

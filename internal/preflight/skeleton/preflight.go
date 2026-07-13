@@ -47,18 +47,13 @@ type Result struct {
 	NoSkeletons   []NoOutput      `json:"no_skeletons,omitempty" yaml:"no_skeletons,omitempty"`
 	Baseline      Baseline        `json:"baseline" yaml:"baseline"`
 	Error         *PreflightError `json:"error,omitempty" yaml:"error,omitempty"`
-	// ExecutorCLI/Model/Effort record the resolved executor identity used for
-	// this preflight so later requeues reuse completed evidence only when the
-	// current resolved identity still matches. These fields omit omitempty so
-	// an empty executor_model (provider CLI default) is persisted distinctly
-	// from an absent key.
+	// Executor identity gates reuse. Model remains present when empty to record the CLI default.
 	ExecutorCLI    string `json:"executor_cli" yaml:"executor_cli"`
 	ExecutorModel  string `json:"executor_model" yaml:"executor_model"`
 	ExecutorEffort string `json:"executor_effort" yaml:"executor_effort"`
 }
 
-// ApplyExecutorIdentity stamps the resolved executor identity onto the result
-// before persistence.
+// ApplyExecutorIdentity records the executor used by this result.
 func ApplyExecutorIdentity(res *Result, exec task.Executor) {
 	if res == nil {
 		return
@@ -68,7 +63,7 @@ func ApplyExecutorIdentity(res *Result, exec task.Executor) {
 	res.ExecutorEffort = exec.Effort
 }
 
-// ResolvedExecutor returns the executor identity recorded on this result.
+// ResolvedExecutor returns the recorded executor identity.
 func (r *Result) ResolvedExecutor() task.Executor {
 	if r == nil {
 		return task.Executor{}
@@ -76,9 +71,7 @@ func (r *Result) ResolvedExecutor() task.Executor {
 	return task.Executor{CLI: r.ExecutorCLI, Model: r.ExecutorModel, Effort: r.ExecutorEffort}
 }
 
-// MatchesExecutor reports whether this result was produced under the given
-// resolved identity. Results with no known CLI never match so reuse falls
-// through to a fresh preflight.
+// MatchesExecutor reports whether this result can be reused for exec.
 func (r *Result) MatchesExecutor(exec task.Executor) bool {
 	got := r.ResolvedExecutor()
 	if got.CLI == "" {

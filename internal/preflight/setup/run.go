@@ -32,8 +32,6 @@ func Run(ctx context.Context, opts Options) (*Result, *EnvironmentUpdate, error)
 		runner = RunExecutor
 	}
 	res, err := runner(ctx, opts)
-	// Stamp the resolved identity used for this invocation so requeue reuse can
-	// invalidate when environment or task resolution changes later.
 	ApplyExecutorIdentity(res, opts.Task.Executor)
 	if writeErr := WriteResult(opts.RunDir, res); writeErr != nil && err == nil {
 		err = writeErr
@@ -76,9 +74,7 @@ func Run(ctx context.Context, opts Options) (*Result, *EnvironmentUpdate, error)
 	return res, update, nil
 }
 
-// RunExecutor dispatches the setup executor for the selected effective
-// provider transport (claude, codex, glm, or grok) to attempt to make the
-// worktree ready.
+// RunExecutor dispatches setup through the resolved executor transport.
 func RunExecutor(ctx context.Context, opts Options) (*Result, error) {
 	signals := opts.RepositorySignals
 	if signals == nil {

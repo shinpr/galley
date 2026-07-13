@@ -2,8 +2,6 @@ package runner
 
 import "github.com/shinpr/galley/internal/task"
 
-// galleyPromptMode is the provider prompt transport Galley always uses.
-// Tasks no longer configure prompt_mode; replace is the only supported path.
 const galleyPromptMode = "replace"
 
 type executorTaskOptions struct {

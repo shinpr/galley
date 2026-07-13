@@ -114,7 +114,7 @@ Answer each separately:
 
 Choose daemon settings before startup. Explain the defaults and ask for changes when the user has not already chosen:
 
-- implementation executor: store repository runtime defaults in `environment.yaml` as `executor.default_cli` and optional `executor.model` / `executor.effort`. Task fields override these independently at run time; unset falls through to Claude / high effort. Any backend listed above is valid.
+- implementation executor: store repository defaults in `environment.yaml`. Task fields override them independently; omitted CLI and effort use Claude and `high`.
 - supervisor: Claude is the daemon default when unset; a non-default review backend from the list above can be selected at daemon start.
 - PR automation, PR comment handling, base branch, and worktree cleanup: use the resolved `environment.yaml`.
 - run mode: `daemon start` keeps working in the background; `daemon run --once` drains the current queue once.

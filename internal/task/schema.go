@@ -121,11 +121,6 @@ func supervisorSchema() map[string]any {
 }
 
 func executorSchema() map[string]any {
-	// Every field is independently optional. Omitted or empty values resolve
-	// at run start from environment.yaml and then Galley's built-in defaults.
-	// Empty strings match Go structural validation (YAML decode zeros), so the
-	// schema must accept them rather than only the non-empty enum values.
-	// Provider-specific prompt transport is Galley-owned and not task-authored.
 	return object(
 		properties(map[string]any{
 			"cli":    enumSchema(append([]string{""}, validExecutorCLIs...)),
@@ -150,7 +145,6 @@ func executorEffortSchemas() []any {
 		if !descriptor.Executor {
 			continue
 		}
-		// Empty keeps the resolution path open under each conditional enum.
 		efforts := append([]string{""}, provider.EffortsForTransport(descriptor.Transport)...)
 		schemas = append(schemas, map[string]any{
 			"if": map[string]any{

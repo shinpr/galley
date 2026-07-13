@@ -14,9 +14,6 @@ import (
 	"github.com/shinpr/galley/internal/task"
 )
 
-// TestDaemonRejectsInvalidEffectiveExecutorBeforeProviderRoles proves AC4:
-// an invalid effective provider/effort pair fails the task through the
-// existing failure path and never starts setup, skeleton, or implementation.
 func TestDaemonRejectsInvalidEffectiveExecutorBeforeProviderRoles(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
@@ -51,14 +48,11 @@ constraints:
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Partial task: cli only. Effort comes from environment and is invalid for claude.
 	loaded.Executor = task.Executor{CLI: "claude"}
 	if err := task.Save(taskPath, loaded); err != nil {
 		t.Fatal(err)
 	}
 
-	// Invalid effective config fails the claimed task; processAvailable surfaces
-	// that error while still publishing the failed task evidence.
 	_ = runTestDaemon(context.Background(), Options{
 		Root:                   root,
 		SystemPromptFile:       promptPath,
@@ -94,7 +88,6 @@ constraints:
 	if !strings.Contains(failed.Attempts[0].Error.Message, "executor.effort for claude") {
 		t.Fatalf("message got %q", failed.Attempts[0].Error.Message)
 	}
-	// Authored task overrides must not gain the environment effort pin.
 	if failed.Executor.Effort != "" {
 		t.Fatalf("failed task must not write environment effort back, got %#v", failed.Executor)
 	}
@@ -103,9 +96,6 @@ constraints:
 	}
 }
 
-// TestDaemonUsesSameEffectiveExecutorAcrossRoles proves AC5: setup,
-// acceptance-skeleton, and implementation receive the same resolved
-// CLI/model/effort from field-level precedence.
 func TestDaemonUsesSameEffectiveExecutorAcrossRoles(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
@@ -163,8 +153,7 @@ setup:
 
 	creatorManifest := `{"outputs":[{"ac_id":"AC1","path":"internal/foo/foo_test.go","kind":"go-test","purpose":"verify AC1","satisfies":"AC1 observable behavior","integration_point":"executor completes this skeleton before acceptance","implementation_required":true}],"no_skeletons":[]}`
 	executorResult := `{"status":"completed","summary":"done","files_modified":["daemon-output.txt","internal/foo/foo_test.go"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}`
-	// One fake codex serves skeleton creator and implementation, branching on
-	// the flattened stdin prompt like production CodexCommandPlan delivery.
+	// The fake distinguishes skeleton and implementation through their prompts.
 	codexBin := writeFakeCommand(t, "codex", `out=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -202,7 +191,6 @@ esac
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Partial override: pin model only; cli and effort come from environment.
 	loaded.Executor = task.Executor{Model: "task-model"}
 	loaded.Preflight = &task.Preflight{AcceptanceSkeleton: &task.AcceptanceSkeletonConfig{Enabled: true}}
 	if err := task.Save(taskPath, loaded); err != nil {
@@ -228,7 +216,6 @@ esac
 		t.Fatalf("setup effective executor = %#v, want %#v", setupObs, want)
 	}
 
-	// Skeleton creator plan must use the same effective codex/model/effort.
 	matches, err := filepath.Glob(filepath.Join(root, "runs", "*", "preflight_creator_command_plan.json"))
 	if err != nil || len(matches) != 1 {
 		t.Fatalf("preflight_creator_command_plan.json glob = %v (err %v)", matches, err)
@@ -262,7 +249,6 @@ esac
 	if done.Executor.CLI != "" || done.Executor.Effort != "" || done.Executor.Model != "task-model" {
 		t.Fatalf("authored executor must stay partial after run, got %#v", done.Executor)
 	}
-	// Implementation must have used codex (environment default_cli), not claude.
 	foundCodex := false
 	for _, vc := range done.Verification.Commands {
 		if strings.Contains(vc.Cmd, "codex") {
@@ -275,10 +261,6 @@ esac
 	}
 }
 
-// TestDaemonRequeuePicksUpChangedEnvironmentExecutorDefaults proves AC3
-// freshness: after a successful run, changing environment executor defaults
-// and requeueing the same task yields new role plans for setup, skeleton, and
-// implementation while the authored task YAML stays partial.
 func TestDaemonRequeuePicksUpChangedEnvironmentExecutorDefaults(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
@@ -341,8 +323,7 @@ worktree:
 
 	creatorManifest := `{"outputs":[{"ac_id":"AC1","path":"internal/foo/foo_test.go","kind":"go-test","purpose":"verify AC1","satisfies":"AC1 observable behavior","integration_point":"executor completes this skeleton before acceptance","implementation_required":true}],"no_skeletons":[]}`
 	executorResult := `{"status":"completed","summary":"done","files_modified":["daemon-output.txt","internal/foo/foo_test.go"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}`
-	// Fake codex/claude scripts branch on flattened stdin for skeleton vs impl.
-	// Both backends are provided so the second run can switch providers via env.
+	// Both fake backends distinguish skeleton and implementation prompts.
 	codexBin := writeFakeCommand(t, "codex", `out=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -368,9 +349,6 @@ case "$input" in
     ;;
 esac
 `)
-	// writeFakeClaude wraps a supervisor-accept branch before this body so the
-	// second-run claude executor/skeleton path coexists with Claude review.
-	// Creator detection follows argv schema title (same as other daemon tests).
 	claudeBin := writeFakeClaude(t, `creator=0
 for arg in "$@"; do
   case "$arg" in
@@ -397,7 +375,6 @@ printf '%s\n' '`+executorResult+`'
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Authored task pins only model; cli/effort come from environment each run.
 	loaded.Executor = task.Executor{Model: "task-model"}
 	loaded.Preflight = &task.Preflight{AcceptanceSkeleton: &task.AcceptanceSkeletonConfig{Enabled: true}}
 	if err := task.Save(taskPath, loaded); err != nil {
@@ -426,7 +403,6 @@ printf '%s\n' '`+executorResult+`'
 		t.Fatalf("first setup effective = %#v, want %#v", setupCalls[0], wantFirst)
 	}
 
-	// First-run setup evidence must record the resolved identity for reuse gating.
 	firstSetupMatches, err := filepath.Glob(filepath.Join(root, "runs", "*", "setup_result.json"))
 	if err != nil || len(firstSetupMatches) != 1 {
 		t.Fatalf("first setup_result.json glob = %v err %v", firstSetupMatches, err)
@@ -452,7 +428,6 @@ printf '%s\n' '`+executorResult+`'
 		t.Fatalf("authored executor must stay partial after first run, got %#v", done.Executor)
 	}
 
-	// Change environment defaults before requeue; second run must re-resolve.
 	if err := os.WriteFile(envPath, []byte(envBody("claude", "env-model-v2", "xhigh")), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -475,8 +450,6 @@ printf '%s\n' '`+executorResult+`'
 		t.Fatalf("second setup effective = %#v, want %#v", setupCalls[1], wantSecond)
 	}
 
-	// Skeleton creator on the latest run must use the new effective identity.
-	// Prefer the newest preflight_creator_command_plan.json by mod time.
 	plans, err := filepath.Glob(filepath.Join(root, "runs", "*", "preflight_creator_command_plan.json"))
 	if err != nil || len(plans) == 0 {
 		t.Fatalf("preflight_creator_command_plan.json glob = %v err %v", plans, err)
@@ -510,15 +483,12 @@ printf '%s\n' '`+executorResult+`'
 	if !strings.Contains(joined, "task-model") {
 		t.Fatalf("second skeleton creator missing task model: %v", plan.Argv)
 	}
-	// Claude effort is typically --effort xhigh.
 	if !strings.Contains(joined, "xhigh") {
 		t.Fatalf("second skeleton creator missing new effort: %v", plan.Argv)
 	}
 
 	done2, err := task.Load(filepath.Join(root, "tasks", "done", filepath.Base(requeued.To)))
 	if err != nil {
-		// Requeue preserves basename under tasks/done after second completion.
-		// Fall back to scanning done/.
 		entries, readErr := os.ReadDir(filepath.Join(root, "tasks", "done"))
 		if readErr != nil || len(entries) == 0 {
 			t.Fatalf("second done task: %v (scan err %v)", err, readErr)

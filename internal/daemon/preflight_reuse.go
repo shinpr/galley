@@ -26,9 +26,6 @@ func reuseReadySetup(root, taskID, runDir string, effective task.Executor) (*set
 		if res == nil || res.Status != setuppreflight.StatusReady {
 			continue
 		}
-		// Only reuse when the prior preflight ran under the same resolved
-		// executor identity; environment or task resolution changes must
-		// re-run setup rather than trust stale ready evidence.
 		if !res.MatchesExecutor(effective) {
 			continue
 		}

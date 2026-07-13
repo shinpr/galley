@@ -129,11 +129,7 @@ func EnvironmentJSONSchema() ([]byte, error) {
 	return marshalSchema(schema)
 }
 
-// executorSchema uses the provider union as its base and narrows effort when default_cli is selected.
 func executorSchema() map[string]any {
-	// Empty default_cli matches ValidateEnvironment: YAML decode zeros are
-	// omission-equivalent, so the authoring schema must accept "" alongside
-	// the provider IDs (same pattern as task executor.cli).
 	m := object(
 		properties(map[string]any{
 			"default_cli": enumSchema(append([]string{""}, provider.ExecutorIDs()...)),
@@ -157,7 +153,6 @@ func executorEffortSchemas() []any {
 
 // supervisorSchema uses the provider union as its base and narrows effort when default_cli is selected.
 func supervisorSchema() map[string]any {
-	// Empty default_cli is omission-equivalent (ValidateEnvironment skips it).
 	m := object(
 		properties(map[string]any{
 			"default_cli": enumSchema(append([]string{""}, daemonconfig.SupervisorCLIs()...)),
@@ -185,7 +180,6 @@ func roleEffortSchemas(include func(provider.Descriptor) bool) []any {
 		if !include(descriptor) {
 			continue
 		}
-		// Empty preserves the CLI/default resolution path under each conditional enum.
 		efforts := append([]string{""}, provider.EffortsForTransport(descriptor.Transport)...)
 		schemas = append(schemas, map[string]any{
 			"if": map[string]any{

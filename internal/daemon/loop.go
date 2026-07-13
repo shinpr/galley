@@ -384,8 +384,6 @@ func acceptSupervisorVerdict(ctx context.Context, opts Options, runningPath stri
 
 func executionTask(loaded task.Task, workDir string, effectiveExecutor task.Executor) task.Task {
 	loaded.Scope.CWD = workDir
-	// Apply the run-resolved executor so setup, skeleton, and implementation
-	// share one effective configuration without rewriting authored task YAML.
 	loaded.Executor = effectiveExecutor
 	return loaded
 }

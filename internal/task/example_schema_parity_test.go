@@ -352,13 +352,16 @@ func TestPackagedTaskAuthoringOmitsStaleFixedRuntimeFieldsFromDraftGuidance(t *t
 	}
 
 	for _, want := range []string{
-		"Galley owns `mode`, `status`, `worktree.enabled`",
-		"lifecycle sections",
-		"Galley always enables AFK isolation",
+		"resolves them as AFK drafts",
+		"worktree isolation and the fixed decision policy",
+		"persists queued status and other lifecycle state",
 	} {
-		if !strings.Contains(fieldGuidance, want) {
-			t.Fatalf("task-authoring Field Guidance missing ownership guidance %q", want)
+		if !strings.Contains(commonShapes, want) {
+			t.Fatalf("task-authoring Step 7 missing ownership guidance %q", want)
 		}
+	}
+	if !strings.Contains(fieldGuidance, "Galley always enables AFK isolation") {
+		t.Fatal("task-authoring Field Guidance must state that Galley enables AFK isolation")
 	}
 }
 

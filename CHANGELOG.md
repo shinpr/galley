@@ -6,9 +6,14 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Added
+
+- Environment profiles can provide executor CLI, model, and effort defaults. Explicit task fields override them independently for each run.
+
 ### Changed
 
-- Packaged Galley plugins are updated to version `0.1.24`.
+- Task executor fields are optional, each provider uses its fixed Galley prompt construction, and reused preflight evidence must match the resolved executor identity.
+- Packaged Galley plugins are version `0.1.24`, combining runtime executor defaults with simplified author-owned task drafts, enabled-only acceptance-skeleton preflight, and claim-TTL-derived heartbeat cadence. Existing quality profiles must remove `pass_policy.unresolved_high_findings_allowed` before strict validation.
 
 ### Fixed
 

@@ -150,15 +150,15 @@ Then propose execution settings with user-facing explanations and choices. Treat
 
 Execution-setting content requirements:
 
-- Task YAML settings: optional executor overrides, edit authority, retry budget, per-attempt timeout, and AC test skeleton preflight (`enabled` only). Galley owns mode, status, worktree isolation, AFK decision policy, and lifecycle state.
+- Task YAML settings: optional executor overrides, edit authority, retry budget, per-attempt timeout, and AC test skeleton preflight (`enabled` only). Galley owns fixed AFK and lifecycle values.
 - Environment profile settings: PR behavior, PR base branch, PR comments, worktree cleanup, and required-check shell from the current `environment.yaml`; create missing profiles through `references/profile-authoring.md` before queueing ordinary implementation work. Required-check shell controls Galley's own `quality.required_checks` execution, not executor/supervisor-internal commands or daemon startup flags.
 - Effective executor: present CLI, model, and effort with `task`, `environment`, or `built-in` as the source of each value. Show an omitted model as `CLI default`. Validate effort against the effective CLI before approval. GLM requires `glm_api_key`; Grok requires its authenticated CLI.
 - Executor model override (`executor.model`): omit it by default so the selected CLI uses its configured default model. If the user names a model, record that exact value. If the user is unsure or the model name was inferred, do not guess; offer a small runtime smoke check before queueing because available model names depend on the user's account, provider, CLI configuration, and CLI version.
 - Supervisor: present the current daemon supervisor when verified. Otherwise present `claude`, `codex`, `glm`, or `grok`; the default is Claude. The supervisor controls review only and is independent from `executor.cli`.
 - Daemon concurrency: present planned or current `max_concurrent_tasks` and `max_concurrent_per_repo`. Explain that default or low concurrency fits a single heavy task, while higher values are available for parallel execution.
 - AC test skeleton preflight (`preflight.acceptance_skeleton.enabled`): present one of these values:
-  - `enabled`: an integration, cross-layer, or E2E acceptance path needs a concrete file before implementation.
-  - `disabled`: focused tests or required checks already define the evidence path.
+  - `enabled`: a pre-created integration, cross-layer, or E2E skeleton adds protection beyond executor-authored tests because the acceptance path is likely to be missed, weakened, or deferred.
+  - `disabled`: executor-authored focused unit or package tests, or existing required checks, already define the evidence path.
 - Preflight prerequisite and ownership: clarify unclear ACs with `references/authoring-quality.md` before choosing. When enabled, Galley derives the kind, path, and content on the effective executor backend.
 - For each user-changeable setting, include the recommended or current value, why it fits the current task, and practical alternatives.
 - For settings stored outside task YAML, name the change path, such as `environment.yaml` edits or daemon restart with different flags.
@@ -206,7 +206,7 @@ Use `--committed-file SOURCE=DESTINATION` only when the supplied file is intenti
 
 Edit the generated skeleton fields instead of replacing the whole file. Use `references/task.schema.json` as the field contract.
 
-New drafts contain author-owned fields. Galley supplies fixed AFK defaults and lifecycle state. Common authoring shapes:
+New drafts contain author-owned fields. Galley resolves them as AFK drafts with worktree isolation and the fixed decision policy, then persists queued status and other lifecycle state during transitions. Common authoring shapes:
 
 ```yaml
 acceptance_criteria:
@@ -235,7 +235,6 @@ Use `decisions: []` and `risks: []` when empty. Galley creates `attempts`, top-l
 
 ## Field Guidance
 
-- Galley owns `mode`, `status`, `worktree.enabled`, AFK decision policy, and lifecycle sections (`supervisor`, `attempts`, top-level `verification`, `pr`). It resolves drafts as AFK with isolated worktrees and persists `status: queued` when queueing.
 - `scope.permission`: prefer broad operations inside the isolated worktree (`sandbox-full-access`) for AFK implementation tasks; use investigation only (`read-only`) for review tasks; use normal edits (`edit`) when broad sandbox authority is unnecessary or unavailable.
 - `allowed_paths`: choose the narrowest expected implementation paths that cover approved edits and any reference-file destinations. This is the review baseline for scope expansion, not an absolute executor stop; `forbidden_paths` defines protected paths that must not be changed.
 - `executor.cli` / `model` / `effort`: write only values the user explicitly pins and preserve existing pins. Omitted fields inherit the current environment, then `cli: claude`, `effort: high`, and the CLI-default model. Use exact user-provided model names. Galley owns prompt transport, so task YAML contains only these three executor fields.

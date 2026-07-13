@@ -105,7 +105,7 @@ func TestWorkOrderUsesFixedAFKDecisionPolicy(t *testing.T) {
 		Worktree: Worktree{Enabled: true, Branch: "agent/task-wo-001", Path: "../repo.worktrees/task"},
 	}
 	text := RenderWorkOrder(tk)
-	if !strings.Contains(text, "AFK decision policy: `"+DefaultAFKDecisionPolicy+"`") {
+	if !strings.Contains(text, "AFK decision policy: `choose-smallest-reversible`") {
 		t.Fatalf("work order missing fixed AFK decision policy:\n%s", text)
 	}
 	if strings.Contains(text, "stop_on_") {

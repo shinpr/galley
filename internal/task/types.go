@@ -169,13 +169,11 @@ type Supervisor struct {
 	ReviewIterations int `yaml:"review_iterations" json:"review_iterations"`
 }
 
-// Executor configures the implementation worker for a task.
+// Executor contains optional task overrides for the implementation worker.
 type Executor struct {
-	CLI           string `yaml:"cli" json:"cli"`
-	Model         string `yaml:"model,omitempty" json:"model,omitempty"`
-	Effort        string `yaml:"effort" json:"effort"`
-	PromptProfile string `yaml:"prompt_profile" json:"prompt_profile"`
-	PromptMode    string `yaml:"prompt_mode" json:"prompt_mode"`
+	CLI    string `yaml:"cli,omitempty" json:"cli,omitempty"`
+	Model  string `yaml:"model,omitempty" json:"model,omitempty"`
+	Effort string `yaml:"effort,omitempty" json:"effort,omitempty"`
 }
 
 // Decision records an ambiguity resolved during execution.

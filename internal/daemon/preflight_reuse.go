@@ -10,9 +10,10 @@ import (
 
 	setuppreflight "github.com/shinpr/galley/internal/preflight/setup"
 	skeletonpreflight "github.com/shinpr/galley/internal/preflight/skeleton"
+	"github.com/shinpr/galley/internal/task"
 )
 
-func reuseReadySetup(root, taskID, runDir string) (*setuppreflight.Result, bool, error) {
+func reuseReadySetup(root, taskID, runDir string, effective task.Executor) (*setuppreflight.Result, bool, error) {
 	dirs, err := priorTaskRunDirs(root, taskID, runDir)
 	if err != nil {
 		return nil, false, err
@@ -25,6 +26,9 @@ func reuseReadySetup(root, taskID, runDir string) (*setuppreflight.Result, bool,
 		if res == nil || res.Status != setuppreflight.StatusReady {
 			continue
 		}
+		if !res.MatchesExecutor(effective) {
+			continue
+		}
 		if err := setuppreflight.WriteResult(runDir, res); err != nil {
 			return nil, false, err
 		}
@@ -33,7 +37,7 @@ func reuseReadySetup(root, taskID, runDir string) (*setuppreflight.Result, bool,
 	return nil, false, nil
 }
 
-func reuseCompletedAcceptanceSkeleton(root, taskID, runDir string) (*skeletonpreflight.Result, bool, error) {
+func reuseCompletedAcceptanceSkeleton(root, taskID, runDir string, effective task.Executor) (*skeletonpreflight.Result, bool, error) {
 	dirs, err := priorTaskRunDirs(root, taskID, runDir)
 	if err != nil {
 		return nil, false, err
@@ -44,6 +48,9 @@ func reuseCompletedAcceptanceSkeleton(root, taskID, runDir string) (*skeletonpre
 			continue
 		}
 		if res == nil || res.Status != "completed" {
+			continue
+		}
+		if !res.MatchesExecutor(effective) {
 			continue
 		}
 		if err := skeletonpreflight.WriteResult(runDir, res); err != nil {

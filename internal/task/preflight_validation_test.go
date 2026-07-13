@@ -38,11 +38,9 @@ func baseValidPreflightTask(t *testing.T) Task {
 		},
 		Supervisor: Supervisor{ReviewIterations: 0},
 		Executor: Executor{
-			CLI:           "claude",
-			Model:         "opus",
-			Effort:        "high",
-			PromptProfile: "p",
-			PromptMode:    "replace",
+			CLI:    "claude",
+			Model:  "opus",
+			Effort: "high",
 		},
 	}
 }

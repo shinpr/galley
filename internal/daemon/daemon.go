@@ -618,6 +618,16 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	}
 	effectiveOpts := resolveEffectiveTaskOptions(opts, profiles).apply(opts)
 
+	// Keep authored fields unchanged while all provider roles use this run's resolution.
+	var envExecutor *profile.ExecutorDefault
+	if profiles.Environment != nil {
+		envExecutor = profiles.Environment.Executor
+	}
+	effectiveExecutor := task.ResolveEffectiveExecutor(loaded.Executor, envExecutor)
+	if err := task.ValidateEffectiveExecutor(effectiveExecutor); err != nil {
+		return failClaimedStage(opts.Root, runningPath, &loaded, "executor_preflight", "executor_config_failed", err, runDir)
+	}
+
 	// A per-task environment.yaml supervisor.default_cli: glm override bypasses
 	// startup Preflight, so validate the token here — before setup/executor —
 	// rather than failing at the supervisor call after a full attempt ran.
@@ -626,24 +636,22 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 			return failClaimedStage(opts.Root, runningPath, &loaded, "supervisor_preflight", "supervisor_config_failed", fmt.Errorf("supervisor is \"glm\": %w", tokenErr), runDir)
 		}
 	}
+	if effectiveExecutor.CLI == "glm" {
+		if _, tokenErr := runner.ResolveGLMToken(opts.GLMAuthToken); tokenErr != nil {
+			return failClaimedStage(opts.Root, runningPath, &loaded, "executor_preflight", "executor_config_failed", fmt.Errorf("executor is \"glm\": %w", tokenErr), runDir)
+		}
+	}
 
-	prepared, err := prepareClaimedWorkspace(ctx, opts, profiles, runningPath, runDir, &loaded)
+	prepared, err := prepareClaimedWorkspace(ctx, opts, profiles, runningPath, runDir, &loaded, effectiveExecutor)
 	if err != nil {
 		return taskstate.FailMoveToStatus(opts.Root, runningPath, &loaded, err)
 	}
-	// Setup executor preflight runs after the worktree and input files are
-	// prepared, before acceptance skeleton preflight, and before any executor
-	// attempt. The daemon always delegates setup execution to the
-	// setup executor (Claude or Codex per task.executor.cli); any
-	// environment.setup plan is passed as model-visible context so the executor
-	// can try, diagnose, and repair it before returning the successful plan for
-	// Galley to persist. Setup readiness excludes
-	// acceptance skeleton obligations.
+	// Setup runs after workspace preparation and before skeleton or implementation roles.
 	var setupRes *setuppreflight.Result
 	var setupUpdate *setuppreflight.EnvironmentUpdate
 	setupReused := false
 	if prepared.WorktreeReused {
-		setupRes, setupReused, err = reuseReadySetup(opts.Root, loaded.ID, runDir)
+		setupRes, setupReused, err = reuseReadySetup(opts.Root, loaded.ID, runDir, effectiveExecutor)
 		if err != nil {
 			return failClaimedStage(opts.Root, runningPath, &loaded, setuppreflight.Phase, setuppreflight.FailedKind, preflightReuseError(setuppreflight.Phase, err), runDir)
 		}
@@ -651,7 +659,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	var setupErr error
 	if !setupReused {
 		setupRes, setupUpdate, setupErr = setuppreflight.Run(ctx, setuppreflight.Options{
-			Task:                   loaded,
+			Task:                   task.WithExecutor(loaded, effectiveExecutor),
 			WorkDir:                prepared.CWD,
 			RunDir:                 runDir,
 			Profiles:               profiles,
@@ -685,7 +693,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 		var res *skeletonpreflight.Result
 		preflightReused := false
 		if prepared.WorktreeReused {
-			res, preflightReused, err = reuseCompletedAcceptanceSkeleton(opts.Root, loaded.ID, runDir)
+			res, preflightReused, err = reuseCompletedAcceptanceSkeleton(opts.Root, loaded.ID, runDir, effectiveExecutor)
 			if err != nil {
 				return failClaimedStage(opts.Root, runningPath, &loaded, "acceptance_skeleton_preflight", "acceptance_skeleton_preflight_failed", preflightReuseError("acceptance skeleton", err), runDir)
 			}
@@ -693,7 +701,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 		var perr error
 		if !preflightReused {
 			res, perr = skeletonpreflight.Run(ctx, skeletonpreflight.Options{
-				Task:         loaded,
+				Task:         task.WithExecutor(loaded, effectiveExecutor),
 				WorkDir:      prepared.CWD,
 				RunDir:       runDir,
 				Profiles:     profiles,
@@ -712,12 +720,12 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 			if err := task.Save(runningPath, loaded); err != nil {
 				return failClaimedStage(opts.Root, runningPath, &loaded, "acceptance_skeleton_preflight", "acceptance_skeleton_preflight_failed", err, runDir)
 			}
-			if err := copyFile(runningPath, runartifact.Path(runDir, runartifact.EffectiveTaskSnapshotFilename)); err != nil {
+			if err := task.Save(runartifact.Path(runDir, runartifact.EffectiveTaskSnapshotFilename), executionTask(loaded, prepared.CWD, effectiveExecutor)); err != nil {
 				return failClaimedStage(opts.Root, runningPath, &loaded, "run_evidence", "run_evidence_failed", err, runDir)
 			}
 		}
 	}
-	return runSupervisorLoop(ctx, shutdownCtx, effectiveOpts, runningPath, &loaded, prepared, profiles, runDir, runID)
+	return runSupervisorLoop(ctx, shutdownCtx, effectiveOpts, runningPath, &loaded, prepared, profiles, runDir, runID, effectiveExecutor)
 }
 
 func failClaimedStage(root, runningPath string, loaded *task.Task, phase, kind string, err error, runDir string) error {
@@ -839,7 +847,7 @@ func initializeRunEvidence(root, runningPath string, loaded task.Task, validatio
 	return runID, runDir, nil
 }
 
-func prepareClaimedWorkspace(ctx context.Context, opts Options, profiles profile.Bundle, runningPath, runDir string, loaded *task.Task) (workspace.Prepared, error) {
+func prepareClaimedWorkspace(ctx context.Context, opts Options, profiles profile.Bundle, runningPath, runDir string, loaded *task.Task, effectiveExecutor task.Executor) (workspace.Prepared, error) {
 	wsOpts := workspaceOptions(opts)
 	// Resolve the environment profile pr.base into a concrete git ref name and
 	// pass it through workspace.Options.StartPoint so the new task branch is
@@ -892,7 +900,7 @@ func prepareClaimedWorkspace(ctx context.Context, opts Options, profiles profile
 			return workspace.Prepared{}, err
 		}
 	}
-	if err := copyFile(runningPath, runartifact.Path(runDir, runartifact.EffectiveTaskSnapshotFilename)); err != nil {
+	if err := task.Save(runartifact.Path(runDir, runartifact.EffectiveTaskSnapshotFilename), executionTask(*loaded, prepared.CWD, effectiveExecutor)); err != nil {
 		return workspace.Prepared{}, err
 	}
 	cleanupPrepared = false

@@ -17,7 +17,8 @@ The daemon resolves repository profiles from `scope.cwd` and the Galley root.
 
 Backend defaults are intentionally separate:
 
-- Implementation executor default: stored in `environment.yaml` as `executor.default_cli`; unset resolves to Claude when a new task is authored.
+- Implementation executor defaults: store `executor.default_cli`, `model`, and `effort` in `environment.yaml`. Task fields override them independently; omitted fields use `cli: claude`, `effort: high`, and the CLI-default model. Pin task fields only when the user explicitly chooses them.
+- Implementation executor effort: Claude and `glm` accept `low`, `medium`, `high`, `xhigh`, or `max`; Codex also accepts `minimal`; Grok accepts `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. Without `executor.default_cli`, profile validation accepts the provider union; task authoring validates the resolved CLI and effort before queue approval.
 - Review supervisor default: optionally stored in `environment.yaml` as `supervisor.default_cli`; unset falls back to daemon startup state and then Claude.
 - Review supervisor model: set `supervisor.model` to an exact provider model name; omit it or use an empty value to keep that CLI's default.
 - Review supervisor effort: set `supervisor.effort` to `low`, `medium`, `high`, `xhigh`, or `max`; Codex also accepts `minimal`. Empty keeps the CLI default, and invalid provider values fail before review.
@@ -114,7 +115,7 @@ Environment profile questions:
 
 1. What is the target repo absolute path?
 2. Which discovered commands are available and safe to run repeatedly?
-3. Which implementation executor should new tasks use by default: `claude`, `codex`, `glm`, `grok`, or unset so authoring resolves to Claude?
+3. Which implementation executor should runs use by default: `claude`, `codex`, `glm`, `grok`, or unset to use Galley's built-in Claude backend at run time?
 4. Should this repository set a review supervisor default: `claude`, `codex`, `glm`, `grok`, or unset so daemon startup state decides?
 5. Which discovered setup commands should prepare a fresh task worktree before implementation, if they are known?
 6. Does the repo require local services: DB, Docker, Redis, browser, dev server, Figma MCP, Playwright, cloud CLI?
@@ -173,6 +174,8 @@ setup:
       why: "<why this prepares the worktree>"
 executor:
   default_cli: "claude"
+  # model: "<optional pinned model>"
+  # effort: "high"
 constraints:
   network: "approval_required"
   secrets_policy: "never_read_env_files"

@@ -89,10 +89,19 @@ func EffortsForID(id string) ([]string, bool) {
 
 // SupervisorEfforts returns the stable union used before an effective provider is known.
 func SupervisorEfforts() []string {
+	return roleEfforts(func(d Descriptor) bool { return d.Supervisor })
+}
+
+// ExecutorEfforts returns the stable union used before an effective executor is known.
+func ExecutorEfforts() []string {
+	return roleEfforts(func(d Descriptor) bool { return d.Executor })
+}
+
+func roleEfforts(include func(Descriptor) bool) []string {
 	var out []string
 	seen := map[string]bool{}
 	for _, descriptor := range descriptors {
-		if !descriptor.Supervisor {
+		if !include(descriptor) {
 			continue
 		}
 		for _, effort := range EffortsForTransport(descriptor.Transport) {

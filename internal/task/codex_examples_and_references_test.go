@@ -57,8 +57,8 @@ func TestExampleAFKTaskCodexValidates(t *testing.T) {
 	if loaded.Executor.CLI != "codex" {
 		t.Fatalf("examples/afk-task-codex.yaml executor.cli = %q, want %q", loaded.Executor.CLI, "codex")
 	}
-	if loaded.Executor.PromptProfile != "codex-executor-v1" {
-		t.Fatalf("examples/afk-task-codex.yaml executor.prompt_profile = %q, want %q", loaded.Executor.PromptProfile, "codex-executor-v1")
+	if loaded.Executor.Effort != "high" {
+		t.Fatalf("examples/afk-task-codex.yaml executor.effort = %q, want %q", loaded.Executor.Effort, "high")
 	}
 }
 

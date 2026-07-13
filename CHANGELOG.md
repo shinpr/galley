@@ -6,6 +6,14 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Added
+
+- Environment profiles can provide executor CLI, model, and effort defaults. Explicit task fields override them independently for each run.
+
+### Changed
+
+- Task executor fields are optional, each provider uses its fixed Galley prompt construction, and reused preflight evidence must match the resolved executor identity.
+
 ### Fixed
 
 - Repeated `galley daemon stop` commands now coordinate so only one normal stop signals the daemon; `--force` remains the explicit forced-termination path.

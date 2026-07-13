@@ -141,7 +141,7 @@ Interpret daemon-dependent settings before asking:
 - If a verified daemon is already running, use its current daemon settings as the execution condition. Present supervisor, concurrency, polling interval, claim TTL, heartbeat interval, and shutdown timeout as current daemon state, not user-selectable task options.
 - Repository operation settings come from `environment.yaml`: PR creation, PR base branch, PR comment polling/replies, and worktree cleanup.
 - Galley-owned required-check execution settings also come from `environment.yaml`: `required_checks.shell` controls the shell Galley uses when it runs `quality.required_checks` after an executor attempt.
-- Repository executor defaults also come from `environment.yaml`: when `executor.default_cli` is set, confirm that backend and ask for an override only when requested. Otherwise ask for `claude`, `codex`, `glm`, or `grok`; an unset choice resolves to Claude.
+- Repository executor defaults come from `environment.yaml`. Read its executor block, resolve CLI, model, and effort independently using task override, environment value, then built-in default, and present each effective value with its source. Confirm that the effective effort is valid for the effective CLI before approval; model names remain CLI-owned. Record a task override only when the user requests one.
 - Ask for the review supervisor (`claude`, `codex`, `glm`, or `grok`) only when no verified daemon is running or the user wants to restart it. A verified running daemon's supervisor is current state, not a task setting.
 - If no daemon is running, ask the user to approve the planned daemon startup settings because they will be applied when starting the daemon.
 - If daemon status is unclear, report that uncertainty and ask whether to inspect or start a fresh daemon before queueing.
@@ -150,13 +150,13 @@ Then propose execution settings with user-facing explanations and choices. Treat
 
 Execution-setting content requirements:
 
-- Task YAML settings: executor backend, optional executor model override, edit authority, retry budget, per-attempt timeout, AC test skeleton preflight, and blocking severity policy.
+- Task YAML settings: optional executor overrides, edit authority, retry budget, per-attempt timeout, AC test skeleton preflight, and blocking severity policy.
 - Environment profile settings: PR behavior, PR base branch, PR comments, worktree cleanup, and required-check shell from the current `environment.yaml`; create missing profiles through `references/profile-authoring.md` before queueing ordinary implementation work. Required-check shell controls Galley's own `quality.required_checks` execution, not executor/supervisor-internal commands or daemon startup flags.
-- Executor backend (`executor.cli`): include one of `claude`, `codex`, `glm`, or `grok`. The choice controls setup, acceptance-skeleton creation, and implementation, including model and effort. GLM requires `glm_api_key`; Grok requires its installed, authenticated CLI. It remains independent from the supervisor.
+- Effective executor: present CLI, model, and effort with `task`, `environment`, or `built-in` as the source of each value. Show an omitted model as `CLI default`. Validate effort against the effective CLI before approval. GLM requires `glm_api_key`; Grok requires its authenticated CLI.
 - Executor model override (`executor.model`): omit it by default so the selected CLI uses its configured default model. If the user names a model, record that exact value. If the user is unsure or the model name was inferred, do not guess; offer a small runtime smoke check before queueing because available model names depend on the user's account, provider, CLI configuration, and CLI version.
 - Supervisor: present the current daemon supervisor when verified. Otherwise present `claude`, `codex`, `glm`, or `grok`; the default is Claude. The supervisor controls review only and is independent from `executor.cli`.
 - Daemon concurrency: present planned or current `max_concurrent_tasks` and `max_concurrent_per_repo`. Explain that default or low concurrency fits a single heavy task, while higher values are available for parallel execution.
-- AC test skeleton preflight (`preflight.acceptance_skeleton.enabled`): include it as one Task YAML execution setting with only `enabled` or `disabled`. Enable it only when pre-created tests add value beyond asking the executor to write tests during implementation: they should anchor an integration, cross-layer, or E2E acceptance path that is likely to be missed, weakened, or deferred without a concrete skeleton in the worktree. Keep it disabled when the executor can write focused unit or package tests as part of the normal implementation, or when existing required checks already provide concrete verification guidance. If ACs are unclear, use the value-first AC authoring steps in `references/authoring-quality.md` before choosing this setting. When enabled, let the skeleton creator derive test kind, path, and content; it runs on the task's `executor.cli` backend, not the daemon supervisor backend.
+- AC test skeleton preflight (`preflight.acceptance_skeleton.enabled`): include it as one Task YAML execution setting with only `enabled` or `disabled`. Enable it only when pre-created tests add value beyond asking the executor to write tests during implementation: they should anchor an integration, cross-layer, or E2E acceptance path that is likely to be missed, weakened, or deferred without a concrete skeleton in the worktree. Keep it disabled when the executor can write focused unit or package tests as part of the normal implementation, or when existing required checks already provide concrete verification guidance. If ACs are unclear, use the value-first AC authoring steps in `references/authoring-quality.md` before choosing this setting. When enabled, let the skeleton creator derive test kind, path, and content; it runs on the effective executor backend, not the daemon supervisor backend.
 - For each user-changeable setting, include the recommended or current value, why it fits the current task, and practical alternatives.
 - For settings stored outside task YAML, name the change path, such as `environment.yaml` edits or daemon restart with different flags.
 
@@ -183,7 +183,7 @@ python3 <this-skill-directory>/scripts/create_task_skeleton.py "<short task titl
   --loop-budget 10
 ```
 
-The skeleton script resolves `executor.cli` from the explicit `--executor-cli` argument first, then `environment.yaml` `executor.default_cli`, then Claude when no environment setting exists.
+The skeleton writes `executor.cli` only when `--executor-cli` is supplied. Otherwise it omits the executor block so runtime environment defaults remain authoritative.
 
 With a context-only specification, work plan, log, screenshot note, issue export, or review note supplied by the user:
 
@@ -242,9 +242,7 @@ Use `decisions: []`, `risks: []`, and `verification.commands: []` when those ent
 - `status`: write new tasks as `draft`; `galley task queue` writes the queued copy with `status: queued`.
 - `scope.permission`: prefer broad operations inside the isolated worktree (`sandbox-full-access`) for AFK implementation tasks; use investigation only (`read-only`) for review tasks; use normal edits (`edit`) when broad sandbox authority is unnecessary or unavailable.
 - `allowed_paths`: choose the narrowest expected implementation paths that cover approved edits and any reference-file destinations. This is the review baseline for scope expansion, not an absolute executor stop; `forbidden_paths` defines protected paths that must not be changed.
-- `executor.cli`: use the resolved environment executor default when `environment.yaml` has `executor.default_cli`; otherwise use Claude when no environment default or explicit user choice exists. Preserve an explicit `executor.cli` already present in existing task YAML. This is a task YAML setting and is separate from the daemon supervisor.
-- `executor.model`: omit by default. Write it only when the user explicitly selects a model name or asks to pin one; otherwise the executor CLI default is used. Do not invent likely model names. When a model is pinned and the user wants confidence before queueing, run a minimal smoke check with that CLI/model and record the result or limitation.
-- `executor.effort`: use `high` by default. Claude and `glm` accept `low`, `medium`, `high`, `xhigh`, or `max`; Codex also accepts `minimal`. Model-specific rejection remains a Codex error.
+- `executor.cli` / `model` / `effort`: write only values the user explicitly pins and preserve existing pins. Omitted fields inherit the current environment, then `cli: claude`, `effort: high`, and the CLI-default model. Use exact user-provided model names. Galley owns prompt transport, so task YAML contains only these three executor fields.
 - `execution_policy.timeout_ms`: set the approved per-attempt timeout in milliseconds. Use `30min` (`1800000`) as the ordinary-task baseline and increase it for broader, slower, or more uncertain tasks.
 - `preflight.acceptance_skeleton.enabled`: set the approved value. When enabled, write the initial preflight config only; runtime `outputs[]` are generated by the skeleton creator.
 - `files`: use it when the user attaches or names specs, work plans, logs, screenshots, issue exports, or other implementation references the executor should read in the worktree.
@@ -255,7 +253,6 @@ Use `decisions: []`, `risks: []`, and `verification.commands: []` when those ent
 - Blocking severity is enforced by the resolved quality profile and supervisor policy, not by a top-level task schema field. Show the current profile threshold in execution settings and the final queue summary. Use profile authoring when the user wants to change repository-wide blocking severities. Record task-specific review preferences in `decisions` only as guidance.
 - `worktree.path`: use a sibling path outside the source repo, such as `../<repo-name>.worktrees/<short-name>`.
 - `supervisor.review_iterations`: start at `0`; Galley increments it when reviewed work is requeued.
-- `executor.prompt_mode`: use `replace` for Codex-style Claude executor prompts. Use an append mode when the user asks to preserve Claude Code's base prompt.
 
 ## Step 8: Validate And Repair
 
@@ -298,6 +295,7 @@ Task content:
 Please confirm these decisions before queueing:
 | Item | Current choice | Why it matters | Change options |
 | --- | --- | --- | --- |
+| Effective executor | <cli, model, effort and source for each; compatibility result> | <controls every executor role> | change task override or environment profile |
 | Public/API names | <field names, commands, routes, outputs, or N/A> | <compatibility impact> | <rename/change/no change> |
 | Behavioral bounds | <timeouts, limits, retries, accepted values, or N/A> | <runtime or product impact> | <change min/max/allowed values> |
 | State and persistence | <what is saved or intentionally not saved> | <side-effect impact> | <persist/change/keep isolated> |

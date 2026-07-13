@@ -46,7 +46,45 @@ type Result struct {
 	RepairGuidance     string                 `json:"repair_guidance,omitempty" yaml:"repair_guidance,omitempty"`
 	Error              string                 `json:"error,omitempty" yaml:"error,omitempty"`
 	Provider           string                 `json:"provider,omitempty" yaml:"provider,omitempty"`
-	Source             string                 `json:"source,omitempty" yaml:"source,omitempty"`
+	// Executor identity gates reuse. Model remains present when empty to record the CLI default.
+	ExecutorCLI    string `json:"executor_cli" yaml:"executor_cli"`
+	ExecutorModel  string `json:"executor_model" yaml:"executor_model"`
+	ExecutorEffort string `json:"executor_effort" yaml:"executor_effort"`
+	Source         string `json:"source,omitempty" yaml:"source,omitempty"`
+}
+
+// ApplyExecutorIdentity records the executor used by this result.
+func ApplyExecutorIdentity(res *Result, exec task.Executor) {
+	if res == nil {
+		return
+	}
+	res.ExecutorCLI = exec.CLI
+	res.ExecutorModel = exec.Model
+	res.ExecutorEffort = exec.Effort
+	if exec.CLI != "" {
+		res.Provider = exec.CLI
+	}
+}
+
+// ResolvedExecutor returns the recorded identity, deriving legacy CLI from Provider.
+func (r *Result) ResolvedExecutor() task.Executor {
+	if r == nil {
+		return task.Executor{}
+	}
+	cli := r.ExecutorCLI
+	if cli == "" {
+		cli = r.Provider
+	}
+	return task.Executor{CLI: cli, Model: r.ExecutorModel, Effort: r.ExecutorEffort}
+}
+
+// MatchesExecutor reports whether this result can be reused for exec.
+func (r *Result) MatchesExecutor(exec task.Executor) bool {
+	got := r.ResolvedExecutor()
+	if got.CLI == "" {
+		return false
+	}
+	return got.CLI == exec.CLI && got.Model == exec.Model && got.Effort == exec.Effort
 }
 
 // CommandAttempt is one command the setup executor attempted. Stdout/stderr

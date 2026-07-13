@@ -40,7 +40,6 @@ type CodexOptions struct {
 	Bin                   string
 	Model                 string
 	Effort                string
-	PromptMode            string
 	Sandbox               string
 	WorkDir               string
 	SystemPromptFile      string
@@ -73,11 +72,10 @@ func CodexFromTask(t task.Task) CodexOptions {
 	common := executorOptionsFromTask(t)
 
 	return CodexOptions{
-		Model:      common.Model,
-		Effort:     common.Effort,
-		PromptMode: common.PromptMode,
-		Sandbox:    sandbox,
-		WorkDir:    common.WorkDir,
+		Model:   common.Model,
+		Effort:  common.Effort,
+		Sandbox: sandbox,
+		WorkDir: common.WorkDir,
 	}
 }
 
@@ -99,9 +97,6 @@ func CodexArgv(opts CodexOptions) ([]string, error) {
 func CodexCommandPlan(opts CodexOptions) (Command, error) {
 	if opts.Prompt == "" {
 		return Command{}, fmt.Errorf("prompt is required")
-	}
-	if opts.PromptMode == "" {
-		opts.PromptMode = "replace"
 	}
 	var err error
 	opts, err = withDefaultEmbeddedCodexOptions(opts)
@@ -130,15 +125,6 @@ func CodexCommandPlan(opts CodexOptions) (Command, error) {
 			return Command{}, err
 		}
 		systemPrompt = body
-	}
-
-	switch opts.PromptMode {
-	case "replace", "append":
-		// Codex inlines the system prompt via stdin. The CLI has no distinct
-		// append-system-prompt surface, so append is accepted by the task
-		// contract and surfaced as a warning below.
-	default:
-		return Command{}, fmt.Errorf("unsupported prompt mode %q", opts.PromptMode)
 	}
 
 	combined := combinePromptForCodex(systemPrompt, opts.Prompt)
@@ -366,9 +352,6 @@ func ExtractCodexLastMessageFile(path string) (ExecutorResult, error) {
 
 func codexWarnings(opts CodexOptions) []string {
 	var warnings []string
-	if opts.PromptMode == "append" {
-		warnings = append(warnings, "executor.prompt_mode=append has the same effect as replace for codex exec; system prompt and work order are concatenated through stdin")
-	}
 	if opts.Sandbox == "danger-full-access" {
 		warnings = append(warnings, "Codex sandbox is danger-full-access; use only inside an isolated sandbox/worktree")
 	}

@@ -32,6 +32,7 @@ func Run(ctx context.Context, opts Options) (*Result, *EnvironmentUpdate, error)
 		runner = RunExecutor
 	}
 	res, err := runner(ctx, opts)
+	ApplyExecutorIdentity(res, opts.Task.Executor)
 	if writeErr := WriteResult(opts.RunDir, res); writeErr != nil && err == nil {
 		err = writeErr
 	}
@@ -73,8 +74,7 @@ func Run(ctx context.Context, opts Options) (*Result, *EnvironmentUpdate, error)
 	return res, update, nil
 }
 
-// RunExecutor dispatches the setup executor (Claude or Codex per
-// task.executor.cli) to attempt to make the worktree ready.
+// RunExecutor dispatches setup through the resolved executor transport.
 func RunExecutor(ctx context.Context, opts Options) (*Result, error) {
 	signals := opts.RepositorySignals
 	if signals == nil {

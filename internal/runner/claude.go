@@ -25,7 +25,6 @@ type ClaudeOptions struct {
 	Bin               string
 	Model             string
 	Effort            string
-	PromptMode        string
 	PermissionMode    string
 	WorkDir           string
 	SystemPromptFile  string
@@ -75,7 +74,6 @@ func FromTask(t task.Task) ClaudeOptions {
 	return ClaudeOptions{
 		Model:          common.Model,
 		Effort:         common.Effort,
-		PromptMode:     common.PromptMode,
 		PermissionMode: permissionMode,
 		WorkDir:        common.WorkDir,
 	}
@@ -100,7 +98,7 @@ func ClaudeArgv(opts ClaudeOptions) ([]string, error) {
 //
 // macOS and Linux preserve the historical argv shape, where the system prompt,
 // JSON schema, and work order prompt are passed as argv values. Windows moves
-// the system prompt to --system-prompt-file (or --append-system-prompt-file)
+// the system prompt to --system-prompt-file
 // and delivers the work order prompt through stdin to avoid the
 // CommandLineToArgvW length limit. The JSON schema body is intentionally not
 // passed on argv on Windows; Galley relies on the Claude guard hook and the
@@ -115,9 +113,6 @@ func ClaudeCommandPlan(opts ClaudeOptions) (Command, error) {
 func ClaudeCommandPlanForOS(opts ClaudeOptions, goos string) (Command, error) {
 	if opts.Prompt == "" {
 		return Command{}, fmt.Errorf("prompt is required")
-	}
-	if opts.PromptMode == "" {
-		opts.PromptMode = "replace"
 	}
 	opts = withDefaultEmbeddedOptions(opts)
 
@@ -148,9 +143,6 @@ func ClaudeCommandPlanForOS(opts ClaudeOptions, goos string) (Command, error) {
 func ClaudeShellPreview(opts ClaudeOptions) (string, []string, error) {
 	if opts.Prompt == "" {
 		return "", nil, fmt.Errorf("prompt is required")
-	}
-	if opts.PromptMode == "" {
-		opts.PromptMode = "replace"
 	}
 	opts = withDefaultEmbeddedOptions(opts)
 
@@ -186,14 +178,7 @@ func buildClaudeArgv(opts ClaudeOptions, fileValue func(label, path string) (str
 				return nil, err
 			}
 		}
-		switch opts.PromptMode {
-		case "replace":
-			argv = append(argv, "--system-prompt", systemPrompt)
-		case "append":
-			argv = append(argv, "--append-system-prompt", systemPrompt)
-		default:
-			return nil, fmt.Errorf("unsupported prompt mode %q", opts.PromptMode)
-		}
+		argv = append(argv, "--system-prompt", systemPrompt)
 	}
 	if opts.JSONSchemaFile != "" || opts.JSONSchema != "" {
 		schema := opts.JSONSchema
@@ -282,7 +267,7 @@ func baseClaudeArgv(opts ClaudeOptions) []string {
 // buildClaudeArgvWindows builds the Windows-only Claude argv. It keeps
 // Galley-generated long values (system prompt, work order prompt, JSON schema)
 // off argv: the system prompt is delivered through --system-prompt-file or
-// --append-system-prompt-file, the work order prompt is delivered through
+// --system-prompt-file, the work order prompt is delivered through
 // stdin (Claude Code reads stdin in -p/non-interactive mode without the Codex
 // `-` marker), and the JSON schema body is intentionally not passed on argv.
 // The Galley Claude guard hook and the executor result validators reject
@@ -296,14 +281,7 @@ func buildClaudeArgvWindows(opts ClaudeOptions) ([]string, string, []string, err
 		if err != nil {
 			return nil, "", nil, err
 		}
-		switch opts.PromptMode {
-		case "replace":
-			argv = append(argv, "--system-prompt-file", path)
-		case "append":
-			argv = append(argv, "--append-system-prompt-file", path)
-		default:
-			return nil, "", nil, fmt.Errorf("unsupported prompt mode %q", opts.PromptMode)
-		}
+		argv = append(argv, "--system-prompt-file", path)
 	}
 	if opts.JSONSchemaFile != "" || opts.JSONSchema != "" {
 		warnings = append(warnings, "Windows runner does not pass --json-schema on argv; Galley relies on the Claude guard hook and the executor result validators to reject malformed final output")

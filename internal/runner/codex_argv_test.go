@@ -105,29 +105,6 @@ func TestCodexCommandPlanPassesExpandedEffortLiterals(t *testing.T) {
 	}
 }
 
-func TestCodexArgvWarnsWhenPromptModeAppendIsFlattened(t *testing.T) {
-	t.Parallel()
-	base := minimalCodexTask()
-	base.Executor.PromptMode = "append"
-	opts := CodexFromTask(base)
-	opts.Prompt = "work order body"
-
-	plan, err := CodexCommandPlan(opts)
-	if err != nil {
-		t.Fatalf("CodexCommandPlan: %v", err)
-	}
-	var sawPromptModeWarning bool
-	for _, w := range plan.Warnings {
-		if strings.Contains(w, "prompt_mode=append") && strings.Contains(w, "same effect as replace") {
-			sawPromptModeWarning = true
-			break
-		}
-	}
-	if !sawPromptModeWarning {
-		t.Fatalf("expected prompt_mode append warning, got %#v", plan.Warnings)
-	}
-}
-
 func TestCodexArgvSandboxMapping(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

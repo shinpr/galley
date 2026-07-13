@@ -65,14 +65,10 @@ func EnvironmentJSONSchema() ([]byte, error) {
 		// against this schema must agree and not hard-fail a commandless profile.
 		required("id", "cwd", "constraints"),
 		properties(map[string]any{
-			"id":       stringSchema("minLength", 1, "description", "Repository environment profile identifier."),
-			"cwd":      stringSchema("minLength", 1, "description", "Absolute path to the target repository."),
-			"commands": map[string]any{"type": "object", "additionalProperties": stringSchema("minLength", 1)},
-			"executor": object(
-				properties(map[string]any{
-					"default_cli": enumSchema(provider.ExecutorIDs()),
-				}),
-			),
+			"id":         stringSchema("minLength", 1, "description", "Repository environment profile identifier."),
+			"cwd":        stringSchema("minLength", 1, "description", "Absolute path to the target repository."),
+			"commands":   map[string]any{"type": "object", "additionalProperties": stringSchema("minLength", 1)},
+			"executor":   executorSchema(),
 			"supervisor": supervisorSchema(),
 			"required_checks": object(
 				properties(map[string]any{
@@ -133,11 +129,33 @@ func EnvironmentJSONSchema() ([]byte, error) {
 	return marshalSchema(schema)
 }
 
+func executorSchema() map[string]any {
+	m := object(
+		properties(map[string]any{
+			"default_cli": enumSchema(append([]string{""}, provider.ExecutorIDs()...)),
+			"model":       stringSchema("description", "Optional model name passed unchanged to the selected executor CLI. Omit or leave empty to use the CLI default; accepted values depend on the provider."),
+			"effort":      executorEffortBaseSchema(),
+		}),
+	)
+	m["allOf"] = executorEffortSchemas()
+	return m
+}
+
+func executorEffortBaseSchema() map[string]any {
+	m := enumSchema(append([]string{""}, provider.ExecutorEfforts()...))
+	m["description"] = "Optional reasoning effort used as a repository runtime default. Empty leaves resolution to the task or Galley's built-in default; the effective provider is validated before setup, skeleton, or implementation."
+	return m
+}
+
+func executorEffortSchemas() []any {
+	return roleEffortSchemas(func(d provider.Descriptor) bool { return d.Executor })
+}
+
 // supervisorSchema uses the provider union as its base and narrows effort when default_cli is selected.
 func supervisorSchema() map[string]any {
 	m := object(
 		properties(map[string]any{
-			"default_cli": enumSchema(daemonconfig.SupervisorCLIs()),
+			"default_cli": enumSchema(append([]string{""}, daemonconfig.SupervisorCLIs()...)),
 			"model":       stringSchema("description", "Optional model name passed unchanged to the selected supervisor CLI. Omit or leave empty to use the CLI default; accepted values depend on the provider."),
 			"effort":      supervisorEffortBaseSchema(),
 		}),
@@ -153,12 +171,15 @@ func supervisorEffortBaseSchema() map[string]any {
 }
 
 func supervisorEffortSchemas() []any {
+	return roleEffortSchemas(func(d provider.Descriptor) bool { return d.Supervisor })
+}
+
+func roleEffortSchemas(include func(provider.Descriptor) bool) []any {
 	var schemas []any
 	for _, descriptor := range provider.All() {
-		if !descriptor.Supervisor {
+		if !include(descriptor) {
 			continue
 		}
-		// Empty preserves the CLI default under each conditional enum.
 		efforts := append([]string{""}, provider.EffortsForTransport(descriptor.Transport)...)
 		schemas = append(schemas, map[string]any{
 			"if": map[string]any{

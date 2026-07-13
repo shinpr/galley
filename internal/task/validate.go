@@ -269,17 +269,38 @@ func validateSupervisor(result *ValidationResult, t Task) {
 }
 
 func validateExecutor(result *ValidationResult, t Task) {
-	require(result, slices.Contains(validExecutorCLIs, t.Executor.CLI), "executor.cli must be one of: %s", strings.Join(validExecutorCLIs, ", "))
-	require(result, t.Executor.Effort != "", "executor.effort is required")
-	if efforts, ok := provider.EffortsForID(t.Executor.CLI); ok {
-		require(result, slices.Contains(efforts, t.Executor.Effort), "executor.effort for %s must be one of: %s", t.Executor.CLI, strings.Join(efforts, ", "))
+	if t.Executor.CLI != "" {
+		require(result, slices.Contains(validExecutorCLIs, t.Executor.CLI), "executor.cli must be one of: %s", strings.Join(validExecutorCLIs, ", "))
 	}
-	require(result, t.Executor.PromptProfile != "", "executor.prompt_profile is required")
-	if t.Executor.PromptMode == "" {
-		result.Warnings = append(result.Warnings, "executor.prompt_mode is empty; defaulting to replace")
-	} else {
-		require(result, slices.Contains(validPromptModes, t.Executor.PromptMode), "executor.prompt_mode must be one of: %s", strings.Join(validPromptModes, ", "))
+	if t.Executor.Effort == "" {
+		return
 	}
+	if t.Executor.CLI != "" {
+		if efforts, ok := provider.EffortsForID(t.Executor.CLI); ok {
+			require(result, slices.Contains(efforts, t.Executor.Effort), "executor.effort for %s must be one of: %s", t.Executor.CLI, strings.Join(efforts, ", "))
+		}
+		return
+	}
+	// Without an explicit cli, only the provider-union can be enforced here.
+	require(result, slices.Contains(provider.ExecutorEfforts(), t.Executor.Effort), "executor.effort must be one of: %s", strings.Join(provider.ExecutorEfforts(), ", "))
+}
+
+// ValidateEffectiveExecutor validates the provider and effort used by all executor roles.
+func ValidateEffectiveExecutor(exec Executor) error {
+	if !slices.Contains(validExecutorCLIs, exec.CLI) {
+		return fmt.Errorf("executor.cli must be one of: %s", strings.Join(validExecutorCLIs, ", "))
+	}
+	if exec.Effort == "" {
+		return fmt.Errorf("executor.effort is required after resolution")
+	}
+	efforts, ok := provider.EffortsForID(exec.CLI)
+	if !ok {
+		return fmt.Errorf("executor.cli must be one of: %s", strings.Join(validExecutorCLIs, ", "))
+	}
+	if !slices.Contains(efforts, exec.Effort) {
+		return fmt.Errorf("executor.effort for %s must be one of: %s", exec.CLI, strings.Join(efforts, ", "))
+	}
+	return nil
 }
 
 func validatePreflight(result *ValidationResult, t Task) {

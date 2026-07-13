@@ -24,11 +24,9 @@ func minimalCodexTask() task.Task {
 			Permission:   "edit",
 		},
 		Executor: task.Executor{
-			CLI:           "codex",
-			Model:         "gpt-5-codex",
-			Effort:        "high",
-			PromptProfile: "codex-executor-v1",
-			PromptMode:    "replace",
+			CLI:    "codex",
+			Model:  "gpt-5-codex",
+			Effort: "high",
 		},
 	}
 }

@@ -11,7 +11,7 @@ import (
 // contract used by structural validation.
 func TaskJSONSchema() ([]byte, error) {
 	schema := object(
-		required("id", "mode", "status", "goal", "acceptance_criteria", "scope", "execution_policy", "worktree", "supervisor", "executor", "decisions", "risks", "attempts", "verification", "pr"),
+		required("id", "mode", "status", "goal", "acceptance_criteria", "scope", "execution_policy", "worktree", "supervisor", "decisions", "risks", "attempts", "verification", "pr"),
 		properties(map[string]any{
 			"$schema": map[string]any{"const": "https://json-schema.org/draft/2020-12/schema"},
 		}),
@@ -122,18 +122,21 @@ func supervisorSchema() map[string]any {
 
 func executorSchema() map[string]any {
 	return object(
-		required("cli", "effort", "prompt_profile", "prompt_mode"),
 		properties(map[string]any{
-			"cli":            enumSchema(validExecutorCLIs),
-			"model":          stringSchema("minLength", 1),
-			"effort":         stringSchema("minLength", 1),
-			"prompt_profile": stringSchema("minLength", 1),
-			"prompt_mode":    enumSchema(validPromptModes),
+			"cli":    enumSchema(append([]string{""}, validExecutorCLIs...)),
+			"model":  stringSchema("description", "Optional model override. Omit or leave empty to use the selected CLI's configured default model."),
+			"effort": taskExecutorEffortBaseSchema(),
 		}),
 		func(m map[string]any) {
 			m["allOf"] = executorEffortSchemas()
 		},
 	)
+}
+
+func taskExecutorEffortBaseSchema() map[string]any {
+	m := enumSchema(append([]string{""}, provider.ExecutorEfforts()...))
+	m["description"] = "Optional reasoning effort override. Empty resolves from the environment profile or Galley's built-in default; the effective provider is validated before setup, skeleton, or implementation."
+	return m
 }
 
 func executorEffortSchemas() []any {
@@ -142,7 +145,7 @@ func executorEffortSchemas() []any {
 		if !descriptor.Executor {
 			continue
 		}
-		efforts := provider.EffortsForTransport(descriptor.Transport)
+		efforts := append([]string{""}, provider.EffortsForTransport(descriptor.Transport)...)
 		schemas = append(schemas, map[string]any{
 			"if": map[string]any{
 				"properties": map[string]any{"cli": map[string]any{"const": descriptor.ID}},

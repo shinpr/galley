@@ -136,11 +136,9 @@ func TestApplyAcceptanceSkeletonResultToTaskWithDuplicatePathsPassesTaskValidate
 		},
 		Supervisor: task.Supervisor{ReviewIterations: 0},
 		Executor: task.Executor{
-			CLI:           "claude",
-			Model:         "opus",
-			Effort:        "high",
-			PromptProfile: "p",
-			PromptMode:    "replace",
+			CLI:    "claude",
+			Model:  "opus",
+			Effort: "high",
 		},
 		Preflight: &task.Preflight{AcceptanceSkeleton: &task.AcceptanceSkeletonConfig{Enabled: true, Mode: "skeleton"}},
 	}

@@ -211,7 +211,7 @@ If every supervisor try is killed by the idle-output watchdog, Galley records `e
 
 - Running multiple daemon processes is supported by claim conflict handling.
 - Background control uses a local PID file. Avoid sharing the same `--pid-file` across unrelated processes, and prefer one workflow root per managed daemon.
-- Running tasks heartbeat their YAML mtime while the executor loop is active. `--heartbeat-interval` defaults to `min(claim-ttl/4, 1m)`.
+- Running tasks heartbeat their YAML mtime while the executor loop is active. Heartbeat cadence is derived only from claim TTL as `min(claim_ttl / 4, 1m)`; it is not a separate daemon.yaml or CLI setting.
 - Each claimed running task records the owning daemon. On startup the daemon immediately requeues running tasks whose recorded owner is dead or cannot be verified, while leaving tasks still owned by a verified live daemon untouched.
 
 ### External Services

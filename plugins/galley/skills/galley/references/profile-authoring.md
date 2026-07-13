@@ -150,7 +150,6 @@ evidence_requirements:
 pass_policy:
   required_dimensions_must_pass: true
   min_score: 85
-  unresolved_high_findings_allowed: 0
   blocking_severities:
     - critical
     - high

@@ -174,7 +174,6 @@ type ExplicitOptions struct {
 	MaxConcurrentPerRepo   bool
 	PollInterval           bool
 	ClaimTTL               bool
-	HeartbeatInterval      bool
 	ShutdownTimeout        bool
 	IdleTimeout            bool
 	CommitOnAccept         bool
@@ -385,14 +384,13 @@ func (opts Options) withDefaults() Options {
 	if opts.IdleTimeout <= 0 {
 		opts.IdleTimeout = 10 * time.Minute
 	}
+	// Heartbeat cadence is derived only from claim_ttl: min(claim_ttl/4, 1m).
+	opts.HeartbeatInterval = opts.ClaimTTL / 4
 	if opts.HeartbeatInterval <= 0 {
-		opts.HeartbeatInterval = opts.ClaimTTL / 4
-		if opts.HeartbeatInterval <= 0 {
-			opts.HeartbeatInterval = time.Minute
-		}
-		if opts.HeartbeatInterval > time.Minute {
-			opts.HeartbeatInterval = time.Minute
-		}
+		opts.HeartbeatInterval = time.Minute
+	}
+	if opts.HeartbeatInterval > time.Minute {
+		opts.HeartbeatInterval = time.Minute
 	}
 	if opts.OpenPR && !opts.Explicit.CommitOnAccept {
 		opts.CommitOnAccept = true

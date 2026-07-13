@@ -19,24 +19,18 @@ SCHEMA_PATH = SCRIPT_DIR.parent / "references" / "task.schema.json"
 VALID_EXECUTOR_CLIS = {"claude", "codex", "glm", "grok"}
 ROOT_ORDER = [
     "id",
-    "mode",
-    "status",
     "goal",
     "acceptance_criteria",
     "scope",
     "files",
     "execution_policy",
     "worktree",
-    "supervisor",
     "executor",
     "preflight",
     "decisions",
     "risks",
     "discussion_items",
     "revision_requests",
-    "attempts",
-    "verification",
-    "pr",
 ]
 
 
@@ -226,8 +220,15 @@ def main() -> int:
         return 2
 
     task["id"] = task_id
-    task["mode"] = "afk"
-    task["status"] = "draft"
+    # mode, status, worktree.enabled, and AFK decision policy are fixed runtime
+    # defaults applied by Galley when omitted. Daemon-owned lifecycle sections
+    # (supervisor, attempts, verification, pr) are omitted from author drafts.
+    task.pop("mode", None)
+    task.pop("status", None)
+    task.pop("supervisor", None)
+    task.pop("attempts", None)
+    task.pop("verification", None)
+    task.pop("pr", None)
     task["goal"] = "TODO: replace with one concrete outcome."
     task["acceptance_criteria"] = [
         {
@@ -246,29 +247,21 @@ def main() -> int:
     task["execution_policy"] = {
         "loop_budget": args.loop_budget,
         "timeout_ms": 1800000,
-        "afk_decision_policy": "choose-smallest-reversible",
-        "stop_on_destructive_operation": True,
-        "stop_on_missing_secret": True,
-        "stop_on_external_service_unavailable": True,
     }
     task["worktree"] = {
-        "enabled": True,
         "branch": f"agent/{task_id}",
         "path": f"../{cwd.name}.worktrees/{task_id}",
     }
-    task["supervisor"] = {"review_iterations": 0}
     if args.executor_cli:
         task["executor"] = {"cli": args.executor_cli}
+    else:
+        task.pop("executor", None)
     # Emit the AC test skeleton preflight stage explicitly disabled by default so
-    # the generated YAML shows the runtime gate. Only `enabled` is written; any
-    # enabled-only fields (mode, required, allowed_paths, outputs) stay omitted
-    # until the author opts in by flipping enabled to true.
+    # the generated YAML shows the author opt-in. Only `enabled` is authored;
+    # outputs are daemon-owned runtime metadata.
     task["preflight"] = {"acceptance_skeleton": {"enabled": False}}
     task["decisions"] = []
     task["risks"] = []
-    task["attempts"] = []
-    task["verification"] = {"commands": []}
-    task["pr"] = {"url": "", "status": "", "processed_comment_ids": []}
 
     file_entries: list[dict[str, Any]] = []
     for source, destination in args.reference_file:

@@ -54,17 +54,11 @@
         "required_dimensions_must_pass": {
           "default": true,
           "type": "boolean"
-        },
-        "unresolved_high_findings_allowed": {
-          "default": 0,
-          "minimum": 0,
-          "type": "integer"
         }
       },
       "required": [
         "required_dimensions_must_pass",
         "min_score",
-        "unresolved_high_findings_allowed",
         "blocking_severities"
       ],
       "type": "object"

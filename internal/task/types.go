@@ -37,12 +37,11 @@ type Preflight struct {
 
 // AcceptanceSkeletonConfig configures the optional acceptance skeleton
 // preflight stage that materializes AC-linked test skeletons in the worktree
-// before the first executor attempt.
+// before the first executor attempt. Authors only set enabled; allowed paths
+// come from scope.allowed_paths, coverage is always required when enabled, and
+// outputs are daemon-owned runtime metadata written after the creator runs.
 type AcceptanceSkeletonConfig struct {
-	Enabled      bool     `yaml:"enabled" json:"enabled"`
-	Mode         string   `yaml:"mode,omitempty" json:"mode,omitempty"`
-	Required     *bool    `yaml:"required,omitempty" json:"required,omitempty"`
-	AllowedPaths []string `yaml:"allowed_paths,omitempty" json:"allowed_paths,omitempty"`
+	Enabled bool `yaml:"enabled" json:"enabled"`
 	// Outputs is daemon-owned runtime metadata. Authors opt in with enabled:true;
 	// the built-in creator writes these bindings back before the executor runs.
 	Outputs []AcceptanceSkeletonOutputDef `yaml:"outputs,omitempty" json:"outputs,omitempty"`
@@ -70,16 +69,9 @@ func (c *AcceptanceSkeletonConfig) IsEnabled() bool {
 }
 
 // IsRequired reports whether the stage requires every AC to have a skeleton
-// output or no_skeletons reason.
-// Defaults to true when the stage is enabled.
+// output or no_skeletons reason. Coverage is always required when enabled.
 func (c *AcceptanceSkeletonConfig) IsRequired() bool {
-	if c == nil || !c.Enabled {
-		return false
-	}
-	if c.Required == nil {
-		return true
-	}
-	return *c.Required
+	return c != nil && c.Enabled
 }
 
 // InputFile describes a source file Galley should place in the execution workspace.
@@ -108,14 +100,13 @@ type Scope struct {
 	Permission     string   `yaml:"permission" json:"permission"`
 }
 
-// ExecutionPolicy describes loop, timeout, and escalation behavior.
+// ExecutionPolicy describes the author-chosen loop and timeout budget.
+// AFK decision policy and blocker handling are fixed Galley behavior, not
+// task YAML knobs; destructive, secret, and external-service blockers still
+// surface through executor results and visible failure or escalation paths.
 type ExecutionPolicy struct {
-	LoopBudget                       LoopBudget `yaml:"loop_budget" json:"loop_budget"`
-	TimeoutMS                        int        `yaml:"timeout_ms" json:"timeout_ms"`
-	AFKDecisionPolicy                string     `yaml:"afk_decision_policy" json:"afk_decision_policy"`
-	StopOnDestructiveOperation       bool       `yaml:"stop_on_destructive_operation" json:"stop_on_destructive_operation"`
-	StopOnMissingSecret              bool       `yaml:"stop_on_missing_secret" json:"stop_on_missing_secret"`
-	StopOnExternalServiceUnavailable bool       `yaml:"stop_on_external_service_unavailable" json:"stop_on_external_service_unavailable"`
+	LoopBudget LoopBudget `yaml:"loop_budget" json:"loop_budget"`
+	TimeoutMS  int        `yaml:"timeout_ms" json:"timeout_ms"`
 }
 
 // LoopBudget is a non-negative attempt count. A count of zero means unlimited.

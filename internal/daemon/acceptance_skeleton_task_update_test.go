@@ -125,9 +125,8 @@ func TestApplyAcceptanceSkeletonResultToTaskWithDuplicatePathsPassesTaskValidate
 			Permission:     "edit",
 		},
 		ExecutionPolicy: task.ExecutionPolicy{
-			LoopBudget:        task.LoopBudget{Count: 1, Set: true},
-			TimeoutMS:         1000,
-			AFKDecisionPolicy: "choose-smallest-reversible",
+			LoopBudget: task.LoopBudget{Count: 1, Set: true},
+			TimeoutMS:  1000,
 		},
 		Worktree: task.Worktree{
 			Enabled: true,
@@ -140,7 +139,7 @@ func TestApplyAcceptanceSkeletonResultToTaskWithDuplicatePathsPassesTaskValidate
 			Model:  "opus",
 			Effort: "high",
 		},
-		Preflight: &task.Preflight{AcceptanceSkeleton: &task.AcceptanceSkeletonConfig{Enabled: true, Mode: "skeleton"}},
+		Preflight: &task.Preflight{AcceptanceSkeleton: &task.AcceptanceSkeletonConfig{Enabled: true}},
 	}
 
 	res := &skeletonpreflight.Result{Outputs: []skeletonpreflight.Output{

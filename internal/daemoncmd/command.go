@@ -137,8 +137,7 @@ func NewCommand(use string) *cobra.Command {
 	flags.IntVar(&opts.MaxConcurrentTasks, "max-concurrent-tasks", 1, "Maximum concurrent tasks")
 	flags.IntVar(&opts.MaxConcurrentPerRepo, "max-concurrent-per-repo", 1, "Maximum concurrent tasks per source repository; 0 disables the per-repo limit")
 	flags.DurationVar(&pollInterval, "poll-interval", 10*time.Second, "Polling interval for non-once mode")
-	flags.DurationVar(&opts.ClaimTTL, "claim-ttl", 30*time.Minute, "Recover running task and claim locks older than this duration")
-	flags.DurationVar(&opts.HeartbeatInterval, "heartbeat-interval", 0, "Running task heartbeat interval; defaults to min(claim-ttl/4, 1m)")
+	flags.DurationVar(&opts.ClaimTTL, "claim-ttl", 30*time.Minute, "Recover running task and claim locks older than this duration; also sets heartbeat cadence to min(claim-ttl/4, 1m)")
 	flags.DurationVar(&opts.ShutdownTimeout, "shutdown-timeout", 5*time.Minute, "After SIGINT/SIGTERM, let active attempts finish for this duration before canceling them")
 	flags.DurationVar(&opts.IdleTimeout, "idle-timeout", 10*time.Minute, "Kill an executor or built-in supervisor subprocess that produces no stdout/stderr output for this duration")
 	flags.StringVar(&supervisorProvider, "supervisor", "", fmt.Sprintf("Built-in supervisor adapter: %s; defaults to %s", strings.Join(daemonconfig.SupervisorCLIs(), ", "), daemon.DefaultSupervisor))
@@ -196,13 +195,6 @@ func applyDaemonConfig(opts *daemon.Options, pollInterval *time.Duration, cfg da
 			opts.ClaimTTL = d
 		}
 	}
-	if !opts.Explicit.HeartbeatInterval && cfg.HeartbeatInterval != "" {
-		if d, ok, err := daemonConfigDuration("heartbeat_interval", cfg.HeartbeatInterval); err != nil {
-			return err
-		} else if ok {
-			opts.HeartbeatInterval = d
-		}
-	}
 	if !opts.Explicit.ShutdownTimeout && cfg.ShutdownTimeout != "" {
 		if d, ok, err := daemonConfigDuration("shutdown_timeout", cfg.ShutdownTimeout); err != nil {
 			return err
@@ -244,7 +236,6 @@ func explicitOptionsFromFlags(cmd *cobra.Command) daemon.ExplicitOptions {
 		MaxConcurrentPerRepo: changed("max-concurrent-per-repo"),
 		PollInterval:         changed("poll-interval"),
 		ClaimTTL:             changed("claim-ttl"),
-		HeartbeatInterval:    changed("heartbeat-interval"),
 		ShutdownTimeout:      changed("shutdown-timeout"),
 		IdleTimeout:          changed("idle-timeout"),
 		Supervisor:           changed("supervisor"),

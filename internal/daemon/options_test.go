@@ -22,6 +22,26 @@ func TestWithDefaultsAppliesIdleTimeout(t *testing.T) {
 	}
 }
 
+func TestWithDefaultsDerivesHeartbeatFromClaimTTL(t *testing.T) {
+	t.Parallel()
+	if got := (Options{}).withDefaults().HeartbeatInterval; got != time.Minute {
+		t.Fatalf("default claim_ttl heartbeat got %s, want 1m", got)
+	}
+	if got := (Options{ClaimTTL: 2 * time.Minute}).withDefaults().HeartbeatInterval; got != 30*time.Second {
+		t.Fatalf("2m claim_ttl heartbeat got %s, want 30s", got)
+	}
+	if got := (Options{ClaimTTL: 4 * time.Minute}).withDefaults().HeartbeatInterval; got != time.Minute {
+		t.Fatalf("4m claim_ttl heartbeat got %s, want 1m", got)
+	}
+	if got := (Options{ClaimTTL: time.Hour}).withDefaults().HeartbeatInterval; got != time.Minute {
+		t.Fatalf("1h claim_ttl heartbeat got %s, want 1m", got)
+	}
+	// Leftover HeartbeatInterval is ignored; claim_ttl is the sole input.
+	if got := (Options{ClaimTTL: 2 * time.Minute, HeartbeatInterval: 5 * time.Second}).withDefaults().HeartbeatInterval; got != 30*time.Second {
+		t.Fatalf("stale HeartbeatInterval must be overwritten, got %s", got)
+	}
+}
+
 func TestPreflightDefaultsSupervisorToClaude(t *testing.T) {
 	t.Parallel()
 	opts, err := Preflight(Options{Root: t.TempDir()})

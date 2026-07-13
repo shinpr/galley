@@ -43,12 +43,11 @@ func QualityJSONSchema() ([]byte, error) {
 				}),
 			),
 			"pass_policy": object(
-				required("required_dimensions_must_pass", "min_score", "unresolved_high_findings_allowed", "blocking_severities"),
+				required("required_dimensions_must_pass", "min_score", "blocking_severities"),
 				properties(map[string]any{
-					"required_dimensions_must_pass":    boolSchema("default", true),
-					"min_score":                        integerSchema("minimum", 0, "maximum", 100, "default", 85),
-					"unresolved_high_findings_allowed": integerSchema("minimum", 0, "default", 0),
-					"blocking_severities":              arraySchema(enumSchema([]string{"critical", "high", "medium", "low"}), "default", []string{"critical", "high", "medium"}),
+					"required_dimensions_must_pass": boolSchema("default", true),
+					"min_score":                     integerSchema("minimum", 0, "maximum", 100, "default", 85),
+					"blocking_severities":           arraySchema(enumSchema([]string{"critical", "high", "medium", "low"}), "default", []string{"critical", "high", "medium"}),
 				}),
 			),
 		}),

@@ -178,6 +178,9 @@ func newTaskShowCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Resolve omitted fixed authoring values (mode, draft status, worktree)
+			// so display matches validate/queue eligibility semantics.
+			task.ApplyDefaults(&loaded)
 			item := taskSummary(path, loaded)
 			preflight := preflightSummary(loaded)
 			if preflight != nil {
@@ -280,6 +283,7 @@ func listTaskItems(root, state string) ([]taskListItem, error) {
 				})
 				continue
 			}
+			task.ApplyDefaults(&loaded)
 			items = append(items, taskSummary(path, loaded))
 		}
 	}

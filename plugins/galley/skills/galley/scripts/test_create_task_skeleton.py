@@ -89,12 +89,25 @@ def main() -> int:
         "  acceptance_skeleton:\n    enabled: false\n",
         "preflight.acceptance_skeleton.enabled: false",
     )
+    assert_contains(yaml_text, "execution_policy:\n", "execution_policy block")
+    assert_contains(yaml_text, "  loop_budget:", "loop_budget")
+    assert_contains(yaml_text, "  timeout_ms:", "timeout_ms")
+
+    # Fixed AFK values and daemon-owned lifecycle sections stay out of drafts.
+    assert_not_matches(yaml_text, r"^mode:", "mode in default skeleton")
+    assert_not_matches(yaml_text, r"^status:", "status in default skeleton")
+    assert_not_matches(yaml_text, r"^supervisor:", "supervisor in default skeleton")
+    assert_not_matches(yaml_text, r"^attempts:", "attempts in default skeleton")
+    assert_not_matches(yaml_text, r"^verification:", "verification in default skeleton")
+    assert_not_matches(yaml_text, r"^pr:", "pr in default skeleton")
+    assert_not_matches(yaml_text, r"^worktree:\n(?:  .+\n)*?  enabled:", "worktree.enabled in default skeleton")
+    assert_not_matches(yaml_text, r"afk_decision_policy", "afk_decision_policy in default skeleton")
+    assert_not_matches(yaml_text, r"stop_on_", "stop_on_* in default skeleton")
 
     # Default skeleton must not include enabled-only runtime fields.
     assert_not_matches(yaml_text, r"^    outputs:", "outputs[] in default skeleton")
     assert_not_matches(yaml_text, r"^    required:", "required in default skeleton")
     assert_not_matches(yaml_text, r"^    allowed_paths:", "allowed_paths in default skeleton")
-    assert_not_matches(yaml_text, r"^    mode:", "mode in default skeleton")
     if generated_executor_cli(yaml_text) is not None:
         raise SystemExit("regression: default skeleton must inherit executor.cli at run time")
     assert_not_matches(yaml_text, r"^\s+max_budget_usd:", "executor.max_budget_usd in default skeleton")

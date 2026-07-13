@@ -6,12 +6,10 @@ Use the plugin skill for normal authoring. This document is the reference for re
 
 ## Starter Template
 
-This template includes the fields needed for validation plus the runtime sections Galley updates later. Start here when writing a task by hand.
+Author only the decisions that matter. Galley applies fixed AFK defaults (`mode: afk`, draft `status`, enabled isolated worktree, `choose-smallest-reversible` ambiguity policy) when they are omitted. Daemon-owned sections (`supervisor`, `attempts`, `verification`, `pr`, and acceptance-skeleton `outputs`) appear after queueing and execution transitions.
 
 ```yaml
 id: "task-20260509-example"
-mode: "afk"
-status: "draft"
 goal: "Implement the requested repository change with evidence."
 acceptance_criteria:
   - id: "AC1"
@@ -29,27 +27,17 @@ scope:
 execution_policy:
   loop_budget: 10
   timeout_ms: 1200000
-  afk_decision_policy: "choose-smallest-reversible"
-  stop_on_destructive_operation: true
-  stop_on_missing_secret: false
-  stop_on_external_service_unavailable: false
 worktree:
-  enabled: true
   branch: "agent/task-20260509-example"
   path: "../repo.worktrees/task-20260509-example"
-supervisor:
-  review_iterations: 0
 executor:
   cli: "claude"
   effort: "high"
+preflight:
+  acceptance_skeleton:
+    enabled: false
 decisions: []
 risks: []
-attempts: []
-verification:
-  commands: []
-pr:
-  url: ""
-  status: ""
 ```
 
 Validate before queueing:
@@ -67,25 +55,24 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 ## Fields
 
 - `id`: stable task identifier. Use letters, numbers, dot, underscore, and dash.
-- `mode`: currently `afk`.
-- `status`: use `draft` before queueing. Galley updates this as the task moves through the queue.
+- `mode`: optional; defaults to `afk`.
+- `status`: optional for authors; defaults to `draft` before validation, display, and queue eligibility. Queueing persists `queued` through the normal transition.
 - `goal`: concise objective for the work.
 - `acceptance_criteria[]`: observable completion requirements with stable IDs such as `AC1`.
 - `files[]`: optional user-supplied files to place in the execution workspace.
 - `scope`: repository path, expected implementation paths, protected paths, and permission level.
-- `execution_policy`: attempt budget, timeout, and escalation behavior.
-- `worktree`: isolated branch and sibling worktree location for AFK execution.
-- `supervisor`: review loop settings.
-- `executor`: executor CLI and model settings.
-- `decisions`, `risks`, `attempts`, `verification`, `pr`: audit and runtime state updated by Galley.
+- `execution_policy`: author-chosen attempt budget and timeout only (`loop_budget`, `timeout_ms`).
+- `worktree`: isolated branch and sibling worktree location. `enabled` defaults to true for AFK; authors set `branch` and `path`.
+- `executor`: optional per-field overrides for CLI, model, and effort.
+- `preflight.acceptance_skeleton.enabled`: optional boolean that selects the fixed skeleton preflight flow.
+- `decisions`, `risks`: author and executor notes.
+- `supervisor`, `attempts`, `verification`, `pr`: daemon-owned runtime state. Omit them from new drafts; Galley populates them during lifecycle transitions.
 
 ## Execution Policy And Executor
 
-- `execution_policy.loop_budget`: non-negative attempt count; `0` means unlimited.
-- `execution_policy.afk_decision_policy`: currently `choose-smallest-reversible`; the executor should choose the smallest reversible option when it can continue without human input.
-- `execution_policy.stop_on_destructive_operation`: stop when the task would require out-of-scope destructive work.
-- `execution_policy.stop_on_missing_secret`: stop when a required secret is unavailable and cannot be replaced by safe local evidence.
-- `execution_policy.stop_on_external_service_unavailable`: stop when a required external service is unavailable and the task cannot proceed with local substitutes.
+- `execution_policy.loop_budget`: non-negative attempt count; `0` means unlimited. Omitted values default to `10`.
+- `execution_policy.timeout_ms`: positive per-attempt timeout in milliseconds.
+- AFK decision policy is fixed to `choose-smallest-reversible` and is no longer authored. Destructive-operation, missing-secret, and external-service blockers continue through executor results and visible failure or escalation paths without task YAML booleans.
 - `executor`: optional. Each `cli`, `model`, and `effort` field resolves from the task, current `environment.yaml`, then built-in defaults (`cli: claude`, `effort: high`, CLI-default model). Environment values remain runtime-only.
 - `executor.cli`: selects `claude`, `codex`, `glm`, or `grok`. Grok uses the logged-in `grok` CLI for setup, acceptance-skeleton creation, and implementation.
 - `executor.model`: optional model override. Omit it to use the selected CLI's configured default model.
@@ -128,12 +115,11 @@ files:
 
 ```yaml
 worktree:
-  enabled: true
   branch: "agent/task-20260509-example"
   path: "../repo.worktrees/task-20260509-example"
 ```
 
-This keeps the source repository clean while the executor edits the isolated worktree.
+This keeps the source repository clean while the executor edits the isolated worktree. Omitted `worktree.enabled` defaults to true for AFK tasks.
 
 ## Acceptance Criteria
 
@@ -152,9 +138,7 @@ Example:
 
 ## Acceptance Skeleton Preflight
 
-`preflight.acceptance_skeleton` is an optional stage that creates AC-linked test skeletons before the first executor attempt. When enabled, Galley records the result and adds skeleton obligations to the executor work order.
-
-New task skeletons include the stage in its default disabled state:
+`preflight.acceptance_skeleton` is an optional stage that creates AC-linked test skeletons before the first executor attempt. Authors choose only `enabled`.
 
 ```yaml
 preflight:
@@ -164,32 +148,17 @@ preflight:
 
 Disabled preflight has the same daemon behavior as omitting `preflight` entirely. Set `enabled` to `true` when the task should create acceptance-criterion-linked skeleton files before the executor starts.
 
+When enabled:
+
+- write paths are always `scope.allowed_paths` (and remain outside `scope.forbidden_paths`)
+- every AC must produce a skeleton output or an explicit `no_skeletons` reason
+- the daemon writes runtime `outputs[]` back to the running task
+
 When a task reuses its existing worktree after a requeue, Galley reuses previously completed setup and acceptance-skeleton evidence instead of running those phases again. A new worktree, or a phase with no prior successful result, still runs normal preflight.
-
-```yaml
-preflight:
-  acceptance_skeleton:
-    enabled: true
-    required: true            # default true when enabled; require each AC to have output or no_skeletons
-    allowed_paths:            # optional; defaults to scope.allowed_paths
-      - "internal"
-    outputs:                  # daemon-owned; written after the built-in creator runs
-      - ac_id: "AC1"
-        path: "internal/foo/foo_test.go"
-        kind: "go-test"
-        purpose: "Verify the AC1 behavior boundary"
-        satisfies: "AC1's observable foo behavior"
-        integration_point: "Executor completes this skeleton before final acceptance"
-        implementation_required: true
-```
-
-The built-in creator writes AC-linked skeleton files and returns a manifest. Generated paths must be relative, inside the effective allowed paths, outside `scope.forbidden_paths`, and backed by real files.
 
 The skeleton creator follows `executor.cli` and reuses `executor.model` and `executor.effort`. The daemon supervisor backend controls only review.
 
 Required quality checks remain executor evidence for supervisor review; the skeleton stage does not add a second command-matching gate.
-
-`required: false` relaxes AC coverage: Galley no longer requires every AC to have an output or a `no_skeletons[]` reason.
 
 ## Loop Budget
 
@@ -197,7 +166,7 @@ Required quality checks remain executor evidence for supervisor review; the skel
 
 For AFK implementation tasks, `10` is the recommended default. Values below `5` are best reserved for intentionally short, low-cost runs because they can stop useful revision loops too early. Use `0` only when the user explicitly wants an unbounded run.
 
-`supervisor.review_iterations` controls supervisor-only follow-up iterations. `0` means Galley uses the supervisor as an acceptance gate after executor attempts, without additional supervisor-only review loops.
+`supervisor.review_iterations` is daemon-owned runtime state after review transitions. Authors do not set it in new drafts.
 
 ## Queue State
 
@@ -219,8 +188,6 @@ galley task show TASK_ID
 galley task requeue TASK_ID --reason "retry after transient failure"
 ```
 
-Requeue is useful for transient failures such as usage limits or temporary service errors.
+## Compatibility
 
-## Task YAML Decoding
-
-Galley decodes known task YAML fields and ignores unknown fields at runtime. Malformed YAML, incompatible top-level shape, and type mismatches in known fields still fail validation, queueing, requeueing, and daemon execution.
+Removed authoring keys such as `execution_policy.afk_decision_policy`, `execution_policy.stop_on_*`, `preflight.acceptance_skeleton.mode`, `required`, and `allowed_paths` still load through the unknown-field-tolerant task decoder and disappear on the next save. Runtime Task model fields for lifecycle state remain available to the daemon.

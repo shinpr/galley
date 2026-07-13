@@ -136,7 +136,6 @@ func TestApplyDaemonConfigFillsAbsentFlagsAndPreservesExplicit(t *testing.T) {
 		MaxConcurrentPerRepo: &two,
 		PollInterval:         "30s",
 		ClaimTTL:             "1h",
-		HeartbeatInterval:    "15s",
 		ShutdownTimeout:      "2m",
 		IdleTimeout:          "5m",
 	}
@@ -160,8 +159,12 @@ func TestApplyDaemonConfigFillsAbsentFlagsAndPreservesExplicit(t *testing.T) {
 	if opts.ShutdownTimeout != 2*time.Minute {
 		t.Fatalf("daemon.yaml shutdown_timeout not applied: %s", opts.ShutdownTimeout)
 	}
-	if opts.ClaimTTL != time.Hour || opts.HeartbeatInterval != 15*time.Second || opts.IdleTimeout != 5*time.Minute {
+	if opts.ClaimTTL != time.Hour || opts.IdleTimeout != 5*time.Minute {
 		t.Fatalf("daemon.yaml durations not applied: %#v", opts)
+	}
+	// Heartbeat is derived from claim_ttl at withDefaults time, not from config.
+	if opts.HeartbeatInterval != 0 {
+		t.Fatalf("heartbeat must not be filled from daemon.yaml; got %s", opts.HeartbeatInterval)
 	}
 	if poll != 30*time.Second {
 		t.Fatalf("daemon.yaml poll_interval not applied: %s", poll)

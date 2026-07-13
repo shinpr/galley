@@ -11,15 +11,13 @@ const (
 )
 
 var (
-	validModes                  = []string{"afk"}
-	validStatuses               = AllStatuses()
-	validPermissions            = []string{"read-only", "edit", "sandbox-full-access"}
-	validExecutorCLIs           = provider.ExecutorIDs()
-	validClaudeEfforts          = provider.EffortsForTransport(provider.TransportClaude)
-	validCodexEfforts           = provider.EffortsForTransport(provider.TransportCodex)
-	validAFKDecisionPolicies    = []string{"choose-smallest-reversible"}
-	validPreflightSkeletonModes = []string{"skeleton"}
-	validTaskIDPattern          = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+	validModes         = []string{"afk"}
+	validStatuses      = AllStatuses()
+	validPermissions   = []string{"read-only", "edit", "sandbox-full-access"}
+	validExecutorCLIs  = provider.ExecutorIDs()
+	validClaudeEfforts = provider.EffortsForTransport(provider.TransportClaude)
+	validCodexEfforts  = provider.EffortsForTransport(provider.TransportCodex)
+	validTaskIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 )
 
 // ExecutorCLIEnum returns the supported executor.cli values in the stable order

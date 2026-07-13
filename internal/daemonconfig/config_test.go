@@ -42,13 +42,15 @@ func TestEnsureDefaultCreatesFileWithDocumentedDefaults(t *testing.T) {
 		"max_concurrent_per_repo: 1",
 		"poll_interval: 10s",
 		"claim_ttl: 30m",
-		"heartbeat_interval: 1m",
 		"shutdown_timeout: 5m",
 		"idle_timeout: 10m",
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("daemon.yaml missing %q\ncontent:\n%s", want, content)
 		}
+	}
+	if strings.Contains(content, "heartbeat_interval") {
+		t.Fatalf("daemon.yaml must not expose heartbeat_interval; cadence is derived from claim_ttl\ncontent:\n%s", content)
 	}
 }
 
@@ -87,7 +89,7 @@ func TestEnsureDefaultThenLoadRoundTripsDocumentedDefaults(t *testing.T) {
 	if file.MaxConcurrentPerRepo == nil || *file.MaxConcurrentPerRepo != 1 {
 		t.Fatalf("max_concurrent_per_repo got %#v, want 1", file.MaxConcurrentPerRepo)
 	}
-	if file.PollInterval != "10s" || file.ClaimTTL != "30m" || file.HeartbeatInterval != "1m" ||
+	if file.PollInterval != "10s" || file.ClaimTTL != "30m" ||
 		file.ShutdownTimeout != "5m" || file.IdleTimeout != "10m" {
 		t.Fatalf("duration defaults drifted: %#v", file)
 	}
@@ -156,7 +158,6 @@ max_concurrent_tasks: 4
 max_concurrent_per_repo: 2
 poll_interval: 30s
 claim_ttl: 1h
-heartbeat_interval: 15s
 shutdown_timeout: 2m
 idle_timeout: 5m
 `
@@ -179,8 +180,30 @@ idle_timeout: 5m
 	if file.MaxConcurrentPerRepo == nil || *file.MaxConcurrentPerRepo != 2 {
 		t.Fatalf("max_concurrent_per_repo got %#v", file.MaxConcurrentPerRepo)
 	}
-	if file.PollInterval != "30s" || file.ClaimTTL != "1h" || file.HeartbeatInterval != "15s" || file.ShutdownTimeout != "2m" || file.IdleTimeout != "5m" {
+	if file.PollInterval != "30s" || file.ClaimTTL != "1h" || file.ShutdownTimeout != "2m" || file.IdleTimeout != "5m" {
 		t.Fatalf("durations got %#v", file)
+	}
+}
+
+func TestLoadStripsLegacyHeartbeatInterval(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	body := `supervisor: claude
+claim_ttl: 1h
+heartbeat_interval: 15s
+`
+	if err := os.WriteFile(filepath.Join(root, Filename), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, present, err := Load(root)
+	if err != nil {
+		t.Fatalf("legacy heartbeat_interval should be stripped, got %v", err)
+	}
+	if !present {
+		t.Fatalf("expected present=true")
+	}
+	if file.ClaimTTL != "1h" {
+		t.Fatalf("claim_ttl got %q, want 1h", file.ClaimTTL)
 	}
 }
 

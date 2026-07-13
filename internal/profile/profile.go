@@ -42,7 +42,6 @@ type EvidenceRequirements struct {
 type PassPolicy struct {
 	RequiredDimensionsMustPass bool     `yaml:"required_dimensions_must_pass" json:"required_dimensions_must_pass"`
 	MinScore                   int      `yaml:"min_score" json:"min_score"`
-	UnresolvedHighAllowed      int      `yaml:"unresolved_high_findings_allowed" json:"unresolved_high_findings_allowed"`
 	BlockingSeverities         []string `yaml:"blocking_severities" json:"blocking_severities"`
 }
 

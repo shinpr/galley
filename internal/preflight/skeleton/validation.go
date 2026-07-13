@@ -264,18 +264,14 @@ func foldPathCase(p string) string {
 	return p
 }
 
-// EffectivePreflightPaths resolves preflight allowed paths against task scope.
-// When preflight.acceptance_skeleton.allowed_paths is empty the effective set
-// equals scope.allowed_paths. Forbidden paths are always inherited from scope.
+// EffectivePreflightPaths resolves skeleton write paths from task scope.
+// Allowed paths always equal scope.allowed_paths; forbidden paths are inherited
+// from scope.forbidden_paths.
 func EffectivePreflightPaths(t task.Task) ([]string, []string, error) {
 	if t.Preflight == nil || t.Preflight.AcceptanceSkeleton == nil {
 		return nil, nil, fmt.Errorf("preflight.acceptance_skeleton is not configured")
 	}
-	cfg := t.Preflight.AcceptanceSkeleton
-	allowed := cfg.AllowedPaths
-	if len(allowed) == 0 {
-		allowed = append([]string{}, t.Scope.AllowedPaths...)
-	}
+	allowed := append([]string{}, t.Scope.AllowedPaths...)
 	forbidden := append([]string{}, t.Scope.ForbiddenPaths...)
 	return allowed, forbidden, nil
 }

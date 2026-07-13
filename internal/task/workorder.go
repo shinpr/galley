@@ -40,7 +40,7 @@ func RenderWorkOrderWithProfiles(t Task, profiles profile.Bundle) string {
 	fmt.Fprintf(&b, "- loop budget: `%v`\n", t.ExecutionPolicy.LoopBudget)
 	fmt.Fprintf(&b, "- timeout ms: `%d`\n", t.ExecutionPolicy.TimeoutMS)
 	if t.Mode == "afk" {
-		fmt.Fprintf(&b, "- AFK decision policy: `%s`\n", t.ExecutionPolicy.AFKDecisionPolicy)
+		fmt.Fprintf(&b, "- AFK decision policy: `%s`\n", DefaultAFKDecisionPolicy)
 	}
 	renderProfileContext(&b, profiles)
 	renderPreflightObligations(&b, t)

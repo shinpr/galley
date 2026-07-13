@@ -30,6 +30,9 @@ func loadExampleTask(t *testing.T, rel string) Task {
 	if err != nil {
 		t.Fatalf("load %s: %v", rel, err)
 	}
+	// Examples may omit fixed AFK authoring values; public validate/queue paths
+	// apply the same defaults before structural checks.
+	ApplyDefaults(&loaded)
 	return loaded
 }
 
@@ -43,6 +46,9 @@ func TestExampleAFKTaskClaudeStillValid(t *testing.T) {
 	}
 	if loaded.Executor.CLI != "claude" {
 		t.Fatalf("examples/afk-task.yaml executor.cli = %q, want %q", loaded.Executor.CLI, "claude")
+	}
+	if loaded.Mode != DefaultMode || loaded.Status != StatusDraft || !loaded.Worktree.Enabled {
+		t.Fatalf("example defaults: mode=%q status=%q enabled=%v", loaded.Mode, loaded.Status, loaded.Worktree.Enabled)
 	}
 }
 

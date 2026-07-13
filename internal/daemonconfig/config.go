@@ -59,7 +59,6 @@ type File struct {
 	MaxConcurrentPerRepo *int   `yaml:"max_concurrent_per_repo,omitempty"`
 	PollInterval         string `yaml:"poll_interval,omitempty"`
 	ClaimTTL             string `yaml:"claim_ttl,omitempty"`
-	HeartbeatInterval    string `yaml:"heartbeat_interval,omitempty"`
 	ShutdownTimeout      string `yaml:"shutdown_timeout,omitempty"`
 	IdleTimeout          string `yaml:"idle_timeout,omitempty"`
 	// GLMAPIKey is the Z.ai token used when glm is the executor or supervisor.
@@ -147,7 +146,6 @@ func Defaults() File {
 		MaxConcurrentPerRepo: &one,
 		PollInterval:         "10s",
 		ClaimTTL:             "30m",
-		HeartbeatInterval:    "1m",
 		ShutdownTimeout:      "5m",
 		IdleTimeout:          "10m",
 		Notifications: &NotificationConfig{
@@ -202,7 +200,8 @@ func EnsureDefault(root string) (bool, error) {
 
 // Load reads daemon.yaml under root. The boolean reports whether the file was
 // present. A missing file is not an error; the caller proceeds with built-in
-// defaults.
+// defaults. Legacy heartbeat_interval keys are stripped before strict decode
+// because heartbeat cadence is derived solely from claim_ttl.
 func Load(root string) (File, bool, error) {
 	if root == "" {
 		return File{}, false, errors.New("daemonconfig: root is required")
@@ -215,6 +214,7 @@ func Load(root string) (File, bool, error) {
 		}
 		return File{}, false, fmt.Errorf("read %s: %w", path, err)
 	}
+	data = stripLegacyHeartbeatInterval(data)
 	var file File
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
@@ -225,6 +225,39 @@ func Load(root string) (File, bool, error) {
 		return File{}, true, fmt.Errorf("validate %s: %w", path, err)
 	}
 	return file, true, nil
+}
+
+// stripLegacyHeartbeatInterval drops the removed heartbeat_interval key so
+// existing daemon.yaml files created before claim_ttl-derived heartbeats keep
+// loading under KnownFields(true).
+func stripLegacyHeartbeatInterval(data []byte) []byte {
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return data
+	}
+	doc := &root
+	if root.Kind == yaml.DocumentNode && len(root.Content) > 0 {
+		doc = root.Content[0]
+	}
+	if doc.Kind != yaml.MappingNode {
+		return data
+	}
+	filtered := make([]*yaml.Node, 0, len(doc.Content))
+	for i := 0; i+1 < len(doc.Content); i += 2 {
+		if doc.Content[i].Value == "heartbeat_interval" {
+			continue
+		}
+		filtered = append(filtered, doc.Content[i], doc.Content[i+1])
+	}
+	if len(filtered) == len(doc.Content) {
+		return data
+	}
+	doc.Content = filtered
+	out, err := yaml.Marshal(&root)
+	if err != nil {
+		return data
+	}
+	return out
 }
 
 // Validate checks that the fields present in the file are well-formed. An
@@ -258,7 +291,6 @@ func (f File) Validate() error {
 	}{
 		{"poll_interval", f.PollInterval},
 		{"claim_ttl", f.ClaimTTL},
-		{"heartbeat_interval", f.HeartbeatInterval},
 		{"shutdown_timeout", f.ShutdownTimeout},
 		{"idle_timeout", f.IdleTimeout},
 	} {

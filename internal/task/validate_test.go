@@ -175,19 +175,9 @@ func TestValidateStructuralRejectsInvalidCases(t *testing.T) {
 			want: "files[0].destination must not be within scope.forbidden_paths",
 		},
 		{
-			name: "invalid afk policy",
-			mutate: func(task *Task) {
-				task.Mode = "afk"
-				task.ExecutionPolicy.AFKDecisionPolicy = "ask-human"
-				task.Worktree = Worktree{Enabled: true, Branch: "agent/test", Path: "../repo.worktrees/test"}
-			},
-			want: "execution_policy.afk_decision_policy must be one of",
-		},
-		{
 			name: "invalid worktree branch",
 			mutate: func(task *Task) {
 				task.Mode = "afk"
-				task.ExecutionPolicy.AFKDecisionPolicy = "choose-smallest-reversible"
 				task.Worktree = Worktree{Enabled: true, Branch: "-bad", Path: "../repo.worktrees/test"}
 			},
 			want: "worktree.branch must be a valid git branch name",
@@ -196,7 +186,6 @@ func TestValidateStructuralRejectsInvalidCases(t *testing.T) {
 			name: "source repo internal worktree path",
 			mutate: func(task *Task) {
 				task.Mode = "afk"
-				task.ExecutionPolicy.AFKDecisionPolicy = "choose-smallest-reversible"
 				task.Worktree = Worktree{Enabled: true, Branch: "agent/test", Path: "worktrees/test"}
 			},
 			want: "worktree.path must point to a sibling path outside scope.cwd",
@@ -205,7 +194,6 @@ func TestValidateStructuralRejectsInvalidCases(t *testing.T) {
 			name: "parent worktree path",
 			mutate: func(task *Task) {
 				task.Mode = "afk"
-				task.ExecutionPolicy.AFKDecisionPolicy = "choose-smallest-reversible"
 				task.Worktree = Worktree{Enabled: true, Branch: "agent/test", Path: "../../worktrees/test"}
 			},
 			want: `worktree.path contains parent traversal path "../../worktrees/test"`,
@@ -214,7 +202,6 @@ func TestValidateStructuralRejectsInvalidCases(t *testing.T) {
 			name: "afk human decision missing chosen",
 			mutate: func(task *Task) {
 				task.Mode = "afk"
-				task.ExecutionPolicy.AFKDecisionPolicy = "choose-smallest-reversible"
 				task.Worktree = Worktree{Enabled: true, Branch: "agent/test", Path: "../repo.worktrees/test"}
 				task.Decisions = []Decision{{ID: "D1", NeedsHumanReview: true}}
 			},
@@ -257,7 +244,6 @@ func TestValidateStructuralAcceptsSiblingWorktreePath(t *testing.T) {
 	t.Parallel()
 	task := validTask(t)
 	task.Mode = "afk"
-	task.ExecutionPolicy.AFKDecisionPolicy = "choose-smallest-reversible"
 	task.Worktree = Worktree{Enabled: true, Branch: "agent/test", Path: "../repo.worktrees/test"}
 
 	result := ValidateStructural(task)
@@ -355,9 +341,8 @@ func validTask(t *testing.T) Task {
 			Permission:   "edit",
 		},
 		ExecutionPolicy: ExecutionPolicy{
-			LoopBudget:        LoopBudget{Count: 3, Set: true},
-			TimeoutMS:         600000,
-			AFKDecisionPolicy: "choose-smallest-reversible",
+			LoopBudget: LoopBudget{Count: 3, Set: true},
+			TimeoutMS:  600000,
 		},
 		Worktree: Worktree{
 			Enabled: true,

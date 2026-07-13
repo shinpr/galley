@@ -138,7 +138,7 @@ galley daemon status --output json
 
 Interpret daemon-dependent settings before asking:
 
-- If a verified daemon is already running, use its current daemon settings as the execution condition. Present supervisor, concurrency, polling interval, claim TTL, heartbeat interval, and shutdown timeout as current daemon state, not user-selectable task options.
+- If a verified daemon is already running, use its current daemon settings as the execution condition. Present supervisor, concurrency, polling interval, claim TTL (which also sets heartbeat cadence to `min(claim_ttl/4, 1m)`), and shutdown timeout as current daemon state, not user-selectable task options.
 - Repository operation settings come from `environment.yaml`: PR creation, PR base branch, PR comment polling/replies, and worktree cleanup.
 - Galley-owned required-check execution settings also come from `environment.yaml`: `required_checks.shell` controls the shell Galley uses when it runs `quality.required_checks` after an executor attempt.
 - Repository executor defaults come from `environment.yaml`. Read its executor block, resolve CLI, model, and effort independently using task override, environment value, then built-in default, and present each effective value with its source. Confirm that the effective effort is valid for the effective CLI before approval; model names remain CLI-owned. Record a task override only when the user requests one.
@@ -150,7 +150,7 @@ Then propose execution settings with user-facing explanations and choices. Treat
 
 Execution-setting content requirements:
 
-- Task YAML settings: optional executor overrides, edit authority, retry budget, per-attempt timeout, AC test skeleton preflight, and blocking severity policy.
+- Task YAML settings: optional executor overrides, edit authority, retry budget, per-attempt timeout, and AC test skeleton preflight (`enabled` only). Mode, status, worktree isolation, and AFK decision policy are fixed Galley defaults; daemon-owned lifecycle sections are omitted from drafts.
 - Environment profile settings: PR behavior, PR base branch, PR comments, worktree cleanup, and required-check shell from the current `environment.yaml`; create missing profiles through `references/profile-authoring.md` before queueing ordinary implementation work. Required-check shell controls Galley's own `quality.required_checks` execution, not executor/supervisor-internal commands or daemon startup flags.
 - Effective executor: present CLI, model, and effort with `task`, `environment`, or `built-in` as the source of each value. Show an omitted model as `CLI default`. Validate effort against the effective CLI before approval. GLM requires `glm_api_key`; Grok requires its authenticated CLI.
 - Executor model override (`executor.model`): omit it by default so the selected CLI uses its configured default model. If the user names a model, record that exact value. If the user is unsure or the model name was inferred, do not guess; offer a small runtime smoke check before queueing because available model names depend on the user's account, provider, CLI configuration, and CLI version.
@@ -203,7 +203,7 @@ Use `--committed-file SOURCE=DESTINATION` only when the supplied file is intenti
 
 Edit the generated skeleton fields instead of replacing the whole file. Use `references/task.schema.json` as the field contract. Keep optional runtime arrays empty until a valid structured entry is needed.
 
-Common shapes:
+Common shapes (author-facing only). Omit fixed AFK defaults (`mode`, draft `status`, `worktree.enabled`, AFK decision policy), removed blocker booleans (`stop_on_*`), and daemon-owned lifecycle sections (`supervisor`, `attempts`, top-level `verification`, `pr`) from new drafts:
 
 ```yaml
 acceptance_criteria:
@@ -226,20 +226,13 @@ risks:
     detail: "What could go wrong."
     mitigation: "How the executor should prevent or detect it."
     human_review_suggested: false
-
-verification:
-  commands:
-    - cmd: "<repo test command>"
-      status: pending
-      output_excerpt: ""
 ```
 
-Use `decisions: []`, `risks: []`, and `verification.commands: []` when those entries are not necessary.
+Use `decisions: []` and `risks: []` when those entries are not necessary. Do not seed empty `attempts`, top-level `verification`, or `pr` blocks in drafts.
 
 ## Field Guidance
 
-- `mode`: use `afk` for daemon execution.
-- `status`: write new tasks as `draft`; `galley task queue` writes the queued copy with `status: queued`.
+- Omit `mode`, `status`, `worktree.enabled`, AFK decision policy, and daemon-owned lifecycle sections (`supervisor`, `attempts`, top-level `verification`, `pr`) from new drafts. Galley defaults mode to `afk`, omitted status to `draft` for validate/show/list/queue eligibility, enables worktree isolation for AFK, and persists `status: queued` when queueing.
 - `scope.permission`: prefer broad operations inside the isolated worktree (`sandbox-full-access`) for AFK implementation tasks; use investigation only (`read-only`) for review tasks; use normal edits (`edit`) when broad sandbox authority is unnecessary or unavailable.
 - `allowed_paths`: choose the narrowest expected implementation paths that cover approved edits and any reference-file destinations. This is the review baseline for scope expansion, not an absolute executor stop; `forbidden_paths` defines protected paths that must not be changed.
 - `executor.cli` / `model` / `effort`: write only values the user explicitly pins and preserve existing pins. Omitted fields inherit the current environment, then `cli: claude`, `effort: high`, and the CLI-default model. Use exact user-provided model names. Galley owns prompt transport, so task YAML contains only these three executor fields.
@@ -251,8 +244,7 @@ Use `decisions: []`, `risks: []`, and `verification.commands: []` when those ent
 - `files[].commit`: use `false` for context-only inputs; use `true` only when the supplied file is intentionally part of the final branch.
 - `execution_policy.loop_budget`: use `10` as the ordinary-task baseline for AFK implementation so Galley can complete corrective loops. Increase it for broader or more uncertain tasks. Use less than `5` only when the user explicitly wants a short, low-cost run; use `0` only when the user explicitly requests an unbounded loop.
 - Blocking severity is enforced by the resolved quality profile and supervisor policy, not by a top-level task schema field. Show the current profile threshold in execution settings and the final queue summary. Use profile authoring when the user wants to change repository-wide blocking severities. Record task-specific review preferences in `decisions` only as guidance.
-- `worktree.path`: use a sibling path outside the source repo, such as `../<repo-name>.worktrees/<short-name>`.
-- `supervisor.review_iterations`: start at `0`; Galley increments it when reviewed work is requeued.
+- `worktree.branch` / `worktree.path`: set the isolated branch and a sibling path outside the source repo, such as `../<repo-name>.worktrees/<short-name>`. Do not author `worktree.enabled`; AFK isolation is fixed on.
 
 ## Step 8: Validate And Repair
 

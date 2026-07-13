@@ -105,38 +105,6 @@ func TestCodexCommandPlanPassesExpandedEffortLiterals(t *testing.T) {
 	}
 }
 
-func TestCodexFromTaskUsesGalleyOwnedPromptMode(t *testing.T) {
-	t.Parallel()
-	opts := CodexFromTask(minimalCodexTask())
-	if opts.PromptMode != galleyPromptMode {
-		t.Fatalf("prompt mode got %q, want %q", opts.PromptMode, galleyPromptMode)
-	}
-}
-
-func TestCodexArgvWarnsWhenPromptModeAppendIsFlattened(t *testing.T) {
-	t.Parallel()
-	// Direct CodexOptions still accept append for low-level planning, but
-	// FromTask always supplies Galley's replace transport.
-	opts := CodexFromTask(minimalCodexTask())
-	opts.PromptMode = "append"
-	opts.Prompt = "work order body"
-
-	plan, err := CodexCommandPlan(opts)
-	if err != nil {
-		t.Fatalf("CodexCommandPlan: %v", err)
-	}
-	var sawPromptModeWarning bool
-	for _, w := range plan.Warnings {
-		if strings.Contains(w, "prompt_mode=append") && strings.Contains(w, "same effect as replace") {
-			sawPromptModeWarning = true
-			break
-		}
-	}
-	if !sawPromptModeWarning {
-		t.Fatalf("expected prompt_mode append warning, got %#v", plan.Warnings)
-	}
-}
-
 func TestCodexArgvSandboxMapping(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

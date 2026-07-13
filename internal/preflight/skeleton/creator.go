@@ -139,7 +139,6 @@ func buildClaudeCreatorCommandPlan(opts Options, payload []byte) (runner.Command
 		Prompt:         string(payload),
 		SystemPrompt:   prompts.AcceptanceSkeletonCreator(),
 		JSONSchema:     schemas.AcceptanceSkeletonManifest,
-		PromptMode:     "replace",
 		PermissionMode: "bypassPermissions",
 		PluginDirs:     []string{guardDir},
 		AttemptDir:     opts.RunDir,

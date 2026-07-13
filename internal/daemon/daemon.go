@@ -642,7 +642,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 		}
 	}
 
-	prepared, err := prepareClaimedWorkspace(ctx, opts, profiles, runningPath, runDir, &loaded)
+	prepared, err := prepareClaimedWorkspace(ctx, opts, profiles, runningPath, runDir, &loaded, effectiveExecutor)
 	if err != nil {
 		return taskstate.FailMoveToStatus(opts.Root, runningPath, &loaded, err)
 	}
@@ -720,7 +720,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 			if err := task.Save(runningPath, loaded); err != nil {
 				return failClaimedStage(opts.Root, runningPath, &loaded, "acceptance_skeleton_preflight", "acceptance_skeleton_preflight_failed", err, runDir)
 			}
-			if err := copyFile(runningPath, runartifact.Path(runDir, runartifact.EffectiveTaskSnapshotFilename)); err != nil {
+			if err := task.Save(runartifact.Path(runDir, runartifact.EffectiveTaskSnapshotFilename), executionTask(loaded, prepared.CWD, effectiveExecutor)); err != nil {
 				return failClaimedStage(opts.Root, runningPath, &loaded, "run_evidence", "run_evidence_failed", err, runDir)
 			}
 		}
@@ -847,7 +847,7 @@ func initializeRunEvidence(root, runningPath string, loaded task.Task, validatio
 	return runID, runDir, nil
 }
 
-func prepareClaimedWorkspace(ctx context.Context, opts Options, profiles profile.Bundle, runningPath, runDir string, loaded *task.Task) (workspace.Prepared, error) {
+func prepareClaimedWorkspace(ctx context.Context, opts Options, profiles profile.Bundle, runningPath, runDir string, loaded *task.Task, effectiveExecutor task.Executor) (workspace.Prepared, error) {
 	wsOpts := workspaceOptions(opts)
 	// Resolve the environment profile pr.base into a concrete git ref name and
 	// pass it through workspace.Options.StartPoint so the new task branch is
@@ -900,7 +900,7 @@ func prepareClaimedWorkspace(ctx context.Context, opts Options, profiles profile
 			return workspace.Prepared{}, err
 		}
 	}
-	if err := copyFile(runningPath, runartifact.Path(runDir, runartifact.EffectiveTaskSnapshotFilename)); err != nil {
+	if err := task.Save(runartifact.Path(runDir, runartifact.EffectiveTaskSnapshotFilename), executionTask(*loaded, prepared.CWD, effectiveExecutor)); err != nil {
 		return workspace.Prepared{}, err
 	}
 	cleanupPrepared = false

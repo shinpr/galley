@@ -278,7 +278,7 @@ func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) 
 	}
 	setupResultEvidence, setupUpdateEvidence := setuppreflight.LoadRunEvidence(req.RunDir, req.RunID)
 	evidence := supervisor.Evidence{
-		Task:                   *req.Loaded,
+		Task:                   effectiveTask,
 		Profiles:               req.Profiles,
 		ExecutorResult:         outcome.ExecutorResult,
 		ParseError:             outcome.ParseErr,

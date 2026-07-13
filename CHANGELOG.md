@@ -12,7 +12,7 @@ This project follows semantic versioning.
 
 ### Changed
 
-- Task executor fields are optional, prompt transport is Galley-owned, and reused preflight evidence must match the resolved executor identity.
+- Task executor fields are optional, each provider uses its fixed Galley prompt construction, and reused preflight evidence must match the resolved executor identity.
 
 ### Fixed
 

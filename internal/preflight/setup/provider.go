@@ -99,7 +99,6 @@ func buildClaudeSetupExecutorCommandPlan(opts Options, payload []byte) (runner.C
 		Prompt:         string(payload),
 		SystemPrompt:   prompts.SetupExecutorClaude(),
 		JSONSchema:     schemas.SetupResult,
-		PromptMode:     "replace",
 		PermissionMode: "bypassPermissions",
 		PluginDirs:     []string{guardDir},
 		AttemptDir:     opts.RunDir,

@@ -23,7 +23,7 @@ func TestGrokCommandPlanUsesPromptFileAndSchema(t *testing.T) {
 	if strings.Contains(joined, "secret work order") || plan.Stdin != "" {
 		t.Fatalf("prompt leaked outside file: %#v", plan)
 	}
-	if !strings.Contains(joined, "--prompt-file") || !strings.Contains(joined, "--json-schema") || !strings.Contains(joined, "--permission-mode bypassPermissions") || !strings.Contains(joined, "--sandbox workspace") || !strings.Contains(joined, "--reasoning-effort high") {
+	if !strings.Contains(joined, "--prompt-file") || !strings.Contains(joined, "--verbatim") || !strings.Contains(joined, "--json-schema") || !strings.Contains(joined, "--permission-mode bypassPermissions") || !strings.Contains(joined, "--sandbox workspace") || !strings.Contains(joined, "--reasoning-effort high") {
 		t.Fatalf("incomplete grok argv: %#v", plan.Argv)
 	}
 	body, err := os.ReadFile(filepath.Join(attemptDir, GrokPromptFilename))

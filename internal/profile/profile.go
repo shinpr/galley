@@ -239,7 +239,6 @@ func ValidateEnvironment(env Environment) ValidationResult {
 		require(&result, validExecutorCLI(env.Executor.DefaultCLI), "executor.default_cli must be one of: %s", strings.Join(provider.ExecutorIDs(), ", "))
 	}
 	if env.Executor != nil && env.Executor.Effort != "" {
-		// Provider-specific validation happens after task overrides are resolved.
 		if env.Executor.DefaultCLI != "" {
 			if efforts, ok := provider.EffortsForID(env.Executor.DefaultCLI); ok {
 				require(&result, slices.Contains(efforts, env.Executor.Effort), "executor.effort for %s must be one of: %s", env.Executor.DefaultCLI, strings.Join(efforts, ", "))

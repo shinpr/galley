@@ -15,9 +15,9 @@ import (
 const GrokPromptFilename = "grok.prompt.md"
 
 type GrokOptions struct {
-	Bin, Model, Effort, PromptMode, PermissionMode, Sandbox, WorkDir string
-	SystemPromptFile, SystemPrompt, JSONSchemaFile, JSONSchema       string
-	AttemptDir, Prompt, PromptFilename                               string
+	Bin, Model, Effort, PermissionMode, Sandbox, WorkDir       string
+	SystemPromptFile, SystemPrompt, JSONSchemaFile, JSONSchema string
+	AttemptDir, Prompt, PromptFilename                         string
 }
 
 type GrokEnvelope struct {
@@ -45,7 +45,7 @@ func GrokFromTask(t task.Task) GrokOptions {
 		sandbox = "off"
 	}
 	common := executorOptionsFromTask(t)
-	return GrokOptions{Model: common.Model, Effort: common.Effort, PromptMode: common.PromptMode, PermissionMode: "bypassPermissions", Sandbox: sandbox, WorkDir: common.WorkDir}
+	return GrokOptions{Model: common.Model, Effort: common.Effort, PermissionMode: "bypassPermissions", Sandbox: sandbox, WorkDir: common.WorkDir}
 }
 
 func GrokCommandPlan(opts GrokOptions) (Command, error) {
@@ -54,12 +54,6 @@ func GrokCommandPlan(opts GrokOptions) (Command, error) {
 	}
 	if opts.AttemptDir == "" {
 		return Command{}, fmt.Errorf("attempt directory is required for grok prompt transport")
-	}
-	if opts.PromptMode == "" {
-		opts.PromptMode = "replace"
-	}
-	if opts.PromptMode != "replace" && opts.PromptMode != "append" {
-		return Command{}, fmt.Errorf("unsupported prompt mode %q", opts.PromptMode)
 	}
 	if opts.SystemPrompt == "" && opts.SystemPromptFile == "" {
 		opts.SystemPrompt = prompts.GrokExecutorFull()
@@ -112,11 +106,7 @@ func GrokCommandPlan(opts GrokOptions) (Command, error) {
 	if opts.Effort != "" {
 		argv = append(argv, "--reasoning-effort", opts.Effort)
 	}
-	warnings := []string{}
-	if opts.PromptMode == "append" {
-		warnings = append(warnings, "executor.prompt_mode=append has the same effect as replace for grok; role prompt and work order are flattened into the prompt file")
-	}
-	return Command{WorkDir: opts.WorkDir, Argv: argv, Warnings: warnings}, nil
+	return Command{WorkDir: opts.WorkDir, Argv: argv}, nil
 }
 
 func DecodeGrokEnvelope(data []byte) (GrokEnvelope, error) {

@@ -35,7 +35,8 @@ func TestValidateEnvironmentExecutorDefaults(t *testing.T) {
 		{name: "complete defaults", exec: &ExecutorDefault{DefaultCLI: "codex", Model: "gpt", Effort: "minimal"}, wantOK: true},
 		{name: "claude accepts max", exec: &ExecutorDefault{DefaultCLI: "claude", Effort: "max"}, wantOK: true},
 		{name: "claude rejects minimal", exec: &ExecutorDefault{DefaultCLI: "claude", Effort: "minimal"}, wantErr: "executor.effort for claude must be one of"},
-		{name: "effort without default_cli accepts union", exec: &ExecutorDefault{Effort: "minimal"}, wantOK: true},
+		{name: "effort without default_cli accepts provider union", exec: &ExecutorDefault{Effort: "minimal"}, wantOK: true},
+		{name: "effort without default_cli accepts grok value", exec: &ExecutorDefault{Effort: "none"}, wantOK: true},
 		{name: "effort without default_cli rejects unknown", exec: &ExecutorDefault{Effort: "turbo"}, wantErr: "executor.effort must be one of"},
 		{name: "invalid default_cli", exec: &ExecutorDefault{DefaultCLI: "opus"}, wantErr: "executor.default_cli"},
 	}
@@ -211,7 +212,8 @@ func TestEnvironmentJSONSchemaExecutorDefaultsParity(t *testing.T) {
 	}
 	seen := map[string]bool{}
 	for _, rule := range allOf {
-		ifProps := rule.(map[string]any)["if"].(map[string]any)["properties"].(map[string]any)
+		condition := rule.(map[string]any)["if"].(map[string]any)
+		ifProps := condition["properties"].(map[string]any)
 		cli := ifProps["default_cli"].(map[string]any)["const"].(string)
 		seen[cli] = true
 	}

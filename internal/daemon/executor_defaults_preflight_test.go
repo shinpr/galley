@@ -11,6 +11,7 @@ import (
 
 	setuppreflight "github.com/shinpr/galley/internal/preflight/setup"
 	"github.com/shinpr/galley/internal/profile"
+	"github.com/shinpr/galley/internal/supervisor"
 	"github.com/shinpr/galley/internal/task"
 )
 
@@ -27,7 +28,8 @@ func TestDaemonRejectsInvalidEffectiveExecutorBeforeProviderRoles(t *testing.T) 
 cwd: `+workdirQuote(repo)+`
 commands: {}
 executor:
-  effort: "minimal"
+  default_cli: "grok"
+  effort: "none"
 constraints:
   network: "approval_required"
   secrets_policy: "never_read_env_files"
@@ -107,7 +109,7 @@ func TestDaemonUsesSameEffectiveExecutorAcrossRoles(t *testing.T) {
 		Effort string
 	}
 	var setupObs observed
-	var implCLIs []string
+	var supervisorExecutor task.Executor
 
 	envPath := writeSetupEnvironmentProfile(t, t.TempDir(), `id: "shared-effective"
 cwd: `+workdirQuote(repo)+`
@@ -180,7 +182,10 @@ case "$input" in
 esac
 `)
 	claudeBin := writeFakeClaude(t, "exit 1\n")
-	_ = implCLIs
+	supervisorRunner := func(_ context.Context, _ Options, evidence supervisor.Evidence, _, _ string) (supervisor.Verdict, error) {
+		supervisorExecutor = evidence.Task.Executor
+		return supervisor.Verdict{Status: "accepted", Summary: "effective executor observed"}, nil
+	}
 
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
@@ -207,6 +212,7 @@ esac
 		Supervisor:             "claude",
 		ClaudeBin:              claudeBin,
 		CodexBin:               codexBin,
+		dependencies:           &daemonDependencies{supervisorRunner: supervisorRunner},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -214,6 +220,21 @@ esac
 	want := observed{CLI: "codex", Model: "task-model", Effort: "minimal"}
 	if setupObs != want {
 		t.Fatalf("setup effective executor = %#v, want %#v", setupObs, want)
+	}
+	if supervisorExecutor != (task.Executor{CLI: want.CLI, Model: want.Model, Effort: want.Effort}) {
+		t.Fatalf("supervisor effective executor = %#v, want %#v", supervisorExecutor, want)
+	}
+
+	effectiveMatches, err := filepath.Glob(filepath.Join(root, "runs", "*", "task.effective.yaml"))
+	if err != nil || len(effectiveMatches) != 1 {
+		t.Fatalf("task.effective.yaml glob = %v (err %v)", effectiveMatches, err)
+	}
+	effectiveSnapshot, err := task.Load(effectiveMatches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if effectiveSnapshot.Executor != (task.Executor{CLI: want.CLI, Model: want.Model, Effort: want.Effort}) {
+		t.Fatalf("run effective executor = %#v, want %#v", effectiveSnapshot.Executor, want)
 	}
 
 	matches, err := filepath.Glob(filepath.Join(root, "runs", "*", "preflight_creator_command_plan.json"))

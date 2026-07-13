@@ -10,9 +10,6 @@ import (
 	taskpkg "github.com/shinpr/galley/internal/task"
 )
 
-// writeMinimalOmittedStatusTaskYAML writes an author-facing draft that omits
-// status (and other fixed AFK defaults) so display and queue eligibility must
-// resolve draft via ApplyDefaults.
 func writeMinimalOmittedStatusTaskYAML(t *testing.T, id string) string {
 	t.Helper()
 	dir := t.TempDir()

@@ -308,8 +308,6 @@ func validatePreflight(result *ValidationResult, t Task) {
 	validatePreflightOutputs(result, t, cfg, "preflight.acceptance_skeleton")
 }
 
-// validatePreflightOutputs validates each daemon-written skeleton output
-// against the AC list and scope.allowed_paths.
 func validatePreflightOutputs(result *ValidationResult, t Task, cfg *AcceptanceSkeletonConfig, prefix string) {
 	if len(cfg.Outputs) == 0 {
 		return

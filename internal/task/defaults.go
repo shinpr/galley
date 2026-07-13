@@ -8,9 +8,7 @@ const DefaultLoopBudget = 10
 // DefaultMode is the sole supported task execution mode.
 const DefaultMode = "afk"
 
-// DefaultAFKDecisionPolicy is the fixed AFK ambiguity policy applied when a
-// draft omits execution_policy.afk_decision_policy (the field is no longer
-// authored; work orders still surface this constant).
+// DefaultAFKDecisionPolicy is the fixed ambiguity policy rendered in AFK work orders.
 const DefaultAFKDecisionPolicy = "choose-smallest-reversible"
 
 // DefaultExecutorCLI is the fallback implementation backend.
@@ -19,10 +17,8 @@ const DefaultExecutorCLI = "claude"
 // DefaultExecutorEffort is the fallback implementation effort.
 const DefaultExecutorEffort = "high"
 
-// ApplyDefaults fills fixed and omitted authoring values needed before
-// validation, display, queue eligibility, and command decisions. Executor
-// fields still resolve at run time; daemon-owned lifecycle fields are not
-// invented here.
+// ApplyDefaults resolves fixed authoring values before validation, display, and
+// queue decisions. Executor defaults remain runtime-owned.
 func ApplyDefaults(t *Task) {
 	if t.Mode == "" {
 		t.Mode = DefaultMode

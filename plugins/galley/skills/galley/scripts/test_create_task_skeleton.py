@@ -93,7 +93,6 @@ def main() -> int:
     assert_contains(yaml_text, "  loop_budget:", "loop_budget")
     assert_contains(yaml_text, "  timeout_ms:", "timeout_ms")
 
-    # Fixed AFK values and daemon-owned lifecycle sections stay out of drafts.
     assert_not_matches(yaml_text, r"^mode:", "mode in default skeleton")
     assert_not_matches(yaml_text, r"^status:", "status in default skeleton")
     assert_not_matches(yaml_text, r"^supervisor:", "supervisor in default skeleton")
@@ -104,7 +103,6 @@ def main() -> int:
     assert_not_matches(yaml_text, r"afk_decision_policy", "afk_decision_policy in default skeleton")
     assert_not_matches(yaml_text, r"stop_on_", "stop_on_* in default skeleton")
 
-    # Default skeleton must not include enabled-only runtime fields.
     assert_not_matches(yaml_text, r"^    outputs:", "outputs[] in default skeleton")
     assert_not_matches(yaml_text, r"^    required:", "required in default skeleton")
     assert_not_matches(yaml_text, r"^    allowed_paths:", "allowed_paths in default skeleton")

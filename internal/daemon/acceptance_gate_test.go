@@ -12,9 +12,6 @@ import (
 	"github.com/shinpr/galley/internal/task"
 )
 
-// acceptanceGateTask builds a minimal task with the acceptance skeleton stage
-// enabled so evaluateAcceptanceGate exercises the skeleton branch. Coverage is
-// always required when the stage is enabled.
 func acceptanceGateTask() *task.Task {
 	return &task.Task{
 		ID:                 "acceptance-gate-test",

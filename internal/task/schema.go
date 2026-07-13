@@ -7,13 +7,8 @@ import (
 	"github.com/shinpr/galley/internal/provider"
 )
 
-// TaskJSONSchema returns the task YAML JSON Schema generated from the task
-// contract used by structural validation.
-//
-// Author-required fields are the retained authoring surface. mode, status, and
-// worktree.enabled default at runtime; supervisor, attempts, verification, pr,
-// and acceptance-skeleton outputs remain optional properties for daemon-owned
-// lifecycle persistence.
+// TaskJSONSchema returns the generated schema for author input and persisted
+// lifecycle state. Fixed defaults and daemon-owned fields remain optional.
 func TaskJSONSchema() ([]byte, error) {
 	schema := object(
 		required("id", "goal", "acceptance_criteria", "scope", "execution_policy", "worktree", "decisions", "risks"),
@@ -105,7 +100,6 @@ func worktreeSchema() map[string]any {
 	return object(
 		required("branch", "path"),
 		properties(map[string]any{
-			// enabled defaults to true for AFK tasks; retained for runtime YAML.
 			"enabled": map[string]any{"type": "boolean"},
 			"branch":  stringSchema("minLength", 1),
 			"path":    stringSchema("minLength", 1),
@@ -260,7 +254,6 @@ func preflightSchema() map[string]any {
 				required("enabled"),
 				properties(map[string]any{
 					"enabled": map[string]any{"type": "boolean"},
-					// outputs is daemon-owned runtime metadata written after the creator runs.
 					"outputs": arraySchema(preflightOutputSchema()),
 				}),
 			),

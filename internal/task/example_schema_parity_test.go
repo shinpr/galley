@@ -12,9 +12,6 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// TestMaintainedExamplesMatchGeneratedSchemaRequiredKeys ensures checked-in
-// examples satisfy the generated schema required-key contract so authoring
-// samples stay aligned with schema generation.
 func TestMaintainedExamplesMatchGeneratedSchemaRequiredKeys(t *testing.T) {
 	t.Parallel()
 	root := repoRootFromTestFile(t)
@@ -41,7 +38,6 @@ func TestMaintainedExamplesMatchGeneratedSchemaRequiredKeys(t *testing.T) {
 				t.Fatalf("parse example YAML: %v", err)
 			}
 			assertRequiredSchemaKeys(t, "", doc, taskSchemaDoc)
-			// Author-facing examples omit fixed defaults and lifecycle sections.
 			for _, key := range []string{"mode", "status", "supervisor", "attempts", "verification", "pr"} {
 				if _, ok := doc[key]; ok {
 					t.Fatalf("%s must omit author-facing lifecycle/default field %q", rel, key)
@@ -133,8 +129,7 @@ func assertRequiredSchemaKeys(t *testing.T, path string, doc map[string]any, sch
 	}
 }
 
-// staleNestedDraftYAMLFields are parent/child pairs that must not appear as
-// normally indented draft YAML shapes in packaged authoring guidance.
+// staleNestedDraftYAMLFields lists removed parent/child authoring shapes.
 var staleNestedDraftYAMLFields = []struct {
 	parent string
 	child  string
@@ -146,14 +141,8 @@ var staleNestedDraftYAMLFields = []struct {
 	{parent: "worktree", child: "enabled"},
 }
 
-// containsNormallyIndentedNestedYAMLKey reports whether text contains a YAML
-// parent mapping with a more-indented child key line:
-//
-//	parent:
-//	  child: ...
-//
-// Dotted prose mentions (worktree.enabled) and the same child key under a
-// different parent (preflight.acceptance_skeleton.enabled) do not match.
+// containsNormallyIndentedNestedYAMLKey matches a child nested under a named
+// parent, excluding dotted prose and the same child under another parent.
 func containsNormallyIndentedNestedYAMLKey(text, parent, child string) bool {
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {
@@ -295,9 +284,6 @@ func TestContainsNormallyIndentedNestedYAMLKey(t *testing.T) {
 	}
 }
 
-// TestPackagedTaskAuthoringOmitsStaleFixedRuntimeFieldsFromDraftGuidance
-// searches skill-bundled authoring guidance for stale fixed/runtime fields that
-// must not be instructed as new-draft authoring surface.
 func TestPackagedTaskAuthoringOmitsStaleFixedRuntimeFieldsFromDraftGuidance(t *testing.T) {
 	t.Parallel()
 	root := repoRootFromTestFile(t)
@@ -308,7 +294,6 @@ func TestPackagedTaskAuthoringOmitsStaleFixedRuntimeFieldsFromDraftGuidance(t *t
 	}
 	text := string(raw)
 
-	// Draft shapes live under Step 7; Field Guidance is nested inside that step.
 	commonShapes := sectionBetween(text, "## Step 7: Fill Skeleton With Schema", "## Step 8: Validate And Repair")
 	if commonShapes == "" {
 		t.Fatal("could not locate Step 7 common shapes guidance")
@@ -326,13 +311,11 @@ func TestPackagedTaskAuthoringOmitsStaleFixedRuntimeFieldsFromDraftGuidance(t *t
 			t.Fatalf("task-authoring draft guidance still authors nested %s.%s YAML", pair.parent, pair.child)
 		}
 	}
-	// Retained authoring surface must stay present; the nested guard targets
-	// parent-scoped keys, so acceptance_skeleton.enabled is not treated as stale.
+	// The parent-scoped guard must retain acceptance_skeleton.enabled.
 	if !strings.Contains(fieldGuidance, "preflight.acceptance_skeleton.enabled") {
 		t.Fatal("task-authoring Field Guidance must retain preflight.acceptance_skeleton.enabled")
 	}
 
-	// Other stale top-level draft shapes / fixed defaults (not nested pairs).
 	staleDraftYAML := []string{
 		"\nverification:\n  commands:",
 		"\nattempts:",
@@ -369,12 +352,12 @@ func TestPackagedTaskAuthoringOmitsStaleFixedRuntimeFieldsFromDraftGuidance(t *t
 	}
 
 	for _, want := range []string{
-		"Omit `mode`, `status`, `worktree.enabled`",
-		"daemon-owned lifecycle sections",
-		"Do not author `worktree.enabled`",
+		"Galley owns `mode`, `status`, `worktree.enabled`",
+		"lifecycle sections",
+		"Galley always enables AFK isolation",
 	} {
 		if !strings.Contains(fieldGuidance, want) {
-			t.Fatalf("task-authoring Field Guidance missing omit guidance %q", want)
+			t.Fatalf("task-authoring Field Guidance missing ownership guidance %q", want)
 		}
 	}
 }

@@ -3,6 +3,7 @@ package task
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -50,7 +51,7 @@ func TestLoadAndValidateAcceptsMinimalDraft(t *testing.T) {
 		`    verification: "test"`,
 		`    status: "pending"`,
 		`scope:`,
-		`  cwd: "` + cwd + `"`,
+		`  cwd: ` + strconv.Quote(cwd),
 		`  allowed_paths: ["."]`,
 		`  forbidden_paths: [".env"]`,
 		`  permission: "edit"`,

@@ -6,14 +6,9 @@ This project follows semantic versioning.
 
 ## Unreleased
 
-### Added
-
-- Environment profiles can provide executor CLI, model, and effort defaults. Explicit task fields override them independently for each run.
-
 ### Changed
 
-- Task executor fields are optional, each provider uses its fixed Galley prompt construction, and reused preflight evidence must match the resolved executor identity.
-- Packaged Galley plugins are version `0.1.24`. Task authoring now omits fixed AFK values (`mode`, draft `status`, worktree isolation, AFK decision policy), prompt-only execution-policy blockers, and daemon-owned lifecycle sections from new drafts while runtime resolution and lifecycle persistence stay intact. Acceptance-skeleton authoring is only `preflight.acceptance_skeleton.enabled`; quality pass policy no longer includes `unresolved_high_findings_allowed` (remove that one line from any external strict profile); daemon heartbeat cadence is derived solely as `min(claim_ttl/4, 1m)`.
+- Packaged Galley plugins are updated to version `0.1.24`.
 
 ### Fixed
 

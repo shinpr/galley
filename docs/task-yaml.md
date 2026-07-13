@@ -6,7 +6,7 @@ Use the plugin skill for normal authoring. This document is the reference for re
 
 ## Starter Template
 
-Author only the decisions that matter. Galley applies fixed AFK defaults (`mode: afk`, draft `status`, enabled isolated worktree, `choose-smallest-reversible` ambiguity policy) when they are omitted. Daemon-owned sections (`supervisor`, `attempts`, `verification`, `pr`, and acceptance-skeleton `outputs`) appear after queueing and execution transitions.
+This template contains author-owned fields. Galley adds fixed AFK defaults and lifecycle state during validation and execution.
 
 ```yaml
 id: "task-20260509-example"
@@ -66,13 +66,14 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 - `executor`: optional per-field overrides for CLI, model, and effort.
 - `preflight.acceptance_skeleton.enabled`: optional boolean that selects the fixed skeleton preflight flow.
 - `decisions`, `risks`: author and executor notes.
-- `supervisor`, `attempts`, `verification`, `pr`: daemon-owned runtime state. Omit them from new drafts; Galley populates them during lifecycle transitions.
+- `supervisor`, `attempts`, `verification`, `pr`: daemon-owned runtime state populated during lifecycle transitions.
 
 ## Execution Policy And Executor
 
 - `execution_policy.loop_budget`: non-negative attempt count; `0` means unlimited. Omitted values default to `10`.
 - `execution_policy.timeout_ms`: positive per-attempt timeout in milliseconds.
-- AFK decision policy is fixed to `choose-smallest-reversible` and is no longer authored. Destructive-operation, missing-secret, and external-service blockers continue through executor results and visible failure or escalation paths without task YAML booleans.
+- Galley fixes the AFK decision policy at `choose-smallest-reversible`.
+- Destructive-operation, missing-secret, and external-service blockers remain executor results; task YAML has no blocker switches.
 - `executor`: optional. Each `cli`, `model`, and `effort` field resolves from the task, current `environment.yaml`, then built-in defaults (`cli: claude`, `effort: high`, CLI-default model). Environment values remain runtime-only.
 - `executor.cli`: selects `claude`, `codex`, `glm`, or `grok`. Grok uses the logged-in `grok` CLI for setup, acceptance-skeleton creation, and implementation.
 - `executor.model`: optional model override. Omit it to use the selected CLI's configured default model.
@@ -119,7 +120,7 @@ worktree:
   path: "../repo.worktrees/task-20260509-example"
 ```
 
-This keeps the source repository clean while the executor edits the isolated worktree. Omitted `worktree.enabled` defaults to true for AFK tasks.
+Galley enables this isolated worktree for every AFK task, keeping the source repository clean.
 
 ## Acceptance Criteria
 
@@ -138,7 +139,7 @@ Example:
 
 ## Acceptance Skeleton Preflight
 
-`preflight.acceptance_skeleton` is an optional stage that creates AC-linked test skeletons before the first executor attempt. Authors choose only `enabled`.
+`preflight.acceptance_skeleton.enabled` controls AC-linked test skeleton creation before the first executor attempt.
 
 ```yaml
 preflight:
@@ -146,7 +147,7 @@ preflight:
     enabled: false
 ```
 
-Disabled preflight has the same daemon behavior as omitting `preflight` entirely. Set `enabled` to `true` when the task should create acceptance-criterion-linked skeleton files before the executor starts.
+Enable it when an integration, cross-layer, or E2E acceptance path needs a concrete file before implementation. Leave it disabled when focused tests or required checks already define the evidence path.
 
 When enabled:
 
@@ -165,8 +166,6 @@ Required quality checks remain executor evidence for supervisor review; the skel
 `execution_policy.loop_budget` is the maximum number of executor attempts. It accepts an integer greater than or equal to `0`; `0` means unlimited.
 
 For AFK implementation tasks, `10` is the recommended default. Values below `5` are best reserved for intentionally short, low-cost runs because they can stop useful revision loops too early. Use `0` only when the user explicitly wants an unbounded run.
-
-`supervisor.review_iterations` is daemon-owned runtime state after review transitions. Authors do not set it in new drafts.
 
 ## Queue State
 
@@ -190,4 +189,4 @@ galley task requeue TASK_ID --reason "retry after transient failure"
 
 ## Compatibility
 
-Removed authoring keys such as `execution_policy.afk_decision_policy`, `execution_policy.stop_on_*`, `preflight.acceptance_skeleton.mode`, `required`, and `allowed_paths` still load through the unknown-field-tolerant task decoder and disappear on the next save. Runtime Task model fields for lifecycle state remain available to the daemon.
+The tolerant decoder loads removed authoring keys (`execution_policy.afk_decision_policy`, `execution_policy.stop_on_*`, and acceptance-skeleton `mode`, `required`, and `allowed_paths`), then drops them on save. Runtime lifecycle fields remain available to the daemon.

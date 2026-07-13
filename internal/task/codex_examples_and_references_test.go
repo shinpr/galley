@@ -30,8 +30,7 @@ func loadExampleTask(t *testing.T, rel string) Task {
 	if err != nil {
 		t.Fatalf("load %s: %v", rel, err)
 	}
-	// Examples may omit fixed AFK authoring values; public validate/queue paths
-	// apply the same defaults before structural checks.
+	// Match the defaults applied by public validation and queueing paths.
 	ApplyDefaults(&loaded)
 	return loaded
 }

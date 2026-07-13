@@ -220,9 +220,7 @@ def main() -> int:
         return 2
 
     task["id"] = task_id
-    # mode, status, worktree.enabled, and AFK decision policy are fixed runtime
-    # defaults applied by Galley when omitted. Daemon-owned lifecycle sections
-    # (supervisor, attempts, verification, pr) are omitted from author drafts.
+    # Galley supplies fixed defaults and lifecycle fields after authoring.
     task.pop("mode", None)
     task.pop("status", None)
     task.pop("supervisor", None)
@@ -256,9 +254,7 @@ def main() -> int:
         task["executor"] = {"cli": args.executor_cli}
     else:
         task.pop("executor", None)
-    # Emit the AC test skeleton preflight stage explicitly disabled by default so
-    # the generated YAML shows the author opt-in. Only `enabled` is authored;
-    # outputs are daemon-owned runtime metadata.
+    # Expose the author preflight choice; Galley owns its runtime outputs.
     task["preflight"] = {"acceptance_skeleton": {"enabled": False}}
     task["decisions"] = []
     task["risks"] = []

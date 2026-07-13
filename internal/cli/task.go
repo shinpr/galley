@@ -178,8 +178,7 @@ func newTaskShowCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// Resolve omitted fixed authoring values (mode, draft status, worktree)
-			// so display matches validate/queue eligibility semantics.
+			// Display resolves the same fixed defaults as validation and queueing.
 			task.ApplyDefaults(&loaded)
 			item := taskSummary(path, loaded)
 			preflight := preflightSummary(loaded)

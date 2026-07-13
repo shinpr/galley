@@ -35,15 +35,10 @@ type Preflight struct {
 	AcceptanceSkeleton *AcceptanceSkeletonConfig `yaml:"acceptance_skeleton,omitempty" json:"acceptance_skeleton,omitempty"`
 }
 
-// AcceptanceSkeletonConfig configures the optional acceptance skeleton
-// preflight stage that materializes AC-linked test skeletons in the worktree
-// before the first executor attempt. Authors only set enabled; allowed paths
-// come from scope.allowed_paths, coverage is always required when enabled, and
-// outputs are daemon-owned runtime metadata written after the creator runs.
+// AcceptanceSkeletonConfig enables preflight. Paths and AC coverage are fixed;
+// Outputs is daemon-written runtime state.
 type AcceptanceSkeletonConfig struct {
-	Enabled bool `yaml:"enabled" json:"enabled"`
-	// Outputs is daemon-owned runtime metadata. Authors opt in with enabled:true;
-	// the built-in creator writes these bindings back before the executor runs.
+	Enabled bool                          `yaml:"enabled" json:"enabled"`
 	Outputs []AcceptanceSkeletonOutputDef `yaml:"outputs,omitempty" json:"outputs,omitempty"`
 }
 
@@ -68,8 +63,7 @@ func (c *AcceptanceSkeletonConfig) IsEnabled() bool {
 	return c != nil && c.Enabled
 }
 
-// IsRequired reports whether the stage requires every AC to have a skeleton
-// output or no_skeletons reason. Coverage is always required when enabled.
+// IsRequired reports whether AC coverage is required.
 func (c *AcceptanceSkeletonConfig) IsRequired() bool {
 	return c != nil && c.Enabled
 }
@@ -100,10 +94,8 @@ type Scope struct {
 	Permission     string   `yaml:"permission" json:"permission"`
 }
 
-// ExecutionPolicy describes the author-chosen loop and timeout budget.
-// AFK decision policy and blocker handling are fixed Galley behavior, not
-// task YAML knobs; destructive, secret, and external-service blockers still
-// surface through executor results and visible failure or escalation paths.
+// ExecutionPolicy contains author-selected attempt and timeout budgets; AFK
+// decisions and blocker handling are fixed runtime behavior.
 type ExecutionPolicy struct {
 	LoopBudget LoopBudget `yaml:"loop_budget" json:"loop_budget"`
 	TimeoutMS  int        `yaml:"timeout_ms" json:"timeout_ms"`

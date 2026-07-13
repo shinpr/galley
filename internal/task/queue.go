@@ -37,8 +37,7 @@ func queue(path string, opts QueueOptions, readTaskID func(string) (string, erro
 	if err != nil {
 		return QueueResult{}, err
 	}
-	// Defaults must run before queue eligibility so omitted status resolves to
-	// draft and fixed AFK authoring values are present for validation.
+	// Resolve omitted status before checking queue eligibility.
 	ApplyDefaults(&loaded)
 	if !CanQueue(loaded.Status) {
 		return QueueResult{}, fmt.Errorf("task %s status %q cannot be queued with task queue; use task requeue for reviewed tasks", loaded.ID, loaded.Status)

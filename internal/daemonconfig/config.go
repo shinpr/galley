@@ -198,10 +198,8 @@ func EnsureDefault(root string) (bool, error) {
 	return true, nil
 }
 
-// Load reads daemon.yaml under root. The boolean reports whether the file was
-// present. A missing file is not an error; the caller proceeds with built-in
-// defaults. Legacy heartbeat_interval keys are stripped before strict decode
-// because heartbeat cadence is derived solely from claim_ttl.
+// Load reads daemon.yaml under root and reports whether it was present. Missing
+// files use built-in defaults; legacy heartbeat_interval is ignored for compatibility.
 func Load(root string) (File, bool, error) {
 	if root == "" {
 		return File{}, false, errors.New("daemonconfig: root is required")
@@ -227,9 +225,6 @@ func Load(root string) (File, bool, error) {
 	return file, true, nil
 }
 
-// stripLegacyHeartbeatInterval drops the removed heartbeat_interval key so
-// existing daemon.yaml files created before claim_ttl-derived heartbeats keep
-// loading under KnownFields(true).
 func stripLegacyHeartbeatInterval(data []byte) []byte {
 	var root yaml.Node
 	if err := yaml.Unmarshal(data, &root); err != nil {

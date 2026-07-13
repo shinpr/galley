@@ -97,7 +97,7 @@ Trust boundary:
 | `scope.cwd must be an absolute path` | Replace with the absolute target repo path. |
 | `scope.allowed_paths must contain at least one relative path` | Add the narrowest relative path set. |
 | `acceptance_criteria must contain at least one criterion` | Add ACs with `id`, `text`, `verification`, and `status`. |
-| `worktree.enabled must be true for AFK tasks` | Omit `worktree.enabled` (Galley defaults it to true) or ensure the task is not forcing isolation off. |
+| `worktree.enabled must be true for AFK tasks` | Leave `worktree.enabled` unset; Galley enables AFK isolation. |
 | `worktree.branch is required for AFK tasks` | Add a valid branch such as `agent/<task-id>`. |
 | `worktree.path must point to a sibling path outside scope.cwd` | Use a relative sibling path such as `../<repo-name>.worktrees/<task-name>`. |
 | `files[n].source is required` | Add the source path or remove the file entry. |

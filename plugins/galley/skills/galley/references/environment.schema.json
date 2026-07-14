@@ -167,7 +167,7 @@
           "type": "string"
         },
         "effort": {
-          "description": "Optional reasoning effort used as a repository runtime default. Empty leaves resolution to the task or Galley's built-in default; the effective provider is validated before setup, skeleton, or implementation.",
+          "description": "Optional reasoning effort used as a repository runtime default. Empty leaves resolution to the task, then the selected provider CLI's own default; the effective provider is validated before setup, skeleton, or implementation.",
           "enum": [
             "",
             "low",

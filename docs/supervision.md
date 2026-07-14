@@ -8,7 +8,7 @@ At every run start, Galley resolves each executor field independently:
 
 1. explicit task `executor.cli` / `executor.model` / `executor.effort`
 2. current repository `environment.yaml` `executor.default_cli` / `executor.model` / `executor.effort`
-3. built-in defaults (`cli: claude`, `effort: high`; empty model keeps the CLI default)
+3. the built-in `cli: claude` default; an omitted effort or model lets the selected provider CLI choose its own reasoning effort and model
 
 Environment values remain runtime-only, so requeues pick up current profile defaults. All executor roles use the same resolution, validated before invocation.
 

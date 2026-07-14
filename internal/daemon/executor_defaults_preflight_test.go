@@ -282,6 +282,178 @@ esac
 	}
 }
 
+func TestDaemonEmptyEffortDelegatesToProviderAcrossRoles(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+
+	type observed struct {
+		CLI    string
+		Model  string
+		Effort string
+	}
+	var setupObs observed
+	var supervisorExecutor task.Executor
+
+	envPath := writeSetupEnvironmentProfile(t, t.TempDir(), `id: "empty-effort"
+cwd: `+workdirQuote(repo)+`
+commands:
+  test_unit: "true"
+executor:
+  default_cli: "codex"
+constraints:
+  network: "approval_required"
+  secrets_policy: "never_read_env_files"
+  destructive_commands: "deny"
+setup:
+  commands:
+    - run: "true"
+      why: "no-op setup"
+`)
+
+	withSetupExecutorRunner(t, func(_ context.Context, opts setuppreflight.Options) (*setuppreflight.Result, error) {
+		setupObs = observed{
+			CLI:    opts.Task.Executor.CLI,
+			Model:  opts.Task.Executor.Model,
+			Effort: opts.Task.Executor.Effort,
+		}
+		return &setuppreflight.Result{
+			Status: setuppreflight.StatusReady,
+			Commands: []setuppreflight.CommandAttempt{{
+				Run:      "true",
+				Why:      "no-op setup",
+				Source:   setuppreflight.SourceEnvironmentSetup,
+				ExitCode: 0,
+			}},
+			SuccessfulCommands: []profile.SetupCommand{{
+				Run: "true",
+				Why: "no-op setup",
+			}},
+			ReadinessEvidence: "setup observed empty effort",
+			Source:            setuppreflight.SourceEnvironmentSetup,
+			Provider:          opts.Task.Executor.CLI,
+		}, nil
+	})
+
+	creatorManifest := `{"outputs":[{"ac_id":"AC1","path":"internal/foo/foo_test.go","kind":"go-test","purpose":"verify AC1","satisfies":"AC1 observable behavior","integration_point":"executor completes this skeleton before acceptance","implementation_required":true}],"no_skeletons":[]}`
+	executorResult := `{"status":"completed","summary":"done","files_modified":["daemon-output.txt","internal/foo/foo_test.go"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}`
+	codexBin := writeFakeCommand(t, "codex", `out=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output-last-message)
+      out="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+input="$(cat)"
+case "$input" in
+  *"acceptance skeleton creator"*)
+    mkdir -p internal/foo
+    printf 'package foo_test\n' > internal/foo/foo_test.go
+    printf '%s\n' '`+creatorManifest+`' > "$out"
+    ;;
+  *)
+    echo change > daemon-output.txt
+    printf '%s\n' '`+executorResult+`' > "$out"
+    ;;
+esac
+`)
+	claudeBin := writeFakeClaude(t, "exit 1\n")
+	supervisorRunner := func(_ context.Context, _ Options, evidence supervisor.Evidence, _, _ string) (supervisor.Verdict, error) {
+		supervisorExecutor = evidence.Task.Executor
+		return supervisor.Verdict{Status: "accepted", Summary: "empty effort observed"}, nil
+	}
+
+	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonTask(t, taskPath, repo)
+	loaded, err := task.Load(taskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Executor = task.Executor{}
+	loaded.Preflight = &task.Preflight{AcceptanceSkeleton: &task.AcceptanceSkeletonConfig{Enabled: true}}
+	if err := task.Save(taskPath, loaded); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runTestDaemon(context.Background(), Options{
+		Root:                   root,
+		SystemPromptFile:       promptPath,
+		JSONSchemaFile:         schemaPath,
+		EnvironmentProfileFile: envPath,
+		Once:                   true,
+		MaxConcurrentTasks:     1,
+		Supervisor:             "claude",
+		ClaudeBin:              claudeBin,
+		CodexBin:               codexBin,
+		dependencies:           &daemonDependencies{supervisorRunner: supervisorRunner},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	want := observed{CLI: "codex", Model: "", Effort: ""}
+	if setupObs != want {
+		t.Fatalf("setup effective executor = %#v, want %#v", setupObs, want)
+	}
+	if supervisorExecutor != (task.Executor{CLI: "codex"}) {
+		t.Fatalf("supervisor effective executor = %#v, want empty effort codex", supervisorExecutor)
+	}
+
+	effectiveMatches, err := filepath.Glob(filepath.Join(root, "runs", "*", "task.effective.yaml"))
+	if err != nil || len(effectiveMatches) != 1 {
+		t.Fatalf("task.effective.yaml glob = %v (err %v)", effectiveMatches, err)
+	}
+	effectiveSnapshot, err := task.Load(effectiveMatches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if effectiveSnapshot.Executor != (task.Executor{CLI: "codex"}) {
+		t.Fatalf("run effective executor = %#v, want empty effort codex", effectiveSnapshot.Executor)
+	}
+
+	setupMatches, err := filepath.Glob(filepath.Join(root, "runs", "*", "setup_result.json"))
+	if err != nil || len(setupMatches) != 1 {
+		t.Fatalf("setup_result.json glob = %v (err %v)", setupMatches, err)
+	}
+	setupData, err := os.ReadFile(setupMatches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var setupResult setuppreflight.Result
+	if err := json.Unmarshal(setupData, &setupResult); err != nil {
+		t.Fatal(err)
+	}
+	if setupResult.ExecutorEffort != "" {
+		t.Fatalf("setup evidence must persist empty effort identity, got %q", setupResult.ExecutorEffort)
+	}
+
+	matches, err := filepath.Glob(filepath.Join(root, "runs", "*", "preflight_creator_command_plan.json"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("preflight_creator_command_plan.json glob = %v (err %v)", matches, err)
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan struct {
+		Argv []string `json:"argv"`
+	}
+	if err := json.Unmarshal(data, &plan); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(plan.Argv, " ")
+	if strings.Contains(joined, "model_reasoning_effort") {
+		t.Fatalf("empty effort must not add a codex reasoning-effort override: %v", plan.Argv)
+	}
+}
+
 func TestDaemonRequeuePicksUpChangedEnvironmentExecutorDefaults(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)

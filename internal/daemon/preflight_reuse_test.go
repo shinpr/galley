@@ -1,11 +1,14 @@
 package daemon
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 
 	setuppreflight "github.com/shinpr/galley/internal/preflight/setup"
 	skeletonpreflight "github.com/shinpr/galley/internal/preflight/skeleton"
+	"github.com/shinpr/galley/internal/runartifact"
 	"github.com/shinpr/galley/internal/task"
 )
 
@@ -161,5 +164,77 @@ func TestReuseCompletedPreflightsMatchesExplicitEmptyModel(t *testing.T) {
 	}
 	if res, reused, err := reuseCompletedAcceptanceSkeleton(root, taskID, currentRun3, withModel); err != nil || reused || res != nil {
 		t.Fatalf("skeleton must not reuse empty-model evidence for non-empty model: (%+v, %v, %v)", res, reused, err)
+	}
+}
+
+func TestReuseCompletedPreflightsEffortIdentityTransitions(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name      string
+		prior     string
+		current   string
+		wantReuse bool
+	}{
+		{"empty prior reused for empty current", "", "", true},
+		{"empty prior reruns for explicit current", "", "high", false},
+		{"explicit prior reruns for empty current", "high", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			taskID := "task-effort-transition"
+			priorRun := filepath.Join(root, "runs", taskID+"-1")
+			currentRun := filepath.Join(root, "runs", taskID+"-2")
+			// CLI and model are held identical so only the effort transition drives reuse.
+			prior := task.Executor{CLI: "claude", Model: "opus", Effort: tc.prior}
+			current := task.Executor{CLI: "claude", Model: "opus", Effort: tc.current}
+
+			setupRes := &setuppreflight.Result{Status: setuppreflight.StatusReady, ReadinessEvidence: "ready"}
+			setuppreflight.ApplyExecutorIdentity(setupRes, prior)
+			if err := setuppreflight.WriteResult(priorRun, setupRes); err != nil {
+				t.Fatal(err)
+			}
+			skeletonRes := &skeletonpreflight.Result{Status: "completed", SourceOfTruth: true}
+			skeletonpreflight.ApplyExecutorIdentity(skeletonRes, prior)
+			if err := skeletonpreflight.WriteResult(priorRun, skeletonRes); err != nil {
+				t.Fatal(err)
+			}
+
+			if tc.prior == "" {
+				assertPersistedExecutorEffortEmpty(t, filepath.Join(priorRun, runartifact.SetupResultFilename))
+				assertPersistedExecutorEffortEmpty(t, filepath.Join(priorRun, runartifact.PreflightResultFilename))
+			}
+
+			_, setupReused, err := reuseReadySetup(root, taskID, currentRun, current)
+			if err != nil {
+				t.Fatalf("setup reuse err: %v", err)
+			}
+			if setupReused != tc.wantReuse {
+				t.Fatalf("setup reuse = %v, want %v (prior effort %q, current effort %q)", setupReused, tc.wantReuse, tc.prior, tc.current)
+			}
+			_, skeletonReused, err := reuseCompletedAcceptanceSkeleton(root, taskID, currentRun, current)
+			if err != nil {
+				t.Fatalf("skeleton reuse err: %v", err)
+			}
+			if skeletonReused != tc.wantReuse {
+				t.Fatalf("skeleton reuse = %v, want %v (prior effort %q, current effort %q)", skeletonReused, tc.wantReuse, tc.prior, tc.current)
+			}
+		})
+	}
+}
+
+func assertPersistedExecutorEffortEmpty(t *testing.T, path string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal %s: %v", path, err)
+	}
+	v, ok := raw["executor_effort"]
+	if !ok || string(v) != `""` {
+		t.Fatalf("%s must persist an explicit empty executor_effort, got %q (present=%v)", path, string(v), ok)
 	}
 }

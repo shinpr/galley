@@ -114,7 +114,7 @@ Answer each separately:
 
 Choose daemon settings before startup. Explain the defaults and ask for changes when the user has not already chosen:
 
-- implementation executor: store repository defaults in `environment.yaml`. Task fields override them independently; an omitted CLI uses Claude, while an omitted effort lets the selected provider CLI choose its own reasoning-effort default.
+- implementation executor: store repository defaults in `environment.yaml`. Resolve each field independently from the task, then `environment.yaml`. When neither layer sets CLI, Galley uses Claude. When neither layer sets model, the selected provider CLI chooses the model; when neither sets effort, it chooses its own reasoning-effort default.
 - supervisor: Claude is the daemon default when unset; a non-default review backend from the list above can be selected at daemon start.
 - PR automation, PR comment handling, base branch, and worktree cleanup: use the resolved `environment.yaml`.
 - run mode: `daemon start` keeps working in the background; `daemon run --once` drains the current queue once.

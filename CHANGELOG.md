@@ -6,6 +6,13 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- Executor `effort` no longer has a Galley built-in default. When neither task YAML nor `environment.yaml` sets it, the effective effort stays empty and the selected provider CLI owns reasoning-effort selection; explicit task/profile effort pins still resolve and validate unchanged.
+- Packaged Galley plugins are version `0.1.25` and describe provider-owned executor effort defaults across task, profile, and setup guidance.
+
+## v0.10.1 - 2026-07-13
+
 ### Added
 
 - Environment profiles can provide executor CLI, model, and effort defaults. Explicit task fields override them independently for each run.
@@ -13,9 +20,8 @@ This project follows semantic versioning.
 ### Changed
 
 - Task executor fields are optional, each provider uses its fixed Galley prompt construction, and reused preflight evidence must match the resolved executor identity.
-- Executor `effort` no longer has a Galley built-in default. When neither task YAML nor `environment.yaml` sets it, the effective effort stays empty and the selected provider CLI owns reasoning-effort selection; explicit task/profile effort pins still resolve and validate unchanged.
 - User-authored task, profile, and daemon YAML ignore unknown keys while continuing to reject missing required fields and invalid known values.
-- Packaged Galley plugins are version `0.1.25`, combining runtime executor defaults with simplified author-owned task drafts, enabled-only acceptance-skeleton preflight, and claim-TTL-derived heartbeat cadence.
+- Packaged Galley plugins are version `0.1.24`, combining runtime executor defaults with simplified author-owned task drafts, enabled-only acceptance-skeleton preflight, and claim-TTL-derived heartbeat cadence.
 
 ### Fixed
 

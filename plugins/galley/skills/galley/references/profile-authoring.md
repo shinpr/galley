@@ -17,7 +17,7 @@ The daemon resolves repository profiles from `scope.cwd` and the Galley root.
 
 Backend defaults are intentionally separate:
 
-- Implementation executor defaults: store `executor.default_cli`, `model`, and `effort` in `environment.yaml`. Task fields override them independently; an omitted CLI falls back to `cli: claude`, while an omitted effort or model lets the selected provider CLI choose its own reasoning effort and model. Pin task fields only when the user explicitly chooses them.
+- Implementation executor defaults: store `executor.default_cli`, `model`, and `effort` in `environment.yaml`. Resolve each field independently from the task, then `environment.yaml`. When neither layer sets CLI, Galley uses `cli: claude`. When neither layer sets model, the selected provider CLI chooses the model; when neither sets effort, it chooses the reasoning effort. Pin task fields only when the user explicitly chooses them.
 - Implementation executor effort: Claude and `glm` accept `low`, `medium`, `high`, `xhigh`, or `max`; Codex also accepts `minimal`; Grok accepts `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. Without `executor.default_cli`, profile validation accepts the provider union; task authoring validates the resolved CLI and effort before queue approval.
 - Review supervisor default: optionally stored in `environment.yaml` as `supervisor.default_cli`; unset falls back to daemon startup state and then Claude.
 - Review supervisor model: set `supervisor.model` to an exact provider model name; omit it or use an empty value to keep that CLI's default.

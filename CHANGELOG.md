@@ -6,6 +6,8 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.10.2 - 2026-07-15
+
 ### Changed
 
 - Executor `effort` no longer has a Galley built-in default. When neither task YAML nor `environment.yaml` sets it, the effective effort stays empty and the selected provider CLI owns reasoning-effort selection; explicit task/profile effort pins still resolve and validate unchanged.

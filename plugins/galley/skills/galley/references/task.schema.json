@@ -310,7 +310,7 @@
           "type": "string"
         },
         "effort": {
-          "description": "Optional reasoning effort override. Empty resolves from the environment profile or Galley's built-in default; the effective provider is validated before setup, skeleton, or implementation.",
+          "description": "Optional reasoning effort override. Empty resolves from the environment profile, then the selected provider CLI's own default; the effective provider is validated before setup, skeleton, or implementation.",
           "enum": [
             "",
             "low",

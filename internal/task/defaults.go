@@ -14,9 +14,6 @@ const DefaultAFKDecisionPolicy = "choose-smallest-reversible"
 // DefaultExecutorCLI is the fallback implementation backend.
 const DefaultExecutorCLI = "claude"
 
-// DefaultExecutorEffort is the fallback implementation effort.
-const DefaultExecutorEffort = "high"
-
 // ApplyDefaults resolves fixed authoring values before validation, display, and
 // queue decisions. Executor defaults remain runtime-owned.
 func ApplyDefaults(t *Task) {
@@ -42,7 +39,9 @@ func Defaulted(t Task) Task {
 	return t
 }
 
-// ResolveEffectiveExecutor applies task, environment, then built-in precedence per field.
+// ResolveEffectiveExecutor applies task, then environment precedence per field.
+// Only cli has a Galley built-in fallback; empty model and effort stay empty so
+// the selected provider CLI owns model and reasoning-effort selection.
 func ResolveEffectiveExecutor(taskExec Executor, env *profile.ExecutorDefault) Executor {
 	cli := taskExec.CLI
 	if cli == "" && env != nil {
@@ -60,9 +59,6 @@ func ResolveEffectiveExecutor(taskExec Executor, env *profile.ExecutorDefault) E
 	effort := taskExec.Effort
 	if effort == "" && env != nil {
 		effort = env.Effort
-	}
-	if effort == "" {
-		effort = DefaultExecutorEffort
 	}
 
 	return Executor{CLI: cli, Model: model, Effort: effort}

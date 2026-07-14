@@ -285,7 +285,8 @@ func ValidateEffectiveExecutor(exec Executor) error {
 		return fmt.Errorf("executor.cli must be one of: %s", strings.Join(validExecutorCLIs, ", "))
 	}
 	if exec.Effort == "" {
-		return fmt.Errorf("executor.effort is required after resolution")
+		// Empty effort delegates reasoning-effort selection to the provider CLI.
+		return nil
 	}
 	efforts, ok := provider.EffortsForID(exec.CLI)
 	if !ok {

@@ -4,7 +4,9 @@ commands:
   test_unit: "go test ./..."
   build: "go build ./cmd/galley"
 # Optional implementation executor runtime defaults. Tasks may override any
-# subset of these fields; omitted task fields resolve here, then to Galley built-ins.
+# subset of these fields; omitted task fields resolve here, then cli falls back
+# to Galley's built-in claude while model and effort defer to the provider CLI's
+# own default.
 executor:
   default_cli: "claude"
 #   model: "claude-sonnet-4-5"

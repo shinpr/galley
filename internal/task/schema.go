@@ -131,7 +131,7 @@ func executorSchema() map[string]any {
 
 func taskExecutorEffortBaseSchema() map[string]any {
 	m := enumSchema(append([]string{""}, provider.ExecutorEfforts()...))
-	m["description"] = "Optional reasoning effort override. Empty resolves from the environment profile or Galley's built-in default; the effective provider is validated before setup, skeleton, or implementation."
+	m["description"] = "Optional reasoning effort override. Empty resolves from the environment profile, then the selected provider CLI's own default; the effective provider is validated before setup, skeleton, or implementation."
 	return m
 }
 

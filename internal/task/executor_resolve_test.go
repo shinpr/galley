@@ -39,16 +39,22 @@ func TestResolveEffectiveExecutorFieldPrecedence(t *testing.T) {
 			want: Executor{CLI: "codex", Model: "env-model", Effort: "minimal"},
 		},
 		{
-			name: "built-in defaults when task and environment omit fields",
+			name: "built-in cli only; empty effort and model delegate to provider CLI",
 			task: Executor{},
 			env:  nil,
-			want: Executor{CLI: DefaultExecutorCLI, Model: "", Effort: DefaultExecutorEffort},
+			want: Executor{CLI: DefaultExecutorCLI, Model: "", Effort: ""},
 		},
 		{
-			name: "empty environment block still uses built-ins",
+			name: "empty environment block keeps effort empty for the provider CLI",
 			task: Executor{},
 			env:  &profile.ExecutorDefault{},
-			want: Executor{CLI: DefaultExecutorCLI, Model: "", Effort: DefaultExecutorEffort},
+			want: Executor{CLI: DefaultExecutorCLI, Model: "", Effort: ""},
+		},
+		{
+			name: "environment cli without effort keeps effort empty",
+			task: Executor{},
+			env:  &profile.ExecutorDefault{DefaultCLI: "grok"},
+			want: Executor{CLI: "grok", Model: "", Effort: ""},
 		},
 		{
 			name: "task effort without cli uses environment cli",
@@ -73,6 +79,11 @@ func TestValidateEffectiveExecutorRejectsInvalidPairs(t *testing.T) {
 	t.Parallel()
 	if err := ValidateEffectiveExecutor(Executor{CLI: "claude", Effort: "high"}); err != nil {
 		t.Fatalf("valid pair must pass: %v", err)
+	}
+	for _, cli := range []string{"claude", "codex", "glm", "grok"} {
+		if err := ValidateEffectiveExecutor(Executor{CLI: cli, Effort: ""}); err != nil {
+			t.Fatalf("empty effort must delegate to %s CLI, got %v", cli, err)
+		}
 	}
 	if err := ValidateEffectiveExecutor(Executor{CLI: "claude", Effort: "minimal"}); err == nil {
 		t.Fatal("claude+minimal must fail")

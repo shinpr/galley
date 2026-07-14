@@ -1,7 +1,7 @@
 {
   "name": "galley",
   "description": "Create, validate, queue, set up, and troubleshoot Galley AFK task workflows.",
-  "version": "0.1.24",
+  "version": "0.1.25",
   "author": {
     "name": "Shinsuke Kagawa",
     "url": "https://github.com/shinpr"

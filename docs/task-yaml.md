@@ -74,10 +74,10 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 - `execution_policy.timeout_ms`: positive per-attempt timeout in milliseconds.
 - Galley fixes the AFK decision policy at `choose-smallest-reversible`.
 - Destructive-operation, missing-secret, and external-service blockers remain executor results; task YAML has no blocker switches.
-- `executor`: optional. Each `cli`, `model`, and `effort` field resolves from the task, current `environment.yaml`, then built-in defaults (`cli: claude`, `effort: high`, CLI-default model). Environment values remain runtime-only.
+- `executor`: optional. Each `cli`, `model`, and `effort` field resolves from the task, then current `environment.yaml`. Only `cli` has a built-in fallback (`claude`); an omitted `effort` or `model` lets the selected provider CLI choose its own reasoning effort and model. Environment values remain runtime-only.
 - `executor.cli`: selects `claude`, `codex`, `glm`, or `grok`. Grok uses the logged-in `grok` CLI for setup, acceptance-skeleton creation, and implementation.
 - `executor.model`: optional model override. Omit it to use the selected CLI's configured default model.
-- `executor.effort`: optional effort hint. Claude and `glm` accept `low`, `medium`, `high`, `xhigh`, and `max`; Codex also accepts `minimal`; Grok also accepts `none`. Invalid provider combinations fail before executor roles run.
+- `executor.effort`: optional effort hint. Claude and `glm` accept `low`, `medium`, `high`, `xhigh`, and `max`; Codex also accepts `minimal`; Grok also accepts `none`. Omit it to let the selected provider CLI use its own configured reasoning-effort default. Invalid provider combinations fail before executor roles run.
 - Prompt transport is Galley-owned. Task YAML no longer accepts `executor.prompt_profile` or `executor.prompt_mode`; older files that still include those keys are ignored by the unknown-field-tolerant decoder.
 
 ## Permissions

@@ -150,7 +150,7 @@ func executorSchema() map[string]any {
 
 func executorEffortBaseSchema() map[string]any {
 	m := enumSchema(append([]string{""}, provider.ExecutorEfforts()...))
-	m["description"] = "Optional reasoning effort used as a repository runtime default. Empty leaves resolution to the task or Galley's built-in default; the effective provider is validated before setup, skeleton, or implementation."
+	m["description"] = "Optional reasoning effort used as a repository runtime default. Empty leaves resolution to the task, then the selected provider CLI's own default; the effective provider is validated before setup, skeleton, or implementation."
 	return m
 }
 

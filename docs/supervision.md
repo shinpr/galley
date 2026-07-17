@@ -47,11 +47,20 @@ For implementation tasks, the supervisor should reject a no-diff result unless t
 | `completed` with blockers that require human judgment about product, design, environment, external services, or required-check policy | `tasks/failed/` with status `needs_supervisor_review` |
 | `completed` with an external or unrecoverable blocker that prevents meaningful progress | `tasks/failed/` with status `failed` |
 | `completed_with_risks` | retry, then `tasks/failed/` with status `needs_supervisor_review` |
-| Parse failure or schema validation failure | retry, then `tasks/failed/` with status `needs_supervisor_review` |
+| Parse or schema validation failure after a normal provider terminal | retry, then `tasks/failed/` with status `needs_supervisor_review` |
+| Executor provider or runtime interruption (no normal provider terminal) | `tasks/failed/` with status `failed`, without supervisor review or retry |
 | Two consecutive attempts with no git diff | stop early as a no-progress safeguard |
 | `hard_stop` | `tasks/failed/` with status `failed`, without retry |
 
 `needs_supervisor_review` is a task state, not a daemon process failure. `galley daemon run --once` can exit 0 after recording that state.
+
+## Executor Interruptions
+
+When an executor process ends, Galley first decides whether the attempt reached a normal provider terminal. The decision uses only the runner state and the provider's machine-readable completion marker — Claude and GLM successful result events, Codex `turn.completed`, and Grok `EndTurn` — and never the process exit code or error-text matching alone. A start failure, timeout, idle timeout, kill, explicit failed terminal (Codex `turn.failed`, Grok non-`EndTurn`, a Claude/GLM API-error result), or any output without a reliable normal terminal is an interruption.
+
+An interrupted attempt stops before the supervisor: Galley does not invoke the supervisor and does not start another executor attempt in the same run, regardless of loop budget or whether the worktree has a diff. The task moves to `tasks/failed/` with status `failed` and the latest attempt records `supervisor_verdict: not_reviewed` and an executor-owned `error_kind: executor_interrupted`, distinct from an ordinary completed-result failure. Galley captures the command plan, run result, raw provider output, git status, diff, and an `executor_terminal.json` decision record before publishing the failed task, and preserves the worktree with its tracked and untracked changes.
+
+`galley task show TASK_ID` surfaces the interruption, its evidence directory, and any retained provider detail (structured status, code, stop reason, session ID, or message; unavailable detail falls back to a generic reason). Resolve the interruption cause, then run `galley task requeue TASK_ID` to reuse the retained worktree and start a fresh executor attempt from the preserved changes.
 
 `completed_with_risks` means the executor believes the implementation is coherent, but verification limits, assumptions, or residual risks still need supervisor attention.
 

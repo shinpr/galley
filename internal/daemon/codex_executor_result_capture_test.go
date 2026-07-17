@@ -29,9 +29,9 @@ func TestCodexExecutorLastMessageJSONReachesExecutorResult(t *testing.T) {
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
 
 	executorResult := `{"status":"completed","summary":"codex last-message summary","files_modified":["daemon-output.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}`
-	// The fake executor writes the result to --output-last-message and emits a
-	// non-result line on stdout so the test only passes when the daemon parses
-	// the last-message file rather than relying on stdout JSONL.
+	// The fake writes the result to --output-last-message and emits turn.completed
+	// plus a non-result stdout line, so the test only passes when the daemon reads
+	// the last-message file rather than stdout JSONL.
 	claudeBin := writeFakeClaude(t, "exit 1\n")
 	codexBin := writeFakeCommand(t, "codex", `lastmsg=""
 while [ "$#" -gt 0 ]; do
@@ -51,6 +51,7 @@ if [ -n "$lastmsg" ]; then
   printf '%s' '`+executorResult+`' > "$lastmsg"
 fi
 printf '%s\n' '{"event":"unrelated"}'
+printf '%s\n' '`+fakeCodexTurnCompleted+`'
 `)
 
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
@@ -117,6 +118,7 @@ if [ -n "$lastmsg" ]; then
   printf '%s' '`+hardStopResult+`' > "$lastmsg"
 fi
 printf '%s\n' '`+hardStopResult+`'
+printf '%s\n' '`+fakeCodexTurnCompleted+`'
 `)
 
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")

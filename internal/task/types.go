@@ -207,6 +207,17 @@ type Attempt struct {
 	Error             *AttemptError `yaml:"error,omitempty" json:"error,omitempty"`
 }
 
+const (
+	// AttemptKindExecutorInterrupted marks an attempt whose executor was
+	// interrupted (provider or runtime failure) before it reached a normal
+	// provider terminal. It is distinct from an ordinary completed-result
+	// failure because no supervisor reviewed the attempt.
+	AttemptKindExecutorInterrupted = "executor_interrupted"
+	// AttemptVerdictNotReviewed marks an attempt no supervisor evaluated, so a
+	// non-verdict is never mistaken for an accepted or needs_revision decision.
+	AttemptVerdictNotReviewed = "not_reviewed"
+)
+
 // AttemptError records the operator-facing failure that ended an attempt.
 type AttemptError struct {
 	Phase       string `yaml:"phase" json:"phase"`

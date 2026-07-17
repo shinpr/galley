@@ -187,6 +187,8 @@ galley task show TASK_ID
 galley task requeue TASK_ID --reason "retry after transient failure"
 ```
 
+An executor provider or runtime interruption records the latest `attempts[]` entry with `supervisor_verdict: not_reviewed` and `error.kind: executor_interrupted`, distinct from an ordinary completed-result failure that a supervisor reviewed. The task lands in `tasks/failed/` with status `failed` and its worktree and run evidence preserved. `galley task requeue TASK_ID` reuses the retained dirty worktree so the next executor continues from the preserved tracked and untracked changes. See [Supervision → Executor Interruptions](supervision.md#executor-interruptions).
+
 ## Compatibility
 
 The tolerant decoder loads removed authoring keys (`execution_policy.afk_decision_policy`, `execution_policy.stop_on_*`, and acceptance-skeleton `mode`, `required`, and `allowed_paths`), then drops them on save. Runtime lifecycle fields remain available to the daemon.

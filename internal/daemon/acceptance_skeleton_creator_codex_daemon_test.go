@@ -75,6 +75,7 @@ case "$input" in
   *)
     echo change > daemon-output.txt
     printf '%s\n' '`+executorResult+`' > "$out"
+    printf '%s\n' '`+fakeCodexTurnCompleted+`'
     ;;
 esac
 `)

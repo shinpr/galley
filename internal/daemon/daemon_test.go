@@ -185,7 +185,10 @@ func TestRunOnceRecordsSupervisorTimeoutInTaskAttempt(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeDaemonTask(t, taskPath, repo)
-	setTimeoutMS(t, taskPath, 50)
+	// The executor reaches a normal terminal well within this budget while the
+	// sleeping supervisor exhausts it, so the recorded failure is the supervisor
+	// timeout rather than an executor interruption before review.
+	setTimeoutMS(t, taskPath, 800)
 
 	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
@@ -196,6 +199,7 @@ func TestRunOnceRecordsSupervisorTimeoutInTaskAttempt(t *testing.T) {
 		Supervisor:         "codex",
 		ClaudeBin:          claudeBin,
 		CodexBin:           codexBin,
+		DisableClaudeGuard: true,
 	})
 	if err == nil {
 		t.Fatal("expected supervisor timeout")
@@ -644,7 +648,10 @@ func TestRunOnceParseFailureNeedsSupervisorReview(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	claudeBin := writeFakeClaude(t, "echo not-json\n")
+	// A result event is the Claude normal terminal; its inner payload is invalid
+	// JSON. An executor-result parse failure after a normal terminal must still
+	// be reviewed by the supervisor rather than treated as an interruption.
+	claudeBin := writeFakeClaude(t, `echo '{"type":"result","subtype":"success","is_error":false,"result":"not-json"}'`+"\n")
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -673,6 +680,11 @@ func TestRunOnceParseFailureNeedsSupervisorReview(t *testing.T) {
 	if len(failedTask.Risks) == 0 {
 		t.Fatal("expected parse risk")
 	}
+	last := failedTask.Attempts[len(failedTask.Attempts)-1]
+	if last.SupervisorVerdict == task.AttemptVerdictNotReviewed || last.SupervisorVerdict == "" {
+		t.Fatalf("expected a supervisor verdict after a normal terminal; got %q", last.SupervisorVerdict)
+	}
+	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", "supervisor_verdict.json"), 1)
 }
 
 func TestRunOnceCompletedWithRisksNeedsSupervisorReview(t *testing.T) {
@@ -784,6 +796,15 @@ func TestRunOnceStopsAfterConsecutiveNoDiffAttempts(t *testing.T) {
 	}
 }
 
+// Representative normal-terminal markers the fake executors auto-append so
+// strict terminal classification sees a completed attempt. A body that emits
+// its own explicit failed terminal still routes as an interruption because
+// failed terminals take precedence.
+const (
+	fakeClaudeResultEvent  = `{"type":"result","subtype":"success","is_error":false}`
+	fakeCodexTurnCompleted = `{"type":"turn.completed"}`
+)
+
 func writeFakeClaude(t *testing.T, body string) string {
 	t.Helper()
 	return writeFakeCommand(t, "claude", `supervisor=0
@@ -807,7 +828,7 @@ if [ "$supervisor" = "1" ]; then
   fi
   exit 0
 fi
-`+body)
+`+body+"\nprintf '%s\\n' '"+fakeClaudeResultEvent+"'\n")
 }
 
 func prepareDonePRTask(t *testing.T, taskPath, repo, prStatus string) (task.Task, string) {

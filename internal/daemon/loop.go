@@ -168,6 +168,15 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 			EffectiveExecutor: effectiveExecutor,
 		})
 		if err != nil {
+			// An interruption is published to the existing failed-task state
+			// with its preserved worktree and evidence. The attempt was already
+			// recorded (not_reviewed) by runOneSupervisorAttempt, so this is a
+			// clean terminal publication, not a daemon error, and must never
+			// start another executor attempt regardless of remaining budget.
+			if interrupted, ok := asExecutorInterrupted(err); ok {
+				fmt.Fprintf(os.Stderr, "galley: task %s executor interrupted (%s); publishing to failed for requeue\n", loaded.ID, interrupted.Reason)
+				return taskstate.MoveToStatus(opts.Root, runningPath, loaded)
+			}
 			// When an exhausted supervisor idle timeout fails the task,
 			// emit one concise line in the existing Galley log tone so the
 			// daemon log distinguishes it from a task total-timeout expiry.
@@ -275,6 +284,12 @@ func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) 
 		}
 		appendFailureAttempt(req.Loaded, "executor", classifyFailureKind("executor_failed", err), err, attemptDir)
 		return attemptReview{}, err
+	}
+	// A provider or runtime interruption never reaches the supervisor: the
+	// attempt is recorded as not_reviewed with preserved evidence and the loop
+	// stops so no verdict is invented and no further executor attempt starts.
+	if !outcome.Terminal.NormalTerminal {
+		return attemptReview{}, appendInterruptedAttempt(req.Loaded, outcome, attemptDir)
 	}
 	setupResultEvidence, setupUpdateEvidence := setuppreflight.LoadRunEvidence(req.RunDir, req.RunID)
 	evidence := supervisor.Evidence{

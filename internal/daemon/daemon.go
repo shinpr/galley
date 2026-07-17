@@ -136,13 +136,23 @@ type daemonDependencies struct {
 	stageExecutorOutput func(context.Context, Options, string, string, []string) error
 	supervisorRunner    func(context.Context, Options, supervisor.Evidence, string, string) (supervisor.Verdict, error)
 	setupExecutorRunner func(context.Context, setuppreflight.Options) (*setuppreflight.Result, error)
+	// writeAttemptArtifact persists one JSON attempt artifact (run_result,
+	// executor_terminal, or executor_result). It is a seam so lifecycle tests can
+	// inject a deterministic write failure for a single named artifact and prove
+	// the runner outcome and terminal classification still survive.
+	writeAttemptArtifact func(path string, value any) error
+	// writeProviderMetadata persists a provider completion metadata blob (Grok
+	// raw output). Injectable for the same reason as writeAttemptArtifact.
+	writeProviderMetadata func(path string, data []byte) error
 }
 
 func defaultDaemonDependencies() daemonDependencies {
 	return daemonDependencies{
-		stageExecutorOutput: defaultStageExecutorOutput,
-		supervisorRunner:    defaultSupervisorRunner,
-		setupExecutorRunner: setuppreflight.RunExecutor,
+		stageExecutorOutput:   defaultStageExecutorOutput,
+		supervisorRunner:      defaultSupervisorRunner,
+		setupExecutorRunner:   setuppreflight.RunExecutor,
+		writeAttemptArtifact:  writeJSON,
+		writeProviderMetadata: runner.WriteGrokCompletionMetadata,
 	}
 }
 
@@ -160,6 +170,12 @@ func (opts Options) daemonDependencies() daemonDependencies {
 	}
 	if deps.setupExecutorRunner == nil {
 		deps.setupExecutorRunner = defaults.setupExecutorRunner
+	}
+	if deps.writeAttemptArtifact == nil {
+		deps.writeAttemptArtifact = defaults.writeAttemptArtifact
+	}
+	if deps.writeProviderMetadata == nil {
+		deps.writeProviderMetadata = defaults.writeProviderMetadata
 	}
 	return deps
 }

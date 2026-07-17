@@ -194,7 +194,7 @@ Galley uses two timeout concepts:
 - `--idle-timeout`: kills executor or built-in supervisor subprocesses that stop producing output.
 - `execution_policy.timeout_ms`: bounds the total wall-clock duration of one executor attempt.
 
-Executor idle timeouts are recorded as `error_kind: idle_timeout` and as `idle_timed_out: true` in run evidence, then the task loop continues according to the task loop budget.
+An executor idle timeout, total timeout, start failure, or kill is an interruption: it stops before supervisor review rather than continuing the loop. The task moves to `tasks/failed/` with status `failed`, the attempt records `supervisor_verdict: not_reviewed` and `error_kind: executor_interrupted` (with the diagnostic cause, such as `idle_timeout` or `timed_out`, retained in the message), and run evidence keeps `idle_timed_out: true` where applicable. Galley preserves the worktree and evidence so the task can be requeued. See [Supervision → Executor Interruptions](supervision.md#executor-interruptions).
 
 Built-in supervisor subprocess failures caused by idle timeout, total timeout, or forced kill are retried up to two additional times inside the same executor attempt. Each try writes evidence under `runs/<run-id>/attempt-N/supervisor-try-<M>/`.
 
@@ -215,6 +215,7 @@ If every supervisor try is killed by the idle-output watchdog, Galley records `e
 - Background control uses a local PID file. Avoid sharing the same `--pid-file` across unrelated processes, and prefer one workflow root per managed daemon.
 - Running tasks refresh their YAML mtime at `min(claim_ttl / 4, 1m)` while the executor loop is active. Heartbeat cadence has no separate daemon or CLI setting.
 - Each claimed running task records the owning daemon. On startup the daemon immediately requeues running tasks whose recorded owner is dead or cannot be verified, while leaving tasks still owned by a verified live daemon untouched.
+- An executor provider or runtime interruption publishes the task to `tasks/failed/` with its worktree and run evidence preserved, without a supervisor verdict. Inspect it with `galley task show TASK_ID`, resolve the interruption cause, then run `galley task requeue TASK_ID` to reuse the retained (dirty) worktree and continue from the preserved changes.
 
 ### External Services
 

@@ -35,6 +35,7 @@ const (
 
 	// Executor and supervisor attempt artifacts.
 	ExecutorResultFilename         = "executor_result.json"
+	ExecutorTerminalFilename       = "executor_terminal.json"
 	RunResultFilename              = "run_result.json"
 	CommandPlanFilename            = "command_plan.json"
 	GrokCompletionMetadataFilename = "grok_completion.json"

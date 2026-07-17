@@ -220,6 +220,9 @@ func newTaskShowCommand() *cobra.Command {
 						if last.Error.ArtifactDir != "" {
 							fmt.Fprintf(cmd.OutOrStdout(), "%s_error_artifact_dir: %s\n", prefix, last.Error.ArtifactDir)
 						}
+						if last.Error.Kind == task.AttemptKindExecutorInterrupted {
+							fmt.Fprintf(cmd.OutOrStdout(), "%s_recovery: executor interrupted before supervisor review; partial work and run evidence are preserved. Resolve the interruption cause, then run `galley task requeue %s` to reuse the retained worktree and start a fresh executor attempt.\n", prefix, loaded.ID)
+						}
 					}
 				}
 				if len(loaded.Risks) > 0 {

@@ -22,6 +22,8 @@ fi
 cat > /dev/null
 echo "smoke" > smoke-output.txt
 echo '{"status":"completed","summary":"smoke done","files_modified":["smoke-output.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["smoke-output.txt"],"notes":"created smoke output"}],"verification":[{"command":"test -f smoke-output.txt","status":"passed","reason":"file exists","output_excerpt":"ok"}],"decisions":[],"risks":[]}'
+# Classification keys on this terminal event, not the executor-result JSON above.
+echo '{"type":"result","subtype":"success","is_error":false}'
 SH
 chmod +x "$BIN_DIR/claude"
 

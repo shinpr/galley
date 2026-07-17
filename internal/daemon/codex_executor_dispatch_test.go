@@ -45,7 +45,7 @@ import (
 // to record invocation markers and emit the executor result JSON line.
 func writeFakeCodexExecutor(t *testing.T, body string) string {
 	t.Helper()
-	return writeFakeCommand(t, "codex", "cat >/dev/null\n"+body)
+	return writeFakeCommand(t, "codex", "cat >/dev/null\n"+body+"\nprintf '%s\\n' '"+fakeCodexTurnCompleted+"'\n")
 }
 
 // TestDaemonDispatchesSelectedExecutorBinary parameterizes over the supported

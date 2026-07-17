@@ -24,12 +24,26 @@ type attemptOutcome struct {
 	Completed      time.Time
 	RunResult      runner.RunResult
 	RunErr         error
+	Terminal       runner.ExecutorTerminal
+	CLI            string
 	ExecutorResult runner.ExecutorResult
 	ParseErr       error
 	DiffDirty      bool
 	Diff           string
 	DiffErr        error
 	DiffSnapshot   workspace.Snapshot
+	// Per-artifact availability flags. Any may be non-nil on an interruption
+	// without discarding routing, so the inventory names each artifact truthfully:
+	// GitStatusErr and DiffPatchErr split the diff evidence, and RawOutputErr flags
+	// a capture-file creation failure that left no raw output to claim.
+	RawOutputErr error
+	RunResultErr error
+	TerminalErr  error
+	GrokMetaErr  error
+	ResultErr    error
+	StagingErr   error
+	GitStatusErr error
+	DiffPatchErr error
 }
 
 func defaultStageExecutorOutput(ctx context.Context, opts Options, workDir, attemptDir string, excludePaths []string) error {
@@ -88,35 +102,64 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 	if err != nil {
 		return attemptOutcome{}, err
 	}
+	// A capture-file creation failure returns before either raw log exists, so the
+	// on-disk stdout/stderr paths decide whether raw provider output was preserved.
+	rawOutputErr := rawOutputCaptureErr(stdoutPath, stderrPath)
+	deps := opts.daemonDependencies()
+
+	// Terminal classification is the single executor->supervisor routing
+	// decision. It is derived only from the in-memory runner outcome and captured
+	// provider output, so it is fixed immediately after the runner returns and
+	// survives every post-run persistence failure below. An interruption keeps
+	// this decision even when no artifact can be written; a normal terminal keeps
+	// the existing hard-failure semantics because the supervisor must not review
+	// an attempt whose evidence could not be persisted.
+	terminal := runner.ClassifyExecutorTerminal(cli, stdoutPath, run.RunResult.Stdout, run.RunResult, run.RunErr)
+	interrupted := !terminal.NormalTerminal
+
+	// Persist the runner outcome and routing decision. Each write records a
+	// separate availability flag instead of discarding the outcome.
+	runResultErr := deps.writeAttemptArtifact(runartifact.Path(attemptDir, runartifact.RunResultFilename), run.RunResult)
+	terminalErr := deps.writeAttemptArtifact(runartifact.Path(attemptDir, runartifact.ExecutorTerminalFilename), terminal)
+
+	var grokMetaErr error
 	if cli == "grok" {
 		data, readErr := os.ReadFile(stdoutPath)
 		if readErr != nil {
 			data = []byte(run.RunResult.Stdout)
 		}
-		if metaErr := runner.WriteGrokCompletionMetadata(runartifact.Path(attemptDir, runartifact.GrokCompletionMetadataFilename), data); metaErr != nil {
-			return attemptOutcome{}, metaErr
-		}
+		grokMetaErr = deps.writeProviderMetadata(runartifact.Path(attemptDir, runartifact.GrokCompletionMetadataFilename), data)
 	}
 
-	resultPath := runartifact.Path(attemptDir, runartifact.ExecutorResultFilename)
 	lastMessagePath := codexLastMessagePath(cli, attemptDir)
 	executorResult, parseErr := resolveExecutorResult(cli, stdoutPath, run.RunResult.Stdout, lastMessagePath)
+	var resultErr error
 	if parseErr == nil {
-		if err := writeJSON(resultPath, executorResult); err != nil {
-			return attemptOutcome{}, err
-		}
+		resultErr = deps.writeAttemptArtifact(runartifact.Path(attemptDir, runartifact.ExecutorResultFilename), executorResult)
 	}
 
 	// Stage untracked executor output, excluding context-only inputs, before
 	// supervisor review. The parent context preserves evidence after a timeout.
 	excludePaths := nonCommittedInputDestinations(loaded.Files)
-	if err := opts.daemonDependencies().stageExecutorOutput(ctx, opts, workDir, attemptDir, excludePaths); err != nil {
-		return attemptOutcome{}, &reviewStagingError{Err: err}
-	}
+	stagingErr := deps.stageExecutorOutput(ctx, opts, workDir, attemptDir, excludePaths)
 
-	diffArtifacts, err := executorflow.CaptureDiffArtifacts(ctx, workDir, baseSHA, attemptDir, workspaceOptions(opts))
-	if err != nil {
-		return attemptOutcome{}, err
+	// CaptureDiffArtifacts returns every successfully captured component with any
+	// snapshot-capture failure in diffArtifacts.Err (second return nil) and any
+	// artifact-write failure as the second return. A normal terminal fails on a
+	// write failure but tolerates a capture-only failure as a recorded risk.
+	diffArtifacts, diffWriteErr := executorflow.CaptureDiffArtifacts(ctx, workDir, baseSHA, attemptDir, workspaceOptions(opts))
+	diffErr := diffArtifacts.Err
+
+	if !interrupted {
+		if err := firstNonNilErr(runResultErr, terminalErr, grokMetaErr, resultErr); err != nil {
+			return attemptOutcome{}, err
+		}
+		if stagingErr != nil {
+			return attemptOutcome{}, &reviewStagingError{Err: stagingErr}
+		}
+		if diffWriteErr != nil {
+			return attemptOutcome{}, diffWriteErr
+		}
 	}
 
 	return attemptOutcome{
@@ -124,13 +167,51 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 		Completed:      run.Completed,
 		RunResult:      run.RunResult,
 		RunErr:         run.RunErr,
+		Terminal:       terminal,
+		CLI:            cli,
 		ExecutorResult: executorResult,
 		ParseErr:       parseErr,
 		DiffDirty:      diffArtifacts.Dirty,
 		Diff:           diffArtifacts.Diff,
-		DiffErr:        diffArtifacts.Err,
+		DiffErr:        diffErr,
 		DiffSnapshot:   diffArtifacts.Snapshot,
+		RawOutputErr:   rawOutputErr,
+		RunResultErr:   runResultErr,
+		TerminalErr:    terminalErr,
+		GrokMetaErr:    grokMetaErr,
+		ResultErr:      resultErr,
+		StagingErr:     stagingErr,
+		GitStatusErr:   diffArtifacts.GitStatusErr,
+		DiffPatchErr:   diffArtifacts.DiffPatchErr,
 	}, nil
+}
+
+// rawOutputCaptureErr reports the capture logs that were never created, so an
+// interruption inventory never claims raw provider output a capture-file failure
+// prevented Galley from persisting.
+func rawOutputCaptureErr(paths ...string) error {
+	var missing []string
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		if _, err := os.Stat(p); err != nil {
+			missing = append(missing, filepath.Base(p))
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf("capture file not created: %s", strings.Join(missing, ", "))
+}
+
+func firstNonNilErr(errs ...error) error {
+	for _, err := range errs {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func markRevisionRequestsAddressed(loaded *task.Task, evidence string) {

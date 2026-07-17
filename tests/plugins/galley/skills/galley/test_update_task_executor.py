@@ -113,6 +113,25 @@ def test_preserves_crlf_line_endings(tmpdir: pathlib.Path) -> None:
         raise AssertionError("updater introduced non-CRLF line endings")
 
 
+def test_preserves_bom_before_first_executor_block(tmpdir: pathlib.Path) -> None:
+    task_path = tmpdir / "task.yaml"
+    original = "\ufeffexecutor:\r\n  cli: claude\r\nid: task-1\r\nrisks: []\r\n"
+    write_task(task_path, original, newline="")
+
+    result = run_updater(task_path, "--cli", "codex")
+
+    if result.returncode != 0:
+        raise AssertionError(result.stderr)
+    content = task_path.read_bytes()
+    if not content.startswith(b"\xef\xbb\xbf"):
+        raise AssertionError("UTF-8 BOM was not preserved")
+    decoded = content.decode("utf-8-sig")
+    if decoded.count("executor:") != 1:
+        raise AssertionError("executor block was duplicated")
+    if '  cli: "codex"\r\n' not in decoded:
+        raise AssertionError("executor block was not updated with CRLF preserved")
+
+
 def test_rejects_unsupported_inline_executor_without_writing(tmpdir: pathlib.Path) -> None:
     task_path = tmpdir / "task.yaml"
     original = "id: task-1\nexecutor: {cli: claude}\nrisks: []\n"
@@ -147,6 +166,7 @@ def main() -> int:
         test_updates_only_requested_executor_fields,
         test_removes_empty_executor_block,
         test_preserves_crlf_line_endings,
+        test_preserves_bom_before_first_executor_block,
         test_rejects_unsupported_inline_executor_without_writing,
         test_requires_a_requested_change,
     )

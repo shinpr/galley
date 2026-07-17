@@ -71,24 +71,46 @@ galley task requeue <task-id-or-task-file> --reason "retry after fixing the bloc
 
 ### Executor interruption recovery
 
-When a task is `failed` because the executor stopped before supervisor review, continue from its retained worktree and diff. Choose the recovery action by whether the executor settings need to change. Provider-specific error details improve `Cause`, `Evidence`, and the requeue reason; an exact provider failure classification is optional.
+When a task is `failed` because the executor stopped before supervisor review, continue from its retained worktree and diff. Use observed evidence to choose the recovery action:
 
-For the same executor settings, wait when the observed condition is temporary, then requeue:
+- Update task-level executor overrides when the error identifies the current CLI, model, or effort as incompatible, or when the user chooses different settings.
+- Otherwise keep the same settings; when the observed condition is temporary, wait before requeueing.
+
+Provider-specific error details improve `Cause`, `Evidence`, and the requeue reason; an exact provider failure classification is optional. Record the observed symptom and only an established cause; when the cause is not established, use `cause unknown`.
+
+For the same executor settings, inspect the task and requeue:
 
 ```bash
 galley task show <task-id>
-galley task requeue <task-id-or-task-file> --reason "retry after executor interruption: <observed cause>"
+galley task requeue <task-id-or-task-file> --reason "retry after executor interruption: <observed symptom>; cause <established cause or unknown>"
 ```
 
-To change task-level executor overrides, pass only the fields that should change. An `--unset-*` option removes that task override so runtime defaults apply. The helper changes `executor.cli`, `executor.model`, and `executor.effort`; it leaves the recovery decision to this flow.
+To change task-level executor overrides, run exactly one helper command with only the fields that should change. An `--unset-*` option removes that task override so runtime defaults apply. The helper changes `executor.cli`, `executor.model`, and `executor.effort`; it leaves the recovery decision to this flow.
+
+Use the Python launcher available on the host (`python3`, `python`, or Windows `py -3`); these examples use `python3`.
+
+To set task overrides:
 
 ```bash
-python3 <this-skill-directory>/scripts/update_task_executor.py <task-file> \
-  --cli <cli> --model <model> --effort <effort>
-python3 <this-skill-directory>/scripts/update_task_executor.py <task-file> \
-  --unset-model --unset-effort
+python3 <this-skill-directory>/scripts/update_task_executor.py <task-file> --cli <cli> --model <model> --effort <effort>
+```
+
+To remove selected task overrides:
+
+```bash
+python3 <this-skill-directory>/scripts/update_task_executor.py <task-file> --unset-model --unset-effort
+```
+
+Proceed to validation only when the selected helper command exits 0. When it exits non-zero, report its error and correct the reported file or YAML problem before rerunning the helper.
+
+```bash
 galley task validate <task-file>
-galley task requeue <task-id-or-task-file> --reason "retry with updated executor settings: <observed cause>"
+```
+
+When validation exits 0, requeue:
+
+```bash
+galley task requeue <task-id-or-task-file> --reason "retry with updated executor settings: <observed symptom>; cause <established cause or unknown>"
 ```
 
 For a weak supervisor acceptance:

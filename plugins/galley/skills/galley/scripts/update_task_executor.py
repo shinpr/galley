@@ -109,7 +109,9 @@ def main() -> int:
     try:
         with task_path.open("r", encoding="utf-8", newline="") as task_file:
             original = task_file.read()
-        updated = update_executor_yaml(original, changes)
+        bom = "\ufeff" if original.startswith("\ufeff") else ""
+        task_yaml = original[len(bom) :]
+        updated = bom + update_executor_yaml(task_yaml, changes)
         if updated != original:
             with task_path.open("w", encoding="utf-8", newline="") as task_file:
                 task_file.write(updated)

@@ -51,7 +51,7 @@ Read the files that exist. Focus on the newest attempt first.
 | task remains in `queued` | daemon stopped, concurrency limit, or queue mismatch | Check `galley daemon status`, daemon log, and the queued file path. |
 | task remains in `running` | stale claim or active attempt | Check heartbeat age and claim TTL. |
 | `needs_revision` loops | AC too broad, executor missing context, or supervisor finding unclear | Rewrite AC or add `revision_requests` with concrete next work. |
-| task failed due to usage limit or transient provider failure | executor stopped for a temporary external limit | Wait until the limit resets, then requeue with a reason. |
+| task is `failed` after the executor stopped and no supervisor verdict was produced | executor execution was interrupted before review; provider evidence may identify a temporary limit or an incompatible executor setting | Continue with Executor interruption recovery below. |
 | `accepted` with quality concerns | pass policy treats concern as non-blocking | Add quality profile or PR comment requeue with specific blocker. |
 | no diff produced | task was investigation-only or executor stopped early | Check executor result and work order. |
 | PR comments ignored | polling disabled in `environment.yaml`, auth missing, or comment ID already processed | Check `pr.comments.enabled`, `gh auth status`, and `pr.processed_comment_ids`. |
@@ -69,11 +69,26 @@ For a failed task with a clear next step:
 galley task requeue <task-id-or-task-file> --reason "retry after fixing the blocker"
 ```
 
-For usage limits or temporary provider failures:
+### Executor interruption recovery
+
+When a task is `failed` because the executor stopped before supervisor review, continue from its retained worktree and diff. Choose the recovery action by whether the executor settings need to change. Provider-specific error details improve `Cause`, `Evidence`, and the requeue reason; an exact provider failure classification is optional.
+
+For the same executor settings, wait when the observed condition is temporary, then requeue:
 
 ```bash
 galley task show <task-id>
-galley task requeue <task-id-or-task-file> --reason "retry after usage limit reset"
+galley task requeue <task-id-or-task-file> --reason "retry after executor interruption: <observed cause>"
+```
+
+To change task-level executor overrides, pass only the fields that should change. An `--unset-*` option removes that task override so runtime defaults apply. The helper changes `executor.cli`, `executor.model`, and `executor.effort`; it leaves the recovery decision to this flow.
+
+```bash
+python3 <this-skill-directory>/scripts/update_task_executor.py <task-file> \
+  --cli <cli> --model <model> --effort <effort>
+python3 <this-skill-directory>/scripts/update_task_executor.py <task-file> \
+  --unset-model --unset-effort
+galley task validate <task-file>
+galley task requeue <task-id-or-task-file> --reason "retry with updated executor settings: <observed cause>"
 ```
 
 For a weak supervisor acceptance:

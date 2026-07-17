@@ -6,6 +6,14 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Added
+
+- The Galley skill includes a helper for changing task-level executor CLI, model, and effort overrides before validation and requeue.
+
+### Changed
+
+- Packaged Claude, Codex, and Grok Galley plugins are now versioned as `0.1.26`: troubleshooting guidance routes executor interruptions through wait-or-update recovery without requiring an exact provider failure classification, and the bundled helper updates task-level executor CLI, model, and effort overrides before validation and requeue.
+
 ## v0.10.2 - 2026-07-15
 
 ### Changed

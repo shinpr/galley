@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- Documentation now provides a goal-based guide, clearer model and review configuration, and task-state troubleshooting.
+
 ## v0.11.0 - 2026-07-18
 
 ### Added

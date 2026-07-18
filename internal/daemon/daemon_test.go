@@ -650,7 +650,7 @@ func TestRunOnceParseFailureNeedsSupervisorReview(t *testing.T) {
 	// A real Claude run that finishes normally but emits non-JSON still ends its
 	// stream with a success result event; only the embedded executor result is
 	// unparseable. That normal terminal must reach Supervisor review rather than
-	// be misclassified as an interruption (AC2, R2).
+	// be misclassified as an interruption.
 	claudeBin := writeFakeClaude(t, `printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"not-json","session_id":"sess-parse"}'`+"\n")
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {

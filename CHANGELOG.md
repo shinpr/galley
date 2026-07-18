@@ -12,7 +12,7 @@ This project follows semantic versioning.
 
 ### Changed
 
-- Executor provider or runtime interruptions now stop before Supervisor review. Galley decides whether an attempt reached a reliable normal provider terminal (Claude/GLM success result, Codex `turn.completed`, Grok `EndTurn`) from runner state and machine-readable provider output; interruptions skip the Supervisor and any further attempt, preserve the dirty worktree and run evidence, record an executor-owned `not_reviewed` attempt with retained provider detail, and publish the task to `tasks/failed`. `galley task show` surfaces the interruption, its evidence directory, and the `galley task requeue` recovery action, which resumes the retained worktree. A parse or schema-validation failure after a normal terminal remains reviewable under the existing correction loop.
+- Executor interruptions now bypass Supervisor, preserve the worktree and run evidence, and resume through `galley task requeue`; result-validation failures after a normal provider terminal remain reviewable.
 - Packaged Claude, Codex, and Grok Galley plugins are now versioned as `0.1.26`: troubleshooting guidance routes executor interruptions through wait-or-update recovery without requiring an exact provider failure classification, and the bundled helper updates task-level executor CLI, model, and effort overrides before validation and requeue.
 
 ## v0.10.2 - 2026-07-15

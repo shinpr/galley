@@ -15,7 +15,7 @@ import (
 // reliable normal terminal. When Normal is false the attempt was interrupted
 // and must bypass Supervisor review. Reason is a stable machine code used for
 // routing and diagnosis; the remaining provider detail fields are retained for
-// diagnosis only and never determine routing (prior decision D3).
+// diagnosis only and never determine routing.
 type ExecutorTerminal struct {
 	Normal     bool   `json:"normal"`
 	Reason     string `json:"reason"`
@@ -80,13 +80,35 @@ func runnerInterruption(provider string, runErr error) ExecutorTerminal {
 	return t
 }
 
+// mergeRunnerInterruption keeps runner-failure interruption routing while
+// retaining any provider terminal detail parsed from the same exit for
+// diagnosis. A provider success or an absent/malformed terminal never flips
+// routing or masks the runner error reason.
+func mergeRunnerInterruption(runnerTerm, providerTerm ExecutorTerminal) ExecutorTerminal {
+	switch providerTerm.Reason {
+	case "", TerminalReasonNoNormalTerminal, TerminalReasonMalformedTerminal:
+		return runnerTerm
+	}
+	runnerTerm.Status = providerTerm.Status
+	runnerTerm.Code = providerTerm.Code
+	runnerTerm.StopReason = providerTerm.StopReason
+	runnerTerm.SessionID = providerTerm.SessionID
+	if providerTerm.Message != "" {
+		runnerTerm.Message = providerTerm.Message
+	}
+	if !providerTerm.Normal {
+		runnerTerm.Reason = providerTerm.Reason
+	}
+	return runnerTerm
+}
+
 // ClaudeTerminal classifies a Claude (or GLM, which shares Claude's transport)
 // executor exit from its stream-json stdout and runner error. provider carries
 // the actual executor identity ("claude" or "glm") so interruption evidence
 // names the executor that ran rather than the shared transport.
 func ClaudeTerminal(provider string, stdout []byte, runErr error) ExecutorTerminal {
 	if runErr != nil {
-		return runnerInterruption(provider, runErr)
+		return mergeRunnerInterruption(runnerInterruption(provider, runErr), scanClaudeStream(provider, stdout))
 	}
 	return scanClaudeStream(provider, stdout)
 }
@@ -100,29 +122,36 @@ type claudeResultEvent struct {
 }
 
 func scanClaudeStream(provider string, stdout []byte) ExecutorTerminal {
-	var result *claudeResultEvent
+	var success *claudeResultEvent
+	var failure *claudeResultEvent
 	forEachLine(stdout, func(line string) {
 		var ev claudeResultEvent
 		if err := json.Unmarshal([]byte(line), &ev); err == nil && ev.Type == "result" {
 			captured := ev
-			result = &captured
+			if !captured.IsError && captured.Subtype == "success" {
+				success = &captured
+			} else {
+				failure = &captured
+			}
 		}
 	})
-	if result == nil {
-		return ExecutorTerminal{Provider: provider, Reason: TerminalReasonNoNormalTerminal}
+	// An explicit failure result wins over any later success event, so a normal
+	// terminal never masks an earlier provider failure; a missing or unknown
+	// subtype also stays an interruption so unreliable terminals never reach
+	// Supervisor.
+	if failure != nil {
+		return ExecutorTerminal{
+			Provider:  provider,
+			Reason:    TerminalReasonClaudeResultError,
+			Status:    failure.Subtype,
+			SessionID: failure.SessionID,
+			Message:   claudeResultMessage(failure.Result),
+		}
 	}
-	t := ExecutorTerminal{Provider: provider, Status: result.Subtype, SessionID: result.SessionID}
-	// Normal completion requires the explicit success result event; a missing or
-	// unknown subtype is an interruption so unreliable terminals never route to
-	// Supervisor (AC1).
-	if !result.IsError && result.Subtype == "success" {
-		t.Normal = true
-		t.Reason = TerminalReasonClaudeResultSuccess
-		return t
+	if success != nil {
+		return ExecutorTerminal{Provider: provider, Normal: true, Reason: TerminalReasonClaudeResultSuccess, Status: success.Subtype, SessionID: success.SessionID}
 	}
-	t.Reason = TerminalReasonClaudeResultError
-	t.Message = claudeResultMessage(result.Result)
-	return t
+	return ExecutorTerminal{Provider: provider, Reason: TerminalReasonNoNormalTerminal}
 }
 
 func claudeResultMessage(raw json.RawMessage) string {
@@ -137,40 +166,49 @@ func claudeResultMessage(raw json.RawMessage) string {
 }
 
 // CodexTerminal classifies a Codex executor exit from its JSONL stdout and the
-// runner error. Normal completion is established only by a `turn.completed`
-// event; any other stream (including a final message without that event) is an
-// interruption (AC1).
+// runner error. Only a `turn.completed` event establishes normal completion;
+// any other stream, including a final message without that event, is an
+// interruption.
 func CodexTerminal(stdout []byte, runErr error) ExecutorTerminal {
 	if runErr != nil {
-		return runnerInterruption("codex", runErr)
+		return mergeRunnerInterruption(runnerInterruption("codex", runErr), scanCodexStream(stdout))
 	}
-	var terminalLine string
-	var terminalType string
+	return scanCodexStream(stdout)
+}
+
+func scanCodexStream(stdout []byte) ExecutorTerminal {
+	var failedLine string
+	var sawFailed, sawCompleted bool
 	forEachLine(stdout, func(line string) {
 		var head codexTypeEvent
 		if err := json.Unmarshal([]byte(line), &head); err != nil {
 			return
 		}
-		if head.Type == "turn.completed" || head.Type == "turn.failed" {
-			terminalLine = line
-			terminalType = head.Type
+		switch head.Type {
+		case "turn.failed":
+			sawFailed = true
+			failedLine = line
+		case "turn.completed":
+			sawCompleted = true
 		}
 	})
-	if terminalType == "" {
-		return ExecutorTerminal{Provider: "codex", Reason: TerminalReasonNoNormalTerminal}
-	}
-	if terminalType == "turn.failed" {
+	// A `turn.failed` keeps failure routing even when a later `turn.completed`
+	// appears, so a normal terminal never masks an earlier provider failure.
+	if sawFailed {
 		t := ExecutorTerminal{Provider: "codex", Reason: TerminalReasonCodexTurnFailed}
-		// Decode nested detail best-effort. A missing or unparseable error field
-		// keeps the turn.failed routing and falls back to a generic reason (AC5).
+		// Decode nested detail best-effort: a missing or unparseable error field
+		// keeps turn.failed routing with a generic reason.
 		var detailed codexTerminalEvent
-		if err := json.Unmarshal([]byte(terminalLine), &detailed); err == nil && detailed.Error != nil {
+		if err := json.Unmarshal([]byte(failedLine), &detailed); err == nil && detailed.Error != nil {
 			t.Code = detailed.Error.Code
 			t.Message = detailed.Error.Message
 		}
 		return t
 	}
-	return ExecutorTerminal{Normal: true, Provider: "codex", Reason: TerminalReasonCodexTurnCompleted}
+	if sawCompleted {
+		return ExecutorTerminal{Normal: true, Provider: "codex", Reason: TerminalReasonCodexTurnCompleted}
+	}
+	return ExecutorTerminal{Provider: "codex", Reason: TerminalReasonNoNormalTerminal}
 }
 
 type codexTypeEvent struct {
@@ -187,12 +225,16 @@ type codexTerminalEvent struct {
 // GrokTerminal classifies a Grok executor exit from its JSON envelope and the
 // runner error. The normal terminal is a parseable envelope whose stopReason is
 // `EndTurn`; the session ID and result payload are optional diagnostic detail
-// and never gate routing (AC1, D3). Every other stopReason or an unparseable
-// envelope is an interruption.
+// and never gate routing. Every other stopReason or an unparseable envelope is
+// an interruption.
 func GrokTerminal(data []byte, runErr error) ExecutorTerminal {
 	if runErr != nil {
-		return runnerInterruption("grok", runErr)
+		return mergeRunnerInterruption(runnerInterruption("grok", runErr), scanGrokEnvelope(data))
 	}
+	return scanGrokEnvelope(data)
+}
+
+func scanGrokEnvelope(data []byte) ExecutorTerminal {
 	var envelope grokTerminalEnvelope
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		return ExecutorTerminal{Provider: "grok", Reason: TerminalReasonMalformedTerminal, Message: err.Error()}

@@ -282,7 +282,7 @@ func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) 
 	// A provider or runtime interruption never reaches Supervisor and never
 	// starts another executor attempt in this run. The attempt evidence and the
 	// dirty worktree are already captured, so publishing to tasks/failed
-	// preserves the partial work for `galley task requeue` (AC3, AC4).
+	// preserves the partial work for `galley task requeue`.
 	if outcome.Terminal.Interrupted() {
 		appendExecutorInterruptionAttempt(req.Loaded, outcome, attemptDir)
 		return attemptReview{}, &executorInterruptionError{terminal: outcome.Terminal}

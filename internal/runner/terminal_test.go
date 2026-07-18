@@ -5,9 +5,8 @@ import (
 	"testing"
 )
 
-// validExecutorResultLine is a minimal executor result that passes Validate. It
-// is used to prove that a well-formed result payload no longer counts as a
-// normal terminal without an explicit provider terminal event.
+// validExecutorResultLine is a minimal executor result that passes Validate; a
+// well-formed result alone is not a normal terminal without a provider terminal event.
 const validExecutorResultLine = `{"status":"completed","summary":"done","files_modified":[],"acceptance_criteria":[],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}`
 
 func TestExecutorTerminalDecision(t *testing.T) {
@@ -182,6 +181,53 @@ func TestClaudeTerminalPreservesProviderIdentity(t *testing.T) {
 	glmInterrupt := ClaudeTerminal("glm", nil, &CommandError{Kind: CommandErrorTimeout, Err: errors.New("t")})
 	if glmInterrupt.Provider != "glm" {
 		t.Fatalf("interrupted Provider = %q, want glm (%+v)", glmInterrupt.Provider, glmInterrupt)
+	}
+}
+
+func TestExecutorTerminalRetainsProviderDetailOnNonZeroExit(t *testing.T) {
+	exitErr := &CommandError{Kind: CommandErrorExitNonZero, Err: errors.New("exit status 1")}
+
+	claude := ClaudeTerminal("claude", []byte(`{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"s1","result":"api overloaded"}`), exitErr)
+	if claude.Normal {
+		t.Fatalf("claude non-zero exit must stay interrupted: %+v", claude)
+	}
+	if claude.Reason != TerminalReasonClaudeResultError {
+		t.Fatalf("claude reason = %q, want %q", claude.Reason, TerminalReasonClaudeResultError)
+	}
+	if claude.RunError == "" || claude.SessionID != "s1" || claude.Status != "error_during_execution" || claude.Message != "api overloaded" {
+		t.Fatalf("claude provider detail not retained alongside run error: %+v", claude)
+	}
+
+	codex := CodexTerminal([]byte(`{"type":"turn.failed","error":{"message":"model overloaded","code":"rate_limit"}}`), exitErr)
+	if codex.Normal || codex.Reason != TerminalReasonCodexTurnFailed {
+		t.Fatalf("codex non-zero exit must stay codex_turn_failed: %+v", codex)
+	}
+	if codex.RunError == "" || codex.Code != "rate_limit" || codex.Message != "model overloaded" {
+		t.Fatalf("codex provider detail not retained alongside run error: %+v", codex)
+	}
+
+	grok := GrokTerminal([]byte(`{"text":"partial","stopReason":"MaxTokens","sessionId":"g1"}`), exitErr)
+	if grok.Normal || grok.Reason != TerminalReasonGrokNonEndTurn {
+		t.Fatalf("grok non-zero exit must stay grok_non_end_turn: %+v", grok)
+	}
+	if grok.RunError == "" || grok.StopReason != "MaxTokens" || grok.SessionID != "g1" {
+		t.Fatalf("grok provider detail not retained alongside run error: %+v", grok)
+	}
+}
+
+func TestExecutorTerminalRejectsConflictingStreams(t *testing.T) {
+	claude := ClaudeTerminal("claude", []byte(
+		`{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"s1"}`+"\n"+
+			`{"type":"result","subtype":"success","is_error":false,"session_id":"s2"}`), nil)
+	if claude.Normal || claude.Reason != TerminalReasonClaudeResultError {
+		t.Fatalf("claude error-then-success must stay interrupted: %+v", claude)
+	}
+
+	codex := CodexTerminal([]byte(
+		`{"type":"turn.failed","error":{"message":"boom","code":"x"}}`+"\n"+
+			`{"type":"turn.completed"}`), nil)
+	if codex.Normal || codex.Reason != TerminalReasonCodexTurnFailed {
+		t.Fatalf("codex turn.failed-then-completed must stay interrupted: %+v", codex)
 	}
 }
 

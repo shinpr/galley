@@ -3,16 +3,19 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 
+	"github.com/shinpr/galley/internal/executorflow"
 	"github.com/shinpr/galley/internal/runartifact"
 	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/supervisor"
 	"github.com/shinpr/galley/internal/task"
+	"github.com/shinpr/galley/internal/workspace"
 )
 
 func countingSupervisor(calls *int32, verdict func(attempt int) supervisor.Verdict) func(context.Context, Options, supervisor.Evidence, string, string) (supervisor.Verdict, error) {
@@ -71,10 +74,11 @@ func TestInterruptedExecutorBypassesSupervisor(t *testing.T) {
 	}
 }
 
-// Each fixture emits its provider terminal and exits 0, so an interruption
-// verdict must come from the terminal, not the process exit code.
+// Representative provider wiring across the Claude, Codex, and Grok transports;
+// the exhaustive classification matrix lives in internal/runner/terminal_test.go.
+// Each fixture exits 0, so an interruption must come from the provider terminal,
+// not the exit code.
 func TestExecutorInterruptionLifecycleMatrix(t *testing.T) {
-	const validResult = `{"status":"completed","summary":"done","files_modified":[],"acceptance_criteria":[],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}`
 	cases := []struct {
 		name         string
 		cli          string
@@ -93,14 +97,6 @@ func TestExecutorInterruptionLifecycleMatrix(t *testing.T) {
 			wantMessage:  []string{"claude_result_error", "error_during_execution", "claude-sess"},
 		},
 		{
-			name:         "glm api failure",
-			cli:          "glm",
-			stdout:       `printf '%s\n' '{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"glm-sess"}'` + "\n",
-			wantReason:   "claude_result_error",
-			wantProvider: "glm",
-			wantMessage:  []string{"claude_result_error", "error_during_execution", "glm-sess"},
-		},
-		{
 			name:         "codex turn.failed with detail",
 			cli:          "codex",
 			stdout:       `printf '%s\n' '{"type":"turn.failed","error":{"message":"model overloaded","code":"rate_limit"}}'` + "\n",
@@ -109,46 +105,12 @@ func TestExecutorInterruptionLifecycleMatrix(t *testing.T) {
 			wantMessage:  []string{"codex_turn_failed", "rate_limit", "model overloaded"},
 		},
 		{
-			name:         "codex turn.failed without detail",
-			cli:          "codex",
-			stdout:       `printf '%s\n' '{"type":"turn.failed"}'` + "\n",
-			wantReason:   "codex_turn_failed",
-			wantProvider: "codex",
-			wantMessage:  []string{"codex_turn_failed"},
-			notMessage:   []string{"code=", "detail="},
-		},
-		{
-			name:         "codex turn.failed with unparseable detail",
-			cli:          "codex",
-			stdout:       `printf '%s\n' '{"type":"turn.failed","error":"boom"}'` + "\n",
-			wantReason:   "codex_turn_failed",
-			wantProvider: "codex",
-			wantMessage:  []string{"codex_turn_failed"},
-			notMessage:   []string{"code=", "detail="},
-		},
-		{
 			name:         "grok non-endturn",
 			cli:          "grok",
 			stdout:       `printf '%s\n' '{"text":"partial","stopReason":"MaxTokens","sessionId":"grok-sess"}'` + "\n",
 			wantReason:   "grok_non_end_turn",
 			wantProvider: "grok",
 			wantMessage:  []string{"grok_non_end_turn", "MaxTokens"},
-		},
-		{
-			name:         "grok malformed terminal",
-			cli:          "grok",
-			stdout:       "printf '%s\\n' 'not-json'\n",
-			wantReason:   "malformed_provider_terminal",
-			wantProvider: "grok",
-			wantMessage:  []string{"malformed_provider_terminal"},
-		},
-		{
-			name:         "unknown interruption without terminal",
-			cli:          "claude",
-			stdout:       `echo change > daemon-output.txt` + "\n" + `printf '%s\n' '` + validResult + `'` + "\n",
-			wantReason:   "no_normal_terminal",
-			wantProvider: "claude",
-			wantMessage:  []string{"no_normal_terminal"},
 		},
 	}
 	for _, tc := range cases {
@@ -227,6 +189,133 @@ func TestExecutorInterruptionLifecycleMatrix(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestInterruptedExecutorStagingFailureStaysInterrupted(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+	claudeBin := writeRawExecutor(t, "claude", "echo partial > daemon-output.txt\n"+
+		`printf '%s\n' '{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"stage-sess"}'`+"\n")
+	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonTask(t, taskPath, repo)
+	setLoopBudget(t, taskPath, 3)
+
+	stageFail := func(_ context.Context, _ Options, _, _ string, _ []string) error {
+		return context.Canceled
+	}
+	var supCalls int32
+	opts := testDaemonOptions(Options{Root: root, SystemPromptFile: promptPath, JSONSchemaFile: schemaPath, Once: true, MaxConcurrentTasks: 1, Supervisor: "claude", ClaudeBin: claudeBin})
+	deps := opts.daemonDependencies()
+	deps.stageExecutorOutput = stageFail
+	deps.supervisorRunner = countingSupervisor(&supCalls, func(int) supervisor.Verdict {
+		t.Errorf("supervisor must not run for an interrupted executor")
+		return supervisor.Verdict{Status: "accepted"}
+	})
+	opts.dependencies = &deps
+	_ = Run(context.Background(), opts)
+
+	failed := assertInterruptedFailedTask(t, root, &supCalls)
+	last := failed.Attempts[len(failed.Attempts)-1]
+	if last.Error.Kind != "executor_interrupted" {
+		t.Fatalf("error kind = %q, want executor_interrupted (staging failure must not override interruption)", last.Error.Kind)
+	}
+	if last.Error.Phase != "executor" {
+		t.Fatalf("error phase = %q, want executor", last.Error.Phase)
+	}
+	foundEvidenceRisk := false
+	for _, r := range failed.Risks {
+		if strings.HasPrefix(r.ID, "executor-interruption-evidence") {
+			foundEvidenceRisk = true
+		}
+	}
+	if !foundEvidenceRisk {
+		t.Fatalf("expected secondary staging-failure risk, got risks: %#v", failed.Risks)
+	}
+}
+
+// CaptureDiffArtifacts reports a snapshot/diff failure in-band as
+// DiffArtifacts.Err with a nil function error (distinct from a staging or
+// artifact-write error). The interrupted path must promote that into the
+// secondary-evidence risk while the interruption stays primary and requeueable.
+func TestInterruptedExecutorDiffCaptureFailureStaysInterrupted(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+	claudeBin := writeRawExecutor(t, "claude", "echo changed >> README.md\necho created > new-file.txt\n"+
+		`printf '%s\n' '{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"diff-sess"}'`+"\n")
+	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonTask(t, taskPath, repo)
+	setLoopBudget(t, taskPath, 3)
+
+	diffFail := func(_ context.Context, _, _, _ string, _ workspace.Options) (executorflow.DiffArtifacts, error) {
+		return executorflow.DiffArtifacts{Err: errors.New("git status: snapshot failed")}, nil
+	}
+	var supCalls int32
+	opts := testDaemonOptions(Options{Root: root, SystemPromptFile: promptPath, JSONSchemaFile: schemaPath, Once: true, MaxConcurrentTasks: 1, Supervisor: "claude", ClaudeBin: claudeBin})
+	deps := opts.daemonDependencies()
+	deps.captureDiffArtifacts = diffFail
+	deps.supervisorRunner = countingSupervisor(&supCalls, func(int) supervisor.Verdict {
+		t.Errorf("supervisor must not run for an interrupted executor")
+		return supervisor.Verdict{Status: "accepted"}
+	})
+	opts.dependencies = &deps
+	_ = Run(context.Background(), opts)
+
+	failed := assertInterruptedFailedTask(t, root, &supCalls)
+	last := failed.Attempts[len(failed.Attempts)-1]
+	if last.Error.Kind != "executor_interrupted" {
+		t.Fatalf("error kind = %q, want executor_interrupted (diff-capture failure must not override interruption)", last.Error.Kind)
+	}
+	foundEvidenceRisk := false
+	for _, r := range failed.Risks {
+		if strings.HasPrefix(r.ID, "executor-interruption-evidence") && strings.Contains(r.Detail, "snapshot failed") {
+			foundEvidenceRisk = true
+		}
+	}
+	if !foundEvidenceRisk {
+		t.Fatalf("expected secondary diff-capture-failure risk, got risks: %#v", failed.Risks)
+	}
+
+	worktree := taskWorktreePath(repo, failed.Worktree.Path)
+	if data, err := os.ReadFile(filepath.Join(worktree, "new-file.txt")); err != nil || !strings.Contains(string(data), "created") {
+		t.Fatalf("untracked change not retained in worktree: %v %q", err, data)
+	}
+
+	failedPath := filepath.Join(root, "tasks", "failed", "task.yaml")
+	if _, err := task.Requeue(failedPath, task.RequeueOptions{Root: root, Reason: "resolved interruption"}); err != nil {
+		t.Fatalf("requeue: %v", err)
+	}
+	rerun := testDaemonOptions(Options{Root: root, SystemPromptFile: promptPath, JSONSchemaFile: schemaPath, Once: true, MaxConcurrentTasks: 1, Supervisor: "claude", ClaudeBin: claudeBin})
+	_ = Run(context.Background(), rerun)
+
+	reuseFound := false
+	workspaces, _ := filepath.Glob(filepath.Join(root, "runs", "*", runartifact.WorkspaceFilename))
+	for _, path := range workspaces {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var prepared struct {
+			WorktreeReused  bool   `json:"worktree_reused"`
+			StatusPorcelain string `json:"status_porcelain"`
+		}
+		if err := json.Unmarshal(data, &prepared); err != nil {
+			continue
+		}
+		if prepared.WorktreeReused && strings.Contains(prepared.StatusPorcelain, "new-file.txt") {
+			reuseFound = true
+		}
+	}
+	if !reuseFound {
+		t.Fatal("no reused-worktree evidence with retained change found after requeue")
 	}
 }
 

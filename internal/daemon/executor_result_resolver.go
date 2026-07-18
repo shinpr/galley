@@ -57,11 +57,10 @@ func resolveExecutorResult(cli, stdoutPath, stdoutTail, lastMessagePath string) 
 	return runner.ExecutorResult{}, errors.Join(resultErrs...)
 }
 
-// classifyExecutorTerminal derives the single routing decision for one executor
-// exit from runner state and the machine-readable provider output. It reads the
-// captured stdout (falling back to the in-memory tail) and, for Codex, the
-// captured final message. The decision never depends on the process exit code
-// or human-language error text alone (acceptance criterion AC1, decision D1).
+// classifyExecutorTerminal derives one routing decision per executor exit from
+// runner state plus machine-readable provider output, reading captured stdout
+// with an in-memory tail fallback. Process exit code or human-language error
+// text alone never decides routing.
 func classifyExecutorTerminal(cli, stdoutPath, stdoutTail string, runErr error) runner.ExecutorTerminal {
 	switch cli {
 	case "grok":

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,6 +25,7 @@ type attemptOutcome struct {
 	Completed      time.Time
 	RunResult      runner.RunResult
 	RunErr         error
+	Terminal       runner.ExecutorTerminal
 	ExecutorResult runner.ExecutorResult
 	ParseErr       error
 	DiffDirty      bool
@@ -107,6 +109,15 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 		}
 	}
 
+	// The normal-terminal versus interruption decision is derived from runner
+	// state and provider output and persisted as attempt evidence before the
+	// task is routed. runExecutorAttempt still captures diff, git status, and raw
+	// logs below so an interrupted attempt keeps its full evidence set.
+	terminal := classifyExecutorTerminal(cli, stdoutPath, run.RunResult.Stdout, run.RunErr)
+	if err := writeJSON(runartifact.Path(attemptDir, runartifact.ExecutorTerminalFilename), terminal); err != nil {
+		return attemptOutcome{}, err
+	}
+
 	// Stage untracked executor output, excluding context-only inputs, before
 	// supervisor review. The parent context preserves evidence after a timeout.
 	excludePaths := nonCommittedInputDestinations(loaded.Files)
@@ -124,6 +135,7 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 		Completed:      run.Completed,
 		RunResult:      run.RunResult,
 		RunErr:         run.RunErr,
+		Terminal:       terminal,
 		ExecutorResult: executorResult,
 		ParseErr:       parseErr,
 		DiffDirty:      diffArtifacts.Dirty,
@@ -227,6 +239,95 @@ func executorAttemptError(outcome attemptOutcome, attemptDir string) *task.Attem
 		return nil
 	}
 	return attemptError("executor", classifyFailureKind("executor_failed", outcome.RunErr), outcome.RunErr, attemptDir)
+}
+
+// executorInterruptionError signals that an executor attempt did not reach a
+// normal provider terminal. The daemon loop publishes the task to tasks/failed
+// without invoking Supervisor or starting another executor attempt (AC3).
+type executorInterruptionError struct {
+	terminal runner.ExecutorTerminal
+}
+
+func (e *executorInterruptionError) Error() string {
+	if e == nil {
+		return "executor interrupted"
+	}
+	return "executor interrupted: " + e.terminal.Reason
+}
+
+func asExecutorInterruptionError(err error) (*executorInterruptionError, bool) {
+	var interruption *executorInterruptionError
+	if errors.As(err, &interruption) {
+		return interruption, true
+	}
+	return nil, false
+}
+
+// interruptionKind maps an interrupted attempt to its persisted attempt-error
+// kind. Runner failures keep the existing timeout/idle/executor classifications
+// so downstream recovery still sees the actionable signal; a provider-reported
+// non-normal terminal (runner succeeded) records the distinct
+// executor_interrupted kind (AC5).
+func interruptionKind(outcome attemptOutcome) string {
+	if outcome.RunErr != nil {
+		return classifyFailureKind("executor_failed", outcome.RunErr)
+	}
+	return "executor_interrupted"
+}
+
+// appendExecutorInterruptionAttempt records the interrupted attempt with an
+// executor-owned structured error, a non-verdict marker (no Supervisor produced
+// one), and a requeue recovery risk. Provider detail is retained for diagnosis
+// only; it never changes routing (D3).
+func appendExecutorInterruptionAttempt(loaded *task.Task, outcome attemptOutcome, attemptDir string) {
+	message := interruptionMessage(outcome.Terminal)
+	loaded.Attempts = append(loaded.Attempts, task.Attempt{
+		Number:            len(loaded.Attempts) + 1,
+		StartedAt:         outcome.Started.Format(time.RFC3339Nano),
+		CompletedAt:       outcome.Completed.Format(time.RFC3339Nano),
+		ClaudeStatus:      executorStatus(outcome.RunResult, outcome.RunErr),
+		SupervisorVerdict: "not_reviewed",
+		Summary:           message,
+		Error: &task.AttemptError{
+			Phase:       "executor",
+			Kind:        interruptionKind(outcome),
+			Message:     message,
+			ArtifactDir: attemptDir,
+		},
+	})
+	loaded.Verification.Commands = append(loaded.Verification.Commands, task.VerificationCommand{
+		Cmd:           executorVerificationCmd(loaded.Executor.CLI),
+		Status:        "failed",
+		OutputExcerpt: fmt.Sprintf("executor interrupted (%s); terminal decision and raw logs captured under %s", outcome.Terminal.Reason, attemptDir),
+	})
+	appendRisk(loaded, "executor-interruption", "external_dependency", message,
+		"Resolve the interruption cause, then run `galley task requeue` to resume from the preserved worktree.", true)
+}
+
+// interruptionMessage renders an operator-facing interruption reason that keeps
+// available provider detail while falling back to a generic reason when the
+// provider exposes none (AC5).
+func interruptionMessage(terminal runner.ExecutorTerminal) string {
+	parts := []string{fmt.Sprintf("Executor interrupted before Supervisor review (reason=%s)", terminal.Reason)}
+	if terminal.RunError != "" {
+		parts = append(parts, fmt.Sprintf("run_error=%s", terminal.RunError))
+	}
+	if terminal.Status != "" {
+		parts = append(parts, fmt.Sprintf("status=%s", terminal.Status))
+	}
+	if terminal.Code != "" {
+		parts = append(parts, fmt.Sprintf("code=%s", terminal.Code))
+	}
+	if terminal.StopReason != "" {
+		parts = append(parts, fmt.Sprintf("stop_reason=%s", terminal.StopReason))
+	}
+	if terminal.SessionID != "" {
+		parts = append(parts, fmt.Sprintf("session_id=%s", terminal.SessionID))
+	}
+	if terminal.Message != "" {
+		parts = append(parts, fmt.Sprintf("detail=%s", terminal.Message))
+	}
+	return strings.Join(parts, "; ")
 }
 
 func appendSupervisorFailureAttempt(loaded *task.Task, outcome attemptOutcome, err error, attemptDir string) {

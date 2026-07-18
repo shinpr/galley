@@ -38,6 +38,9 @@ const (
 	RunResultFilename              = "run_result.json"
 	CommandPlanFilename            = "command_plan.json"
 	GrokCompletionMetadataFilename = "grok_completion.json"
+	// ExecutorTerminalFilename records the normal-terminal versus interruption
+	// routing decision Galley derived from runner state and provider output.
+	ExecutorTerminalFilename       = "executor_terminal.json"
 	SupervisorVerdictFilename      = "supervisor_verdict.json"
 	ModelSupervisorVerdictFilename = "model_supervisor_verdict.json"
 	SupervisorErrorFilename        = "supervisor_error.json"

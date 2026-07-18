@@ -45,7 +45,12 @@ import (
 // to record invocation markers and emit the executor result JSON line.
 func writeFakeCodexExecutor(t *testing.T, body string) string {
 	t.Helper()
-	return writeFakeCommand(t, "codex", "cat >/dev/null\n"+body)
+	// Emit a realistic Codex `turn.completed` terminal after the body so the
+	// normal-terminal decision matches production routing; interruption bodies
+	// exit before this line or emit their own terminal event.
+	return writeFakeCommand(t, "codex", "cat >/dev/null\n"+body+`
+printf '%s\n' '{"type":"turn.completed","usage":{}}'
+`)
 }
 
 // TestDaemonDispatchesSelectedExecutorBinary parameterizes over the supported

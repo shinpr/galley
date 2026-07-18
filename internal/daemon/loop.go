@@ -174,6 +174,9 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 			if idle, ok := asSupervisorIdleTimeout(err); ok {
 				fmt.Fprintln(os.Stderr, idle.logLine(loaded.ID))
 			}
+			if interruption, ok := asExecutorInterruptionError(err); ok {
+				fmt.Fprintf(os.Stderr, "galley: task %s executor interrupted (%s) before Supervisor review; preserving worktree for requeue\n", loaded.ID, interruption.terminal.Reason)
+			}
 			return taskstate.FailMoveToStatus(opts.Root, runningPath, loaded, err)
 		}
 		mergeAttemptEvidence(loaded, review.Outcome, runID, prepared.CWD, review.AttemptDir)
@@ -275,6 +278,14 @@ func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) 
 		}
 		appendFailureAttempt(req.Loaded, "executor", classifyFailureKind("executor_failed", err), err, attemptDir)
 		return attemptReview{}, err
+	}
+	// A provider or runtime interruption never reaches Supervisor and never
+	// starts another executor attempt in this run. The attempt evidence and the
+	// dirty worktree are already captured, so publishing to tasks/failed
+	// preserves the partial work for `galley task requeue` (AC3, AC4).
+	if outcome.Terminal.Interrupted() {
+		appendExecutorInterruptionAttempt(req.Loaded, outcome, attemptDir)
+		return attemptReview{}, &executorInterruptionError{terminal: outcome.Terminal}
 	}
 	setupResultEvidence, setupUpdateEvidence := setuppreflight.LoadRunEvidence(req.RunDir, req.RunID)
 	evidence := supervisor.Evidence{

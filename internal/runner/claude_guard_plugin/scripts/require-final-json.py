@@ -256,16 +256,22 @@ def validate_supervisor_verdict(verdict):
 
     for index, finding in enumerate(verdict["findings"]):
         require_object(finding, f"findings[{index}]")
-        for field in ["severity", "category", "file", "summary", "blocks_acceptance"]:
+        for field in ["severity", "category", "file", "summary", "blocks_acceptance", "supersedes"]:
             if field not in finding:
                 raise ValueError(f"findings[{index}].{field} is required")
         if finding.get("severity") not in {"critical", "high", "medium", "low"}:
             raise ValueError(f"findings[{index}].severity is invalid")
         if not isinstance(finding["blocks_acceptance"], bool):
             raise ValueError(f"findings[{index}].blocks_acceptance must be a boolean")
+        require_array(finding["supersedes"], f"findings[{index}].supersedes")
+        for supersedes_index, value in enumerate(finding["supersedes"]):
+            if not isinstance(value, str) or not value.startswith("revision:") or not value[len("revision:"):].strip():
+                raise ValueError(
+                    f"findings[{index}].supersedes[{supersedes_index}] must be a revision:<id> string"
+                )
 
-    if verdict["status"] == "needs_revision" and not verdict["next_work_order"].strip():
-        raise ValueError("next_work_order is required when status is needs_revision")
+    if verdict["status"] == "needs_revision" and not verdict["findings"] and not verdict["next_work_order"].strip():
+        raise ValueError("a finding or next_work_order is required when status is needs_revision")
     if verdict["status"] != "needs_revision" and verdict["next_work_order"].strip():
         raise ValueError("next_work_order must be empty unless status is needs_revision")
     if verdict["status"] == "accepted" and verdict["confidence"] == "low":

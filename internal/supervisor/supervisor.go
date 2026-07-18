@@ -51,11 +51,12 @@ type AcceptanceEvidence struct {
 
 // Finding is a structured supervisor review issue.
 type Finding struct {
-	Severity         string `json:"severity"`
-	Category         string `json:"category"`
-	File             string `json:"file"`
-	Summary          string `json:"summary"`
-	BlocksAcceptance bool   `json:"blocks_acceptance"`
+	Severity         string   `json:"severity"`
+	Category         string   `json:"category"`
+	File             string   `json:"file"`
+	Summary          string   `json:"summary"`
+	BlocksAcceptance bool     `json:"blocks_acceptance"`
+	Supersedes       []string `json:"supersedes"`
 }
 
 // DiscussionItem records accepted-work follow-up context for human reviewers.

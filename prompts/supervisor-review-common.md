@@ -45,8 +45,8 @@ Accept only evidence that proves the semantic acceptance contract at the require
 ## Contract Rules
 
 - Acceptance criteria from `task.acceptance_criteria` are authoritative. Return one result for each open or regression-candidate task AC reviewed in this attempt.
-- Pending `task.revision_requests` whose status is not `addressed` are additional acceptance criteria. Identify them as `revision:<id>`.
-- `acceptance_gaps` contains item IDs only: task AC IDs or `revision:<id>`. Put the reason and corrective detail in `findings` and `next_work_order`.
+- Pending `task.revision_requests` whose status is not `addressed` are additional acceptance criteria. Identify them as `revision:<id>`. Requests whose source is not `supervisor` are authoritative human or reviewer instructions. A `supervisor`-source request records an earlier model finding; re-evaluate it against current repository evidence and the active pass policy.
+- `acceptance_gaps` contains item IDs only: task AC IDs or `revision:<id>`. Put executor-fixable reasons and complete repair contracts in `findings`; map human-decision or external-blocker reasons in terminal `summary`. Use `next_work_order` only for batch-level order or dependencies.
 - `quality_passes` and `quality_gaps` contain the exact IDs of reviewed quality dimensions that pass or fail. The quality gate completes when the scoped IDs form a disjoint exact partition across the two arrays. On non-accepted handoffs, Galley preserves omitted IDs as open recovery state.
 - A quality dimension fails when its ID appears in `quality_gaps`. The complete failed-dimension set comes from `quality_gaps`, independently of finding categories. When `required_dimensions_must_pass` is enabled, a failed required dimension blocks acceptance. Always compare `min_score` with the integer percentage of total dimension weight that remains passed after applying current `quality_passes` and `quality_gaps` to `task.review_progress.quality`; when no dimensions are configured, the score is 100.
 - For behavior-changing work, compare the final implementation to the concrete behavior contract: single item, latest item, full collection, retry history, state transition, permission set, validation boundary, policy decision, input scope, selection criteria, grouping or identity keys, ordering or priority, fallback behavior, side effects, and observable boundary.
@@ -94,13 +94,19 @@ Record concrete wrong-result conditions, contract/data-shape/entry-point inconsi
 
 Record each supported quality defect as a finding whose `category` is the quality criterion that most directly governs it.
 
-Use one finding for one independently actionable defect. When the same defect affects multiple quality criteria but requires one repair, append every affected criterion ID to `quality_gaps`, choose the criterion that most directly governs the defect as the finding `category`, name the other affected criteria in `summary`, and represent repeated category coverage through those IDs rather than duplicate findings.
+Use one finding per fix contract: the complete post-fix obligations and verification needed for the next executor to close one defect. Group problems when one repair contract closes them. Split findings when obligations can remain broken independently or need separate verification.
+
+Make each finding `summary` independently actionable because it becomes a revision request. State the concrete failure and triggering condition or material-risk evidence, the required post-fix behavior across affected boundaries, and the verification that proves closure. Name exact paths, symbols, or IDs when the evidence supports them. When the implementation is uncertain, specify observable obligations.
+
+Set each finding's `supersedes` array to the exact `revision:<id>` acceptance IDs of pending `supervisor`-source requests whose repair contracts it replaces. Use an empty array for new defects and requests from other sources. Galley retains a pending supervisor request until acceptance evidence addresses it or a current finding explicitly supersedes it.
+
+When the same defect affects multiple quality criteria but requires one repair, append every affected criterion ID to `quality_gaps`, choose the criterion that most directly governs the defect as the finding `category`, name the other affected criteria in `summary`, and represent repeated category coverage through those IDs rather than duplicate findings.
 
 `blocks_acceptance` represents only `profiles.quality.pass_policy.blocking_severities`; apply required-dimension and `min_score` gates separately when choosing the verdict. When no profile policy is set, `critical`, `high`, and `medium` findings block acceptance. Non-blocking findings remain in `findings` with `blocks_acceptance=false`.
 
 Use `residual_risks` only for non-blocking uncertainty that remains after review and does not require another executor attempt.
 
-Use `discussion_items` only for accepted work after the verdict is justified. Discussion items are reviewer-facing notes about accepted scope notes, AC wording, domain ambiguity, or follow-up product questions. Keep concrete problems, acceptance gaps, and executor work orders in `findings`, `acceptance_gaps`, and `next_work_order`.
+Use `discussion_items` only for accepted work after the verdict is justified. Discussion items are reviewer-facing notes about accepted scope notes, AC wording, domain ambiguity, or follow-up product questions. Keep concrete problems and repair contracts in `findings`, acceptance IDs in `acceptance_gaps`, and batch ordering in `next_work_order`.
 
 ## Status Policy
 
@@ -113,7 +119,7 @@ Use exactly one status:
 
 A blocking finding prevents `accepted`. Choose the next status by the next actor: use `needs_revision` when another executor attempt can reasonably fix the blocker; use `needs_supervisor_review` when the blocker requires human judgment; use `hard_stop` when the blocker is external or unrecoverable.
 
-For `needs_revision`, set `next_work_order` to precise corrective instructions the executor can run next. For all other statuses, set `next_work_order` to an empty string.
+For `needs_revision`, keep the complete repair contract in each finding. Put concise batch-level order or dependency information in `next_work_order` when it is useful, and otherwise leave it empty. A `needs_revision` handoff contains at least one finding or a non-empty `next_work_order`. For all other statuses, set `next_work_order` to an empty string.
 
 For `needs_supervisor_review` or `hard_stop`, map each `acceptance_gaps` ID to its human-decision or external-blocker reason in `summary` so the terminal handoff remains actionable without an executor work order.
 
@@ -144,6 +150,6 @@ Field shapes:
 - `acceptance_evidence`: `[{ "ac_id": "...", "evidence": ["..."] }]`
 - `quality_passes`: `["configured dimension ID"]`; exact IDs of reviewed dimensions that passed.
 - `quality_gaps`: `["configured dimension ID"]`; exact IDs of reviewed dimensions that failed.
-- `findings`: structured problems with severity, category, file, summary, and blocks_acceptance.
+- `findings`: structured problems with severity, category, file, summary, blocks_acceptance, and supersedes acceptance IDs; use an empty supersedes array when none apply.
 - `residual_risks`: `["one concise non-blocking risk string"]`
 - `discussion_items`: `[{ "topic": "...", "summary": "...", "requires_human_decision": false }]`

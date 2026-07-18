@@ -354,7 +354,7 @@ func TestShutdownStopsBeforeRetryAttempt(t *testing.T) {
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
 	attemptLog := filepath.Join(t.TempDir(), "attempts.log")
 	claudeBin := writeFakeClaude(t, "echo attempt >> "+attemptLog+"\nsleep 0.05\necho change >> daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
-	codexBin := writeFakeCodexSupervisor(t, `{"status":"needs_revision","summary":"codex wants retry","acceptance_gaps":["AC1"],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[],"quality_passes":[],"quality_gaps":[],"findings":[{"severity":"medium","category":"acceptance","file":"daemon-output.txt","summary":"retry","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"try again"}`)
+	codexBin := writeFakeCodexSupervisor(t, `{"status":"needs_revision","summary":"codex wants retry","acceptance_gaps":["AC1"],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[],"quality_passes":[],"quality_gaps":[],"findings":[{"severity":"medium","category":"acceptance","file":"daemon-output.txt","summary":"retry","blocks_acceptance":true,"supersedes":[]}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"try again"}`)
 	queueDir := filepath.Join(root, "tasks", "queued")
 	if err := os.MkdirAll(queueDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -433,9 +433,9 @@ while [ "$#" -gt 0 ]; do
 done
 request="$(cat)"
 if printf '%s' "$request" | grep -q 'supervisor-attempt-1-finding-1'; then
-  verdict='{"status":"needs_revision","summary":"codex wants retry","acceptance_gaps":["AC1","revision:supervisor-attempt-1-finding-1"],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[],"quality_passes":[],"quality_gaps":[],"findings":[{"severity":"medium","category":"acceptance","file":"daemon-output.txt","summary":"persist this revision","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"apply the persisted revision"}'
+  verdict='{"status":"needs_revision","summary":"codex wants retry","acceptance_gaps":["AC1","revision:supervisor-attempt-1-finding-1"],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[],"quality_passes":[],"quality_gaps":[],"findings":[{"severity":"medium","category":"acceptance","file":"daemon-output.txt","summary":"persist this revision","blocks_acceptance":true,"supersedes":["revision:supervisor-attempt-1-finding-1"]}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"apply the persisted revision"}'
 else
-  verdict='{"status":"needs_revision","summary":"codex wants retry","acceptance_gaps":["AC1"],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[],"quality_passes":[],"quality_gaps":[],"findings":[{"severity":"medium","category":"acceptance","file":"daemon-output.txt","summary":"persist this revision","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"apply the persisted revision"}'
+  verdict='{"status":"needs_revision","summary":"codex wants retry","acceptance_gaps":["AC1"],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[],"quality_passes":[],"quality_gaps":[],"findings":[{"severity":"medium","category":"acceptance","file":"daemon-output.txt","summary":"persist this revision","blocks_acceptance":true,"supersedes":[]}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"apply the persisted revision"}'
 fi
 printf '%s\n' "$verdict" > "$out"
 printf '%s\n' '{"event":"done"}'

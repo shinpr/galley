@@ -9,6 +9,7 @@ This project follows semantic versioning.
 ### Changed
 
 - Documentation now provides a goal-based guide, clearer model and review configuration, and task-state troubleshooting.
+- Revision loops now hand off the latest actionable finding batch with preserved passes, while Codex reviews filter optional hardening.
 
 ## v0.11.0 - 2026-07-18
 

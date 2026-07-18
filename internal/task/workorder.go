@@ -14,13 +14,17 @@ func RenderWorkOrder(t Task) string {
 func RenderWorkOrderWithProfiles(t Task, profiles profile.Bundle) string {
 	t = Defaulted(t)
 	var b strings.Builder
+	pendingRevisions := pendingRevisionRequests(t.RevisionRequests)
 
 	fmt.Fprintf(&b, "# Galley Work Order\n\n")
 	fmt.Fprintf(&b, "Task ID: `%s`\n", t.ID)
 	fmt.Fprintf(&b, "Mode: `%s`\n", t.Mode)
 	fmt.Fprintf(&b, "Review iteration: `%d`\n\n", t.Supervisor.ReviewIterations)
+	if len(pendingRevisions) > 0 {
+		renderRevisionContext(&b, t, pendingRevisions)
+	}
 	fmt.Fprintf(&b, "## Goal\n\n%s\n\n", t.Goal)
-	renderReviewContext(&b, t)
+	renderReviewContext(&b, t, len(pendingRevisions) == 0)
 
 	fmt.Fprintf(&b, "## Acceptance Criteria\n\n")
 	for _, ac := range t.AcceptanceCriteria {
@@ -56,6 +60,48 @@ func RenderWorkOrderWithProfiles(t Task, profiles profile.Bundle) string {
 	return b.String()
 }
 
+func pendingRevisionRequests(requests []RevisionRequest) []RevisionRequest {
+	pending := make([]RevisionRequest, 0, len(requests))
+	for _, request := range requests {
+		if request.Status != "addressed" {
+			pending = append(pending, request)
+		}
+	}
+	return pending
+}
+
+func renderRevisionContext(b *strings.Builder, t Task, requests []RevisionRequest) {
+	fmt.Fprintf(b, "## Revision Objective\n\n")
+	fmt.Fprintf(b, "Resolve the active revision requests as a coherent repair batch while preserving the task contract and verified passes. This attempt is complete only when every pending request has concrete implementation and verification evidence.\n\n")
+
+	fmt.Fprintf(b, "## Findings To Address This Attempt\n\n")
+	for _, risk := range t.Risks {
+		if strings.HasPrefix(risk.ID, "requeue-") {
+			fmt.Fprintf(b, "- supervisor work order: %s\n", risk.Detail)
+		}
+	}
+	for _, request := range requests {
+		fmt.Fprintf(b, "- `%s` source=`%s`", request.ID, request.Source)
+		if request.CommentID != "" {
+			fmt.Fprintf(b, " comment=`%s`", request.CommentID)
+		}
+		fmt.Fprintf(b, ": %s\n", request.Text)
+		fmt.Fprintf(b, "  - executor result ID: `revision:%s`\n", request.ID)
+	}
+	fmt.Fprintf(b, "\nReturn each request as one `acceptance_criteria` entry with the displayed `revision:<id>`, status, and concrete evidence. When requests describe the same underlying defect, use one consistent repair while returning evidence for each request ID.\n\n")
+
+	if t.ReviewProgress != nil && (len(t.ReviewProgress.Acceptance) > 0 || len(t.ReviewProgress.Quality) > 0) {
+		fmt.Fprintf(b, "## Verified Passes To Preserve\n\n")
+		fmt.Fprintf(b, "The supervisor has already verified these items. Preserve them and recheck any item this attempt can affect.\n\n")
+		if len(t.ReviewProgress.Acceptance) > 0 {
+			fmt.Fprintf(b, "- acceptance: `%s`\n", strings.Join(t.ReviewProgress.Acceptance, "`, `"))
+		}
+		if len(t.ReviewProgress.Quality) > 0 {
+			fmt.Fprintf(b, "- quality: `%s`\n", strings.Join(t.ReviewProgress.Quality, "`, `"))
+		}
+		fmt.Fprintf(b, "\n")
+	}
+}
 func renderInputFiles(b *strings.Builder, t Task) {
 	if len(t.Files) == 0 {
 		return
@@ -75,7 +121,7 @@ func renderInputFiles(b *strings.Builder, t Task) {
 	}
 }
 
-func renderReviewContext(b *strings.Builder, t Task) {
+func renderReviewContext(b *strings.Builder, t Task, includeRequeueInstructions bool) {
 	var requeueInstructions []Risk
 	var otherRisks []Risk
 	for _, risk := range t.Risks {
@@ -85,7 +131,7 @@ func renderReviewContext(b *strings.Builder, t Task) {
 		}
 		otherRisks = append(otherRisks, risk)
 	}
-	if t.PR.URL != "" || len(requeueInstructions) > 0 {
+	if t.PR.URL != "" || (includeRequeueInstructions && len(requeueInstructions) > 0) {
 		fmt.Fprintf(b, "## PR Review Context\n\n")
 		if t.PR.URL != "" {
 			fmt.Fprintf(b, "- PR: `%s`\n", t.PR.URL)
@@ -93,24 +139,10 @@ func renderReviewContext(b *strings.Builder, t Task) {
 		if t.Supervisor.ReviewIterations > 0 {
 			fmt.Fprintf(b, "- review iteration: `%d`\n", t.Supervisor.ReviewIterations)
 		}
-		for _, instruction := range requeueInstructions {
-			fmt.Fprintf(b, "- additional instruction `%s`: %s\n", instruction.ID, instruction.Detail)
-		}
-		fmt.Fprintf(b, "\n")
-	}
-	if len(t.RevisionRequests) > 0 {
-		fmt.Fprintf(b, "## Revision Requests\n\n")
-		fmt.Fprintf(b, "Complete every pending revision request as an additional acceptance criterion. For each request, return an `acceptance_criteria` entry with the displayed revision ID, its status, and concrete evidence. Return `completed` when every request is satisfied; use the normal hard-stop contract when local completion is blocked.\n\n")
-		for _, request := range t.RevisionRequests {
-			if request.Status == "addressed" {
-				continue
+		if includeRequeueInstructions {
+			for _, instruction := range requeueInstructions {
+				fmt.Fprintf(b, "- additional instruction `%s`: %s\n", instruction.ID, instruction.Detail)
 			}
-			fmt.Fprintf(b, "- `%s` source=`%s`", request.ID, request.Source)
-			if request.CommentID != "" {
-				fmt.Fprintf(b, " comment=`%s`", request.CommentID)
-			}
-			fmt.Fprintf(b, ": %s\n", request.Text)
-			fmt.Fprintf(b, "  - executor result ID: `revision:%s`\n", request.ID)
 		}
 		fmt.Fprintf(b, "\n")
 	}

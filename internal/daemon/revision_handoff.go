@@ -25,9 +25,25 @@ type supervisorRevision struct {
 func nextSupervisorRevision(previous supervisorRevision, sourceAttempt int, verdict supervisor.Verdict) supervisorRevision {
 	requests := make([]task.RevisionRequest, 0, len(previous.Requests)+len(verdict.Findings))
 	knownText := make(map[string]bool)
+	reviewedGaps := make(map[string]bool, len(verdict.AcceptanceGaps))
+	for _, id := range verdict.AcceptanceGaps {
+		reviewedGaps[strings.TrimSpace(id)] = true
+	}
+	superseded := make(map[string]bool)
+	for _, finding := range verdict.Findings {
+		for _, rawID := range finding.Supersedes {
+			id := strings.TrimSpace(rawID)
+			if reviewedGaps[id] {
+				superseded[id] = true
+			}
+		}
+	}
 	for _, request := range previous.Requests {
 		if request.Status == "addressed" {
 			requests = append(requests, request)
+			continue
+		}
+		if superseded["revision:"+request.ID] {
 			continue
 		}
 		requests = append(requests, request)

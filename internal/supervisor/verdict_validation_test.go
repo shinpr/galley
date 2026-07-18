@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -13,10 +14,57 @@ import (
 	"github.com/shinpr/galley/internal/task"
 )
 
-func TestValidateVerdictRejectsNeedsRevisionWithoutWorkOrder(t *testing.T) {
+func TestValidateVerdictRejectsNeedsRevisionWithoutActionableHandoff(t *testing.T) {
 	err := ValidateVerdict(Verdict{Status: "needs_revision", Summary: "gaps", Confidence: "high"})
 	if err == nil {
 		t.Fatal("expected validation error")
+	}
+}
+
+func TestValidateVerdictAcceptsFindingBackedNeedsRevisionWithoutWorkOrder(t *testing.T) {
+	err := ValidateVerdict(Verdict{
+		Status:     "needs_revision",
+		Summary:    "gaps",
+		Confidence: "high",
+		Findings: []Finding{{
+			Severity:   "high",
+			Category:   "acceptance",
+			Summary:    "The saved state omits the requested value; preserve it and verify the round trip.",
+			Supersedes: []string{},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("finding-backed handoff was rejected: %v", err)
+	}
+}
+
+func TestValidateVerdictValidatesFindingSupersedes(t *testing.T) {
+	tests := []struct {
+		name       string
+		supersedes []string
+		wantErr    string
+	}{
+		{name: "missing", wantErr: "supersedes is required"},
+		{name: "empty", supersedes: []string{}},
+		{name: "revision id", supersedes: []string{"revision:supervisor-attempt-1-finding-1"}},
+		{name: "acceptance id", supersedes: []string{"AC1"}, wantErr: "must be a revision:<id> string"},
+		{name: "empty revision id", supersedes: []string{"revision: "}, wantErr: "must be a revision:<id> string"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateVerdict(Verdict{
+				Status: "needs_revision", Summary: "one repair remains", Confidence: "high",
+				Findings: []Finding{{
+					Severity: "medium", Category: "acceptance", Summary: "repair and verify the boundary", Supersedes: tt.supersedes,
+				}},
+			})
+			if tt.wantErr == "" && err != nil {
+				t.Fatalf("ValidateVerdict: %v", err)
+			}
+			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("error = %v, want %q", err, tt.wantErr)
+			}
+		})
 	}
 }
 
@@ -63,6 +111,45 @@ func TestSupervisorVerdictSchemaStatusEnumMatchesValidator(t *testing.T) {
 			if err := ValidateVerdict(Verdict{Status: status, Summary: "ok", Confidence: "high", NextWorkOrder: "work"}); err != nil {
 				t.Fatalf("validator rejected needs_revision with work order: %v", err)
 			}
+		}
+	}
+}
+
+func TestSupervisorVerdictSchemaRequiresValidFindingSupersedes(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "schemas", "supervisor-verdict.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema struct {
+		Properties map[string]struct {
+			Items struct {
+				Required   []string `json:"required"`
+				Properties map[string]struct {
+					Items struct {
+						Pattern string `json:"pattern"`
+					} `json:"items"`
+				} `json:"properties"`
+			} `json:"items"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(data, &schema); err != nil {
+		t.Fatal(err)
+	}
+	finding := schema.Properties["findings"].Items
+	if !slices.Contains(finding.Required, "supersedes") {
+		t.Fatalf("finding required = %v", finding.Required)
+	}
+	pattern, err := regexp.Compile(finding.Properties["supersedes"].Items.Pattern)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for value, want := range map[string]bool{
+		"revision:supervisor-attempt-1-finding-1": true,
+		"AC1":        false,
+		"revision: ": false,
+	} {
+		if got := pattern.MatchString(value); got != want {
+			t.Errorf("pattern match %q = %t, want %t", value, got, want)
 		}
 	}
 }
@@ -117,7 +204,7 @@ func TestVerdictJSONPreservesSchemaRequiredEmptyFields(t *testing.T) {
 		QualityPasses:      []string{},
 		QualityGaps:        []string{},
 		Findings: []Finding{{
-			Severity: "low", Category: "style", File: "", Summary: "note",
+			Severity: "low", Category: "style", File: "", Summary: "note", Supersedes: []string{},
 		}},
 		ResidualRisks:   []string{},
 		DiscussionItems: []DiscussionItem{},
@@ -267,7 +354,7 @@ func TestValidateVerdictForEvidenceRequiresOnlyOpenReviewItems(t *testing.T) {
 		AcceptanceGaps:     []string{"AC2"},
 		QualityPasses:      []string{"quality-a"},
 		QualityGaps:        []string{"quality-b"},
-		Findings:           []Finding{{Category: "quality-b", Summary: "b fails"}},
+		Findings:           []Finding{{Category: "quality-b", Summary: "b fails", Supersedes: []string{}}},
 	})
 
 	err := ValidateVerdictForEvidence(Verdict{
@@ -276,7 +363,7 @@ func TestValidateVerdictForEvidenceRequiresOnlyOpenReviewItems(t *testing.T) {
 		AcceptanceGaps:     []string{"AC2"},
 		AcceptanceEvidence: []AcceptanceEvidence{},
 		QualityGaps:        []string{"quality-b"},
-		Findings:           []Finding{{Severity: "medium", Category: "quality-b", Summary: "b still fails"}},
+		Findings:           []Finding{{Severity: "medium", Category: "quality-b", Summary: "b still fails", Supersedes: []string{}}},
 		Confidence:         "high",
 		NextWorkOrder:      "fix AC2 and quality-b",
 	}, Evidence{Task: loaded, Profiles: profile.Bundle{Quality: quality}})
@@ -339,7 +426,7 @@ func TestValidateVerdictForEvidenceAcceptsFinalOpenItemsWithPriorPasses(t *testi
 		AcceptanceGaps:     []string{"AC2"},
 		QualityPasses:      []string{"quality-a"},
 		QualityGaps:        []string{"quality-b"},
-		Findings:           []Finding{{Category: "quality-b", Summary: "b fails"}},
+		Findings:           []Finding{{Category: "quality-b", Summary: "b fails", Supersedes: []string{}}},
 	})
 
 	err := ValidateVerdictForEvidence(Verdict{
@@ -441,7 +528,7 @@ func TestValidateVerdictForEvidenceRejectsFailedRequiredQualityDimension(t *test
 		AcceptanceEvidence: []AcceptanceEvidence{{ACID: "AC1", Evidence: []string{"diff"}}},
 		QualityPasses:      []string{},
 		QualityGaps:        []string{"criterion-a"},
-		Findings:           []Finding{{Severity: "low", Category: "criterion-a", Summary: "criterion is not satisfied", BlocksAcceptance: false}},
+		Findings:           []Finding{{Severity: "low", Category: "criterion-a", Summary: "criterion is not satisfied", BlocksAcceptance: false, Supersedes: []string{}}},
 		Confidence:         "high",
 	}, Evidence{
 		Task:      task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},
@@ -464,7 +551,7 @@ func TestValidateVerdictForEvidenceUsesQualityGapsInsteadOfFindingCategory(t *te
 		Summary:       "quality criterion passed with a non-blocking observation",
 		QualityPasses: []string{"criterion-a"},
 		QualityGaps:   []string{},
-		Findings:      []Finding{{Severity: "low", Category: "criterion-a", Summary: "non-blocking observation", BlocksAcceptance: false}},
+		Findings:      []Finding{{Severity: "low", Category: "criterion-a", Summary: "non-blocking observation", BlocksAcceptance: false, Supersedes: []string{}}},
 		Confidence:    "high",
 	}, Evidence{Profiles: profile.Bundle{Quality: quality}})
 	if err != nil {
@@ -488,7 +575,7 @@ func TestValidateVerdictForEvidenceEnforcesQualityScore(t *testing.T) {
 		AcceptanceEvidence: []AcceptanceEvidence{{ACID: "AC1", Evidence: []string{"diff"}}},
 		QualityPasses:      []string{"criterion-a"},
 		QualityGaps:        []string{"criterion-b"},
-		Findings:           []Finding{{Severity: "low", Category: "criterion-b", Summary: "criterion gap", BlocksAcceptance: false}},
+		Findings:           []Finding{{Severity: "low", Category: "criterion-b", Summary: "criterion gap", BlocksAcceptance: false, Supersedes: []string{}}},
 		Confidence:         "high",
 	}, Evidence{
 		Task:      task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},
@@ -514,7 +601,7 @@ func TestValidateVerdictForEvidenceRejectsAcceptedWithBlockingFinding(t *testing
 		Summary:            "ok",
 		ReviewedFiles:      []string{"file.go"},
 		AcceptanceEvidence: []AcceptanceEvidence{{ACID: "AC1", Evidence: []string{"diff"}}},
-		Findings:           []Finding{{Severity: "medium", Category: "correctness", Summary: "ordering bug", BlocksAcceptance: false}},
+		Findings:           []Finding{{Severity: "medium", Category: "correctness", Summary: "ordering bug", BlocksAcceptance: false, Supersedes: []string{}}},
 		Confidence:         "high",
 	}, Evidence{
 		Task:      task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},
@@ -534,7 +621,7 @@ func TestValidateVerdictForEvidenceDefaultAllowsLowSeverityFinding(t *testing.T)
 		Summary:            "ok",
 		ReviewedFiles:      []string{"file.go"},
 		AcceptanceEvidence: []AcceptanceEvidence{{ACID: "AC1", Evidence: []string{"diff"}}},
-		Findings:           []Finding{{Severity: "low", Category: "style", Summary: "wording", BlocksAcceptance: false}},
+		Findings:           []Finding{{Severity: "low", Category: "style", Summary: "wording", BlocksAcceptance: false, Supersedes: []string{}}},
 		Confidence:         "medium",
 	}, Evidence{
 		Task:      task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},
@@ -551,7 +638,7 @@ func TestValidateVerdictForEvidenceBlockingSeveritiesCanRequireLowSeverityFindin
 		Summary:            "ok",
 		ReviewedFiles:      []string{"file.go"},
 		AcceptanceEvidence: []AcceptanceEvidence{{ACID: "AC1", Evidence: []string{"diff"}}},
-		Findings:           []Finding{{Severity: "low", Category: "style", Summary: "wording", BlocksAcceptance: false}},
+		Findings:           []Finding{{Severity: "low", Category: "style", Summary: "wording", BlocksAcceptance: false, Supersedes: []string{}}},
 		Confidence:         "medium",
 	}, Evidence{
 		Task: task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},
@@ -574,7 +661,7 @@ func TestValidateVerdictForEvidenceRejectsBlocksAcceptanceMismatch(t *testing.T)
 		Summary:            "ok",
 		ReviewedFiles:      []string{"file.go"},
 		AcceptanceEvidence: []AcceptanceEvidence{{ACID: "AC1", Evidence: []string{"diff"}}},
-		Findings:           []Finding{{Severity: "low", Category: "style", Summary: "wording", BlocksAcceptance: true}},
+		Findings:           []Finding{{Severity: "low", Category: "style", Summary: "wording", BlocksAcceptance: true, Supersedes: []string{}}},
 		Confidence:         "medium",
 	}, Evidence{
 		Task:      task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},
@@ -597,7 +684,7 @@ func TestValidateVerdictForEvidenceAllowsBlocksAcceptanceMismatchOnNeedsRevision
 		Summary:        "needs work",
 		NextWorkOrder:  "fix the failing test",
 		AcceptanceGaps: []string{"AC1"},
-		Findings:       []Finding{{Severity: "medium", Category: "correctness", Summary: "bug", BlocksAcceptance: false}},
+		Findings:       []Finding{{Severity: "medium", Category: "correctness", Summary: "bug", BlocksAcceptance: false, Supersedes: []string{}}},
 		Confidence:     "medium",
 	}, Evidence{
 		Task: task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},

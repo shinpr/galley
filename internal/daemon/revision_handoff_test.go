@@ -89,7 +89,7 @@ func TestNextSupervisorRevisionIncludesFindingsOnly(t *testing.T) {
 	}
 }
 
-func TestNextSupervisorRevisionPreservesAddressedHistoryAndPendingRequests(t *testing.T) {
+func TestNextSupervisorRevisionPreservesAddressedHistoryAndReplacesReviewedPendingRequests(t *testing.T) {
 	loaded := task.Task{RevisionRequests: []task.RevisionRequest{
 		{ID: "supervisor-attempt-1-finding-1", Source: "supervisor", Text: "first", Status: "pending"},
 		{ID: "supervisor-attempt-1-finding-2", Source: "supervisor", Text: "second", Status: "pending"},
@@ -99,8 +99,9 @@ func TestNextSupervisorRevisionPreservesAddressedHistoryAndPendingRequests(t *te
 		AcceptanceEvidence: []supervisor.AcceptanceEvidence{
 			{ACID: "revision:supervisor-attempt-1-finding-1", Evidence: []string{"fixed in loop.go"}},
 		},
+		AcceptanceGaps: []string{"revision:supervisor-attempt-1-finding-2"},
 		Findings: []supervisor.Finding{
-			{Category: "regression", Summary: "A new boundary case is missing."},
+			{Category: "regression", Summary: "A new boundary case is missing.", Supersedes: []string{"revision:supervisor-attempt-1-finding-2"}},
 		},
 		NextWorkOrder: "Cover the remaining boundary.",
 	}
@@ -108,30 +109,104 @@ func TestNextSupervisorRevisionPreservesAddressedHistoryAndPendingRequests(t *te
 	previous := supervisorRevisionFromTask(loaded)
 
 	revision := nextSupervisorRevision(previous, 2, verdict)
-	if got, want := len(revision.Requests), 3; got != want {
+	if got, want := len(revision.Requests), 2; got != want {
 		t.Fatalf("revision request count got %d, want %d: %#v", got, want, revision.Requests)
 	}
 	if request := revision.Requests[0]; request.ID != "supervisor-attempt-1-finding-1" || request.Status != "addressed" || request.Evidence != "fixed in loop.go" {
 		t.Fatalf("resolved request audit got %#v", request)
 	}
-	if request := revision.Requests[1]; request.ID != "supervisor-attempt-1-finding-2" || request.Status != "pending" {
-		t.Fatalf("unresolved request got %#v", request)
-	}
-	if request := revision.Requests[2]; request.ID != "supervisor-attempt-2-finding-1" || request.Status != "pending" {
+	if request := revision.Requests[1]; request.ID != "supervisor-attempt-2-finding-1" || request.Status != "pending" {
 		t.Fatalf("new request got %#v", request)
 	}
 
 	persisted := revision.applyToTask(loaded)
-	if got, want := len(persisted.RevisionRequests), 3; got != want {
+	if got, want := len(persisted.RevisionRequests), 2; got != want {
 		t.Fatalf("persisted revision request count got %d, want %d: %#v", got, want, persisted.RevisionRequests)
 	}
 	workOrder := task.RenderWorkOrder(persisted)
-	if strings.Contains(workOrder, "`supervisor-attempt-1-finding-1`") {
-		t.Fatalf("work order contains addressed request:\n%s", workOrder)
+	for _, oldID := range []string{"supervisor-attempt-1-finding-1", "supervisor-attempt-1-finding-2"} {
+		if strings.Contains(workOrder, "`"+oldID+"`") {
+			t.Fatalf("work order contains prior request %q:\n%s", oldID, workOrder)
+		}
 	}
-	for _, pendingID := range []string{"supervisor-attempt-1-finding-2", "supervisor-attempt-2-finding-1"} {
-		if !strings.Contains(workOrder, "`"+pendingID+"`") {
-			t.Fatalf("work order missing pending request %q:\n%s", pendingID, workOrder)
+	if pendingID := "supervisor-attempt-2-finding-1"; !strings.Contains(workOrder, "`"+pendingID+"`") {
+		t.Fatalf("work order missing latest pending request %q:\n%s", pendingID, workOrder)
+	}
+}
+
+func TestNextSupervisorRevisionRetainsPendingRequestOmittedFromLatestVerdict(t *testing.T) {
+	previous := supervisorRevision{Requests: []task.RevisionRequest{{
+		ID: "supervisor-attempt-1-finding-1", Source: "supervisor", Text: "unreviewed", Status: "pending",
+	}}}
+	verdict := supervisor.Verdict{
+		Status: "needs_revision",
+		Findings: []supervisor.Finding{{
+			Category: "regression", Summary: "A separately reviewed boundary is missing.",
+		}},
+	}
+
+	revision := nextSupervisorRevision(previous, 2, verdict)
+	if got, want := len(revision.Requests), 2; got != want {
+		t.Fatalf("revision request count got %d, want %d: %#v", got, want, revision.Requests)
+	}
+	if request := revision.Requests[0]; request.ID != "supervisor-attempt-1-finding-1" || request.Status != "pending" {
+		t.Fatalf("omitted pending request was not retained: %#v", request)
+	}
+	if request := revision.Requests[1]; request.ID != "supervisor-attempt-2-finding-1" || request.Status != "pending" {
+		t.Fatalf("latest request got %#v", request)
+	}
+}
+
+func TestNextSupervisorRevisionRetainsPendingRequestWithoutReplacementFinding(t *testing.T) {
+	previous := supervisorRevision{Requests: []task.RevisionRequest{{
+		ID: "supervisor-attempt-1-finding-1", Source: "supervisor", Text: "still active", Status: "pending",
+	}}}
+	verdict := supervisor.Verdict{
+		Status:         "needs_revision",
+		AcceptanceGaps: []string{"revision:supervisor-attempt-1-finding-1"},
+		NextWorkOrder:  "Retry after restoring structured finding output.",
+	}
+
+	revision := nextSupervisorRevision(previous, 2, verdict)
+	if got, want := len(revision.Requests), 1; got != want {
+		t.Fatalf("revision request count got %d, want %d: %#v", got, want, revision.Requests)
+	}
+	if request := revision.Requests[0]; request.ID != "supervisor-attempt-1-finding-1" || request.Status != "pending" {
+		t.Fatalf("pending request without replacement was not retained: %#v", request)
+	}
+}
+
+func TestNextSupervisorRevisionReplacesOnlyExplicitlySupersededRequest(t *testing.T) {
+	previous := supervisorRevision{Requests: []task.RevisionRequest{
+		{ID: "supervisor-attempt-1-finding-1", Source: "supervisor", Text: "first", Status: "pending"},
+		{ID: "supervisor-attempt-1-finding-2", Source: "supervisor", Text: "second", Status: "pending"},
+	}}
+	verdict := supervisor.Verdict{
+		Status: "needs_revision",
+		AcceptanceGaps: []string{
+			"revision:supervisor-attempt-1-finding-1",
+			"revision:supervisor-attempt-1-finding-2",
+		},
+		Findings: []supervisor.Finding{
+			{
+				Category:   "regression",
+				Summary:    "Replace only the first repair contract.",
+				Supersedes: []string{"revision:supervisor-attempt-1-finding-1"},
+			},
+			{Category: "acceptance", Summary: "A separate new defect remains."},
+		},
+	}
+
+	revision := nextSupervisorRevision(previous, 2, verdict)
+	if got, want := len(revision.Requests), 3; got != want {
+		t.Fatalf("revision request count got %d, want %d: %#v", got, want, revision.Requests)
+	}
+	if request := revision.Requests[0]; request.ID != "supervisor-attempt-1-finding-2" || request.Status != "pending" {
+		t.Fatalf("unrelated pending request was not retained: %#v", request)
+	}
+	for _, request := range revision.Requests[1:] {
+		if !strings.HasPrefix(request.ID, "supervisor-attempt-2-finding-") {
+			t.Fatalf("latest finding request got %#v", request)
 		}
 	}
 }

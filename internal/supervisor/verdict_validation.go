@@ -20,8 +20,8 @@ func ValidateVerdict(verdict Verdict) error {
 	if verdict.Confidence == "" {
 		return fmt.Errorf("supervisor verdict confidence is required")
 	}
-	if verdict.Status == "needs_revision" && verdict.NextWorkOrder == "" {
-		return fmt.Errorf("needs_revision verdict requires next_work_order")
+	if verdict.Status == "needs_revision" && len(verdict.Findings) == 0 && strings.TrimSpace(verdict.NextWorkOrder) == "" {
+		return fmt.Errorf("needs_revision verdict requires a finding or next_work_order")
 	}
 	switch verdict.Confidence {
 	case "high", "medium", "low":
@@ -37,6 +37,14 @@ func ValidateVerdict(verdict Verdict) error {
 		}
 		if finding.Summary == "" {
 			return fmt.Errorf("supervisor verdict findings[%d].summary is required", i)
+		}
+		if finding.Supersedes == nil {
+			return fmt.Errorf("supervisor verdict findings[%d].supersedes is required", i)
+		}
+		for j, id := range finding.Supersedes {
+			if !strings.HasPrefix(id, "revision:") || strings.TrimSpace(strings.TrimPrefix(id, "revision:")) == "" {
+				return fmt.Errorf("supervisor verdict findings[%d].supersedes[%d] must be a revision:<id> string", i, j)
+			}
 		}
 	}
 	for i, item := range verdict.DiscussionItems {

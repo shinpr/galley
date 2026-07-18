@@ -895,7 +895,7 @@ func TestRunOnceStopsAfterConsecutiveNoDiffAttempts(t *testing.T) {
 	if len(failedTask.Risks) == 0 || !strings.Contains(failedTask.Risks[len(failedTask.Risks)-1].Detail, "no git diff") {
 		t.Fatalf("progress risk missing: %#v", failedTask.Risks)
 	}
-	assertSupervisorRevisionState(t, failedTask, "supervisor-attempt-1-finding-1", "no repository diff was produced", "Make the required repository change and return valid structured JSON.")
+	assertSupervisorRevisionState(t, failedTask, "supervisor-attempt-2-finding-1", "no repository diff was produced", "Make the required repository change and return valid structured JSON.")
 }
 
 func writeFakeClaude(t *testing.T, body string) string {
@@ -909,17 +909,19 @@ done
 if [ "$supervisor" = "1" ]; then
   request="$(cat)"
   revision_gap=
+  revision_supersedes=',"supersedes":[]'
   if printf '%s' "$request" | grep -q 'supervisor-attempt-1-finding-1'; then
     revision_gap=',"revision:supervisor-attempt-1-finding-1"'
+    revision_supersedes=',"supersedes":["revision:supervisor-attempt-1-finding-1"]'
   fi
   if printf '%s' "$request" | grep -q '"status":"hard_stop"'; then
-    printf '%s\n' '{"status":"hard_stop","summary":"executor reported hard_stop","acceptance_gaps":[],"reviewed_files":[],"acceptance_evidence":[],"quality_passes":[],"quality_gaps":[],"findings":[{"severity":"high","category":"execution","file":"","summary":"executor reported hard_stop","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}'
+    printf '%s\n' '{"status":"hard_stop","summary":"executor reported hard_stop","acceptance_gaps":[],"reviewed_files":[],"acceptance_evidence":[],"quality_passes":[],"quality_gaps":[],"findings":[{"severity":"high","category":"execution","file":"","summary":"executor reported hard_stop","blocks_acceptance":true,"supersedes":[]}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}'
   elif printf '%s' "$request" | grep -q '"parse_error":"'; then
-    printf '%s\n' '{"status":"needs_revision","summary":"executor result was invalid","acceptance_gaps":["AC1"'"$revision_gap"'],"reviewed_files":[],"acceptance_evidence":[],"quality_passes":[],"quality_gaps":[],"findings":[{"severity":"medium","category":"verification","file":"","summary":"executor result JSON is invalid","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"Return valid structured JSON and preserve any useful workspace changes."}'
+    printf '%s\n' '{"status":"needs_revision","summary":"executor result was invalid","acceptance_gaps":["AC1"'"$revision_gap"'],"reviewed_files":[],"acceptance_evidence":[],"quality_passes":[],"quality_gaps":[],"findings":[{"severity":"medium","category":"verification","file":"","summary":"executor result JSON is invalid","blocks_acceptance":true'"$revision_supersedes"'}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"Return valid structured JSON and preserve any useful workspace changes."}'
   elif printf '%s' "$request" | grep -q '"status":"completed_with_risks"'; then
-    printf '%s\n' '{"status":"needs_revision","summary":"executor reported risks","acceptance_gaps":["AC1"'"$revision_gap"'],"reviewed_files":[],"acceptance_evidence":[],"quality_passes":[],"quality_gaps":[],"findings":[{"severity":"medium","category":"verification","file":"","summary":"executor reported risks","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"Resolve the reported risks and rerun verification."}'
+    printf '%s\n' '{"status":"needs_revision","summary":"executor reported risks","acceptance_gaps":["AC1"'"$revision_gap"'],"reviewed_files":[],"acceptance_evidence":[],"quality_passes":[],"quality_gaps":[],"findings":[{"severity":"medium","category":"verification","file":"","summary":"executor reported risks","blocks_acceptance":true'"$revision_supersedes"'}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"Resolve the reported risks and rerun verification."}'
   elif printf '%s' "$request" | grep -q '"diff_dirty":false'; then
-    printf '%s\n' '{"status":"needs_revision","summary":"no repository diff was produced","acceptance_gaps":["AC1"'"$revision_gap"'],"reviewed_files":[],"acceptance_evidence":[],"quality_passes":[],"quality_gaps":[],"findings":[{"severity":"medium","category":"acceptance","file":"","summary":"no repository diff was produced","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"Make the required repository change and return valid structured JSON."}'
+    printf '%s\n' '{"status":"needs_revision","summary":"no repository diff was produced","acceptance_gaps":["AC1"'"$revision_gap"'],"reviewed_files":[],"acceptance_evidence":[],"quality_passes":[],"quality_gaps":[],"findings":[{"severity":"medium","category":"acceptance","file":"","summary":"no repository diff was produced","blocks_acceptance":true'"$revision_supersedes"'}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"Make the required repository change and return valid structured JSON."}'
   else
     if printf '%s' "$request" | grep -q 'supervisor-attempt-1-finding-1'; then
       printf '%s\n' '{"status":"accepted","summary":"fake claude supervisor accepted","acceptance_gaps":[],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["diff"]},{"ac_id":"revision:supervisor-attempt-1-finding-1","evidence":["resolved in the retry diff"]}],"quality_passes":[],"quality_gaps":[],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}'

@@ -105,7 +105,7 @@ Use the common Status Policy. Return `accepted` only when the review procedure i
 
 Accepted is allowed only when every plausible wrong-behavior scenario discovered during review has either concrete evidence showing it is handled, or a non-blocking explanation that does not require another executor attempt. When a plausible bug can be fixed by another executor attempt, return `needs_revision` even if tests pass.
 
-Treat executor `hard_stop` as a claim to review, not as an automatic final state. Return `hard_stop` only when the blocker is external or genuinely unrecoverable by another executor attempt, such as a missing credential, destructive requirement, requirement to change paths listed in `task.scope.forbidden_paths`, unavailable external system, or contradictory acceptance criteria. If the executor stopped because of uncertainty, reluctance, insufficient investigation, local tool confusion, or a solvable implementation/verification problem, return `needs_revision` with a `next_work_order` that explains the alternative path to try. Use the executor's `hard_stop.reason`, `attempted`, and `needed_to_continue` as evidence for that work order.
+Treat executor `hard_stop` as a claim to review, not as an automatic final state. Return `hard_stop` only when the blocker is external or genuinely unrecoverable by another executor attempt, such as a missing credential, destructive requirement, requirement to change paths listed in `task.scope.forbidden_paths`, unavailable external system, or contradictory acceptance criteria. If the executor stopped because of uncertainty, reluctance, insufficient investigation, local tool confusion, or a solvable implementation/verification problem, return `needs_revision` with a finding that states the alternative path and verification needed to complete it. Use the executor's `hard_stop.reason`, `attempted`, and `needed_to_continue` as evidence for that finding.
 
 # Acceptance Rules
 
@@ -144,7 +144,7 @@ Apply task-specific quality profile rules and any task playbook included in the 
 - If `parse_error` is non-empty and no attempt remains, use `needs_supervisor_review` unless evidence independently proves a concrete revision path.
 - If `diff_error` is non-empty and the task requires repository changes, use `needs_revision` or `needs_supervisor_review` based on whether another executor attempt can recover evidence.
 - If there are no repository changes and the task appears to require code or file edits, use `needs_revision` when attempts remain, otherwise `needs_supervisor_review`.
-- If the executor result status is `hard_stop`, review the reason, attempted work, and requested unblock steps. Return `hard_stop` only when the blocker is external and not recoverable by another executor attempt. Return `needs_revision` when another attempt can try a local workaround, narrower implementation path, alternate verification path, dependency installation, or better investigation.
+- If the executor result status is `hard_stop`, review the reason, attempted work, and requested unblock steps. Return `hard_stop` only when the blocker is external and not recoverable by another executor attempt. Return `needs_revision` with an actionable finding when another attempt can try a local workaround, narrower implementation path, alternate verification path, dependency installation, or better investigation.
 - If the executor result status is `completed_with_risks`, evaluate the risks. Use `needs_revision` or `needs_supervisor_review` for risks that are not acceptable under the pass policy.
 
 # Output Shape
@@ -161,15 +161,3 @@ Provider-specific field guidance:
 - `discussion_items`: accepted-work reviewer notes only. Use an empty array unless the verdict is already accepted and useful non-gating context remains. Each item must use `topic`, `summary`, and `requires_human_decision`; use `summary`, not `note`.
 
 Use `high` confidence only when repository context, diff, and verification evidence are sufficient. Use `medium` for normal accepted reviews with bounded uncertainty. Use `low` when evidence is thin. Accepted verdicts use `medium` or `high` confidence.
-
-# Revision Work Orders
-
-When status is `needs_revision`, write `next_work_order` as an actionable work order for the executor:
-
-- identify exact missing acceptance criteria, pending revision requests, and quality findings;
-- name relevant files or behaviors when evidence provides them;
-- specify verification to run;
-- preserve already valid work;
-- keep rewrites narrow unless evidence shows a broad rewrite is necessary.
-
-Escalate with `needs_supervisor_review` when human judgment is required.

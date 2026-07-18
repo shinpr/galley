@@ -47,6 +47,10 @@ func TestRenderWorkOrderIncludesPRReviewInstructions(t *testing.T) {
 	}
 	loaded.PR.URL = "https://github.com/shinpr/sandbox/pull/3"
 	loaded.Supervisor.ReviewIterations = 2
+	loaded.Risks = append(loaded.Risks, Risk{
+		ID:     "requeue-supervisor-attempt-1-guidance",
+		Detail: "Preserve the existing contract while closing the publication boundary.",
+	})
 	loaded.RevisionRequests = append(loaded.RevisionRequests, RevisionRequest{
 		ID:        "pr-comment-42",
 		Source:    "pr_comment",
@@ -54,20 +58,47 @@ func TestRenderWorkOrderIncludesPRReviewInstructions(t *testing.T) {
 		Text:      "Please rename the proof file and update the README.",
 		Status:    "pending",
 	})
+	loaded.RevisionRequests = append(loaded.RevisionRequests, RevisionRequest{
+		ID:     "supervisor-attempt-1-finding-1",
+		Source: "supervisor",
+		Text:   "An earlier request that is already complete.",
+		Status: "addressed",
+	})
+	loaded.ReviewProgress = &ReviewProgress{
+		Acceptance: []string{"AC1"},
+		Quality:    []string{"regression"},
+	}
 
 	workOrder := RenderWorkOrder(loaded)
 	for _, want := range []string{
-		"## PR Review Context",
-		"## Revision Requests",
 		"https://github.com/shinpr/sandbox/pull/3",
 		"review iteration: `2`",
-		"additional acceptance criterion",
+		"Preserve the existing contract while closing the publication boundary.",
+		"acceptance: `AC1`",
+		"quality: `regression`",
+		"`acceptance_criteria`",
 		"`revision:pr-comment-42`",
 		"Please rename the proof file and update the README.",
 	} {
 		if !strings.Contains(workOrder, want) {
 			t.Fatalf("work order missing %q:\n%s", want, workOrder)
 		}
+	}
+	if strings.Contains(workOrder, "An earlier request that is already complete.") {
+		t.Fatalf("work order contains addressed revision request:\n%s", workOrder)
+	}
+	goalIndex := strings.Index(workOrder, loaded.Goal)
+	for _, active := range []string{
+		"Preserve the existing contract while closing the publication boundary.",
+		"Please rename the proof file and update the README.",
+		"acceptance: `AC1`",
+	} {
+		if strings.Index(workOrder, active) >= goalIndex {
+			t.Fatalf("active revision context %q does not precede the task goal:\n%s", active, workOrder)
+		}
+	}
+	if acceptanceIndex := strings.Index(workOrder, loaded.AcceptanceCriteria[0].Text); acceptanceIndex <= goalIndex {
+		t.Fatalf("acceptance criteria do not follow the task goal:\n%s", workOrder)
 	}
 }
 

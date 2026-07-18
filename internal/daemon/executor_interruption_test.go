@@ -91,10 +91,10 @@ func TestExecutorInterruptionLifecycleMatrix(t *testing.T) {
 		{
 			name:         "claude api failure",
 			cli:          "claude",
-			stdout:       `printf '%s\n' '{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"claude-sess"}'` + "\n",
+			stdout:       `printf '%s\n' '{"type":"result","subtype":"success","is_error":true,"api_error_status":529,"terminal_reason":"api_error","stop_reason":"stop_sequence","session_id":"claude-sess","result":"api overloaded"}'` + "\n",
 			wantReason:   "claude_result_error",
 			wantProvider: "claude",
-			wantMessage:  []string{"claude_result_error", "error_during_execution", "claude-sess"},
+			wantMessage:  []string{"claude_result_error", "api_error", "529", "stop_sequence", "claude-sess", "api overloaded"},
 		},
 		{
 			name:         "codex turn.failed with detail",

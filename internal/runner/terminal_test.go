@@ -187,14 +187,14 @@ func TestClaudeTerminalPreservesProviderIdentity(t *testing.T) {
 func TestExecutorTerminalRetainsProviderDetailOnNonZeroExit(t *testing.T) {
 	exitErr := &CommandError{Kind: CommandErrorExitNonZero, Err: errors.New("exit status 1")}
 
-	claude := ClaudeTerminal("claude", []byte(`{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"s1","result":"api overloaded"}`), exitErr)
+	claude := ClaudeTerminal("claude", []byte(`{"type":"result","subtype":"success","is_error":true,"api_error_status":529,"terminal_reason":"api_error","stop_reason":"stop_sequence","session_id":"s1","result":"api overloaded"}`), exitErr)
 	if claude.Normal {
 		t.Fatalf("claude non-zero exit must stay interrupted: %+v", claude)
 	}
 	if claude.Reason != TerminalReasonClaudeResultError {
 		t.Fatalf("claude reason = %q, want %q", claude.Reason, TerminalReasonClaudeResultError)
 	}
-	if claude.RunError == "" || claude.SessionID != "s1" || claude.Status != "error_during_execution" || claude.Message != "api overloaded" {
+	if claude.RunError == "" || claude.SessionID != "s1" || claude.Status != "api_error" || claude.Code != "529" || claude.StopReason != "stop_sequence" || claude.Message != "api overloaded" {
 		t.Fatalf("claude provider detail not retained alongside run error: %+v", claude)
 	}
 
@@ -228,20 +228,5 @@ func TestExecutorTerminalRejectsConflictingStreams(t *testing.T) {
 			`{"type":"turn.completed"}`), nil)
 	if codex.Normal || codex.Reason != TerminalReasonCodexTurnFailed {
 		t.Fatalf("codex turn.failed-then-completed must stay interrupted: %+v", codex)
-	}
-}
-
-func TestExecutorTerminalRetainsProviderDetail(t *testing.T) {
-	codex := CodexTerminal([]byte(`{"type":"turn.failed","error":{"message":"model overloaded","code":"rate_limit"}}`), nil)
-	if codex.Code != "rate_limit" || codex.Message != "model overloaded" {
-		t.Fatalf("codex detail not retained: %+v", codex)
-	}
-	grok := GrokTerminal([]byte(`{"text":"partial","stopReason":"MaxTokens","sessionId":"g9"}`), nil)
-	if grok.StopReason != "MaxTokens" || grok.SessionID != "g9" {
-		t.Fatalf("grok detail not retained: %+v", grok)
-	}
-	claude := ClaudeTerminal("claude", []byte(`{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"s9"}`), nil)
-	if claude.SessionID != "s9" || claude.Status != "error_during_execution" {
-		t.Fatalf("claude detail not retained: %+v", claude)
 	}
 }

@@ -9,8 +9,6 @@ import (
 	taskpkg "github.com/shinpr/galley/internal/task"
 )
 
-// interruptMessage mirrors the daemon-owned interruptionMessage format rather
-// than defining it here.
 func TestTaskShowExecutorInterruptionRendering(t *testing.T) {
 	root := t.TempDir()
 	artifactDir := filepath.Join(root, "runs", "task-cli-test-1", "attempt-1")

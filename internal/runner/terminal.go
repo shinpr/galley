@@ -57,9 +57,6 @@ const (
 	TerminalReasonRunnerExitNonZero = "runner_exit_nonzero"
 )
 
-// runnerInterruption classifies a runner-state failure. Start failures,
-// timeouts, and kills guarantee that no reliable provider terminal exists, so
-// they resolve to an interruption before any provider output is inspected.
 func runnerInterruption(provider string, runErr error) ExecutorTerminal {
 	t := ExecutorTerminal{Provider: provider, RunError: runErr.Error()}
 	switch {
@@ -114,11 +111,14 @@ func ClaudeTerminal(provider string, stdout []byte, runErr error) ExecutorTermin
 }
 
 type claudeResultEvent struct {
-	Type      string          `json:"type"`
-	Subtype   string          `json:"subtype"`
-	IsError   bool            `json:"is_error"`
-	Result    json.RawMessage `json:"result"`
-	SessionID string          `json:"session_id"`
+	Type           string          `json:"type"`
+	Subtype        string          `json:"subtype"`
+	IsError        bool            `json:"is_error"`
+	APIErrorStatus json.RawMessage `json:"api_error_status"`
+	TerminalReason string          `json:"terminal_reason"`
+	StopReason     string          `json:"stop_reason"`
+	Result         json.RawMessage `json:"result"`
+	SessionID      string          `json:"session_id"`
 }
 
 func scanClaudeStream(provider string, stdout []byte) ExecutorTerminal {
@@ -140,18 +140,36 @@ func scanClaudeStream(provider string, stdout []byte) ExecutorTerminal {
 	// subtype also stays an interruption so unreliable terminals never reach
 	// Supervisor.
 	if failure != nil {
+		status := failure.TerminalReason
+		if status == "" {
+			status = failure.Subtype
+		}
 		return ExecutorTerminal{
-			Provider:  provider,
-			Reason:    TerminalReasonClaudeResultError,
-			Status:    failure.Subtype,
-			SessionID: failure.SessionID,
-			Message:   claudeResultMessage(failure.Result),
+			Provider:   provider,
+			Reason:     TerminalReasonClaudeResultError,
+			Status:     status,
+			Code:       claudeAPIErrorStatus(failure.APIErrorStatus),
+			StopReason: failure.StopReason,
+			SessionID:  failure.SessionID,
+			Message:    claudeResultMessage(failure.Result),
 		}
 	}
 	if success != nil {
 		return ExecutorTerminal{Provider: provider, Normal: true, Reason: TerminalReasonClaudeResultSuccess, Status: success.Subtype, SessionID: success.SessionID}
 	}
 	return ExecutorTerminal{Provider: provider, Reason: TerminalReasonNoNormalTerminal}
+}
+
+func claudeAPIErrorStatus(raw json.RawMessage) string {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return ""
+	}
+	var text string
+	if err := json.Unmarshal(trimmed, &text); err == nil {
+		return text
+	}
+	return string(trimmed)
 }
 
 func claudeResultMessage(raw json.RawMessage) string {

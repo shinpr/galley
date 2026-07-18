@@ -24,6 +24,7 @@ type Task struct {
 	Risks              []Risk                `yaml:"risks" json:"risks"`
 	DiscussionItems    []DiscussionItem      `yaml:"discussion_items,omitempty" json:"discussion_items,omitempty"`
 	RevisionRequests   []RevisionRequest     `yaml:"revision_requests,omitempty" json:"revision_requests,omitempty"`
+	ReviewProgress     *ReviewProgress       `yaml:"review_progress,omitempty" json:"review_progress,omitempty"`
 	Attempts           []Attempt             `yaml:"attempts" json:"attempts"`
 	Verification       Verification          `yaml:"verification" json:"verification"`
 	PR                 PR                    `yaml:"pr" json:"pr"`
@@ -194,6 +195,14 @@ type RevisionRequest struct {
 	Text      string `yaml:"text" json:"text"`
 	Status    string `yaml:"status" json:"status"`
 	Evidence  string `yaml:"evidence,omitempty" json:"evidence,omitempty"`
+}
+
+// ReviewProgress is daemon-owned state for supervisor checks that remain
+// valid across executor attempts. Run artifacts retain the per-attempt history.
+type ReviewProgress struct {
+	ContractHash string   `yaml:"contract_hash" json:"contract_hash"`
+	Acceptance   []string `yaml:"acceptance,omitempty" json:"acceptance,omitempty"`
+	Quality      []string `yaml:"quality,omitempty" json:"quality,omitempty"`
 }
 
 // Attempt records one executor and supervisor loop iteration.

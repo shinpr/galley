@@ -35,6 +35,39 @@ func TestQueueMovesDraftTaskToQueued(t *testing.T) {
 	}
 }
 
+func TestQueueClearsDaemonReviewProgress(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	draftPath := filepath.Join(root, "tasks", "draft", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(draftPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(writeTaskYAML(t, "loop_budget: 3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Status = "draft"
+	loaded.AcceptanceCriteria[0].Status = "satisfied"
+	loaded.ReviewProgress = &ReviewProgress{
+		ContractHash: "stale",
+		Acceptance:   []string{loaded.AcceptanceCriteria[0].ID},
+	}
+	if err := Save(draftPath, loaded); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Queue(draftPath, QueueOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Task.ReviewProgress != nil {
+		t.Fatalf("review progress = %#v, want nil", result.Task.ReviewProgress)
+	}
+	if result.Task.AcceptanceCriteria[0].Status != "pending" {
+		t.Fatalf("acceptance status = %q, want pending", result.Task.AcceptanceCriteria[0].Status)
+	}
+}
+
 func TestQueueDefaultsLoopBudget(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

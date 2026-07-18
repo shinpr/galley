@@ -461,6 +461,33 @@
       },
       "type": "object"
     },
+    "review_progress": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptance": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "contract_hash": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "quality": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "contract_hash"
+      ],
+      "type": "object"
+    },
     "revision_requests": {
       "items": {
         "additionalProperties": false,

@@ -851,7 +851,12 @@ func initializeRunEvidence(root, runningPath string, loaded task.Task, validatio
 	return runID, runDir, nil
 }
 
-func prepareClaimedWorkspace(ctx context.Context, opts Options, profiles profile.Bundle, runningPath, runDir string, loaded *task.Task, effectiveExecutor task.Executor) (workspace.Prepared, error) {
+type claimedWorkspace struct {
+	workspace.Prepared
+	ReviewContractContext supervisor.ReviewContractContext
+}
+
+func prepareClaimedWorkspace(ctx context.Context, opts Options, profiles profile.Bundle, runningPath, runDir string, loaded *task.Task, effectiveExecutor task.Executor) (claimedWorkspace, error) {
 	wsOpts := workspaceOptions(opts)
 	// Resolve the environment profile pr.base into a concrete git ref name and
 	// pass it through workspace.Options.StartPoint so the new task branch is
@@ -865,28 +870,28 @@ func prepareClaimedWorkspace(ctx context.Context, opts Options, profiles profile
 	startPoint, err := resolveWorktreeStartPoint(ctx, opts, loaded.Scope.CWD, prBase)
 	if err != nil {
 		appendFailureAttempt(loaded, "workspace", "workspace_failed", err, runDir)
-		return workspace.Prepared{}, err
+		return claimedWorkspace{}, err
 	}
 	wsOpts.StartPoint = startPoint
 	prepared, err := workspace.Prepare(ctx, loaded.Scope.CWD, loaded.Worktree, wsOpts)
 	if err != nil {
 		appendFailureAttempt(loaded, "workspace", "workspace_failed", err, runDir)
-		return workspace.Prepared{}, err
+		return claimedWorkspace{}, err
 	}
 	if err := writeJSON(runartifact.Path(runDir, runartifact.WorkspaceFilename), prepared); err != nil {
 		appendFailureAttempt(loaded, "run_evidence", "run_evidence_failed", err, runDir)
-		return workspace.Prepared{}, err
+		return claimedWorkspace{}, err
 	}
 	if prepared.WorktreeReused {
 		if err := reconcileReusedInputFiles(prepared.CWD, loaded.Files); err != nil {
 			appendFailureAttempt(loaded, "input_files", "input_files_failed", err, runDir)
-			return workspace.Prepared{}, err
+			return claimedWorkspace{}, err
 		}
 	}
 	preparedFiles, err := inputfiles.Prepare(prepared.CWD, loaded.Files)
 	if err != nil {
 		appendFailureAttempt(loaded, "input_files", "input_files_failed", err, runDir)
-		return workspace.Prepared{}, err
+		return claimedWorkspace{}, err
 	}
 	cleanupPrepared := true
 	defer func() {
@@ -896,19 +901,25 @@ func prepareClaimedWorkspace(ctx context.Context, opts Options, profiles profile
 	}()
 	if err := writeJSON(runartifact.Path(runDir, runartifact.InputFilesFilename), preparedFiles); err != nil {
 		appendFailureAttempt(loaded, "run_evidence", "run_evidence_failed", err, runDir)
-		return workspace.Prepared{}, err
+		return claimedWorkspace{}, err
 	}
 	if prepared.WorktreeReused && prepared.Dirty {
 		appendRisk(loaded, "workspace-dirty", "technical_debt", "Reused worktree had uncommitted changes before executor run.", "Preserved existing worktree state and recorded git status porcelain in workspace.json.", true)
 		if err := task.Save(runningPath, *loaded); err != nil {
-			return workspace.Prepared{}, err
+			return claimedWorkspace{}, err
 		}
 	}
 	if err := task.Save(runartifact.Path(runDir, runartifact.EffectiveTaskSnapshotFilename), executionTask(*loaded, prepared.CWD, effectiveExecutor)); err != nil {
-		return workspace.Prepared{}, err
+		return claimedWorkspace{}, err
 	}
 	cleanupPrepared = false
-	return prepared, nil
+	return claimedWorkspace{
+		Prepared: prepared,
+		ReviewContractContext: supervisor.ReviewContractContext{
+			SourceCWD:        loaded.Scope.CWD,
+			InputFilesDigest: inputfiles.ContractDigest(preparedFiles),
+		},
+	}, nil
 }
 
 func startHeartbeat(ctx context.Context, path string, interval time.Duration) func() {

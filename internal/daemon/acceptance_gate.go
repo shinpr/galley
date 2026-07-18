@@ -84,15 +84,6 @@ func evaluateAcceptanceGate(loaded *task.Task, runDir string) (string, bool) {
 	return reason, ok
 }
 
-func mapAcceptanceStatus(status string) string {
-	switch status {
-	case "satisfied", "partially_satisfied", "not_satisfied":
-		return status
-	default:
-		return "unknown"
-	}
-}
-
 // applyAcceptedAcceptanceCriteria prevents stale executor statuses from
 // contradicting an accepted supervisor verdict while preserving reported gaps.
 func applyAcceptedAcceptanceCriteria(loaded *task.Task, verdict supervisor.Verdict) {

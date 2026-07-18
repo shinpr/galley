@@ -63,6 +63,7 @@ When meaningful progress requires unavailable credentials or services, a destruc
 # Evidence Rules
 
 - `files_modified` is the complete final worktree diff, including retained changes from earlier attempts.
+- `summary` reports every behavior, state, contract, and verification area changed during this attempt, with the files or symbols needed to locate those changes. Earlier-attempt changes remain represented by `files_modified`.
 - Each acceptance criterion cites concrete file or command evidence, or carries a partial/not-satisfied status.
 - Verification entries describe commands actually run. A selector matching zero tests is `skipped`.
 - Risks record limitations, assumptions, residual uncertainty, and human-review needs with concrete mitigation.

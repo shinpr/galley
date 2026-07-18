@@ -16,7 +16,7 @@ cat > "$BIN_DIR/claude" <<'SH'
 #!/bin/sh
 if [ "${GALLEY_CLAUDE_GUARD_MODE:-}" = "supervisor" ]; then
   cat > /dev/null
-  echo '{"status":"accepted","summary":"smoke supervisor accepted","acceptance_gaps":[],"reviewed_files":["smoke-output.txt"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["smoke-output.txt exists"]}],"quality_coverage":[],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}'
+  echo '{"status":"accepted","summary":"smoke supervisor accepted","acceptance_gaps":[],"reviewed_files":["smoke-output.txt"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["smoke-output.txt exists"]}],"quality_passes":[],"quality_gaps":[],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}'
   exit 0
 fi
 cat > /dev/null
@@ -41,7 +41,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 cat > /dev/null
-printf '%s\n' '{"status":"accepted","summary":"smoke supervisor accepted","acceptance_gaps":[],"reviewed_files":["smoke-output.txt"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["smoke-output.txt exists"]}],"quality_coverage":[],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}' > "$out"
+printf '%s\n' '{"status":"accepted","summary":"smoke supervisor accepted","acceptance_gaps":[],"reviewed_files":["smoke-output.txt"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["smoke-output.txt exists"]}],"quality_passes":[],"quality_gaps":[],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}' > "$out"
 printf '%s\n' '{"event":"done"}'
 SH
 chmod +x "$BIN_DIR/codex"

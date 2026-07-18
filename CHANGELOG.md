@@ -6,14 +6,25 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.11.0 - 2026-07-18
+
 ### Added
 
 - The Galley skill includes a helper for changing task-level executor CLI, model, and effort overrides before validation and requeue.
 
 ### Changed
 
+- Supervisor review now completes AC review before quality review, records quality pass and gap IDs independently from consolidated findings, and persists passed AC and quality items across attempts. Changed task direction, source repository path, or placed input content invalidates stale passes.
+- Codex supervisor review now builds acceptance results, quality results, consolidated findings, and the final verdict through explicit completion gates.
+- Executor summaries report current-attempt changes for regression routing while `files_modified` and supervisor scope validation use the cumulative final diff.
 - Executor interruptions now bypass Supervisor, preserve the worktree and run evidence, and resume through `galley task requeue`; result-validation failures after a normal provider terminal remain reviewable.
-- Packaged Claude, Codex, and Grok Galley plugins are now versioned as `0.1.26`: troubleshooting guidance routes executor interruptions through wait-or-update recovery without requiring an exact provider failure classification, and the bundled helper updates task-level executor CLI, model, and effort overrides before validation and requeue.
+- Packaged Claude, Codex, and Grok Galley plugins are now versioned as `0.1.27`, combining executor-interruption recovery guidance and task-level executor override tooling with the daemon-owned review-progress task schema.
+
+### Fixed
+
+- Supervisor revision handoffs now persist before the next attempt and retain addressed history plus unresolved work across retries, terminal escalation, shutdown, and requeue.
+- Non-accepted supervisor verdicts preserve actionable findings and work orders when AC or quality results are incomplete or malformed. The affected result kind cannot advance persisted passes, while recognized gaps still reopen them without failing the task.
+- Galley runs the supervisor once per executor attempt. Supervisor process and verdict failures retain their artifacts and move the task to supervisor review instead of repeating the same review against unchanged evidence.
 
 ## v0.10.2 - 2026-07-15
 

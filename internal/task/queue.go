@@ -44,6 +44,10 @@ func queue(path string, opts QueueOptions, readTaskID func(string) (string, erro
 	}
 	ResolveFileSources(path, &loaded)
 	loaded.Status = StatusQueued
+	loaded.ReviewProgress = nil
+	for i := range loaded.AcceptanceCriteria {
+		loaded.AcceptanceCriteria[i].Status = "pending"
+	}
 	validation := Validate(loaded)
 	if !validation.Valid() {
 		return QueueResult{}, fmt.Errorf("task validation failed: %v", validation.Errors)

@@ -100,7 +100,7 @@ func renderReviewContext(b *strings.Builder, t Task) {
 	}
 	if len(t.RevisionRequests) > 0 {
 		fmt.Fprintf(b, "## Revision Requests\n\n")
-		fmt.Fprintf(b, "Treat every pending revision request as an additional acceptance criterion for this attempt. Do not report `completed` unless each pending request is addressed or explicitly escalated with a reason.\n\n")
+		fmt.Fprintf(b, "Complete every pending revision request as an additional acceptance criterion. For each request, return an `acceptance_criteria` entry with the displayed revision ID, its status, and concrete evidence. Return `completed` when every request is satisfied; use the normal hard-stop contract when local completion is blocked.\n\n")
 		for _, request := range t.RevisionRequests {
 			if request.Status == "addressed" {
 				continue
@@ -110,6 +110,7 @@ func renderReviewContext(b *strings.Builder, t Task) {
 				fmt.Fprintf(b, " comment=`%s`", request.CommentID)
 			}
 			fmt.Fprintf(b, ": %s\n", request.Text)
+			fmt.Fprintf(b, "  - executor result ID: `revision:%s`\n", request.ID)
 		}
 		fmt.Fprintf(b, "\n")
 	}

@@ -14,8 +14,8 @@ import (
 // (see internal/daemon supervisorIdleTimeoutError.attemptErrorMessage). The
 // daemon package owns and tests the exact wording; this fixture only needs a
 // representative message so the CLI renderer assertions are meaningful.
-const supervisorIdleTimeoutMessage = "supervisor idle timeout: the built-in supervisor subprocess produced no output for the idle-timeout watchdog and was killed on every try " +
-	"(supervisor=codex idle_timeout=10m0s tries=3/3). This is a supervisor watchdog failure, not the task execution_policy.timeout_ms expiring. " +
+const supervisorIdleTimeoutMessage = "supervisor idle timeout: the built-in supervisor subprocess produced no output for the idle-timeout watchdog and was killed " +
+	"(supervisor=codex idle_timeout=10m0s). This is a supervisor watchdog failure, not the task execution_policy.timeout_ms expiring. " +
 	"Requeue the task, or adjust the daemon --idle-timeout or --supervisor settings."
 
 // writeSupervisorIdleTimeoutFailedTask seeds tasks/failed/task.yaml for a task

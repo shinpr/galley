@@ -62,6 +62,7 @@ func TestRenderWorkOrderIncludesPRReviewInstructions(t *testing.T) {
 		"https://github.com/shinpr/sandbox/pull/3",
 		"review iteration: `2`",
 		"additional acceptance criterion",
+		"`revision:pr-comment-42`",
 		"Please rename the proof file and update the README.",
 	} {
 		if !strings.Contains(workOrder, want) {

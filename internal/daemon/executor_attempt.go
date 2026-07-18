@@ -15,6 +15,7 @@ import (
 	"github.com/shinpr/galley/internal/runartifact"
 	"github.com/shinpr/galley/internal/runner"
 	claudeguard "github.com/shinpr/galley/internal/runner/claude_guard_plugin"
+	"github.com/shinpr/galley/internal/supervisor"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/internal/vcs"
 	"github.com/shinpr/galley/internal/workspace"
@@ -204,13 +205,6 @@ func mergeAttemptEvidence(loaded *task.Task, outcome attemptOutcome, runID, work
 	if outcome.ExecutorResult.Status == "completed" && outcome.DiffErr == nil && !outcome.DiffDirty {
 		appendRisk(loaded, "git-diff-empty", "partial_verification", "Executor completed but produced no git diff in the execution workspace.", fmt.Sprintf("Stored %s result and raw logs for supervisor review.", executorArtifactLabel(loaded.Executor.CLI)), true)
 	}
-	for _, ac := range outcome.ExecutorResult.AcceptanceCriteria {
-		for i := range loaded.AcceptanceCriteria {
-			if loaded.AcceptanceCriteria[i].ID == ac.ID {
-				loaded.AcceptanceCriteria[i].Status = mapAcceptanceStatus(ac.Status)
-			}
-		}
-	}
 	for _, verification := range outcome.ExecutorResult.Verification {
 		loaded.Verification.Commands = append(loaded.Verification.Commands, task.VerificationCommand{
 			Cmd:           verification.Command,
@@ -367,7 +361,7 @@ func appendSupervisorFailureAttempt(loaded *task.Task, outcome attemptOutcome, e
 		appendSupervisorIdleTimeoutAttempt(loaded, outcome, idle, attemptDir)
 		return
 	}
-	kind := classifyFailureKind("supervisor_failed", err)
+	kind := supervisorFailureKind(err)
 	loaded.Attempts = append(loaded.Attempts, task.Attempt{
 		Number:            len(loaded.Attempts) + 1,
 		StartedAt:         outcome.Started.Format(time.RFC3339Nano),
@@ -377,9 +371,13 @@ func appendSupervisorFailureAttempt(loaded *task.Task, outcome attemptOutcome, e
 		Summary:           err.Error(),
 		Error:             attemptError("supervisor", kind, err, attemptDir),
 	})
-	// A supervisor process failure is not a verdict on the executor's work.
+	// A supervisor failure is not a verdict on the executor's work.
 	loaded.Status = "needs_supervisor_review"
-	appendRisk(loaded, "supervisor-stall", "partial_verification", fmt.Sprintf("Supervisor evaluation failed (%s): %s", kind, err.Error()), "Inspect the supervisor-try-N evidence under the attempt directory and requeue the task once the supervisor backend is healthy.", true)
+	if supervisor.IsVerdictContractError(err) {
+		appendRisk(loaded, "supervisor-invalid-verdict", "partial_verification", fmt.Sprintf("Supervisor evaluation failed (%s): %s", kind, err.Error()), "Inspect the supervisor-try-1 validation evidence and requeue with the same or another supervisor after correcting the output-contract issue.", true)
+		return
+	}
+	appendRisk(loaded, "supervisor-stall", "partial_verification", fmt.Sprintf("Supervisor evaluation failed (%s): %s", kind, err.Error()), "Inspect the supervisor-try-1 evidence under the attempt directory and requeue the task once the supervisor backend is healthy.", true)
 }
 
 func appendSupervisorIdleTimeoutAttempt(loaded *task.Task, outcome attemptOutcome, idle *supervisorIdleTimeoutError, attemptDir string) {
@@ -399,7 +397,7 @@ func appendSupervisorIdleTimeoutAttempt(loaded *task.Task, outcome attemptOutcom
 		},
 	})
 	loaded.Status = "needs_supervisor_review"
-	appendRisk(loaded, "supervisor-idle-timeout", "partial_verification", message, "Inspect the supervisor-try-N evidence under the attempt directory, then requeue the task or adjust the daemon --idle-timeout or --supervisor settings.", true)
+	appendRisk(loaded, "supervisor-idle-timeout", "partial_verification", message, "Inspect the supervisor-try-1 evidence under the attempt directory, then requeue the task or adjust the daemon --idle-timeout or --supervisor settings.", true)
 }
 
 func prepareClaudeExecutorPlan(opts Options, loaded task.Task, workDir, prompt, attemptDir string) (runner.Command, string, string, error) {

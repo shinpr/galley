@@ -35,6 +35,7 @@ func TaskJSONSchema() ([]byte, error) {
 		"risks":               arraySchema(riskSchema()),
 		"discussion_items":    arraySchema(discussionItemSchema()),
 		"revision_requests":   arraySchema(revisionRequestSchema()),
+		"review_progress":     reviewProgressSchema(),
 		"attempts":            arraySchema(attemptSchema()),
 		"verification":        verificationSchema(),
 		"pr":                  prSchema(),
@@ -204,6 +205,17 @@ func revisionRequestSchema() map[string]any {
 			"text":       stringSchema("minLength", 1),
 			"status":     stringSchema("minLength", 1),
 			"evidence":   stringSchema(),
+		}),
+	)
+}
+
+func reviewProgressSchema() map[string]any {
+	return object(
+		required("contract_hash"),
+		properties(map[string]any{
+			"contract_hash": stringSchema("minLength", 1),
+			"acceptance":    arraySchema(stringSchema("minLength", 1)),
+			"quality":       arraySchema(stringSchema("minLength", 1)),
 		}),
 	)
 }

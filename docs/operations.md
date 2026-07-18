@@ -1,15 +1,103 @@
 # Operations
 
-This document covers day-to-day Galley operation: queue layout, task commands, daemon control, recovery behavior, and local development checks.
+This document covers daemon control, task inspection, queue storage, notifications, and process behavior. Use the Galley skill for normal setup and task authoring. For help with a specific failure, start with [Troubleshooting](troubleshooting.md).
 
-For normal task authoring, prefer the Galley skill. It validates task YAML and profiles before queueing.
+## Daily Commands
 
-## Queue Layout
+```sh
+galley daemon start
+galley daemon status --output json
+galley task list
+galley task show TASK_ID
+galley daemon stop
+```
 
-The daemon root defaults to `~/.galley`:
+`task list` shows each task's queue state, status, PR URL, latest verdict, and latest summary. `task show` gives the latest attempt, supervisor verdict, risk, failed verification context, and recovery hint.
+
+Use the installed `galley` binary for background daemon control. PID verification records the executable path, so separate `go run ./cmd/galley` invocations cannot reliably start and later stop the same background process.
+
+## Daemon Control
+
+```sh
+galley daemon start
+galley daemon status --output json
+galley daemon stop
+galley daemon run --once
+```
+
+`daemon start` launches Galley in the background and writes its PID and log under the daemon root. `daemon run --once` drains the tasks currently available in the queue and exits. The background daemon also polls configured PR comments and cleans up worktrees for closed or merged PRs.
+
+The daemon root defaults to `~/.galley`. Use `--root` consistently when running an isolated or test workflow with a different root.
+
+By default, the background files are:
+
+```text
+~/.galley/galley-daemon.pid
+~/.galley/galley-daemon.log
+```
+
+`--pid-file` and `--log-file` override those paths. `daemon stop` sends a normal shutdown request, waits up to `--stop-timeout`, and removes the PID file after it verifies that the recorded process stopped.
+
+## Daemon Configuration
+
+`daemon start` and `daemon run` create `daemon.yaml` under the selected root on first use. Edit this file for durable daemon-wide defaults:
+
+```yaml
+supervisor: claude
+max_concurrent_tasks: 1
+max_concurrent_per_repo: 1
+poll_interval: 10s
+claim_ttl: 30m
+shutdown_timeout: 5m
+idle_timeout: 10m
+notifications:
+  enabled: false
+  on: [failed, needs_supervisor_review]
+```
+
+| Field | Purpose |
+| --- | --- |
+| `supervisor` | Daemon-level supervisor backend: `claude`, `codex`, `glm`, or `grok`. A repository environment profile can override it. |
+| `max_concurrent_tasks` | Maximum tasks run at once. Must be at least 1. |
+| `max_concurrent_per_repo` | Maximum concurrent tasks for one source repository. `0` disables the per-repository limit. |
+| `poll_interval` | Delay between queue and maintenance polls. |
+| `claim_ttl` | Age used to recover stale task claims; it also determines heartbeat cadence. |
+| `shutdown_timeout` | Time active attempts may finish after shutdown is requested. |
+| `idle_timeout` | Time an executor or supervisor process may produce no output before Galley kills it. |
+| `glm_api_key` | Z.ai credential used when GLM is selected as executor or supervisor. |
+| `notifications` | Optional terminal-state command hook described below. |
+
+Explicit flags on `daemon start` or `daemon run` override `daemon.yaml` for that process. Missing file values use built-in defaults. Unknown keys are ignored; invalid values for known keys fail daemon startup.
+
+Repository executor, supervisor, model, and effort defaults belong in `environment.yaml`, not `daemon.yaml`. See [Profiles](profiles.md) and [Models and supervision](supervision.md).
+
+## Task Commands
+
+```sh
+galley task validate ./TASK.yaml
+galley task work-order ./TASK.yaml
+galley task queue ./TASK.yaml --reason "queue for daemon"
+galley task list
+galley task show TASK_ID
+galley task requeue TASK_ID --reason "resolved the reported blocker"
+galley task archive ~/.galley/tasks/done/TASK.yaml
+```
+
+`task queue` validates a draft, records the queue reason, and copies it into `tasks/queued` without overwriting an existing task. Pass `--move` when the original draft should be removed after queueing.
+
+`task requeue` moves a reviewed task from `failed`, `done`, or `running` back to `queued`. It preserves the existing worktree and applicable review progress. Successful setup and acceptance-skeleton phases are reused when their earlier evidence is still valid.
+
+`task archive` records the archived state, moves the task into `tasks/archived`, and attempts to remove its managed worktree. Archive only tasks that no longer need to resume.
+
+For the authoring contract, see [Task YAML](task-yaml.md). For state-specific decisions, see [Troubleshooting](troubleshooting.md).
+
+## Queue and Evidence Layout
+
+The default daemon root contains:
 
 ```text
 ~/.galley/
+  daemon.yaml
   tasks/
     draft/
     queued/
@@ -23,96 +111,34 @@ The daemon root defaults to `~/.galley`:
       quality.yaml
       environment.yaml
   runtime/
-    claude-guard-plugin/
   galley-daemon.pid
   galley-daemon.log
 ```
 
-`profiles/` holds repository quality and environment YAML files. Galley resolves `<repo-key>` from `scope.cwd`; use `galley profile resolve --cwd <repo> --mkdir --output json` to find the exact paths and create their parent directory.
-
-Each executor attempt writes evidence under `runs/<run-id>/attempt-N/`, where `<run-id>` is generated as `<task-id>-<unix-nano>`.
-
-Attempt evidence includes:
-
-- `command_plan.json`
-- `run_result.json`
-- `executor_result.json` when the executor returns valid structured JSON
-- `supervisor_verdict.json`
-- `git_status.json`
-- `diff.patch`
-
-On the first supervisor attempt, every task AC is reviewed before every configured quality dimension. Galley stores passed items in daemon-owned `task.review_progress`; later attempts review only unfinished items plus passed items implicated by the executor's current-attempt summary. A normal `task requeue` preserves this progress. A new `task queue`, changed task direction or review contract, changed `scope.cwd`, or changed content in a placed task input resets it.
-
-Each verdict lists reviewed quality dimension IDs in `quality_passes` or `quality_gaps`. Galley combines those results with persisted passes and enforces the active required-dimension and weighted-score policy before accepting. A non-accepted verdict remains actionable when an AC or quality result array is malformed. That result kind cannot advance persisted passes, while recognized gap IDs still reopen them.
-
-Galley also records `workspace.json` for the effective execution workspace and writes `profiles.json` when quality or environment profiles are loaded.
-
-## Task Files
-
-For hand-authored task YAML, use [task-yaml.md](task-yaml.md) as the reference.
+Use this command to find a repository's profile directory instead of guessing `<repo-key>`:
 
 ```sh
-galley task list
-galley task show TASK_ID
-galley task validate ./TASK.yaml
-galley task work-order ./TASK.yaml
-galley task queue ./TASK.yaml --reason "queue for daemon"
-galley task requeue TASK_ID --reason "addressed review feedback"
-galley task archive ~/.galley/tasks/done/TASK.yaml
-```
-
-`galley task queue` validates a `draft` task, sets `status: queued`, records a queue attempt, and writes it into `tasks/queued` without overwriting an existing queued file. Drafts outside the daemon root are copied by default; pass `--move` when the source file should be removed after queueing.
-
-`galley task list` shows task state, status, PR URL, latest verdict, and latest summary across the workflow root.
-
-`galley task show` accepts a task file or task ID and prints the latest attempt, supervisor verdict, risk, and failed verification context. Accepted terminal tasks show prior attempt errors as audit history, not active failures. When the latest attempt is an executor interruption, `task show` marks it (`latest_executor_interruption: true`), points at the attempt evidence directory, and prints a `latest_recovery` line with the `galley task requeue` command to run after the interruption cause is resolved.
-
-`galley task requeue` accepts a task ID or task file, returns a reviewed task from `tasks/failed`, `tasks/done`, or `tasks/running` to `tasks/queued`, records an optional reason, and increments `supervisor.review_iterations`. When the task worktree is reused, successful setup and acceptance-skeleton phases are reused rather than repeated. An executor interruption preserves the dirty worktree, so requeueing resumes the next executor attempt from the retained tracked and untracked changes.
-
-## Profiles
-
-Use `galley profile` commands to validate profiles or locate the repository-specific profile directory.
-
-```sh
-galley profile validate --kind quality examples/quality-default.yaml
-galley profile validate --kind environment examples/environment-local.yaml
 galley profile resolve --cwd /path/to/repo --mkdir --output json
 ```
 
-See [profiles.md](profiles.md) for supported fields and examples.
+Each executor attempt writes evidence under `runs/<run-id>/attempt-N/`. Depending on how far the attempt progressed, it can include:
 
-## Daemon
+- `command_plan.json`
+- `run_result.json`
+- raw provider output
+- `executor_result.json`
+- `supervisor_verdict.json`
+- `git_status.json`
+- `diff.patch`
+- `workspace.json`
+- `profiles.json`
+- `supervisor.json`
 
-```sh
-galley daemon start
-galley daemon status --output json
-galley daemon stop
-galley daemon run --once
-```
+Run directory names begin with the task ID. Use `task show` to identify the latest attempt number and any reported error artifact path before opening these files. [Troubleshooting](troubleshooting.md#inspecting-run-evidence) maps common questions to the relevant artifact.
 
-`galley daemon run --once` drains queued tasks once and exits. Background `galley daemon start` also performs daemon maintenance such as PR comment polling and closed or merged PR worktree cleanup according to `environment.yaml`.
+## Notifications
 
-For PR automation and cleanup details, see [pr-automation.md](pr-automation.md).
-
-`--root` points at the daemon root and defaults to `~/.galley`. Use `--root .agent-workflow` only for repo-local or test workflows.
-
-`galley daemon start` launches the daemon in the background. It writes a PID file and appends stdout and stderr to a log file. By default those files are under `~/.galley`; override them with `--pid-file` and `--log-file`.
-
-`galley daemon stop` reads the PID file, sends `SIGTERM`, waits up to `--stop-timeout`, and removes the PID file when it still points at the stopped process. `galley daemon status` reports whether the PID file points at a live process.
-
-Use the installed `galley` binary for `start`, `status`, and `stop`. PID verification records the executable path, so `go run ./cmd/galley ... daemon start` is not suitable for background daemon control because later `go run` invocations use different temporary binaries.
-
-### Daemon startup defaults (`daemon.yaml`)
-
-Both `galley daemon run` and `galley daemon start` create `daemon.yaml` under the selected daemon root on first use. The file holds durable startup defaults such as `supervisor`, concurrency, polling, timeout, and notification settings. `galley daemon status` and `galley daemon stop` are read-only.
-
-CLI flags on `galley daemon run` or `galley daemon start` always override the matching `daemon.yaml` field for that run (including `--shutdown-timeout`). Anything you do not set on the CLI falls back to `daemon.yaml`; anything `daemon.yaml` does not set falls back to the built-in default.
-
-Runtime loading ignores unknown `daemon.yaml` keys while rejecting invalid values for known keys.
-
-### Notifications
-
-The daemon can run an opt-in, best-effort command hook after a task reaches a terminal published status. Notifications are configured only in `daemon.yaml`.
+The daemon can run an operator-owned command after a task reaches a configured terminal status. Notifications are best-effort and never change task state.
 
 ```yaml
 notifications:
@@ -121,143 +147,48 @@ notifications:
   command: "/absolute/path/to/docs/examples/notifications/notify-slack.sh"
 ```
 
-Fields:
+An empty `on` list uses `[failed, needs_supervisor_review]`. The command may also subscribe to `accepted` and `pr_opened`.
 
-- `enabled` (bool, default `false`): gates the hook. When `true`, `command` must be set.
-- `on` (list, optional): terminal task statuses that trigger the hook. Empty means `[failed, needs_supervisor_review]`.
-- `command` (string): the operator-owned shell command to run.
+Galley sends one JSON object on stdin:
 
-#### Hook input
+- `task_id`
+- `status`
+- `repo`
+- `summary`
+- `run_dir`
+- `show_hint`
 
-Task-derived data is passed to the command as data, never as part of the command string. Each invocation receives:
+The same values are available as `GALLEY_TASK_ID`, `GALLEY_TASK_STATUS`, `GALLEY_REPO`, `GALLEY_SUMMARY`, and `GALLEY_RUN_DIR`. Summary values are limited to 280 runes.
 
-- A single-line JSON object on stdin with these fields:
-  - `task_id` — the task ID.
-  - `status` — the terminal published status that triggered the hook.
-  - `repo` — the task `scope.cwd`.
-  - `summary` — a short human-readable summary (latest attempt summary, falling back to the latest risk detail, then the task goal), truncated to 280 runes with a trailing `…` when clipped.
-  - `run_dir` — the run evidence directory for the attempt, when available.
-  - `show_hint` — the inspection command an operator can run, `galley task show <task_id>`.
-- The same values mirrored as namespaced environment variables: `GALLEY_TASK_ID`, `GALLEY_TASK_STATUS`, `GALLEY_REPO`, `GALLEY_SUMMARY` (also truncated to 280 runes), and `GALLEY_RUN_DIR`.
+Task data is never inserted into the command string. The hook runs asynchronously with a fixed 30-second timeout. Failures are logged without retry and do not affect the task. Galley does not store webhook URLs or other notification secrets; the command environment owns them.
 
-#### Timeout and failure behavior
-
-The hook is best-effort and never changes task state. It runs asynchronously, has a fixed 30-second timeout, and logs failures without retrying delivery. During daemon shutdown, in-flight notifications may be canceled.
-
-#### Security boundary
-
-The `command` string is operator-owned. Task content is untrusted and is delivered only through stdin JSON and `GALLEY_*` environment variables. Sample hooks live under [`docs/examples/notifications/`](examples/notifications/).
-
-#### Non-goals
-
-- No built-in Slack, email, desktop, or other native notifier. Galley only runs the operator-provided command.
-- No secrets storage. Any webhook URL, token, or credential is owned by the operator's command/environment (for example `SLACK_WEBHOOK_URL` exported for `notify-slack.sh`); Galley never holds or persists the secret.
-- No operator-tunable timeout, retries, or delivery guarantees.
-
-### Supervisor resolution
-
-`--supervisor` selects the built-in supervisor adapter (`claude`, `codex`, `glm`, or `grok`). Grok uses the logged-in `grok` CLI. The daemon resolves the supervisor for each task in this order:
-
-1. The repository `environment.yaml` `supervisor.default_cli` (resolved from `scope.cwd`). This overrides every layer below for that task only.
-2. The daemon CLI `--supervisor` startup flag.
-3. The `supervisor` field in `daemon.yaml`.
-4. The built-in default (`claude`).
-
-`galley daemon status` omits startup defaults it cannot report accurately, such as effective supervisor and concurrency. `runs/<run-id>/supervisor.json` records the adapter, model, effort, and each setting's source.
-
-Set `supervisor.model` in the repository profile to pass an exact model name to every built-in supervisor evaluation. See [profiles.md](profiles.md#environmentyaml) for fallback behavior.
-
-On Unix, foreground and background daemons use the same shutdown path. On `SIGINT` or `SIGTERM`, Galley stops claiming new queued tasks, lets active attempts finish until the shutdown timeout, records evidence, and avoids starting another retry attempt after shutdown is requested.
-
-### Windows
-
-Windows has no SIGTERM equivalent that can be delivered to a console-less background process, so background `galley daemon start`/`stop` performs an immediate `TerminateProcess` rather than a graceful shutdown:
-
-- `galley daemon status` uses `OpenProcess` + `GetExitCodeProcess` to verify the recorded PID instead of the Unix `signal(0)` probe. `STILL_ACTIVE` (Windows exit code 259) reports alive; any other exit code reports stopped.
-- `galley daemon stop` terminates the daemon PID directly. Active executor/supervisor attempts running under that daemon do not get a chance to record graceful-shutdown evidence on Windows; the next daemon startup recovers any interrupted running task.
-- `galley daemon stop --force` terminates the daemon plus every recorded executor/supervisor child. On Windows, descendant processes spawned by those children may require OS-level cleanup.
-- For a graceful shutdown on Windows, run `galley daemon run` in the foreground and stop it with `Ctrl+C`. The foreground daemon shutdown path is the same on every OS: it stops claiming new tasks, lets active attempts finish until `--shutdown-timeout`, and records evidence.
+Sample hooks are in [`docs/examples/notifications/`](examples/notifications/).
 
 ## Force Stop
 
-`galley daemon stop --force` is an escape hatch for a stalled daemon. It:
+Use `galley daemon stop --force` only when normal stop cannot end a stalled daemon. Galley first tries normal shutdown, then terminates the verified daemon and its recorded executor and supervisor process groups.
 
-1. Tries the normal graceful shutdown first.
-2. Re-verifies process identity and sends `SIGKILL` when the daemon has not exited within `--stop-timeout`.
-3. After the daemon is gone, sends `SIGKILL` to every registered executor and supervisor child process group recorded under the daemon root, waiting up to the same `--stop-timeout`.
-4. If any child process group is still alive after that wait, prints an error naming the surviving PIDs and PGIDs and leaves the PID file in place so the operator can target the same daemon record.
+Force stop can interrupt active work. The next daemon startup recovers tasks left in `running`; inspect their latest state and evidence before deciding whether to requeue.
 
-A force kill can interrupt an active attempt; the next daemon startup recovers the interrupted running task.
+On Unix, normal foreground and background shutdown stops new claims and gives active attempts the configured shutdown timeout. On Windows, background stop uses immediate process termination because a console-less process has no SIGTERM equivalent. Run `galley daemon run` in the foreground and stop it with `Ctrl+C` when graceful Windows shutdown is required.
+
+On Windows, `stop --force` terminates the recorded daemon and direct child processes. Descendants created outside those process relationships may require OS-level cleanup.
 
 ## Timeouts
 
-Galley uses two timeout concepts:
+Galley uses two independent timeout boundaries:
 
-- `--idle-timeout`: kills executor or built-in supervisor subprocesses that stop producing output.
-- `execution_policy.timeout_ms`: bounds the total wall-clock duration of one executor attempt.
+- daemon `idle_timeout` or `--idle-timeout` stops an executor or supervisor that produces no output
+- task `execution_policy.timeout_ms` limits the total wall-clock duration of one executor attempt
 
-Executor idle timeouts are recorded as `error_kind: idle_timeout` and as `idle_timed_out: true` in run evidence, then the task loop continues according to the task loop budget.
+Executor idle timeouts are recorded as executor interruptions. A supervisor idle timeout preserves its supervisor artifacts and moves the task to `needs_supervisor_review`. Use `task show` before changing a timeout; an authentication or provider failure should be fixed rather than hidden behind a longer limit.
 
-Galley runs one built-in supervisor evaluation per executor attempt. A supervisor process or verdict failure writes evidence under `runs/<run-id>/attempt-N/supervisor-try-1/` and moves the task to supervisor review; requeue after changing the supervisor conditions or when the backend is healthy.
+## Filesystems and Concurrency
 
-If the supervisor is killed by the idle-output watchdog, Galley records `error_phase: supervisor` and `error_kind: supervisor_idle_timeout`. Requeue the task, or adjust `--idle-timeout` / `--supervisor`.
+- Use local filesystems for the daemon root and managed worktrees. Shared filesystems may not provide the rename and timestamp behavior queue claims expect.
+- Avoid very short claim TTLs. Filesystems with coarse timestamp resolution can make stale-claim recovery noisy.
+- Multiple daemons can share a root because queue claims reject conflicting ownership. Do not share one PID file across unrelated daemon processes.
+- Running tasks refresh their ownership record while the executor loop is active. On startup, Galley requeues tasks whose recorded daemon is dead or cannot be verified and leaves tasks owned by a live daemon untouched.
+- PR comment polling uses `gh api`. Choose a polling interval appropriate for the number of repositories and the account's GitHub API limits.
 
-## Operational Notes
-
-### Filesystems
-
-- Galley is intended for trusted local repositories and local filesystems. Queue claims rely on no-overwrite file creation plus atomic rename behavior on the same filesystem.
-- No-overwrite queue/task moves (`task queue`, `task requeue`, archive, and daemon claim/requeue) use `O_CREATE|O_EXCL` rather than `os.Link`, so they no longer require the destination filesystem to implement hardlinks. Duplicate destinations are still rejected on every supported OS.
-- Shared network filesystems may not provide the same rename and mtime behavior as a local disk.
-- Avoid very short `--claim-ttl` values. Filesystems with coarse mtime resolution can make overly aggressive stale-claim detection noisy.
-
-### Concurrency and Recovery
-
-- Running multiple daemon processes is supported by claim conflict handling.
-- Background control uses a local PID file. Avoid sharing the same `--pid-file` across unrelated processes, and prefer one workflow root per managed daemon.
-- Running tasks refresh their YAML mtime at `min(claim_ttl / 4, 1m)` while the executor loop is active. Heartbeat cadence has no separate daemon or CLI setting.
-- Each claimed running task records the owning daemon. On startup the daemon immediately requeues running tasks whose recorded owner is dead or cannot be verified, while leaving tasks still owned by a verified live daemon untouched.
-
-### External Services
-
-- PR comment polling uses `gh api`; choose a polling interval that respects GitHub API rate limits for your account and repository count.
-- Closed or merged PR cleanup treats the task worktree as disposable execution state. Keep anything that should survive cleanup outside the task worktree.
-- Executor process failures and infrastructure errors are reported after the current queue is drained.
-
-## Development
-
-### Schema References
-
-```sh
-galley schema check
-galley schema generate
-```
-
-`galley schema generate` writes the task, quality profile, and environment profile schemas into the packaged skill references. `galley schema check` verifies those reference files still match the Go contracts and is run in CI.
-
-The `examples/` directory is for Galley checkout development and CI validation. Normal users should prefer `~/.galley` tasks created by the plugin skill.
-
-Development build and tests:
-
-```sh
-go test ./...
-go build ./cmd/galley
-```
-
-Run the local smoke test:
-
-```sh
-./scripts/smoke-local.sh
-```
-
-The smoke test builds the binaries, creates a temporary git repository, installs a fake `claude` executable, queues a draft AFK task, runs the daemon once, and verifies that the task reaches `done/accepted` with run evidence.
-
-```sh
-galley task validate examples/afk-task.yaml
-galley task work-order examples/afk-task.yaml
-galley daemon run --once
-```
-
-For local development and release notes, see [../CONTRIBUTING.md](../CONTRIBUTING.md) and [../CHANGELOG.md](../CHANGELOG.md).
-
-Release assets are built by GitHub Actions when a GitHub Release is published. See [../.github/workflows/release.yml](../.github/workflows/release.yml) and [../.goreleaser.yaml](../.goreleaser.yaml).
+Development commands and release procedures are documented in [Contributing](../CONTRIBUTING.md).

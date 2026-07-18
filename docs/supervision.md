@@ -1,69 +1,96 @@
-# Supervision
+# Models and Supervision
 
-Galley separates implementation from acceptance. The executor produces work and structured evidence; the supervisor reviews that evidence against the task and repository policy.
+Galley separates implementation from acceptance. The executor changes the repository; the supervisor reviews the result against the task and repository policy. You choose both roles explicitly.
 
-## Executors
+Galley does not route tasks to models automatically. This keeps cost, capability, and acceptance authority visible while still allowing different model combinations for different repositories and tasks.
 
-At every run start, Galley resolves each executor field independently:
+## Choosing a Model Setup
 
-1. explicit task `executor.cli` / `executor.model` / `executor.effort`
-2. current repository `environment.yaml` `executor.default_cli` / `executor.model` / `executor.effort`
-3. the built-in `cli: claude` default; an omitted effort or model lets the selected provider CLI choose its own reasoning effort and model
+Use the combination that fits the work and the level of review you need.
 
-Environment values remain runtime-only, so requeues pick up current profile defaults. All executor roles use the same resolution, validated before invocation.
+| Pattern | When it fits |
+| --- | --- |
+| Same backend for executor and supervisor | A simple default when one provider is already trusted for the repository. |
+| Faster or lower-cost executor with a stronger supervisor | Routine implementation where review quality matters more than using the strongest model for every attempt. |
+| Specialized executor with an independent supervisor | Tasks that benefit from a provider's tooling, context, or coding behavior while retaining a separate acceptance check. |
 
-Galley supports Claude Code, Codex, GLM, and Grok. GLM uses the `claude` binary and `glm_api_key`; Grok uses its logged-in CLI state. Galley owns provider prompt transport.
+The supervisor is not a substitute for suitable acceptance criteria or repository policy. A weaker executor can be useful when the task is bounded and the checks are strong; vague work with weak evidence remains difficult to supervise regardless of model choice.
 
-See [task-yaml.md](task-yaml.md) for the full `executor` block and [../examples/afk-task-codex.yaml](../examples/afk-task-codex.yaml) for a Codex task example.
+## Supported Backends
 
-## Supervisors
+Executors and supervisors support `claude`, `codex`, `glm`, and `grok`.
 
-Supervisor review defaults to Claude. Use `--supervisor codex` for Codex, `--supervisor glm` for GLM (the `claude` binary pointed at GLM's Z.ai endpoint; needs `glm_api_key` in `daemon.yaml`), or `--supervisor claude` to be explicit. The supervisor is the acceptance gate; the backend is your choice.
+- Claude uses the `claude` CLI.
+- Codex uses the `codex` CLI.
+- GLM uses the `claude` CLI with the Z.ai endpoint and requires `glm_api_key` in `daemon.yaml`.
+- Grok uses the logged-in `grok` CLI state.
 
-All supervisor backends use the same verdict contract and evidence layout. Repository-specific PR behavior, comment polling, and worktree cleanup live in the environment profile resolved from `scope.cwd`.
+All backends use Galley-owned prompt transport, result contracts, and evidence layout.
 
-Supervisor selection controls only review. It is independent from the executor backend in `executor.cli`.
+## Executor Configuration
+
+Galley resolves `cli`, `model`, and `effort` independently at the start of every run:
+
+1. the task's `executor` field
+2. the repository `environment.yaml` executor defaults
+3. the built-in `cli: claude` fallback
+
+There is no built-in model or effort default. When both the task and environment profile omit one of those fields, the selected provider CLI uses its own configured default.
+
+Task overrides are useful for a single job. Environment defaults define the repository's normal implementation setup. A requeued task picks up repository-level model changes because Galley reads the profile at the start of each run.
+
+See [Task YAML](task-yaml.md#execution-policy-and-executor) for task overrides, [Profiles](profiles.md#environmentyaml) for repository defaults, and the [Codex task example](../examples/afk-task-codex.yaml) for a complete file.
+
+## Supervisor Configuration
+
+The supervisor backend resolves in this order:
+
+1. repository `environment.yaml` `supervisor.default_cli`
+2. the daemon startup `--supervisor` flag
+3. `supervisor` in `daemon.yaml`
+4. the built-in `claude` default
+
+The repository environment profile also supplies the supervisor model and effort. `runs/<run-id>/supervisor.json` records the resolved backend, model, effort, and the source of each setting.
+
+Executor and supervisor choices are independent. Changing the task executor does not change the supervisor.
+
+## How Review Converges
+
+The first supervisor attempt reviews every acceptance criterion before reviewing every configured quality dimension. This ordering keeps task obligations primary while still applying repository-wide standards.
+
+Galley persists verified passes in daemon-owned task state. Later attempts review unfinished items and revisit a verified pass when the executor reports a current-attempt change that may affect it. The next executor receives the active revision work rather than an unstructured history of every earlier review.
+
+A normal requeue preserves review progress when the task direction and review contract remain the same. Galley resets stale passes when the goal, acceptance contract, review policy, source repository, or placed input content changes in a way that invalidates earlier review.
 
 ## Acceptance Requirements
 
-Accepted tasks must:
+An accepted implementation task needs:
 
-- report every task acceptance criterion by ID
-- mark every required acceptance criterion as `satisfied`
-- include evidence for satisfied acceptance criteria
-- report required quality checks as passed verification evidence
-- return valid structured JSON matching the executor result schema
+- a normal executor terminal with valid structured output
+- a repository diff unless the task is explicitly investigation or review-only
+- satisfied required acceptance criteria with evidence
+- passing evidence for required checks
+- all required quality dimensions and the configured weighted score
+- no unresolved finding at a blocking severity
 
-Otherwise the task is retried until `execution_policy.loop_budget` is exhausted; `loop_budget: 0` has no attempt cap.
+Incomplete work can continue while the loop budget remains when the supervisor returns actionable revision work. Human decisions, exhausted budgets, supervisor failures, and finalization problems move the task to `needs_supervisor_review`. A hard stop or executor interruption ends the run without another attempt.
 
-For implementation tasks, the supervisor should reject a no-diff result unless the task is explicitly investigation or review-only and the evidence explains why no repository change was expected.
+`completed_with_risks` means the executor considers the implementation coherent but has verification limits, assumptions, or residual risks for the supervisor to evaluate.
 
-## Verdict Outcomes
+## Outcomes
 
-| Condition | Result |
+| Outcome | What Galley does |
 | --- | --- |
-| `completed` with diff, satisfied ACs, evidence, and required checks | `tasks/done/` with status `accepted` |
-| `completed` with executor-actionable implementation, scope, acceptance, or verification blockers | retry, then `tasks/failed/` with status `needs_supervisor_review` if the loop budget is exhausted |
-| `completed` with blockers that require human judgment about product, design, environment, external services, or required-check policy | `tasks/failed/` with status `needs_supervisor_review` |
-| `completed` with an external or unrecoverable blocker that prevents meaningful progress | `tasks/failed/` with status `failed` |
-| `completed_with_risks` | retry, then `tasks/failed/` with status `needs_supervisor_review` |
-| Parse failure or schema validation failure | retry, then `tasks/failed/` with status `needs_supervisor_review` |
-| Two consecutive attempts with no git diff | stop early as a no-progress safeguard |
-| `hard_stop` | `tasks/failed/` with status `failed`, without retry |
-| Executor interruption (provider or runtime, before any normal terminal) | `tasks/failed/` with status `failed`, without Supervisor review or another attempt |
+| Accepted | Moves the task to `done/accepted`, then performs configured PR handoff. |
+| Executor-actionable revision | Starts another executor attempt while the loop budget remains. |
+| Human decision or exhausted loop | Moves the task to `failed/needs_supervisor_review` with the latest evidence and work order. |
+| Supervisor process or verdict failure | Preserves supervisor artifacts and moves the task to `needs_supervisor_review`. |
+| Hard stop | Moves the task to `failed/failed` without retry. |
+| Executor interruption before a normal terminal | Preserves the worktree and evidence, skips supervisor review, and moves the task to `failed/failed`. |
+| Two consecutive attempts with no diff | Stops early as a no-progress safeguard. |
 
-`needs_supervisor_review` is a task state, not a daemon process failure. `galley daemon run --once` can exit 0 after recording that state.
+`needs_supervisor_review` is a task state, not a daemon process failure. `galley daemon run --once` can exit successfully after recording it.
 
-## Executor Interruptions
+Hard stops are reserved for conditions that leave no useful executor action, such as missing required secrets, inaccessible required systems, contradictory acceptance criteria, protected destructive actions, or unreadable required files.
 
-Before normal Supervisor review, Galley decides whether an executor attempt reached a reliable normal provider terminal. Claude and GLM success result events, Codex `turn.completed`, and Grok `EndTurn` are normal terminals; explicit failed terminals, start failures, timeouts, kills, and output with no reliable normal terminal are interruptions. The decision uses runner state and machine-readable provider output, never the process exit code or error text alone.
-
-An interrupted attempt does not invoke the Supervisor and does not start another executor attempt in the same run, regardless of loop budget or worktree diff. Galley captures the command plan, run result, raw provider output, git status, diff, and a terminal-decision record, preserves the tracked and untracked worktree changes, and publishes the task to `tasks/failed/` with status `failed`. The attempt records an executor-owned error with the non-verdict marker `not_reviewed` and retains any provider status, code, stop reason, session ID, or message detail for diagnosis; unavailable detail falls back to a generic interruption reason without changing routing.
-
-An executor-result parse or schema-validation failure that follows a normal terminal is not an interruption: it stays reviewable, and a `needs_revision` verdict continues to start the next executor attempt under the existing loop budget.
-
-Resolve the interruption cause (for example a provider outage or a local dependency), then resume the retained worktree with `galley task requeue`.
-
-`completed_with_risks` means the executor believes the implementation is coherent, but verification limits, assumptions, or residual risks still need supervisor attention.
-
-Hard stops are reserved for blockers such as missing required secrets, inaccessible required systems, contradictory acceptance criteria, out-of-scope destructive actions, unreadable required files, or runtime failures that leave no useful next step.
+For state-specific recovery steps, see [Troubleshooting](troubleshooting.md).

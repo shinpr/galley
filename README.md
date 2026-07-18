@@ -4,21 +4,33 @@
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Plugin-purple)](https://claude.ai/code)
 [![Codex CLI](https://img.shields.io/badge/Codex%20CLI-Supported-10a37f)](https://developers.openai.com/codex/cli)
+[![GLM](https://img.shields.io/badge/GLM-Backend-2f6bff)](https://z.ai/)
 [![Grok Build](https://img.shields.io/badge/Grok%20Build-Plugin-black)](https://x.ai/)
 [![Agent Skills](https://img.shields.io/badge/Agent%20Skills-Spec%20Compliant-blue)](https://developers.openai.com/codex/skills/)
 [![CI](https://github.com/shinpr/galley/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/shinpr/galley/actions/workflows/ci.yml)
 [![GitHub Release](https://img.shields.io/github/v/release/shinpr/galley)](https://github.com/shinpr/galley/releases)
 [![License: MIT](https://img.shields.io/github/license/shinpr/galley)](LICENSE)
 
-Galley is a local runtime for supervised AI coding tasks.
+Galley is a local runtime for supervised, multi-model AI coding.
 
-It runs Claude Code, Codex, GLM, or Grok Build in a git worktree, records evidence for each attempt, and asks a supervisor model to accept, retry, or escalate the result before the work is treated as done.
+Choose the executor that fits the task and select the supervisor independently. Galley helps define acceptance criteria and repository policy, runs the work in an isolated git worktree, and records each attempt so the result can be inspected later.
 
-Galley is for tasks where the output should be inspectable later: the request, scope, checks, diffs, and supervisor verdict stay on disk.
+This makes lower-cost, faster, or specialized models practical for implementation while keeping model configuration and acceptance criteria explicit. The recommended workflow hands accepted changes off as ordinary pull requests for final human review.
 
 Galley builds Galley: roughly half of this repository's merged implementation PRs were created from Galley-managed task branches.
 
 [Browse Galley-built PRs](https://github.com/shinpr/galley/pulls?q=is%3Apr+is%3Amerged+head%3Aagent)
+
+## Why Galley
+
+Interactive AI coding sessions work well for short tasks. Longer work needs explicit standards, visible model choices, and a reliable path back to human review.
+
+- **Explicit model configuration**: set the executor CLI, model, and effort for a task or repository, and choose the supervisor separately. Galley records the resolved configuration passed to each run.
+- **Repository-defined standards**: the skill inspects the repository, helps write acceptance criteria, and prepares quality and environment profiles before work is queued.
+- **Focused retries**: the supervisor reviews acceptance criteria before repository quality policy, preserves verified passes, and focuses the next attempt on unresolved work and regression risks.
+- **Auditable execution**: command plans, model output, checks, git status, diffs, and supervisor verdicts stay under the local workflow root.
+- **Isolated AFK work**: execution runs in a managed git worktree, with retry limits and escalation when the task needs human judgment.
+- **Review-ready handoff**: the recommended setup commits and opens accepted work as a pull request for final human review.
 
 ## Quick Start
 
@@ -101,21 +113,10 @@ plugins/galley/skills/galley/
 
 The standalone skill still expects the `galley` CLI on `PATH`. Some workflows also use `claude`, `codex`, `gh`, and `python3`.
 
-## Why Galley
-
-Interactive AI coding sessions work well for short tasks. They get harder to trust when the work becomes asynchronous, long-running, or review-heavy.
-
-- **Asynchronous execution with review**: run coding work away from the main checkout, then gate completion through a supervisor verdict.
-- **Git-visible changes**: executor work happens in a managed worktree, so normal git review still applies.
-- **Structured evidence**: every run records command plans, executor output, git status, diffs, and supervisor results under the workflow root.
-- **Retry and escalation**: tasks can retry while the loop budget remains, then escalate with recorded context when human judgment is needed.
-- **Repository-specific policy**: profiles describe expected checks, command names, network and secrets policy, PR behavior, and cleanup rules.
-- **Optional PR handoff**: accepted work can be committed, pushed, opened as a PR, and requeued from trusted PR comments.
-
 ## How It Works
 
 ```text
-task YAML
+task YAML + repository policy
     |
     | galley task queue
     v
@@ -125,22 +126,22 @@ queued task
     v
 isolated git worktree
     |
-    | Claude Code, Codex, GLM, or Grok implements
+    | selected executor implements
     v
 run evidence + git diff
     |
-    | supervisor review
-    +--> accepted ---------> done or PR opened
-    +--> needs revision ---> retry while budget remains
+    | independently selected supervisor reviews
+    +--> accepted ---------> PR opened or local completion
+    +--> needs revision ---> retry unresolved work while budget remains
     +--> needs review -----> failed for human review
     +--> hard stop --------> failed
 ```
 
 ## Core Concepts
 
-- **Task YAML**: trusted local input describing the goal, acceptance criteria, scope, executor, verification, worktree, and PR behavior. See [docs/task-yaml.md](docs/task-yaml.md).
-- **Quality profile**: optional repository expectations for required checks, review dimensions, evidence, and pass policy. See [docs/profiles.md](docs/profiles.md).
-- **Environment profile**: optional repository defaults for commands, executor CLI/model/effort, constraints, PR behavior, and cleanup. See [docs/profiles.md](docs/profiles.md).
+- **Task YAML**: trusted local input describing the goal, acceptance criteria, scope, executor overrides, verification, and worktree. See [docs/task-yaml.md](docs/task-yaml.md).
+- **Quality profile**: repository review policy for required checks, review dimensions, evidence, and pass criteria. The setup skill creates it from repository evidence and the user's chosen review strictness. See [docs/profiles.md](docs/profiles.md).
+- **Environment profile**: repository runtime defaults for commands, executor CLI/model/effort, constraints, PR behavior, and cleanup. The setup skill creates it from repository evidence and approved execution settings. See [docs/profiles.md](docs/profiles.md).
 - **Executor**: Claude Code, Codex, GLM, or Grok Build backend that implements the task. Each executor field resolves from the task, then the environment profile; only `cli` has a built-in default (`claude`), while an omitted `model` or `effort` defers to the selected provider CLI's own default. GLM requires `glm_api_key`; Grok uses its logged-in CLI state.
 - **Supervisor**: Claude, Codex, GLM, or Grok Build backend that reviews the result against acceptance criteria, required checks, and recorded evidence. It is the acceptance gate; the default is Claude.
 - **Worktree**: isolated git checkout used for AFK execution so the source repository stays clean.
@@ -189,11 +190,13 @@ See [SECURITY.md](SECURITY.md) for reporting and operational trust boundaries.
 
 ## Documentation
 
-- [Task YAML](docs/task-yaml.md): task fields, starter template, permissions, input files, worktree paths, and acceptance skeleton preflight.
-- [Profiles](docs/profiles.md): quality and environment profile fields with examples.
-- [Operations](docs/operations.md): daemon commands, queue layout, task commands, operational notes, and development checks.
-- [Supervision](docs/supervision.md): supervisor verdicts, retry behavior, executor selection, and evidence expectations.
-- [PR automation](docs/pr-automation.md): accepted-task commits, PR creation, PR comment requeueing, and worktree cleanup.
+Start with the [documentation guide](docs/README.md) to follow the workflow or find a topic by goal.
+
+- [Models and supervision](docs/supervision.md): executor and supervisor configuration, model roles, review convergence, and outcomes.
+- [Troubleshooting](docs/troubleshooting.md): task states, recovery decisions, and run evidence.
+- [Task YAML](docs/task-yaml.md) and [Profiles](docs/profiles.md): task and repository configuration references.
+- [Operations](docs/operations.md): daemon control, queue storage, notifications, timeouts, and platform behavior.
+- [PR automation](docs/pr-automation.md): accepted-task commits, PR creation, comment requeues, and worktree cleanup.
 
 ## Development
 

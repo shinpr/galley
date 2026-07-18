@@ -1,6 +1,6 @@
 # Task YAML
 
-Task YAML is the trusted local input that tells Galley what to execute, where to execute it, how to judge completion, and how to handle PR automation.
+Task YAML is the trusted local input that tells Galley what to execute, where to execute it, and how to judge completion. Repository-wide PR behavior belongs in `environment.yaml`.
 
 Use the plugin skill for normal authoring. This document is the reference for reviewing or hand-writing a task file.
 
@@ -66,7 +66,7 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 - `executor`: optional per-field overrides for CLI, model, and effort.
 - `preflight.acceptance_skeleton.enabled`: optional boolean that selects the fixed skeleton preflight flow.
 - `decisions`, `risks`: author and executor notes.
-- `supervisor`, `attempts`, `verification`, `pr`: daemon-owned runtime state populated during lifecycle transitions. An attempt that ended in an executor interruption records `supervisor_verdict: not_reviewed` and an executor-phase `error` with the retained provider detail; see [supervision.md](supervision.md#executor-interruptions).
+- `supervisor`, `attempts`, `verification`, `pr`: daemon-owned runtime state populated during lifecycle transitions. An attempt that ended in an executor interruption records `supervisor_verdict: not_reviewed` and an executor-phase `error` with the retained provider detail; see [Troubleshooting](troubleshooting.md#executor-interruption).
 
 ## Execution Policy And Executor
 
@@ -77,7 +77,7 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 - `executor`: optional. Each `cli`, `model`, and `effort` field resolves from the task, then current `environment.yaml`. Only `cli` has a built-in fallback (`claude`); an omitted `effort` or `model` lets the selected provider CLI choose its own reasoning effort and model. Environment values remain runtime-only.
 - `executor.cli`: selects `claude`, `codex`, `glm`, or `grok`. Grok uses the logged-in `grok` CLI for setup, acceptance-skeleton creation, and implementation.
 - `executor.model`: optional model override. Omit it to use the selected CLI's configured default model.
-- `executor.effort`: optional effort hint. Claude and `glm` accept `low`, `medium`, `high`, `xhigh`, and `max`; Codex also accepts `minimal`; Grok also accepts `none`. Omit it to let the selected provider CLI use its own configured reasoning-effort default. Invalid provider combinations fail before executor roles run.
+- `executor.effort`: optional effort hint. Claude and `glm` accept `low`, `medium`, `high`, `xhigh`, and `max`; Codex also accepts `minimal`; Grok also accepts `none` and `minimal`. Omit it to let the selected provider CLI use its own configured reasoning-effort default. Invalid provider combinations fail before executor roles run.
 - Prompt transport is Galley-owned. Task YAML no longer accepts `executor.prompt_profile` or `executor.prompt_mode`; older files that still include those keys are ignored by the unknown-field-tolerant decoder.
 
 ## Permissions
@@ -186,6 +186,8 @@ galley task list
 galley task show TASK_ID
 galley task requeue TASK_ID --reason "retry after transient failure"
 ```
+
+See [Troubleshooting](troubleshooting.md) for the meaning of each terminal status and when to requeue instead of creating a new task.
 
 ## Compatibility
 

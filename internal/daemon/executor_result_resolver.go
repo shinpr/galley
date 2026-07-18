@@ -56,3 +56,35 @@ func resolveExecutorResult(cli, stdoutPath, stdoutTail, lastMessagePath string) 
 	)
 	return runner.ExecutorResult{}, errors.Join(resultErrs...)
 }
+
+// classifyExecutorTerminal derives one routing decision per executor exit from
+// runner state plus machine-readable provider output, reading captured stdout
+// with an in-memory tail fallback. Process exit code or human-language error
+// text alone never decides routing.
+func classifyExecutorTerminal(cli, stdoutPath, stdoutTail string, runErr error) runner.ExecutorTerminal {
+	switch cli {
+	case "grok":
+		data, err := os.ReadFile(stdoutPath)
+		if err != nil {
+			data = []byte(stdoutTail)
+		}
+		return runner.GrokTerminal(data, runErr)
+	case "codex":
+		return runner.CodexTerminal(readExecutorStdout(stdoutPath, stdoutTail), runErr)
+	default:
+		// cli is "claude", "glm", or empty (defaulting to claude); GLM shares
+		// Claude's transport but keeps its own provider identity in evidence.
+		provider := cli
+		if provider == "" {
+			provider = "claude"
+		}
+		return runner.ClaudeTerminal(provider, readExecutorStdout(stdoutPath, stdoutTail), runErr)
+	}
+}
+
+func readExecutorStdout(stdoutPath, stdoutTail string) []byte {
+	if data, err := os.ReadFile(stdoutPath); err == nil {
+		return data
+	}
+	return []byte(stdoutTail)
+}

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,13 +25,24 @@ type attemptOutcome struct {
 	Completed      time.Time
 	RunResult      runner.RunResult
 	RunErr         error
+	Terminal       runner.ExecutorTerminal
 	ExecutorResult runner.ExecutorResult
 	ParseErr       error
 	DiffDirty      bool
 	Diff           string
 	DiffErr        error
 	DiffSnapshot   workspace.Snapshot
+	// EvidenceErr records a post-interruption staging or diff-capture failure. It
+	// is secondary evidence: the interruption stays primary so the task still
+	// routes to tasks/failed and requeue recovery stays available.
+	EvidenceErr error
 }
+
+// evidenceCaptureTimeout bounds post-executor git status and diff capture. The
+// capture uses a context detached from the executor so a shutdown that cancels
+// the executor cannot cancel evidence capture; the bound stops a wedged git
+// process from blocking shutdown.
+const evidenceCaptureTimeout = 2 * time.Minute
 
 func defaultStageExecutorOutput(ctx context.Context, opts Options, workDir, attemptDir string, excludePaths []string) error {
 	bins := vcsBinaries(opts)
@@ -107,30 +119,54 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 		}
 	}
 
-	// Stage untracked executor output, excluding context-only inputs, before
-	// supervisor review. The parent context preserves evidence after a timeout.
-	excludePaths := nonCommittedInputDestinations(loaded.Files)
-	if err := opts.daemonDependencies().stageExecutorOutput(ctx, opts, workDir, attemptDir, excludePaths); err != nil {
-		return attemptOutcome{}, &reviewStagingError{Err: err}
-	}
-
-	diffArtifacts, err := executorflow.CaptureDiffArtifacts(ctx, workDir, baseSHA, attemptDir, workspaceOptions(opts))
-	if err != nil {
+	// The normal-terminal versus interruption decision is derived from runner
+	// state and provider output and persisted as attempt evidence before the
+	// task is routed. runExecutorAttempt still captures diff, git status, and raw
+	// logs below so an interrupted attempt keeps its full evidence set.
+	terminal := classifyExecutorTerminal(cli, stdoutPath, run.RunResult.Stdout, run.RunErr)
+	if err := writeJSON(runartifact.Path(attemptDir, runartifact.ExecutorTerminalFilename), terminal); err != nil {
 		return attemptOutcome{}, err
 	}
 
-	return attemptOutcome{
+	outcome := attemptOutcome{
 		Started:        run.Started,
 		Completed:      run.Completed,
 		RunResult:      run.RunResult,
 		RunErr:         run.RunErr,
+		Terminal:       terminal,
 		ExecutorResult: executorResult,
 		ParseErr:       parseErr,
-		DiffDirty:      diffArtifacts.Dirty,
-		Diff:           diffArtifacts.Diff,
-		DiffErr:        diffArtifacts.Err,
-		DiffSnapshot:   diffArtifacts.Snapshot,
-	}, nil
+	}
+
+	evidenceCtx, evidenceCancel := context.WithTimeout(context.WithoutCancel(ctx), evidenceCaptureTimeout)
+	defer evidenceCancel()
+
+	excludePaths := nonCommittedInputDestinations(loaded.Files)
+	stageErr := opts.daemonDependencies().stageExecutorOutput(evidenceCtx, opts, workDir, attemptDir, excludePaths)
+	if stageErr != nil && !terminal.Interrupted() {
+		// For a normally completed attempt a staging failure is terminal: the
+		// supervisor would otherwise review a stale or empty diff.
+		return attemptOutcome{}, &reviewStagingError{Err: stageErr}
+	}
+	if stageErr != nil {
+		// The interruption stays the primary outcome; still attempt diff capture
+		// so git status/diff evidence is retained where possible.
+		outcome.EvidenceErr = stageErr
+	}
+
+	diffArtifacts, err := opts.daemonDependencies().captureDiffArtifacts(evidenceCtx, workDir, baseSHA, attemptDir, workspaceOptions(opts))
+	if err != nil {
+		if !terminal.Interrupted() {
+			return attemptOutcome{}, err
+		}
+		outcome.EvidenceErr = errors.Join(outcome.EvidenceErr, err)
+		return outcome, nil
+	}
+	outcome.DiffDirty = diffArtifacts.Dirty
+	outcome.Diff = diffArtifacts.Diff
+	outcome.DiffErr = diffArtifacts.Err
+	outcome.DiffSnapshot = diffArtifacts.Snapshot
+	return outcome, nil
 }
 
 func markRevisionRequestsAddressed(loaded *task.Task, evidence string) {
@@ -227,6 +263,103 @@ func executorAttemptError(outcome attemptOutcome, attemptDir string) *task.Attem
 		return nil
 	}
 	return attemptError("executor", classifyFailureKind("executor_failed", outcome.RunErr), outcome.RunErr, attemptDir)
+}
+
+// executorInterruptionError signals that an executor attempt did not reach a
+// normal provider terminal. The daemon loop publishes the task to tasks/failed
+// without invoking Supervisor or starting another executor attempt.
+type executorInterruptionError struct {
+	terminal runner.ExecutorTerminal
+}
+
+func (e *executorInterruptionError) Error() string {
+	if e == nil {
+		return "executor interrupted"
+	}
+	return "executor interrupted: " + e.terminal.Reason
+}
+
+func asExecutorInterruptionError(err error) (*executorInterruptionError, bool) {
+	var interruption *executorInterruptionError
+	if errors.As(err, &interruption) {
+		return interruption, true
+	}
+	return nil, false
+}
+
+// interruptionKind maps an interrupted attempt to its persisted attempt-error
+// kind. Runner failures keep the timeout/idle/executor classifications so
+// recovery still sees the actionable signal; a provider-reported non-normal
+// terminal with a successful runner records the distinct executor_interrupted
+// kind.
+func interruptionKind(outcome attemptOutcome) string {
+	if outcome.RunErr != nil {
+		return classifyFailureKind("executor_failed", outcome.RunErr)
+	}
+	return "executor_interrupted"
+}
+
+// appendExecutorInterruptionAttempt records the interrupted attempt with an
+// executor-owned structured error, a non-verdict marker (no Supervisor produced
+// one), and a requeue recovery risk. Provider detail is retained for diagnosis
+// only; it never changes routing.
+func appendExecutorInterruptionAttempt(loaded *task.Task, outcome attemptOutcome, attemptDir string) {
+	message := interruptionMessage(outcome.Terminal)
+	loaded.Attempts = append(loaded.Attempts, task.Attempt{
+		Number:            len(loaded.Attempts) + 1,
+		StartedAt:         outcome.Started.Format(time.RFC3339Nano),
+		CompletedAt:       outcome.Completed.Format(time.RFC3339Nano),
+		ClaudeStatus:      executorStatus(outcome.RunResult, outcome.RunErr),
+		SupervisorVerdict: "not_reviewed",
+		Summary:           message,
+		Error: &task.AttemptError{
+			Phase:       "executor",
+			Kind:        interruptionKind(outcome),
+			Message:     message,
+			ArtifactDir: attemptDir,
+		},
+	})
+	loaded.Verification.Commands = append(loaded.Verification.Commands, task.VerificationCommand{
+		Cmd:           executorVerificationCmd(loaded.Executor.CLI),
+		Status:        "failed",
+		OutputExcerpt: fmt.Sprintf("executor interrupted (%s); terminal decision and raw logs captured under %s", outcome.Terminal.Reason, attemptDir),
+	})
+	appendRisk(loaded, "executor-interruption", "external_dependency", message,
+		"Resolve the interruption cause, then run `galley task requeue` to resume from the preserved worktree.", true)
+	// CaptureDiffArtifacts reports a snapshot/diff failure in-band as DiffErr (nil
+	// function error), so it is joined with any staging failure. Both surface as
+	// secondary evidence; the interruption stays primary and the worktree keeps
+	// partial changes for requeue.
+	if evidenceErr := errors.Join(outcome.EvidenceErr, outcome.DiffErr); evidenceErr != nil {
+		appendRisk(loaded, "executor-interruption-evidence", "partial_verification", evidenceErr.Error(),
+			"Evidence capture failed after the interruption; the preserved worktree still holds the partial changes for requeue.", true)
+	}
+}
+
+// interruptionMessage renders an operator-facing interruption reason, keeping
+// available provider detail and falling back to a generic reason when none
+// exists.
+func interruptionMessage(terminal runner.ExecutorTerminal) string {
+	parts := []string{fmt.Sprintf("Executor interrupted before Supervisor review (reason=%s)", terminal.Reason)}
+	if terminal.RunError != "" {
+		parts = append(parts, fmt.Sprintf("run_error=%s", terminal.RunError))
+	}
+	if terminal.Status != "" {
+		parts = append(parts, fmt.Sprintf("status=%s", terminal.Status))
+	}
+	if terminal.Code != "" {
+		parts = append(parts, fmt.Sprintf("code=%s", terminal.Code))
+	}
+	if terminal.StopReason != "" {
+		parts = append(parts, fmt.Sprintf("stop_reason=%s", terminal.StopReason))
+	}
+	if terminal.SessionID != "" {
+		parts = append(parts, fmt.Sprintf("session_id=%s", terminal.SessionID))
+	}
+	if terminal.Message != "" {
+		parts = append(parts, fmt.Sprintf("detail=%s", terminal.Message))
+	}
+	return strings.Join(parts, "; ")
 }
 
 func appendSupervisorFailureAttempt(loaded *task.Task, outcome attemptOutcome, err error, attemptDir string) {

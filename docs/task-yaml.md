@@ -66,7 +66,7 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 - `executor`: optional per-field overrides for CLI, model, and effort.
 - `preflight.acceptance_skeleton.enabled`: optional boolean that selects the fixed skeleton preflight flow.
 - `decisions`, `risks`: author and executor notes.
-- `supervisor`, `attempts`, `verification`, `pr`: daemon-owned runtime state populated during lifecycle transitions.
+- `supervisor`, `attempts`, `verification`, `pr`: daemon-owned runtime state populated during lifecycle transitions. An attempt that ended in an executor interruption records `supervisor_verdict: not_reviewed` and an executor-phase `error` with the retained provider detail; see [supervision.md](supervision.md#executor-interruptions).
 
 ## Execution Policy And Executor
 

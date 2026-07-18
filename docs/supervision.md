@@ -50,8 +50,19 @@ For implementation tasks, the supervisor should reject a no-diff result unless t
 | Parse failure or schema validation failure | retry, then `tasks/failed/` with status `needs_supervisor_review` |
 | Two consecutive attempts with no git diff | stop early as a no-progress safeguard |
 | `hard_stop` | `tasks/failed/` with status `failed`, without retry |
+| Executor interruption (provider or runtime, before any normal terminal) | `tasks/failed/` with status `failed`, without Supervisor review or another attempt |
 
 `needs_supervisor_review` is a task state, not a daemon process failure. `galley daemon run --once` can exit 0 after recording that state.
+
+## Executor Interruptions
+
+Before normal Supervisor review, Galley decides whether an executor attempt reached a reliable normal provider terminal. Claude and GLM success result events, Codex `turn.completed`, and Grok `EndTurn` are normal terminals; explicit failed terminals, start failures, timeouts, kills, and output with no reliable normal terminal are interruptions. The decision uses runner state and machine-readable provider output, never the process exit code or error text alone.
+
+An interrupted attempt does not invoke the Supervisor and does not start another executor attempt in the same run, regardless of loop budget or worktree diff. Galley captures the command plan, run result, raw provider output, git status, diff, and a terminal-decision record, preserves the tracked and untracked worktree changes, and publishes the task to `tasks/failed/` with status `failed`. The attempt records an executor-owned error with the non-verdict marker `not_reviewed` and retains any provider status, code, stop reason, session ID, or message detail for diagnosis; unavailable detail falls back to a generic interruption reason without changing routing.
+
+An executor-result parse or schema-validation failure that follows a normal terminal is not an interruption: it stays reviewable, and a `needs_revision` verdict continues to start the next executor attempt under the existing loop budget.
+
+Resolve the interruption cause (for example a provider outage or a local dependency), then resume the retained worktree with `galley task requeue`.
 
 `completed_with_risks` means the executor believes the implementation is coherent, but verification limits, assumptions, or residual risks still need supervisor attention.
 

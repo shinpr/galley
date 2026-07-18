@@ -178,6 +178,7 @@ case "$input" in
   *)
     echo change > daemon-output.txt
     printf '%s\n' '`+executorResult+`' > "$out"
+    printf '%s\n' '{"type":"turn.completed","usage":{}}'
     ;;
 esac
 `)
@@ -359,6 +360,7 @@ case "$input" in
   *)
     echo change > daemon-output.txt
     printf '%s\n' '`+executorResult+`' > "$out"
+    printf '%s\n' '{"type":"turn.completed","usage":{}}'
     ;;
 esac
 `)
@@ -539,6 +541,7 @@ case "$input" in
   *)
     echo change > daemon-output.txt
     printf '%s\n' '`+executorResult+`' > "$out"
+    printf '%s\n' '{"type":"turn.completed","usage":{}}'
     ;;
 esac
 `)

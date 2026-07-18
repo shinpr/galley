@@ -51,6 +51,7 @@ if [ -n "$lastmsg" ]; then
   printf '%s' '`+executorResult+`' > "$lastmsg"
 fi
 printf '%s\n' '{"event":"unrelated"}'
+printf '%s\n' '{"type":"turn.completed","usage":{}}'
 `)
 
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
@@ -117,6 +118,7 @@ if [ -n "$lastmsg" ]; then
   printf '%s' '`+hardStopResult+`' > "$lastmsg"
 fi
 printf '%s\n' '`+hardStopResult+`'
+printf '%s\n' '{"type":"turn.completed","usage":{}}'
 `)
 
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")

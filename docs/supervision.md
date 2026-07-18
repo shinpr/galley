@@ -20,7 +20,7 @@ See [task-yaml.md](task-yaml.md) for the full `executor` block and [../examples/
 
 Supervisor review defaults to Claude. Use `--supervisor codex` for Codex, `--supervisor glm` for GLM (the `claude` binary pointed at GLM's Z.ai endpoint; needs `glm_api_key` in `daemon.yaml`), or `--supervisor claude` to be explicit. The supervisor is the acceptance gate; the backend is your choice.
 
-All supervisor backends use the same verdict contract, retry budget, and evidence layout. Repository-specific PR behavior, comment polling, and worktree cleanup live in the environment profile resolved from `scope.cwd`.
+All supervisor backends use the same verdict contract and evidence layout. Repository-specific PR behavior, comment polling, and worktree cleanup live in the environment profile resolved from `scope.cwd`.
 
 Supervisor selection controls only review. It is independent from the executor backend in `executor.cli`.
 

@@ -10,17 +10,48 @@ Important evidence fields include `source_cwd` for the original repository, `wor
 
 When `task.files` is present, classify supplied files as requirement basis, execution plan, test or quality basis, or context evidence. Verify that changed behavior and evidence reflect the obligations defined by requirement, plan, and test/quality materials when they affect the changed behavior; their obligations can define contracts even when the task YAML only calls them input files.
 
-# Runtime Guidance
+# Review Procedure
 
-Follow the common Review Algorithm. While executing it:
+The review procedure exists to produce a complete, actionable verdict while making revision loops converge. Complete and record each phase before starting the next: establishing the active review set, reviewing acceptance, and reviewing quality separately prevents the first discovered defect from consuming the review, preserves coverage of every active item, and lets persisted passes narrow later attempts.
 
-1. Use repository tools in read-only mode.
-2. Inspect changed files plus nearby contract files before accepting. For code changes, this usually includes entry points, consumers, adapters, data-shape definitions, external interfaces, and focused tests or checks.
-3. Use `worktree_cwd`, not `source_cwd` or `task.scope.cwd`, for repository inspection.
-4. Identify local rules such as naming, data shapes, validation style, error handling, requirement boundaries, compatibility expectations, and test/check style as evidence for the common acceptance contract.
-5. Check requested core mechanism preservation as part of the common Contract Rules.
+Use `update_plan` to track this procedure. Before Step 1, register each `Step N` heading below as a plan item, with Step 1 `in_progress` and every later step `pending`. After each step's stated result or gate is complete, mark it `completed` and move the next step to `in_progress`. After Step 5 is complete, mark it `completed`; every plan item must then be `completed`. Return the final verdict only after this final plan update.
 
-If a diff is present, accept only after repository/context review and list the reviewed files or contract areas in `reviewed_files`.
+Build the final verdict object in the following order. Its acceptance and quality arrays are the completion record for each phase. Select `status` and write `next_work_order` only after both phase gates pass.
+
+## Step 1. Establish The Active Review Set
+
+Read the task, persisted review progress, pending revision requests, profiles, executor result, errors, cumulative diff, verification evidence, and task input files. Derive the open acceptance and quality item IDs and identify passed items implicated by the current-attempt change report as regression candidates.
+
+Use repository tools in read-only mode and `worktree_cwd` as the repository cwd. Inspect changed files relevant to the active review set plus the nearby contracts needed to decide them. For code changes, relevant contracts commonly include entry points, consumers, adapters, data-shape definitions, external interfaces, and focused tests or checks.
+
+Start a draft verdict object with empty `acceptance_evidence`, `acceptance_gaps`, `quality_passes`, `quality_gaps`, and `findings` arrays. Leave `status` and `next_work_order` for Step 4 after both phase gates pass.
+
+## Step 2. Review Acceptance And Generate Its Results
+
+Review regression candidates first, then every open acceptance item. For each item, inspect the complete acceptance contract and immediately append exactly one result to the draft verdict:
+
+- append a supported pass to `acceptance_evidence`; or
+- append the exact item ID to `acceptance_gaps` and record a candidate finding when another executor attempt can fix the gap.
+
+Continue until every active acceptance item has a result, including after finding a blocker. Then verify that `acceptance_evidence` and `acceptance_gaps` form a disjoint exact partition of the active acceptance IDs. The acceptance phase passes only after this check; begin quality review after it passes.
+
+## Step 3. Review Quality And Generate Its Results
+
+Review quality regression candidates first, then every open quality item. For each item, inspect its `pass` statement against every applicable changed surface or contract area and immediately append its exact criterion ID to `quality_passes` when supported, or to `quality_gaps` and record a candidate finding when it fails. Then continue through the remaining quality items.
+
+After every active quality item has been inspected, verify that `quality_passes` and `quality_gaps` form a disjoint exact partition of the active quality IDs. The quality phase passes only after this check.
+
+## Step 4. Consolidate Findings And Select The Verdict
+
+Verify candidate findings against supporting and contradicting repository evidence. Consolidate candidates that describe the same defect and require the same repair into one finding while retaining every affected ID in `quality_gaps`. Keep separate findings when they require independent changes. For a consolidated defect that affects multiple quality criteria, use the criterion that most directly governs the defect as `category` and name the other affected criteria in `summary`.
+
+Choose `status` from the persisted passes, generated acceptance and quality results, verified findings, pass policy, and next actor. For `needs_revision`, build `next_work_order` from the complete consolidated repair batch. Preserve already valid work and keep the requested changes independently actionable.
+
+## Step 5. Validate The Final Object
+
+Before returning, verify that every required field is present and has the schema-defined type. Confirm that the acceptance and quality phase records still satisfy their gates after finding consolidation, `discussion_items` is empty unless the work is accepted, and `next_work_order` is non-empty only for `needs_revision`.
+
+Return the validated draft verdict as the only response.
 
 # Decision Rules
 
@@ -31,26 +62,6 @@ Passing tests are required evidence when configured. Passing tests support accep
 Accepted is allowed only when every plausible wrong-behavior scenario discovered during review has either concrete evidence showing it is handled, or a non-blocking explanation that does not require another executor attempt. When a plausible bug can be fixed by another executor attempt, return `needs_revision` even if tests pass.
 
 Treat executor `hard_stop` as a claim to review, not as an automatic final state. Return `hard_stop` only when the blocker is external or genuinely unrecoverable by another executor attempt, such as a missing credential, destructive requirement, requirement to change paths listed in `task.scope.forbidden_paths`, unavailable external system, or contradictory acceptance criteria. If the executor stopped because of uncertainty, reluctance, insufficient investigation, local tool confusion, or a solvable implementation/verification problem, return `needs_revision` with a `next_work_order` that explains the alternative path to try. Use the executor's `hard_stop.reason`, `attempted`, and `needed_to_continue` as evidence for that work order.
-
-# Review Checklist
-
-1. Compare each task acceptance criterion to the common acceptance contract, changed files, and verification evidence.
-2. Treat every `task.revision_requests[]` item whose status is not `addressed` as an additional acceptance criterion. Use acceptance evidence id `revision:<request.id>` for those entries.
-3. For each pending revision request, after checking the direct request, review adjacent cases within the common Review Algorithm context that share the same changed path, contract, persisted state, or external boundary. Examples include fallback behavior, stale state, retries, and external calls; use only categories relevant to the change. Acceptance requires the revision request, original ACs, and relevant adjacent cases to agree.
-4. Check whether executor claims are supported by diff, command output, or explicit skipped-verification reasons.
-5. Check for unrelated changes, unsafe or unreviewable scope drift, reverted user work, incomplete stubs, hollow tests, and TODO-only implementations.
-6. Check whether verification commands are relevant to the changed behavior.
-7. Check whether quality profile required checks have passed evidence.
-8. Check whether decisions are reversible and recorded.
-9. Check `task.files` when present: committed source materials may appear in the diff when relevant; non-committed source materials inform the work and stay out of the final diff.
-10. For user-facing interface tasks, evaluate stated quality profile items such as accessibility, responsive behavior, visual consistency, and design-source references when provided.
-11. For external-interface, data, or integration tasks, evaluate contract behavior, data integrity, error handling, state changes, requirement boundaries, value conversion, entry-point/consumer consistency, and security-sensitive boundaries when provided.
-12. For behavior-changing tasks, derive the acceptance contract using the common Review Algorithm.
-13. Treat a misplaced requirement boundary as a concrete finding when the implementation enforces a requirement after an earlier step has already made a violation hard to observe, recover, prevent, or attribute.
-14. For infra tasks, evaluate idempotency, environment targeting, secrets handling, rollout or rollback risk, and plan or apply evidence when provided.
-15. Apply task-specific quality profile rules, pending revision requests, and any task playbook included in the evidence as boundary contracts.
-16. When a rationale in one changed file depends on a design rule, layering rule, ownership boundary, dependency direction, or compatibility policy, check the other changed files for the same rule before accepting.
-17. Before recording any candidate problem from this checklist as a finding, identify the supporting repository evidence and check nearby contracts plus adjacent cases that share the same changed path, contract, persisted state, or external boundary for contrary evidence. Apply the common Finding Policy.
 
 # Finding Policy
 
@@ -72,8 +83,9 @@ Return one JSON object as the entire response body.
 Follow the common supervisor output contract and schema. Provider-specific field guidance:
 
 - `reviewed_files`: files or contract areas inspected during repository/context review.
-- `acceptance_evidence`: one entry per task AC, plus one entry per pending revision request using `revision:<request.id>`.
-- `quality_coverage`: one entry per quality profile review dimension and changed-surface pairing, listing the repository evidence inspected. Use the criterion ID as the finding category when the evidence supports a quality failure.
+- `acceptance_evidence`: one entry per reviewed open or regression-candidate item. Use `revision:<request.id>` for revision requests.
+- `quality_passes`: exact IDs of reviewed quality dimensions that passed.
+- `quality_gaps`: exact IDs of reviewed quality dimensions that failed.
 - `findings`: structured problems only. Empty array means no problems found. Set `file` to the relevant path, or to an empty string when no single file applies.
 - `residual_risks`: non-blocking concerns that do not require another executor attempt.
 - `discussion_items`: accepted-work reviewer notes only. Use an empty array unless the verdict is already accepted and useful non-gating context remains.

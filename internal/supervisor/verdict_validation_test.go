@@ -14,14 +14,14 @@ import (
 )
 
 func TestValidateVerdictRejectsNeedsRevisionWithoutWorkOrder(t *testing.T) {
-	err := ValidateVerdict(Verdict{Status: "needs_revision", Summary: "gaps", Confidence: "high", QualityCoverage: []QualityCoverage{}})
+	err := ValidateVerdict(Verdict{Status: "needs_revision", Summary: "gaps", Confidence: "high"})
 	if err == nil {
 		t.Fatal("expected validation error")
 	}
 }
 
 func TestValidateVerdictRequiresConfidence(t *testing.T) {
-	err := ValidateVerdict(Verdict{Status: "accepted", Summary: "ok", QualityCoverage: []QualityCoverage{}})
+	err := ValidateVerdict(Verdict{Status: "accepted", Summary: "ok"})
 	if err == nil {
 		t.Fatal("expected validation error")
 	}
@@ -45,19 +45,22 @@ func TestSupervisorVerdictSchemaStatusEnumMatchesValidator(t *testing.T) {
 	if err := json.Unmarshal(data, &schema); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := schema.Properties["quality_coverage"]; !ok {
-		t.Fatalf("schema missing quality_coverage property")
+	if _, ok := schema.Properties["quality_passes"]; !ok {
+		t.Fatalf("schema missing quality_passes property")
 	}
-	if !slices.Contains(schema.Required, "quality_coverage") {
+	if _, ok := schema.Properties["quality_gaps"]; !ok {
+		t.Fatalf("schema missing quality_gaps property")
+	}
+	if !slices.Contains(schema.Required, "quality_passes") || !slices.Contains(schema.Required, "quality_gaps") {
 		t.Fatalf("schema required = %v", schema.Required)
 	}
 	got := append([]string(nil), schema.Properties["status"].Enum...)
 	for _, status := range got {
-		if err := ValidateVerdict(Verdict{Status: status, Summary: "ok", Confidence: "high", NextWorkOrder: "work", QualityCoverage: []QualityCoverage{}}); err != nil && status != "needs_revision" {
+		if err := ValidateVerdict(Verdict{Status: status, Summary: "ok", Confidence: "high", NextWorkOrder: "work"}); err != nil && status != "needs_revision" {
 			t.Fatalf("validator rejected schema status %q: %v", status, err)
 		}
 		if status == "needs_revision" {
-			if err := ValidateVerdict(Verdict{Status: status, Summary: "ok", Confidence: "high", NextWorkOrder: "work", QualityCoverage: []QualityCoverage{}}); err != nil {
+			if err := ValidateVerdict(Verdict{Status: status, Summary: "ok", Confidence: "high", NextWorkOrder: "work"}); err != nil {
 				t.Fatalf("validator rejected needs_revision with work order: %v", err)
 			}
 		}
@@ -70,7 +73,8 @@ func TestValidateVerdictForEvidenceRejectsAcceptedWithoutRepositoryReview(t *tes
 		Summary:            "ok",
 		AcceptanceEvidence: []AcceptanceEvidence{{ACID: "AC1", Evidence: []string{"diff"}}},
 		Confidence:         "high",
-		QualityCoverage:    []QualityCoverage{},
+		QualityPasses:      []string{},
+		QualityGaps:        []string{},
 	}, Evidence{
 		Task:      task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},
 		DiffDirty: true,
@@ -83,13 +87,79 @@ func TestValidateVerdictForEvidenceRejectsAcceptedWithoutRepositoryReview(t *tes
 	}
 }
 
+func TestValidateVerdictForEvidenceRejectsAcceptedGapForAddressedRevision(t *testing.T) {
+	t.Parallel()
+	err := ValidateVerdictForEvidence(Verdict{
+		Status:         "accepted",
+		Summary:        "ok",
+		AcceptanceGaps: []string{"revision:review-1"},
+		QualityPasses:  []string{},
+		QualityGaps:    []string{},
+		Confidence:     "high",
+	}, Evidence{Task: task.Task{RevisionRequests: []task.RevisionRequest{{
+		ID:       "review-1",
+		Status:   "addressed",
+		Evidence: "fixed earlier",
+	}}}})
+	if err == nil || !strings.Contains(err.Error(), "revision:review-1") {
+		t.Fatalf("accepted verdict reused an addressed revision as a gap: %v", err)
+	}
+}
+
+func TestVerdictJSONPreservesSchemaRequiredEmptyFields(t *testing.T) {
+	t.Parallel()
+	data, err := json.Marshal(Verdict{
+		Status:             "accepted",
+		Summary:            "ok",
+		AcceptanceGaps:     []string{},
+		ReviewedFiles:      []string{},
+		AcceptanceEvidence: []AcceptanceEvidence{},
+		QualityPasses:      []string{},
+		QualityGaps:        []string{},
+		Findings: []Finding{{
+			Severity: "low", Category: "style", File: "", Summary: "note",
+		}},
+		ResidualRisks:   []string{},
+		DiscussionItems: []DiscussionItem{},
+		Confidence:      "high",
+		NextWorkOrder:   "",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{
+		"acceptance_gaps", "reviewed_files", "acceptance_evidence", "quality_passes", "quality_gaps",
+		"findings", "residual_risks", "discussion_items", "confidence", "next_work_order",
+	} {
+		if _, ok := got[field]; !ok {
+			t.Errorf("schema-required field %q omitted from %s", field, data)
+		}
+	}
+	findings, ok := got["findings"].([]any)
+	if !ok || len(findings) != 1 {
+		t.Fatalf("findings = %#v", got["findings"])
+	}
+	finding, ok := findings[0].(map[string]any)
+	if !ok {
+		t.Fatalf("finding = %#v", findings[0])
+	}
+	if value, ok := finding["file"]; !ok || value != "" {
+		t.Fatalf("schema-required finding.file omitted or changed: %#v", finding)
+	}
+}
+
 func TestValidateVerdictForEvidenceRejectsAcceptedWithoutACEvidence(t *testing.T) {
 	err := ValidateVerdictForEvidence(Verdict{
-		Status:          "accepted",
-		Summary:         "ok",
-		ReviewedFiles:   []string{"file.go"},
-		Confidence:      "high",
-		QualityCoverage: []QualityCoverage{},
+		Status:        "accepted",
+		Summary:       "ok",
+		ReviewedFiles: []string{"file.go"},
+		Confidence:    "high",
+		QualityPasses: []string{},
+		QualityGaps:   []string{},
 	}, Evidence{
 		Task:      task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},
 		DiffDirty: true,
@@ -102,7 +172,7 @@ func TestValidateVerdictForEvidenceRejectsAcceptedWithoutACEvidence(t *testing.T
 	}
 }
 
-func TestValidateVerdictForEvidenceRejectsAcceptedWithoutQualityCoverage(t *testing.T) {
+func TestValidateVerdictForEvidenceRejectsAcceptedWithoutQualityResult(t *testing.T) {
 	t.Parallel()
 	err := ValidateVerdictForEvidence(Verdict{
 		Status:             "accepted",
@@ -110,7 +180,8 @@ func TestValidateVerdictForEvidenceRejectsAcceptedWithoutQualityCoverage(t *test
 		ReviewedFiles:      []string{"file.go"},
 		AcceptanceEvidence: []AcceptanceEvidence{{ACID: "AC1", Evidence: []string{"diff"}}},
 		Confidence:         "high",
-		QualityCoverage:    []QualityCoverage{},
+		QualityGaps:        []string{},
+		QualityPasses:      []string{},
 	}, Evidence{
 		Task: task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},
 		Profiles: profile.Bundle{Quality: &profile.Quality{ReviewDimensions: []profile.ReviewDimension{{
@@ -123,7 +194,7 @@ func TestValidateVerdictForEvidenceRejectsAcceptedWithoutQualityCoverage(t *test
 	}
 }
 
-func TestValidateVerdictForEvidenceAcceptsCompleteQualityCoverage(t *testing.T) {
+func TestValidateVerdictForEvidenceAcceptsCompleteQualityResults(t *testing.T) {
 	t.Parallel()
 	quality := &profile.Quality{
 		ReviewDimensions: []profile.ReviewDimension{
@@ -137,11 +208,9 @@ func TestValidateVerdictForEvidenceAcceptsCompleteQualityCoverage(t *testing.T) 
 		Summary:            "ok",
 		ReviewedFiles:      []string{"file.go"},
 		AcceptanceEvidence: []AcceptanceEvidence{{ACID: "AC1", Evidence: []string{"diff"}}},
-		QualityCoverage: []QualityCoverage{
-			{Criterion: "criterion-a", ChangedSurface: "file.go", EvidenceChecked: []string{"criterion evidence"}},
-			{Criterion: "criterion-b", ChangedSurface: "final diff", EvidenceChecked: []string{"No narrower changed surface is governed by this criterion."}},
-		},
-		Confidence: "high",
+		QualityGaps:        []string{},
+		QualityPasses:      []string{"criterion-a", "criterion-b"},
+		Confidence:         "high",
 	}, Evidence{
 		Task:      task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},
 		Profiles:  profile.Bundle{Quality: quality},
@@ -152,26 +221,149 @@ func TestValidateVerdictForEvidenceAcceptsCompleteQualityCoverage(t *testing.T) 
 	}
 }
 
-func TestValidateVerdictForEvidenceRejectsNonAcceptedWithoutQualityCoverage(t *testing.T) {
+func TestValidateVerdictForEvidenceRejectsAcceptedWithoutQualityOutcomeList(t *testing.T) {
 	t.Parallel()
-	err := ValidateVerdictForEvidence(Verdict{Status: "needs_revision", Summary: "gap", Confidence: "high", NextWorkOrder: "fix it", QualityCoverage: []QualityCoverage{}}, Evidence{
-		Profiles: profile.Bundle{Quality: &profile.Quality{ReviewDimensions: []profile.ReviewDimension{{ID: "criterion-a"}}}},
+	quality := &profile.Quality{ReviewDimensions: []profile.ReviewDimension{{ID: "criterion-a", Weight: 1, Required: true}}}
+	err := ValidateVerdictForEvidence(Verdict{
+		Status:             "accepted",
+		Summary:            "ok",
+		ReviewedFiles:      []string{"file.go"},
+		AcceptanceEvidence: []AcceptanceEvidence{{ACID: "AC1", Evidence: []string{"diff"}}},
+		Confidence:         "high",
+	}, Evidence{
+		Task:      task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},
+		Profiles:  profile.Bundle{Quality: quality},
+		DiffDirty: true,
 	})
-	if err == nil || !strings.Contains(err.Error(), "criterion-a") {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "quality_gaps") {
+		t.Fatalf("accepted verdict without explicit quality outcomes: %v", err)
 	}
 }
 
-func TestValidateVerdictForEvidenceAllowsIncompleteCoverageForTerminalEscalation(t *testing.T) {
+func TestValidateVerdictForEvidenceAllowsNeedsRevisionWithoutCompleteQualityResults(t *testing.T) {
+	t.Parallel()
+	err := ValidateVerdictForEvidence(Verdict{Status: "needs_revision", Summary: "gap", Confidence: "high", NextWorkOrder: "fix it"}, Evidence{
+		Profiles: profile.Bundle{Quality: &profile.Quality{ReviewDimensions: []profile.ReviewDimension{{ID: "criterion-a"}}}},
+	})
+	if err != nil {
+		t.Fatalf("incomplete needs_revision results must preserve the handoff: %v", err)
+	}
+}
+
+func TestValidateVerdictForEvidenceRequiresOnlyOpenReviewItems(t *testing.T) {
+	t.Parallel()
+	quality := &profile.Quality{ReviewDimensions: []profile.ReviewDimension{
+		{ID: "quality-a", Weight: 1, Required: true, Pass: "a"},
+		{ID: "quality-b", Weight: 1, Required: true, Pass: "b"},
+	}}
+	loaded := task.Task{
+		AcceptanceCriteria: []task.AcceptanceCriterion{
+			{ID: "AC1", Text: "first", Verification: "verify first"},
+			{ID: "AC2", Text: "second", Verification: "verify second"},
+		},
+	}
+	ApplyReviewProgress(&loaded, profile.Bundle{Quality: quality}, Verdict{
+		AcceptanceEvidence: []AcceptanceEvidence{{ACID: "AC1", Evidence: []string{"first evidence"}}},
+		AcceptanceGaps:     []string{"AC2"},
+		QualityPasses:      []string{"quality-a"},
+		QualityGaps:        []string{"quality-b"},
+		Findings:           []Finding{{Category: "quality-b", Summary: "b fails"}},
+	})
+
+	err := ValidateVerdictForEvidence(Verdict{
+		Status:             "needs_revision",
+		Summary:            "remaining gaps",
+		AcceptanceGaps:     []string{"AC2"},
+		AcceptanceEvidence: []AcceptanceEvidence{},
+		QualityGaps:        []string{"quality-b"},
+		Findings:           []Finding{{Severity: "medium", Category: "quality-b", Summary: "b still fails"}},
+		Confidence:         "high",
+		NextWorkOrder:      "fix AC2 and quality-b",
+	}, Evidence{Task: loaded, Profiles: profile.Bundle{Quality: quality}})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateVerdictForEvidenceAllowsMissingOpenAcceptanceResult(t *testing.T) {
+	t.Parallel()
+	loaded := task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{
+		{ID: "AC1", Text: "first", Verification: "verify first"},
+		{ID: "AC2", Text: "second", Verification: "verify second"},
+	}}
+	ApplyReviewProgress(&loaded, profile.Bundle{}, Verdict{
+		AcceptanceEvidence: []AcceptanceEvidence{{ACID: "AC1", Evidence: []string{"first evidence"}}},
+		AcceptanceGaps:     []string{"AC2"},
+	})
+
+	err := ValidateVerdictForEvidence(Verdict{
+		Status:        "needs_revision",
+		Summary:       "remaining gap",
+		Confidence:    "high",
+		NextWorkOrder: "fix AC2",
+	}, Evidence{Task: loaded})
+	if err != nil {
+		t.Fatalf("missing needs_revision result must remain open instead of rejecting the handoff: %v", err)
+	}
+}
+
+func TestValidateVerdictForEvidenceAllowsUnknownNeedsRevisionAcceptanceResult(t *testing.T) {
+	t.Parallel()
+	err := ValidateVerdictForEvidence(Verdict{
+		Status:         "needs_revision",
+		Summary:        "remaining gap",
+		AcceptanceGaps: []string{"AC1 still fails"},
+		Confidence:     "high",
+		NextWorkOrder:  "fix AC1",
+	}, Evidence{Task: task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "first", Verification: "verify"}}}})
+	if err != nil {
+		t.Fatalf("unknown non-accepted result must not discard the work order: %v", err)
+	}
+}
+
+func TestValidateVerdictForEvidenceAcceptsFinalOpenItemsWithPriorPasses(t *testing.T) {
+	t.Parallel()
+	quality := &profile.Quality{
+		ReviewDimensions: []profile.ReviewDimension{
+			{ID: "quality-a", Weight: 1, Required: true, Pass: "a"},
+			{ID: "quality-b", Weight: 1, Required: true, Pass: "b"},
+		},
+		PassPolicy: profile.PassPolicy{RequiredDimensionsMustPass: true, MinScore: 100},
+	}
+	loaded := task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{
+		{ID: "AC1", Text: "first", Verification: "verify first"},
+		{ID: "AC2", Text: "second", Verification: "verify second"},
+	}}
+	ApplyReviewProgress(&loaded, profile.Bundle{Quality: quality}, Verdict{
+		AcceptanceEvidence: []AcceptanceEvidence{{ACID: "AC1", Evidence: []string{"first evidence"}}},
+		AcceptanceGaps:     []string{"AC2"},
+		QualityPasses:      []string{"quality-a"},
+		QualityGaps:        []string{"quality-b"},
+		Findings:           []Finding{{Category: "quality-b", Summary: "b fails"}},
+	})
+
+	err := ValidateVerdictForEvidence(Verdict{
+		Status:             "accepted",
+		Summary:            "all done",
+		ReviewedFiles:      []string{"b.go"},
+		AcceptanceEvidence: []AcceptanceEvidence{{ACID: "AC2", Evidence: []string{"second evidence"}}},
+		QualityPasses:      []string{"quality-b"},
+		QualityGaps:        []string{},
+		Confidence:         "high",
+	}, Evidence{Task: loaded, Profiles: profile.Bundle{Quality: quality}, DiffDirty: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateVerdictForEvidenceAllowsIncompleteQualityResultsForTerminalEscalation(t *testing.T) {
 	t.Parallel()
 	quality := &profile.Quality{ReviewDimensions: []profile.ReviewDimension{{ID: "criterion-a"}}}
 	for _, status := range []string{"hard_stop", "needs_supervisor_review"} {
 		status := status
 		t.Run(status, func(t *testing.T) {
 			t.Parallel()
-			err := ValidateVerdictForEvidence(Verdict{
-				Status: status, Summary: "external decision required", Confidence: "high", QualityCoverage: []QualityCoverage{},
-			}, Evidence{Profiles: profile.Bundle{Quality: quality}})
+			err := ValidateVerdictForEvidence(Verdict{Status: status, Summary: "external decision required", Confidence: "high"}, Evidence{Profiles: profile.Bundle{Quality: quality}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -179,7 +371,7 @@ func TestValidateVerdictForEvidenceAllowsIncompleteCoverageForTerminalEscalation
 	}
 }
 
-func TestValidateVerdictForEvidenceRejectsMalformedCoverageForTerminalEscalation(t *testing.T) {
+func TestValidateVerdictForEvidenceAllowsMalformedQualityResultsForTerminalEscalation(t *testing.T) {
 	t.Parallel()
 	quality := &profile.Quality{ReviewDimensions: []profile.ReviewDimension{{ID: "criterion-a"}}}
 	for _, status := range []string{"hard_stop", "needs_supervisor_review"} {
@@ -188,34 +380,34 @@ func TestValidateVerdictForEvidenceRejectsMalformedCoverageForTerminalEscalation
 			t.Parallel()
 			err := ValidateVerdictForEvidence(Verdict{
 				Status: status, Summary: "external decision required", Confidence: "high",
-				QualityCoverage: []QualityCoverage{{Criterion: "criterion-a", ChangedSurface: "file.go"}},
+				QualityPasses: []string{"unknown"},
 			}, Evidence{Profiles: profile.Bundle{Quality: quality}})
-			if err == nil || !strings.Contains(err.Error(), "evidence_checked") {
-				t.Fatalf("unexpected error: %v", err)
+			if err != nil {
+				t.Fatalf("terminal handoff must not be discarded over partial review results: %v", err)
 			}
 		})
 	}
 }
 
-func TestValidateQualityCoverageRejectsInvalidAuditEntries(t *testing.T) {
+func TestValidateQualityResultsRejectsInvalidEntries(t *testing.T) {
 	t.Parallel()
 	quality := &profile.Quality{ReviewDimensions: []profile.ReviewDimension{{ID: "criterion-a"}}}
-	valid := QualityCoverage{Criterion: "criterion-a", ChangedSurface: "file.go", EvidenceChecked: []string{"diff lines"}}
 	tests := []struct {
-		name     string
-		coverage []QualityCoverage
-		want     string
+		name   string
+		passes []string
+		gaps   []string
+		want   string
 	}{
-		{name: "unknown criterion", coverage: []QualityCoverage{{Criterion: "criterion-b", ChangedSurface: "file.go", EvidenceChecked: []string{"diff"}}}, want: "not configured"},
-		{name: "missing surface", coverage: []QualityCoverage{{Criterion: "criterion-a", EvidenceChecked: []string{"diff"}}}, want: "changed_surface"},
-		{name: "missing evidence", coverage: []QualityCoverage{{Criterion: "criterion-a", ChangedSurface: "file.go"}}, want: "evidence_checked"},
-		{name: "blank evidence", coverage: []QualityCoverage{{Criterion: "criterion-a", ChangedSurface: "file.go", EvidenceChecked: []string{" "}}}, want: "evidence_checked"},
-		{name: "duplicate pair", coverage: []QualityCoverage{valid, valid}, want: "duplicate"},
+		{name: "unknown pass", passes: []string{"criterion-b"}, want: "not configured"},
+		{name: "unknown gap", gaps: []string{"criterion-b"}, want: "not configured"},
+		{name: "duplicate pass", passes: []string{"criterion-a", "criterion-a"}, want: "multiple"},
+		{name: "pass and gap", passes: []string{"criterion-a"}, gaps: []string{"criterion-a"}, want: "both"},
+		{name: "missing required result", want: "no pass or gap"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			err := validateQualityCoverage(tt.coverage, quality, true)
+			err := validateQualityResults(tt.passes, tt.gaps, quality, []string{"criterion-a"})
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error = %v, want substring %q", err, tt.want)
 			}
@@ -223,12 +415,13 @@ func TestValidateQualityCoverageRejectsInvalidAuditEntries(t *testing.T) {
 	}
 }
 
-func TestValidateVerdictForEvidenceAcceptsCriterionReviewedAgainstFinalDiff(t *testing.T) {
+func TestValidateVerdictForEvidenceAcceptsQualityPass(t *testing.T) {
 	t.Parallel()
 	quality := &profile.Quality{ReviewDimensions: []profile.ReviewDimension{{ID: "criterion-a"}}}
 	err := ValidateVerdictForEvidence(Verdict{
 		Status: "accepted", Summary: "ok", Confidence: "high", ReviewedFiles: []string{"file.go"},
-		QualityCoverage: []QualityCoverage{{Criterion: "criterion-a", ChangedSurface: "final diff", EvidenceChecked: []string{"The criterion does not govern a narrower changed surface."}}},
+		QualityPasses: []string{"criterion-a"},
+		QualityGaps:   []string{},
 	}, Evidence{Profiles: profile.Bundle{Quality: quality}, DiffDirty: true})
 	if err != nil {
 		t.Fatal(err)
@@ -246,11 +439,10 @@ func TestValidateVerdictForEvidenceRejectsFailedRequiredQualityDimension(t *test
 		Summary:            "ok",
 		ReviewedFiles:      []string{"file.go"},
 		AcceptanceEvidence: []AcceptanceEvidence{{ACID: "AC1", Evidence: []string{"diff"}}},
-		QualityCoverage: []QualityCoverage{{
-			Criterion: "criterion-a", ChangedSurface: "file.go", EvidenceChecked: []string{"criterion is not satisfied"},
-		}},
-		Findings:   []Finding{{Severity: "low", Category: "criterion-a", Summary: "criterion is not satisfied", BlocksAcceptance: false}},
-		Confidence: "high",
+		QualityPasses:      []string{},
+		QualityGaps:        []string{"criterion-a"},
+		Findings:           []Finding{{Severity: "low", Category: "criterion-a", Summary: "criterion is not satisfied", BlocksAcceptance: false}},
+		Confidence:         "high",
 	}, Evidence{
 		Task:      task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},
 		Profiles:  profile.Bundle{Quality: quality},
@@ -258,6 +450,25 @@ func TestValidateVerdictForEvidenceRejectsFailedRequiredQualityDimension(t *test
 	})
 	if err == nil || !strings.Contains(err.Error(), "required quality criterion") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateVerdictForEvidenceUsesQualityGapsInsteadOfFindingCategory(t *testing.T) {
+	t.Parallel()
+	quality := &profile.Quality{
+		ReviewDimensions: []profile.ReviewDimension{{ID: "criterion-a", Weight: 1, Required: true}},
+		PassPolicy:       profile.PassPolicy{RequiredDimensionsMustPass: true},
+	}
+	err := ValidateVerdictForEvidence(Verdict{
+		Status:        "accepted",
+		Summary:       "quality criterion passed with a non-blocking observation",
+		QualityPasses: []string{"criterion-a"},
+		QualityGaps:   []string{},
+		Findings:      []Finding{{Severity: "low", Category: "criterion-a", Summary: "non-blocking observation", BlocksAcceptance: false}},
+		Confidence:    "high",
+	}, Evidence{Profiles: profile.Bundle{Quality: quality}})
+	if err != nil {
+		t.Fatalf("quality finding category overrode explicit quality_gaps: %v", err)
 	}
 }
 
@@ -275,12 +486,10 @@ func TestValidateVerdictForEvidenceEnforcesQualityScore(t *testing.T) {
 		Summary:            "ok",
 		ReviewedFiles:      []string{"file.go"},
 		AcceptanceEvidence: []AcceptanceEvidence{{ACID: "AC1", Evidence: []string{"diff"}}},
-		QualityCoverage: []QualityCoverage{
-			{Criterion: "criterion-a", ChangedSurface: "file.go", EvidenceChecked: []string{"criterion evidence"}},
-			{Criterion: "criterion-b", ChangedSurface: "file.go", EvidenceChecked: []string{"criterion gap"}},
-		},
-		Findings:   []Finding{{Severity: "low", Category: "criterion-b", Summary: "criterion gap", BlocksAcceptance: false}},
-		Confidence: "high",
+		QualityPasses:      []string{"criterion-a"},
+		QualityGaps:        []string{"criterion-b"},
+		Findings:           []Finding{{Severity: "low", Category: "criterion-b", Summary: "criterion gap", BlocksAcceptance: false}},
+		Confidence:         "high",
 	}, Evidence{
 		Task:      task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},
 		Profiles:  profile.Bundle{Quality: quality},
@@ -291,10 +500,10 @@ func TestValidateVerdictForEvidenceEnforcesQualityScore(t *testing.T) {
 	}
 }
 
-func TestQualityFindingScoreReturnsFullScoreWhenTotalWeightIsZero(t *testing.T) {
+func TestQualityPassScoreReturnsFullScoreWhenTotalWeightIsZero(t *testing.T) {
 	t.Parallel()
 	quality := &profile.Quality{ReviewDimensions: []profile.ReviewDimension{{ID: "criterion-a", Weight: 0}}}
-	if got := qualityFindingScore([]Finding{{Category: "criterion-a"}}, quality); got != 100 {
+	if got := qualityPassScore(map[string]bool{}, quality); got != 100 {
 		t.Fatalf("score = %d, want 100", got)
 	}
 }
@@ -307,7 +516,6 @@ func TestValidateVerdictForEvidenceRejectsAcceptedWithBlockingFinding(t *testing
 		AcceptanceEvidence: []AcceptanceEvidence{{ACID: "AC1", Evidence: []string{"diff"}}},
 		Findings:           []Finding{{Severity: "medium", Category: "correctness", Summary: "ordering bug", BlocksAcceptance: false}},
 		Confidence:         "high",
-		QualityCoverage:    []QualityCoverage{},
 	}, Evidence{
 		Task:      task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},
 		DiffDirty: true,
@@ -328,7 +536,6 @@ func TestValidateVerdictForEvidenceDefaultAllowsLowSeverityFinding(t *testing.T)
 		AcceptanceEvidence: []AcceptanceEvidence{{ACID: "AC1", Evidence: []string{"diff"}}},
 		Findings:           []Finding{{Severity: "low", Category: "style", Summary: "wording", BlocksAcceptance: false}},
 		Confidence:         "medium",
-		QualityCoverage:    []QualityCoverage{},
 	}, Evidence{
 		Task:      task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},
 		DiffDirty: true,
@@ -346,7 +553,6 @@ func TestValidateVerdictForEvidenceBlockingSeveritiesCanRequireLowSeverityFindin
 		AcceptanceEvidence: []AcceptanceEvidence{{ACID: "AC1", Evidence: []string{"diff"}}},
 		Findings:           []Finding{{Severity: "low", Category: "style", Summary: "wording", BlocksAcceptance: false}},
 		Confidence:         "medium",
-		QualityCoverage:    []QualityCoverage{},
 	}, Evidence{
 		Task: task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},
 		Profiles: profile.Bundle{Quality: &profile.Quality{PassPolicy: profile.PassPolicy{
@@ -370,7 +576,6 @@ func TestValidateVerdictForEvidenceRejectsBlocksAcceptanceMismatch(t *testing.T)
 		AcceptanceEvidence: []AcceptanceEvidence{{ACID: "AC1", Evidence: []string{"diff"}}},
 		Findings:           []Finding{{Severity: "low", Category: "style", Summary: "wording", BlocksAcceptance: true}},
 		Confidence:         "medium",
-		QualityCoverage:    []QualityCoverage{},
 	}, Evidence{
 		Task:      task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},
 		DiffDirty: true,
@@ -388,12 +593,12 @@ func TestValidateVerdictForEvidenceAllowsBlocksAcceptanceMismatchOnNeedsRevision
 	// flag: the flag is moot when the verdict is already needs_revision, and rejecting
 	// here would discard actionable next_work_order feedback and stall the AFK loop.
 	err := ValidateVerdictForEvidence(Verdict{
-		Status:          "needs_revision",
-		Summary:         "needs work",
-		NextWorkOrder:   "fix the failing test",
-		Findings:        []Finding{{Severity: "medium", Category: "correctness", Summary: "bug", BlocksAcceptance: false}},
-		Confidence:      "medium",
-		QualityCoverage: []QualityCoverage{},
+		Status:         "needs_revision",
+		Summary:        "needs work",
+		NextWorkOrder:  "fix the failing test",
+		AcceptanceGaps: []string{"AC1"},
+		Findings:       []Finding{{Severity: "medium", Category: "correctness", Summary: "bug", BlocksAcceptance: false}},
+		Confidence:     "medium",
 	}, Evidence{
 		Task: task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},
 		Profiles: profile.Bundle{Quality: &profile.Quality{PassPolicy: profile.PassPolicy{
@@ -406,7 +611,7 @@ func TestValidateVerdictForEvidenceAllowsBlocksAcceptanceMismatchOnNeedsRevision
 	}
 }
 
-func TestValidateVerdictForEvidenceAllowsDiscussionItemsOnlyForAccepted(t *testing.T) {
+func TestValidateVerdictForEvidenceIgnoresDiscussionItemsOnNeedsRevision(t *testing.T) {
 	evidence := Evidence{
 		Task: task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "done"}}},
 	}
@@ -417,7 +622,6 @@ func TestValidateVerdictForEvidenceAllowsDiscussionItemsOnlyForAccepted(t *testi
 		AcceptanceEvidence: []AcceptanceEvidence{{ACID: "AC1", Evidence: []string{"diff"}}},
 		DiscussionItems:    []DiscussionItem{{Topic: "AC wording", Summary: "Future tasks could clarify value coercion."}},
 		Confidence:         "medium",
-		QualityCoverage:    []QualityCoverage{},
 	}
 	if err := ValidateVerdictForEvidence(accepted, evidence); err != nil {
 		t.Fatalf("accepted discussion item rejected: %v", err)
@@ -428,10 +632,9 @@ func TestValidateVerdictForEvidenceAllowsDiscussionItemsOnlyForAccepted(t *testi
 		DiscussionItems: []DiscussionItem{{Topic: "AC wording", Summary: "Not relevant before acceptance."}},
 		Confidence:      "medium",
 		NextWorkOrder:   "fix it",
-		QualityCoverage: []QualityCoverage{},
 	}
-	if err := ValidateVerdictForEvidence(revision, evidence); err == nil || !strings.Contains(err.Error(), "discussion_items") {
-		t.Fatalf("expected non-accepted discussion item rejection, got %v", err)
+	if err := ValidateVerdictForEvidence(revision, evidence); err != nil {
+		t.Fatalf("non-accepted optional discussion item must not discard the handoff: %v", err)
 	}
 }
 
@@ -466,5 +669,18 @@ func TestNewAdapterRequestSerializesErrorsAsStrings(t *testing.T) {
 	}
 	if strings.Contains(text, `"ParseError"`) || strings.Contains(text, `"RunError"`) {
 		t.Fatalf("request leaked Go field names: %s", text)
+	}
+}
+
+func TestNewAdapterRequestUsesReviewContractSourceCWD(t *testing.T) {
+	t.Parallel()
+	request := NewAdapterRequest(Evidence{
+		Task: task.Task{Scope: task.Scope{CWD: "/worktrees/task-1"}},
+		ReviewContractContext: ReviewContractContext{
+			SourceCWD: "/source/repo",
+		},
+	})
+	if got := request.Evidence.SourceCWD; got != "/source/repo" {
+		t.Fatalf("source_cwd = %q, want original repository path", got)
 	}
 }

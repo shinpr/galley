@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -144,7 +145,7 @@ func TestRunOnceUsesModelSupervisorProvider(t *testing.T) {
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
 	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
-	codexBin := writeFakeCodexSupervisor(t, `{"status":"accepted","summary":"codex accepted","acceptance_gaps":[],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["diff"]}],"findings":[],"quality_coverage":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}`)
+	codexBin := writeFakeCodexSupervisor(t, `{"status":"accepted","summary":"codex accepted","acceptance_gaps":[],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["diff"]}],"quality_passes":[],"quality_gaps":[],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}`)
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -269,8 +270,113 @@ fi
 	if doneTask.Attempts[0].SupervisorVerdict != "needs_revision" || doneTask.Attempts[1].SupervisorVerdict != "accepted" {
 		t.Fatalf("attempt verdicts got %#v", doneTask.Attempts)
 	}
+	if len(doneTask.RevisionRequests) != 1 || doneTask.RevisionRequests[0].Status != "addressed" {
+		t.Fatalf("accepted task did not retain the addressed supervisor revision: %#v", doneTask.RevisionRequests)
+	}
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", "supervisor_verdict.json"), 1)
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-2", "supervisor_verdict.json"), 1)
+	effectiveTask := string(mustReadSingleGlob(t, filepath.Join(root, "runs", "*", "attempt-2", "task.effective.yaml")))
+	if !strings.Contains(effectiveTask, "id: supervisor-attempt-1-finding-1") {
+		t.Fatalf("attempt-2 effective task missing supervisor revision:\n%s", effectiveTask)
+	}
+	if strings.Contains(effectiveTask, "supervisor-attempt-1-gap") || strings.Contains(effectiveTask, "AC1 lacks independent verification") {
+		t.Fatalf("attempt-2 effective task contains acceptance gap as a revision:\n%s", effectiveTask)
+	}
+
+	planData := mustReadSingleGlob(t, filepath.Join(root, "runs", "*", "attempt-2", "command_plan.json"))
+	var plan struct {
+		Argv []string `json:"argv"`
+	}
+	if err := json.Unmarshal(planData, &plan); err != nil {
+		t.Fatalf("decode attempt-2 command plan: %v", err)
+	}
+	if len(plan.Argv) == 0 {
+		t.Fatal("attempt-2 command plan argv is empty")
+	}
+	retryPrompt := plan.Argv[len(plan.Argv)-1]
+	for _, want := range []string{
+		"source=`supervisor`",
+		"executor reported risks",
+		"Resolve the reported risks and rerun verification.",
+		"`revision:supervisor-attempt-1-finding-1`",
+	} {
+		if !strings.Contains(retryPrompt, want) {
+			t.Fatalf("attempt-2 prompt missing %q:\n%s", want, retryPrompt)
+		}
+	}
+	if strings.Contains(retryPrompt, "supervisor-attempt-1-gap") || strings.Contains(retryPrompt, "AC1 lacks independent verification") {
+		t.Fatalf("attempt-2 prompt contains acceptance gap as a revision:\n%s", retryPrompt)
+	}
+}
+
+func TestRunOncePersistsFinalSupervisorRevisionAcrossRequeue(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+	claudeBin := writeFakeClaude(t, `echo change > daemon-output.txt
+echo '{"status":"completed_with_risks","summary":"risky","files_modified":["daemon-output.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[{"type":"partial_verification","detail":"needs retry","mitigation":"retry with corrective work order","needs_human_review":true}]}'
+`)
+	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonTask(t, taskPath, repo)
+	setLoopBudget(t, taskPath, 1)
+
+	err := runTestDaemon(context.Background(), Options{
+		Root:               root,
+		SystemPromptFile:   promptPath,
+		JSONSchemaFile:     schemaPath,
+		Supervisor:         "claude",
+		ClaudeBin:          claudeBin,
+		Once:               true,
+		MaxConcurrentTasks: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failedPath := filepath.Join(root, "tasks", "failed", "task.yaml")
+	failedTask, err := task.Load(failedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failedTask.Status != "needs_supervisor_review" {
+		t.Fatalf("status got %q", failedTask.Status)
+	}
+	assertSupervisorRevisionState(t, failedTask, "supervisor-attempt-1-finding-1", "executor reported risks", "Resolve the reported risks and rerun verification.")
+
+	requeued, err := task.Requeue(failedPath, task.RequeueOptions{Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSupervisorRevisionState(t, requeued.Task, "supervisor-attempt-1-finding-1", "executor reported risks", "Resolve the reported risks and rerun verification.")
+
+	acceptedClaudeBin := writeFakeClaude(t, `echo fixed >> daemon-output.txt
+echo '{"status":"completed","summary":"fixed","files_modified":["daemon-output.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"},{"id":"revision:supervisor-attempt-1-finding-1","status":"satisfied","evidence":["diff"],"notes":"resolved"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}'
+`)
+	if err := runTestDaemon(context.Background(), Options{
+		Root:               root,
+		SystemPromptFile:   promptPath,
+		JSONSchemaFile:     schemaPath,
+		Supervisor:         "claude",
+		ClaudeBin:          acceptedClaudeBin,
+		Once:               true,
+		MaxConcurrentTasks: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	doneTask, err := task.Load(filepath.Join(root, "tasks", "done", "task.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doneTask.Status != "accepted" || len(doneTask.RevisionRequests) != 1 || doneTask.RevisionRequests[0].Status != "addressed" {
+		t.Fatalf("accepted task did not retain addressed revision audit: status=%q revisions=%#v", doneTask.Status, doneTask.RevisionRequests)
+	}
+	for _, risk := range doneTask.Risks {
+		if strings.HasPrefix(risk.ID, "requeue-supervisor-attempt-") {
+			t.Fatalf("accepted task retained stale supervisor guidance: %#v", doneTask.Risks)
+		}
+	}
 }
 
 func TestRunOncePreservesExecutorDecisionsWithVerificationEvidence(t *testing.T) {
@@ -782,6 +888,7 @@ func TestRunOnceStopsAfterConsecutiveNoDiffAttempts(t *testing.T) {
 	if len(failedTask.Risks) == 0 || !strings.Contains(failedTask.Risks[len(failedTask.Risks)-1].Detail, "no git diff") {
 		t.Fatalf("progress risk missing: %#v", failedTask.Risks)
 	}
+	assertSupervisorRevisionState(t, failedTask, "supervisor-attempt-1-finding-1", "no repository diff was produced", "Make the required repository change and return valid structured JSON.")
 }
 
 func writeFakeClaude(t *testing.T, body string) string {
@@ -794,16 +901,24 @@ for arg in "$@"; do
 done
 if [ "$supervisor" = "1" ]; then
   request="$(cat)"
+  revision_gap=
+  if printf '%s' "$request" | grep -q 'supervisor-attempt-1-finding-1'; then
+    revision_gap=',"revision:supervisor-attempt-1-finding-1"'
+  fi
   if printf '%s' "$request" | grep -q '"status":"hard_stop"'; then
-    printf '%s\n' '{"status":"hard_stop","summary":"executor reported hard_stop","acceptance_gaps":[],"reviewed_files":[],"acceptance_evidence":[],"findings":[{"severity":"high","category":"execution","file":"","summary":"executor reported hard_stop","blocks_acceptance":true}],"quality_coverage":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}'
+    printf '%s\n' '{"status":"hard_stop","summary":"executor reported hard_stop","acceptance_gaps":[],"reviewed_files":[],"acceptance_evidence":[],"quality_passes":[],"quality_gaps":[],"findings":[{"severity":"high","category":"execution","file":"","summary":"executor reported hard_stop","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}'
   elif printf '%s' "$request" | grep -q '"parse_error":"'; then
-    printf '%s\n' '{"status":"needs_revision","summary":"executor result was invalid","acceptance_gaps":["executor result JSON is invalid"],"reviewed_files":[],"acceptance_evidence":[],"findings":[{"severity":"medium","category":"verification","file":"","summary":"executor result JSON is invalid","blocks_acceptance":true}],"quality_coverage":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"Return valid structured JSON and preserve any useful workspace changes."}'
+    printf '%s\n' '{"status":"needs_revision","summary":"executor result was invalid","acceptance_gaps":["AC1"'"$revision_gap"'],"reviewed_files":[],"acceptance_evidence":[],"quality_passes":[],"quality_gaps":[],"findings":[{"severity":"medium","category":"verification","file":"","summary":"executor result JSON is invalid","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"Return valid structured JSON and preserve any useful workspace changes."}'
   elif printf '%s' "$request" | grep -q '"status":"completed_with_risks"'; then
-    printf '%s\n' '{"status":"needs_revision","summary":"executor reported risks","acceptance_gaps":["executor reported risks"],"reviewed_files":[],"acceptance_evidence":[],"findings":[{"severity":"medium","category":"verification","file":"","summary":"executor reported risks","blocks_acceptance":true}],"quality_coverage":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"Resolve the reported risks and rerun verification."}'
+    printf '%s\n' '{"status":"needs_revision","summary":"executor reported risks","acceptance_gaps":["AC1"'"$revision_gap"'],"reviewed_files":[],"acceptance_evidence":[],"quality_passes":[],"quality_gaps":[],"findings":[{"severity":"medium","category":"verification","file":"","summary":"executor reported risks","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"Resolve the reported risks and rerun verification."}'
   elif printf '%s' "$request" | grep -q '"diff_dirty":false'; then
-    printf '%s\n' '{"status":"needs_revision","summary":"no repository diff was produced","acceptance_gaps":["no repository diff was produced"],"reviewed_files":[],"acceptance_evidence":[],"findings":[{"severity":"medium","category":"acceptance","file":"","summary":"no repository diff was produced","blocks_acceptance":true}],"quality_coverage":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"Make the required repository change and return valid structured JSON."}'
+    printf '%s\n' '{"status":"needs_revision","summary":"no repository diff was produced","acceptance_gaps":["AC1"'"$revision_gap"'],"reviewed_files":[],"acceptance_evidence":[],"quality_passes":[],"quality_gaps":[],"findings":[{"severity":"medium","category":"acceptance","file":"","summary":"no repository diff was produced","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"Make the required repository change and return valid structured JSON."}'
   else
-    printf '%s\n' '{"status":"accepted","summary":"fake claude supervisor accepted","acceptance_gaps":[],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["diff"]}],"findings":[],"quality_coverage":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}'
+    if printf '%s' "$request" | grep -q 'supervisor-attempt-1-finding-1'; then
+      printf '%s\n' '{"status":"accepted","summary":"fake claude supervisor accepted","acceptance_gaps":[],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["diff"]},{"ac_id":"revision:supervisor-attempt-1-finding-1","evidence":["resolved in the retry diff"]}],"quality_passes":[],"quality_gaps":[],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}'
+    else
+      printf '%s\n' '{"status":"accepted","summary":"fake claude supervisor accepted","acceptance_gaps":[],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["diff"]}],"quality_passes":[],"quality_gaps":[],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}'
+    fi
   fi
   exit 0
 fi

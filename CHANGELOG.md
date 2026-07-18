@@ -6,6 +6,19 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- Supervisor review now completes AC review before quality review, records quality pass and gap IDs independently from consolidated findings, and persists passed AC and quality items across attempts. Changed task direction, source repository path, or placed input content invalidates stale passes.
+- Codex supervisor review now builds acceptance results, quality results, consolidated findings, and the final verdict through explicit completion gates.
+- Executor summaries report current-attempt changes for regression routing while `files_modified` and supervisor scope validation use the cumulative final diff.
+- Packaged Galley plugins are version `0.1.27` and include the daemon-owned review-progress task schema.
+
+### Fixed
+
+- Supervisor revision handoffs now persist before the next attempt and retain addressed history plus unresolved work across retries, terminal escalation, shutdown, and requeue.
+- Non-accepted supervisor verdicts preserve actionable findings and work orders when AC or quality results are incomplete or malformed. The affected result kind cannot advance persisted passes, while recognized gaps still reopen them without failing the task.
+- Galley runs the supervisor once per executor attempt. Supervisor process and verdict failures retain their artifacts and move the task to supervisor review instead of repeating the same review against unchanged evidence.
+
 ## v0.10.2 - 2026-07-15
 
 ### Changed

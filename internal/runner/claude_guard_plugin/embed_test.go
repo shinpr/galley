@@ -175,7 +175,7 @@ func TestRequireFinalJSONRejectsInvalidScopeExpansionPath(t *testing.T) {
 	}
 }
 
-func TestRequireFinalJSONRejectsEmptySupervisorQualityEvidence(t *testing.T) {
+func TestRequireFinalJSONRejectsConflictingSupervisorQualityResult(t *testing.T) {
 	dir, err := Ensure(filepath.Join(t.TempDir(), "guard"))
 	if err != nil {
 		t.Fatal(err)
@@ -183,9 +183,8 @@ func TestRequireFinalJSONRejectsEmptySupervisorQualityEvidence(t *testing.T) {
 	result := map[string]any{
 		"status": "accepted", "summary": "done", "acceptance_gaps": []any{}, "reviewed_files": []string{"file.go"},
 		"acceptance_evidence": []any{}, "findings": []any{}, "residual_risks": []any{}, "discussion_items": []any{}, "confidence": "high", "next_work_order": "",
-		"quality_coverage": []any{map[string]any{
-			"criterion": "criterion-a", "changed_surface": "changed-surface", "evidence_checked": []string{" "},
-		}},
+		"quality_passes": []string{"criterion-a"},
+		"quality_gaps":   []string{" criterion-a "},
 	}
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
@@ -202,8 +201,48 @@ func TestRequireFinalJSONRejectsEmptySupervisorQualityEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("guard script failed: %v\n%s", err, output)
 	}
-	if got := string(output); !strings.Contains(got, `"decision": "block"`) || !strings.Contains(got, "evidence_checked must contain non-empty strings") {
-		t.Fatalf("expected quality evidence rejection, got %s", got)
+	if got := string(output); !strings.Contains(got, `"decision": "block"`) || !strings.Contains(got, "appears in both or multiple results") {
+		t.Fatalf("expected conflicting quality result rejection, got %s", got)
+	}
+}
+
+func TestRequireFinalJSONRequiresQualityResultArrays(t *testing.T) {
+	dir, err := Ensure(filepath.Join(t.TempDir(), "guard"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(dir, "scripts", "require-final-json.py")
+	tests := []struct{ name, missing string }{
+		{name: "missing passes", missing: "quality_passes"},
+		{name: "missing gaps", missing: "quality_gaps"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := map[string]any{
+				"status": "accepted", "summary": "reviewed", "acceptance_gaps": []any{}, "reviewed_files": []string{"file.go"},
+				"acceptance_evidence": []any{}, "quality_passes": []any{}, "quality_gaps": []any{}, "findings": []any{}, "residual_risks": []any{}, "discussion_items": []any{}, "confidence": "high",
+				"next_work_order": "",
+			}
+			delete(result, tt.missing)
+			resultJSON, err := json.Marshal(result)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hookInput, err := json.Marshal(map[string]string{"last_assistant_message": string(resultJSON)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			cmd := pythonCommand(t, script)
+			cmd.Env = append(os.Environ(), "GALLEY_CLAUDE_GUARD_MODE=supervisor")
+			cmd.Stdin = strings.NewReader(string(hookInput))
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("guard script failed: %v\n%s", err, output)
+			}
+			if !strings.Contains(string(output), `"decision": "block"`) {
+				t.Fatalf("expected missing %s to block; output: %s", tt.missing, output)
+			}
+		})
 	}
 }
 

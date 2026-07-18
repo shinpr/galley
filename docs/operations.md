@@ -41,7 +41,9 @@ Attempt evidence includes:
 - `git_status.json`
 - `diff.patch`
 
-When the quality profile defines review dimensions, every supervisor verdict includes `quality_coverage` for each criterion and changed-surface pairing, with the repository evidence inspected. Galley requires coverage for every configured dimension and enforces the active pass policy from categorized findings before accepting.
+On the first supervisor attempt, every task AC is reviewed before every configured quality dimension. Galley stores passed items in daemon-owned `task.review_progress`; later attempts review only unfinished items plus passed items implicated by the executor's current-attempt summary. A normal `task requeue` preserves this progress. A new `task queue`, changed task direction or review contract, changed `scope.cwd`, or changed content in a placed task input resets it.
+
+Each verdict lists reviewed quality dimension IDs in `quality_passes` or `quality_gaps`. Galley combines those results with persisted passes and enforces the active required-dimension and weighted-score policy before accepting. A non-accepted verdict remains actionable when an AC or quality result array is malformed. That result kind cannot advance persisted passes, while recognized gap IDs still reopen them.
 
 Galley also records `workspace.json` for the effective execution workspace and writes `profiles.json` when quality or environment profiles are loaded.
 
@@ -196,9 +198,9 @@ Galley uses two timeout concepts:
 
 Executor idle timeouts are recorded as `error_kind: idle_timeout` and as `idle_timed_out: true` in run evidence, then the task loop continues according to the task loop budget.
 
-Built-in supervisor subprocess failures caused by idle timeout, total timeout, or forced kill are retried up to two additional times inside the same executor attempt. Each try writes evidence under `runs/<run-id>/attempt-N/supervisor-try-<M>/`.
+Galley runs one built-in supervisor evaluation per executor attempt. A supervisor process or verdict failure writes evidence under `runs/<run-id>/attempt-N/supervisor-try-1/` and moves the task to supervisor review; requeue after changing the supervisor conditions or when the backend is healthy.
 
-If every supervisor try is killed by the idle-output watchdog, Galley records `error_phase: supervisor` and `error_kind: supervisor_idle_timeout`. Requeue the task, or adjust `--idle-timeout` / `--supervisor`.
+If the supervisor is killed by the idle-output watchdog, Galley records `error_phase: supervisor` and `error_kind: supervisor_idle_timeout`. Requeue the task, or adjust `--idle-timeout` / `--supervisor`.
 
 ## Operational Notes
 

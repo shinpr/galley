@@ -65,6 +65,35 @@ func TestRequeueMovesFailedTaskToQueued(t *testing.T) {
 	}
 }
 
+func TestRequeuePreservesSupervisorReviewProgress(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	failedPath := filepath.Join(root, "tasks", "failed", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(failedPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(writeTaskYAML(t, "loop_budget: 3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Status = "needs_supervisor_review"
+	loaded.ReviewProgress = &ReviewProgress{
+		ContractHash: "current",
+		Acceptance:   []string{loaded.AcceptanceCriteria[0].ID},
+	}
+	if err := Save(failedPath, loaded); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Requeue(failedPath, RequeueOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Task.ReviewProgress == nil || result.Task.ReviewProgress.ContractHash != "current" {
+		t.Fatalf("review progress = %#v", result.Task.ReviewProgress)
+	}
+}
+
 func TestRequeueAllowsRunningTask(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

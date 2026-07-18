@@ -36,6 +36,29 @@ func TestPrepareRejectsExistingDestination(t *testing.T) {
 	}
 }
 
+func TestPrepareRecordsPlacedContentDigest(t *testing.T) {
+	t.Parallel()
+	workDir := t.TempDir()
+	source := filepath.Join(t.TempDir(), "requirements.md")
+	if err := os.WriteFile(source, []byte("requirement v1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	prepared, err := Prepare(workDir, []task.InputFile{{Source: source, Destination: "docs/requirements.md"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prepared) != 1 {
+		t.Fatalf("prepared files = %d, want 1", len(prepared))
+	}
+	if got, want := prepared[0].ContentSHA256, "28d5141613cab6847c7cf670a86e2a9f045f9eed50fa448d718ad3cf25e67a1c"; got != want {
+		t.Fatalf("content digest = %q, want %q", got, want)
+	}
+	if ContractDigest(prepared) == ContractDigest([]Prepared{{Destination: "docs/requirements.md", ContentSHA256: "changed"}}) {
+		t.Fatal("contract digest did not change with placed content")
+	}
+}
+
 func TestCleanupNonCommittedRemovesOnlyPreparedFile(t *testing.T) {
 	t.Parallel()
 	workDir := t.TempDir()

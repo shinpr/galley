@@ -3,12 +3,35 @@ package supervisor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 )
+
+func TestDecodeSupervisorVerdictClassifiesContractErrors(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+	}{
+		{name: "invalid JSON", output: "not json"},
+		{name: "invalid verdict", output: `{"status":"needs_revision"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := decodeSupervisorVerdict("claude", []byte(tt.output), Evidence{})
+			if err == nil {
+				t.Fatal("expected supervisor verdict contract error")
+			}
+			var contractErr *VerdictContractError
+			if !errors.As(err, &contractErr) {
+				t.Fatalf("error type got %T, want *VerdictContractError: %v", err, err)
+			}
+		})
+	}
+}
 
 func TestExtractJSONObjectStripsSurroundingProse(t *testing.T) {
 	cases := map[string]string{
@@ -95,8 +118,15 @@ printf '%s\n' '{"event":"done"}'
 	if strings.Count(string(args), "--model provider-model-x") != 1 {
 		t.Fatalf("codex args must contain one configured model: %s", args)
 	}
-	if _, err := os.Stat(filepath.Join(artifactDir, "supervisor-verdict.schema.json")); err != nil {
+	schema, err := os.ReadFile(filepath.Join(artifactDir, "supervisor-verdict.schema.json"))
+	if err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(string(schema), `"quality_passes"`) || !strings.Contains(string(schema), `"quality_gaps"`) {
+		t.Fatalf("Codex supervisor schema lost quality results: %s", schema)
+	}
+	if strings.Contains(string(schema), `"uniqueItems"`) {
+		t.Fatalf("Codex supervisor schema retained unsupported uniqueItems: %s", schema)
 	}
 }
 

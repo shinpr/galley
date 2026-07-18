@@ -213,6 +213,7 @@ func normalizeCodexOutputSchema(node any) {
 	case map[string]any:
 		delete(v, "allOf")
 		delete(v, "pattern")
+		delete(v, "uniqueItems")
 		props, _ := v["properties"].(map[string]any)
 		originalRequired := requiredNameSet(v["required"])
 		if props != nil {

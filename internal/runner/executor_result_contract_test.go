@@ -55,7 +55,9 @@ func TestExecutorResultSchemaLeavesQualityJudgmentToSupervisor(t *testing.T) {
 	if err := json.Unmarshal(data, &schema); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := schema.Properties["quality_coverage"]; ok {
-		t.Fatalf("executor schema must not expose supervisor quality coverage")
+	for _, field := range []string{"quality_passes", "quality_gaps"} {
+		if _, ok := schema.Properties[field]; ok {
+			t.Fatalf("executor schema must not expose supervisor field %q", field)
+		}
 	}
 }

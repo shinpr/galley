@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/task"
 )
 
@@ -34,6 +35,21 @@ func TestResolveExecutorResultIncludesCodexLastMessageParseError(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("error missing %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestMergeAttemptEvidenceDoesNotOverwriteSupervisorAcceptanceState(t *testing.T) {
+	t.Parallel()
+	loaded := task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Status: "satisfied"}}}
+	mergeAttemptEvidence(&loaded, attemptOutcome{ExecutorResult: runner.ExecutorResult{
+		Status: "completed",
+		AcceptanceCriteria: []runner.ExecutorAcceptanceCriterion{{
+			ID: "AC1", Status: "not_satisfied", Evidence: []string{"executor self-report"},
+		}},
+	}}, "run", "/work", "/attempt")
+
+	if loaded.AcceptanceCriteria[0].Status != "satisfied" {
+		t.Fatalf("acceptance status = %q, want supervisor-owned satisfied", loaded.AcceptanceCriteria[0].Status)
 	}
 }
 

@@ -85,12 +85,16 @@ func RunAdapter(ctx context.Context, opts AdapterOptions, evidence Evidence) (Ve
 	if err != nil {
 		return Verdict{}, err
 	}
+	return decodeSupervisorVerdict(opts.Provider, output, evidence)
+}
+
+func decodeSupervisorVerdict(provider string, output []byte, evidence Evidence) (Verdict, error) {
 	var verdict Verdict
 	if err := json.Unmarshal(extractJSONObject(output), &verdict); err != nil {
-		return Verdict{}, fmt.Errorf("decode %s supervisor verdict: %w", opts.Provider, err)
+		return Verdict{}, &VerdictContractError{Err: fmt.Errorf("decode %s supervisor verdict: %w", provider, err)}
 	}
 	if err := ValidateVerdictForEvidence(verdict, evidence); err != nil {
-		return Verdict{}, err
+		return Verdict{}, &VerdictContractError{Err: err}
 	}
 	return verdict, nil
 }
@@ -186,6 +190,10 @@ func runGrokAdapter(ctx context.Context, opts AdapterOptions, request []byte) ([
 
 // NewAdapterRequest converts in-process evidence into the adapter JSON contract.
 func NewAdapterRequest(evidence Evidence) AdapterRequest {
+	sourceCWD := evidence.ReviewContractContext.SourceCWD
+	if sourceCWD == "" {
+		sourceCWD = evidence.Task.Scope.CWD
+	}
 	return AdapterRequest{Evidence: AdapterEvidence{
 		Task:                   evidence.Task,
 		Profiles:               evidence.Profiles,
@@ -197,7 +205,7 @@ func NewAdapterRequest(evidence Evidence) AdapterRequest {
 		DiffError:              errorString(evidence.DiffError),
 		Attempt:                evidence.Attempt,
 		AttemptsLeft:           evidence.AttemptsLeft,
-		SourceCWD:              evidence.Task.Scope.CWD,
+		SourceCWD:              sourceCWD,
 		PreflightResult:        evidence.PreflightResult,
 		SetupResult:            evidence.SetupResult,
 		SetupEnvironmentUpdate: evidence.SetupEnvironmentUpdate,
@@ -239,13 +247,17 @@ func runCodexAdapter(ctx context.Context, opts AdapterOptions, request []byte) (
 	outPath := filepath.Join(dir, "codex_supervisor_last_message.json")
 	eventsPath := filepath.Join(dir, "codex_supervisor_events.jsonl")
 	prompt := prompts.CodexSupervisor() + "\n\n# Evidence JSON\n\n" + string(request)
+	schema, err := runner.CodexCompatibleOutputSchema(schemas.SupervisorVerdict)
+	if err != nil {
+		return nil, fmt.Errorf("prepare Codex supervisor schema: %w", err)
+	}
 	if err := writeSupervisorFile(requestPath, request); err != nil {
 		return nil, err
 	}
 	if err := writeSupervisorFile(promptPath, []byte(prompt)); err != nil {
 		return nil, err
 	}
-	if err := writeSupervisorFile(schemaPath, []byte(schemas.SupervisorVerdict)); err != nil {
+	if err := writeSupervisorFile(schemaPath, []byte(schema)); err != nil {
 		return nil, err
 	}
 	args := []string{

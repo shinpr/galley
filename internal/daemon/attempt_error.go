@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/shinpr/galley/internal/runner"
+	"github.com/shinpr/galley/internal/supervisor"
 	"github.com/shinpr/galley/internal/task"
 )
 
@@ -27,6 +28,13 @@ func appendFailureAttempt(loaded *task.Task, phase, kind string, err error, arti
 		Summary:           message,
 		Error:             attemptError(phase, kind, err, artifactDir),
 	})
+}
+
+func supervisorFailureKind(err error) string {
+	if supervisor.IsVerdictContractError(err) {
+		return "supervisor_invalid_verdict"
+	}
+	return classifyFailureKind("supervisor_failed", err)
 }
 
 func attemptError(phase, kind string, err error, artifactDir string) *task.AttemptError {

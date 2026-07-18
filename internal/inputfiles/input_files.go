@@ -1,11 +1,15 @@
 package inputfiles
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/shinpr/galley/internal/task"
@@ -15,11 +19,12 @@ const maxInputFileBytes = 10 * 1024 * 1024
 
 // Prepared records an input file copied into an executor worktree.
 type Prepared struct {
-	Source      string `json:"source"`
-	Destination string `json:"destination"`
-	Path        string `json:"path"`
-	Description string `json:"description,omitempty"`
-	Commit      bool   `json:"commit"`
+	Source        string `json:"source"`
+	Destination   string `json:"destination"`
+	Path          string `json:"path"`
+	Description   string `json:"description,omitempty"`
+	Commit        bool   `json:"commit"`
+	ContentSHA256 string `json:"content_sha256"`
 }
 
 // Prepare copies task input files into a worktree without overwriting existing files.
@@ -49,19 +54,32 @@ func Prepare(workDir string, files []task.InputFile) ([]Prepared, error) {
 			_ = CleanupPrepared(prepared)
 			return nil, fmt.Errorf("files[%d].destination: %w", i, err)
 		}
-		if err := copyFileNoOverwrite(file.Source, dst); err != nil {
+		contentSHA256, err := copyFileNoOverwrite(file.Source, dst)
+		if err != nil {
 			_ = CleanupPrepared(prepared)
 			return nil, fmt.Errorf("copy input file %s to %s: %w", file.Source, dst, err)
 		}
 		prepared = append(prepared, Prepared{
-			Source:      file.Source,
-			Destination: filepath.Clean(file.Destination),
-			Path:        dst,
-			Description: file.Description,
-			Commit:      file.Commit,
+			Source:        file.Source,
+			Destination:   filepath.Clean(file.Destination),
+			Path:          dst,
+			Description:   file.Description,
+			Commit:        file.Commit,
+			ContentSHA256: contentSHA256,
 		})
 	}
 	return prepared, nil
+}
+
+// ContractDigest identifies the exact task input bytes placed in the worktree.
+func ContractDigest(files []Prepared) string {
+	var body bytes.Buffer
+	for _, file := range files {
+		writeDigestValue(&body, filepath.ToSlash(file.Destination))
+		writeDigestValue(&body, file.ContentSHA256)
+	}
+	sum := sha256.Sum256(body.Bytes())
+	return hex.EncodeToString(sum[:])
 }
 
 // CleanupPrepared removes files copied during Prepare after a later setup error.
@@ -108,58 +126,65 @@ func destination(workDir, dst string) (string, error) {
 	return filepath.Join(workDir, filepath.Clean(dst)), nil
 }
 
-func copyFileNoOverwrite(src, dst string) error {
+func copyFileNoOverwrite(src, dst string) (string, error) {
 	info, err := os.Lstat(src)
 	if err != nil {
-		return fmt.Errorf("stat %s: %w", src, err)
+		return "", fmt.Errorf("stat %s: %w", src, err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("source must not be a symlink: %s", src)
+		return "", fmt.Errorf("source must not be a symlink: %s", src)
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("source must be a regular file: %s", src)
+		return "", fmt.Errorf("source must be a regular file: %s", src)
 	}
 	if info.Size() > maxInputFileBytes {
-		return fmt.Errorf("source exceeds %d bytes: %s", maxInputFileBytes, src)
+		return "", fmt.Errorf("source exceeds %d bytes: %s", maxInputFileBytes, src)
 	}
 	source, err := os.Open(src)
 	if err != nil {
-		return fmt.Errorf("open %s: %w", src, err)
+		return "", fmt.Errorf("open %s: %w", src, err)
 	}
 	defer source.Close()
 	openedInfo, err := source.Stat()
 	if err != nil {
-		return fmt.Errorf("stat opened source %s: %w", src, err)
+		return "", fmt.Errorf("stat opened source %s: %w", src, err)
 	}
 	if !openedInfo.Mode().IsRegular() {
-		return fmt.Errorf("source must be a regular file after open: %s", src)
+		return "", fmt.Errorf("source must be a regular file after open: %s", src)
 	}
 	if openedInfo.Size() > maxInputFileBytes {
-		return fmt.Errorf("source exceeds %d bytes after open: %s", maxInputFileBytes, src)
+		return "", fmt.Errorf("source exceeds %d bytes after open: %s", maxInputFileBytes, src)
 	}
 	file, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
-			return fmt.Errorf("destination already exists: %s", dst)
+			return "", fmt.Errorf("destination already exists: %s", dst)
 		}
-		return fmt.Errorf("create %s: %w", dst, err)
+		return "", fmt.Errorf("create %s: %w", dst, err)
 	}
-	written, err := io.Copy(file, io.LimitReader(source, maxInputFileBytes+1))
+	hasher := sha256.New()
+	written, err := io.Copy(io.MultiWriter(file, hasher), io.LimitReader(source, maxInputFileBytes+1))
 	if err != nil {
 		_ = file.Close()
 		_ = os.Remove(dst)
-		return fmt.Errorf("write %s: %w", dst, err)
+		return "", fmt.Errorf("write %s: %w", dst, err)
 	}
 	if written > maxInputFileBytes {
 		_ = file.Close()
 		_ = os.Remove(dst)
-		return fmt.Errorf("source exceeds %d bytes while copying: %s", maxInputFileBytes, src)
+		return "", fmt.Errorf("source exceeds %d bytes while copying: %s", maxInputFileBytes, src)
 	}
 	if err := file.Close(); err != nil {
 		_ = os.Remove(dst)
-		return fmt.Errorf("write %s: %w", dst, err)
+		return "", fmt.Errorf("write %s: %w", dst, err)
 	}
-	return nil
+	return hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
+func writeDigestValue(body *bytes.Buffer, value string) {
+	body.WriteString(strconv.Itoa(len(value)))
+	body.WriteByte(':')
+	body.WriteString(value)
 }
 
 func ensureUnderRoot(root, path string) error {

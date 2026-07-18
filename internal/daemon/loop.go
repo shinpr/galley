@@ -13,7 +13,6 @@ import (
 	skeletonpreflight "github.com/shinpr/galley/internal/preflight/skeleton"
 	"github.com/shinpr/galley/internal/profile"
 	"github.com/shinpr/galley/internal/runartifact"
-	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/supervisor"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/internal/taskstate"
@@ -78,22 +77,9 @@ var stageExecutorOutput = func(ctx context.Context, opts Options, workDir, attem
 
 const progressNoDiffThreshold = 2
 
-// supervisorRetryBudget is the internal, fixed number of additional supervisor
-// evaluations Galley runs inside a single executor attempt when the supervisor
-// subprocess exits because of idle timeout, total timeout, or a forced
-// subprocess kill. It is intentionally not exposed as a
-// CLI flag, task YAML field, or profile field; supervisor stalls are treated
-// as transient runtime failures, not user-tunable behavior.
-const supervisorRetryBudget = 2
-
-// supervisorTotalAttempts is the maximum number of supervisor invocations per
-// executor attempt: the initial try plus supervisorRetryBudget retries.
-const supervisorTotalAttempts = supervisorRetryBudget + 1
-
 // supervisorRunner runs one supervisor evaluation against evidence using
-// tryDir as the artifact directory. A package-level function variable keeps
-// the retry orchestration testable without spawning a real codex/claude
-// process.
+// artifactDir as the artifact directory. A package-level function variable
+// keeps the handoff testable without spawning a real provider process.
 var supervisorRunner = defaultSupervisorRunner
 
 func defaultSupervisorRunner(ctx context.Context, opts Options, evidence supervisor.Evidence, tryDir, workDir string) (supervisor.Verdict, error) {
@@ -112,7 +98,7 @@ func defaultSupervisorRunner(ctx context.Context, opts Options, evidence supervi
 	}, evidence)
 }
 
-func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPath string, loaded *task.Task, prepared workspace.Prepared, profiles profile.Bundle, runDir, runID string, effectiveExecutor task.Executor) error {
+func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPath string, loaded *task.Task, prepared claimedWorkspace, profiles profile.Bundle, runDir, runID string, effectiveExecutor task.Executor) error {
 	fmt.Fprintf(os.Stderr, "galley: task %s running in %s (run_id=%s)\n", loaded.ID, prepared.CWD, runID)
 	effectiveOpts := opts
 	// Persist the resolved supervisor and its source as run evidence.
@@ -131,6 +117,7 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 	// implementation work order so the executor sees the readiness facts and
 	// threaded into supervisor evidence so reviewers can verify them.
 	setupResultEvidence, setupUpdateEvidence := setuppreflight.LoadRunEvidence(runDir, runID)
+	supervisor.ReconcileReviewProgressWithContext(loaded, profiles, prepared.ReviewContractContext)
 	promptTask := executionTask(*loaded, prepared.CWD, effectiveExecutor)
 	if preflightResult != nil {
 		// Runtime obligations below are the source of truth after preflight.
@@ -145,30 +132,33 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 			promptTask.Preflight = &preflightCopy
 		}
 	}
-	prompt := task.RenderWorkOrderWithProfiles(promptTask, profiles)
-	if preflightResult != nil {
-		prompt = skeletonpreflight.AppendObligations(prompt, preflightResult)
-	}
-	if setupResultEvidence != nil {
-		prompt = setuppreflight.AppendReadinessObligations(prompt, setupResultEvidence, setupUpdateEvidence)
-	}
 	budget := attemptBudget(loaded.ExecutionPolicy.LoopBudget)
 	consecutiveNoDiff := 0
+	revision := supervisorRevisionFromTask(promptTask)
 	for attempt := 1; budget < 0 || attempt <= budget; attempt++ {
+		attemptPromptTask := revision.applyToTask(promptTask)
+		prompt := task.RenderWorkOrderWithProfiles(attemptPromptTask, profiles)
+		if preflightResult != nil {
+			prompt = skeletonpreflight.AppendObligations(prompt, preflightResult)
+		}
+		if setupResultEvidence != nil {
+			prompt = setuppreflight.AppendReadinessObligations(prompt, setupResultEvidence, setupUpdateEvidence)
+		}
+		effectiveTask := revision.applyToTask(executionTask(*loaded, prepared.CWD, effectiveExecutor))
 		review, err := runOneSupervisorAttempt(ctx, supervisorAttemptRequest{
-			Opts:              effectiveOpts,
-			Loaded:            loaded,
-			Prepared:          prepared,
-			Profiles:          profiles,
-			RunDir:            runDir,
-			RunID:             runID,
-			Attempt:           attempt,
-			Budget:            budget,
-			Prompt:            prompt,
-			EffectiveExecutor: effectiveExecutor,
+			Opts:          effectiveOpts,
+			Loaded:        loaded,
+			Prepared:      prepared,
+			Profiles:      profiles,
+			RunDir:        runDir,
+			RunID:         runID,
+			Attempt:       attempt,
+			Budget:        budget,
+			Prompt:        prompt,
+			EffectiveTask: effectiveTask,
 		})
 		if err != nil {
-			// When an exhausted supervisor idle timeout fails the task,
+			// When a supervisor idle timeout fails the task,
 			// emit one concise line in the existing Galley log tone so the
 			// daemon log distinguishes it from a task total-timeout expiry.
 			if idle, ok := asSupervisorIdleTimeout(err); ok {
@@ -177,6 +167,7 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 			return taskstate.FailMoveToStatus(opts.Root, runningPath, loaded, err)
 		}
 		mergeAttemptEvidence(loaded, review.Outcome, runID, prepared.CWD, review.AttemptDir)
+		supervisor.ApplyReviewProgressWithContext(loaded, profiles, prepared.ReviewContractContext, review.Verdict)
 		// Progress detection. The dirty-diff
 		// signal alone over-counts: preflight materialized skeleton files in
 		// the worktree before the first attempt, so every attempt would
@@ -198,6 +189,11 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 		fmt.Fprintf(os.Stderr, "galley: task %s attempt %d verdict=%s summary=%s\n", loaded.ID, attempt, review.Verdict.Status, review.Verdict.Summary)
 		loaded.Attempts[len(loaded.Attempts)-1].SupervisorVerdict = review.Verdict.Status
 		loaded.Attempts[len(loaded.Attempts)-1].Summary = fmt.Sprintf("%s; run_id=%s; attempt=%d; workspace=%s", review.Verdict.Summary, runID, attempt, prepared.CWD)
+		nextRevision := supervisorRevisionFromTask(*loaded)
+		if review.Verdict.Status == "needs_revision" {
+			nextRevision = nextSupervisorRevision(nextRevision, len(loaded.Attempts), review.Verdict)
+			*loaded = nextRevision.applyToTask(*loaded)
+		}
 		if err := task.Save(runningPath, *loaded); err != nil {
 			return taskstate.FailMoveToStatus(opts.Root, runningPath, loaded, err)
 		}
@@ -205,7 +201,7 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 			Opts:              effectiveOpts,
 			RunningPath:       runningPath,
 			Loaded:            loaded,
-			Prepared:          prepared,
+			Prepared:          prepared.Prepared,
 			RunDir:            runDir,
 			Attempt:           attempt,
 			ConsecutiveNoDiff: consecutiveNoDiff,
@@ -215,10 +211,11 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 			return err
 		}
 		if nextPrompt != "" {
-			prompt = nextPrompt
+			revision = nextRevision
 			continue
 		}
 	}
+	*loaded = revision.applyToTask(*loaded)
 	loaded.Status = "needs_supervisor_review"
 	fmt.Fprintf(os.Stderr, "galley: task %s exhausted attempts; needs supervisor review\n", loaded.ID)
 	return taskstate.MoveToStatus(opts.Root, runningPath, loaded)
@@ -231,16 +228,16 @@ type attemptReview struct {
 }
 
 type supervisorAttemptRequest struct {
-	Opts              Options
-	Loaded            *task.Task
-	Prepared          workspace.Prepared
-	Profiles          profile.Bundle
-	RunDir            string
-	RunID             string
-	Attempt           int
-	Budget            int
-	Prompt            string
-	EffectiveExecutor task.Executor
+	Opts          Options
+	Loaded        *task.Task
+	Prepared      claimedWorkspace
+	Profiles      profile.Bundle
+	RunDir        string
+	RunID         string
+	Attempt       int
+	Budget        int
+	Prompt        string
+	EffectiveTask task.Task
 }
 
 func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) (attemptReview, error) {
@@ -250,7 +247,7 @@ func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) 
 		appendFailureAttempt(req.Loaded, "attempt_setup", "attempt_setup_failed", err, req.RunDir)
 		return attemptReview{}, fmt.Errorf("create attempt dir %s: %w", attemptDir, err)
 	}
-	effectiveTask := executionTask(*req.Loaded, req.Prepared.CWD, req.EffectiveExecutor)
+	effectiveTask := req.EffectiveTask
 	effectiveTaskPath := filepath.Join(attemptDir, "task.effective.yaml")
 	if err := task.Save(effectiveTaskPath, effectiveTask); err != nil {
 		appendFailureAttempt(req.Loaded, "attempt_setup", "attempt_setup_failed", err, attemptDir)
@@ -280,6 +277,7 @@ func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) 
 	evidence := supervisor.Evidence{
 		Task:                   effectiveTask,
 		Profiles:               req.Profiles,
+		ReviewContractContext:  req.Prepared.ReviewContractContext,
 		ExecutorResult:         outcome.ExecutorResult,
 		ParseError:             outcome.ParseErr,
 		RunError:               outcome.RunErr,
@@ -292,7 +290,7 @@ func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) 
 		SetupResult:            setupResultEvidence,
 		SetupEnvironmentUpdate: setupUpdateEvidence,
 	}
-	verdict, err := evaluateSupervisorWithRetry(ctx, req.Opts, evidence, attemptDir, req.Prepared.CWD)
+	verdict, err := evaluateSupervisor(ctx, req.Opts, evidence, attemptDir, req.Prepared.CWD)
 	if err != nil {
 		appendSupervisorFailureAttempt(req.Loaded, outcome, err, attemptDir)
 		return attemptReview{}, err
@@ -360,6 +358,7 @@ func degradeToSupervisorReview(req verdictApplication, riskPrefix, detail, mitig
 
 func acceptSupervisorVerdict(ctx context.Context, opts Options, runningPath string, loaded *task.Task, prepared workspace.Prepared, runDir string, verdict supervisor.Verdict) error {
 	markRevisionRequestsAddressed(loaded, verdict.Summary)
+	clearSupervisorGuidance(loaded)
 	applyAcceptedAcceptanceCriteria(loaded, verdict)
 	mergeDiscussionItems(loaded, verdict)
 	if opts.CommitOnAccept {
@@ -388,95 +387,38 @@ func executionTask(loaded task.Task, workDir string, effectiveExecutor task.Exec
 	return loaded
 }
 
-// evaluateSupervisorWithRetry runs the supervisor evaluation and, when the
-// supervisor subprocess fails because of idle timeout, total timeout, or a
-// forced subprocess kill, retries the same evaluation up to
-// supervisorRetryBudget additional times within the same executor attempt.
-// Each try writes its artifacts under a distinct supervisor-try-N subdirectory
-// so retry evidence remains inspectable.
-func evaluateSupervisorWithRetry(ctx context.Context, opts Options, evidence supervisor.Evidence, attemptDir, workDir string) (supervisor.Verdict, error) {
-	var lastErr error
-	idleTimeoutFailures := 0
-	for try := 1; try <= supervisorTotalAttempts; try++ {
-		tryDir := filepath.Join(attemptDir, fmt.Sprintf("supervisor-try-%d", try))
-		if err := os.MkdirAll(tryDir, 0o700); err != nil {
-			return supervisor.Verdict{}, fmt.Errorf("create supervisor try dir %s: %w", tryDir, err)
-		}
-		verdict, err := opts.daemonDependencies().supervisorRunner(ctx, opts, evidence, tryDir, workDir)
-		if err == nil {
-			// Per-retry verdict.
-			if writeErr := writeJSON(runartifact.Path(tryDir, runartifact.SupervisorVerdictFilename), verdict); writeErr != nil {
-				return supervisor.Verdict{}, writeErr
-			}
-			// Preserve the top-level evidence path that downstream tools and
-			// existing tests rely on.
-			if writeErr := writeJSON(runartifact.Path(attemptDir, runartifact.ModelSupervisorVerdictFilename), verdict); writeErr != nil {
-				return supervisor.Verdict{}, writeErr
-			}
-			if try > 1 {
-				fmt.Fprintf(os.Stderr, "galley: supervisor evaluation recovered on try %d after %d transient failure(s)\n", try, try-1)
-			}
-			return verdict, nil
-		}
-		// Record the error JSON for this try so operators can inspect every
-		// retry, including the kind classification.
-		kind := classifyFailureKind("supervisor_failed", err)
-		_ = writeJSON(runartifact.Path(tryDir, runartifact.SupervisorErrorFilename), map[string]any{
-			"try":   try,
+// evaluateSupervisor runs one supervisor evaluation for an executor attempt.
+// A failed supervisor invocation is preserved as evidence and returned to the
+// task-state path; Galley does not rerun the same model against unchanged input.
+func evaluateSupervisor(ctx context.Context, opts Options, evidence supervisor.Evidence, attemptDir, workDir string) (supervisor.Verdict, error) {
+	artifactDir := filepath.Join(attemptDir, "supervisor-try-1")
+	if err := os.MkdirAll(artifactDir, 0o700); err != nil {
+		return supervisor.Verdict{}, fmt.Errorf("create supervisor artifact dir %s: %w", artifactDir, err)
+	}
+	verdict, err := opts.daemonDependencies().supervisorRunner(ctx, opts, evidence, artifactDir, workDir)
+	if err != nil {
+		kind := supervisorFailureKind(err)
+		_ = writeJSON(runartifact.Path(artifactDir, runartifact.SupervisorErrorFilename), map[string]any{
+			"try":   1,
 			"kind":  kind,
 			"error": err.Error(),
 		})
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			// Shutdown or task-level cancel: do not consume retry budget.
-			return supervisor.Verdict{}, err
-		}
-		if !isSupervisorStallError(err) {
-			return supervisor.Verdict{}, err
-		}
 		if isIdleTimeoutError(err) {
-			idleTimeoutFailures++
+			return supervisor.Verdict{}, &supervisorIdleTimeoutError{
+				Supervisor:  opts.Supervisor,
+				IdleTimeout: opts.IdleTimeout,
+				Err:         err,
+			}
 		}
-		lastErr = err
-		fmt.Fprintf(os.Stderr, "galley: supervisor try %d/%d failed (%s); %d retry budget remaining\n", try, supervisorTotalAttempts, kind, supervisorTotalAttempts-try)
+		return supervisor.Verdict{}, err
 	}
-	// An exhausted idle timeout is the watchdog-recoverable failure mode the
-	// user-facing reporting must distinguish from a task total-timeout expiry.
-	// Wrap it in a typed error so appendSupervisorFailureAttempt and
-	// runSupervisorLoop can stamp the distinct supervisor_idle_timeout kind and
-	// log line. Total timeout and forced-kill exhaustion keep the existing
-	// generic wrapped error. Mixed stall causes also keep the generic path
-	// because supervisor_idle_timeout specifically means every try was killed
-	// by the idle-output watchdog.
-	if idleTimeoutFailures == supervisorTotalAttempts {
-		return supervisor.Verdict{}, &supervisorIdleTimeoutError{
-			Supervisor:  opts.Supervisor,
-			IdleTimeout: opts.IdleTimeout,
-			Tries:       supervisorTotalAttempts,
-			MaxTries:    supervisorTotalAttempts,
-			Err:         lastErr,
-		}
+	if err := writeJSON(runartifact.Path(artifactDir, runartifact.SupervisorVerdictFilename), verdict); err != nil {
+		return supervisor.Verdict{}, err
 	}
-	return supervisor.Verdict{}, fmt.Errorf("supervisor evaluation failed after %d tries: %w", supervisorTotalAttempts, lastErr)
-}
-
-// isSupervisorStallError reports whether the supervisor subprocess exited
-// because of idle timeout, total timeout, or a forced subprocess kill - the
-// only failure modes that trigger an in-attempt supervisor retry. Other
-// errors (e.g. a malformed verdict or an unrecognized provider) are treated
-// as permanent so they surface immediately instead of consuming retries.
-func isSupervisorStallError(err error) bool {
-	if err == nil {
-		return false
+	if err := writeJSON(runartifact.Path(attemptDir, runartifact.ModelSupervisorVerdictFilename), verdict); err != nil {
+		return supervisor.Verdict{}, err
 	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return true
-	}
-	if errors.Is(err, runner.ErrIdleTimeout) ||
-		errors.Is(err, runner.ErrTimeout) ||
-		errors.Is(err, runner.ErrKilled) {
-		return true
-	}
-	return false
+	return verdict, nil
 }
 
 func mergeDiscussionItems(loaded *task.Task, verdict supervisor.Verdict) {

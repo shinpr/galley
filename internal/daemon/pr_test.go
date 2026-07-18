@@ -195,7 +195,7 @@ func TestRenderPRBodyShowsSupervisorAcceptedStatus(t *testing.T) {
 	}
 	// Simulate the executor's earlier draft pending status moving through the
 	// existing per-attempt merge code path.
-	loaded.AcceptanceCriteria[0].Status = mapAcceptanceStatus("not_satisfied")
+	loaded.AcceptanceCriteria[0].Status = "not_satisfied"
 
 	verdict := supervisor.Verdict{Status: "accepted", Summary: "looks good"}
 	applyAcceptedAcceptanceCriteria(&loaded, verdict)

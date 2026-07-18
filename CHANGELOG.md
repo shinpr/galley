@@ -6,6 +6,8 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.11.0 - 2026-07-18
+
 ### Added
 
 - The Galley skill includes a helper for changing task-level executor CLI, model, and effort overrides before validation and requeue.

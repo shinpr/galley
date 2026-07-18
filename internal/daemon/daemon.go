@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/shinpr/galley/internal/daemonconfig"
+	"github.com/shinpr/galley/internal/executorflow"
 	"github.com/shinpr/galley/internal/galleyhome"
 	"github.com/shinpr/galley/internal/inputfiles"
 	"github.com/shinpr/galley/internal/jsonio"
@@ -133,16 +134,18 @@ type Options struct {
 }
 
 type daemonDependencies struct {
-	stageExecutorOutput func(context.Context, Options, string, string, []string) error
-	supervisorRunner    func(context.Context, Options, supervisor.Evidence, string, string) (supervisor.Verdict, error)
-	setupExecutorRunner func(context.Context, setuppreflight.Options) (*setuppreflight.Result, error)
+	stageExecutorOutput  func(context.Context, Options, string, string, []string) error
+	captureDiffArtifacts func(context.Context, string, string, string, workspace.Options) (executorflow.DiffArtifacts, error)
+	supervisorRunner     func(context.Context, Options, supervisor.Evidence, string, string) (supervisor.Verdict, error)
+	setupExecutorRunner  func(context.Context, setuppreflight.Options) (*setuppreflight.Result, error)
 }
 
 func defaultDaemonDependencies() daemonDependencies {
 	return daemonDependencies{
-		stageExecutorOutput: defaultStageExecutorOutput,
-		supervisorRunner:    defaultSupervisorRunner,
-		setupExecutorRunner: setuppreflight.RunExecutor,
+		stageExecutorOutput:  defaultStageExecutorOutput,
+		captureDiffArtifacts: executorflow.CaptureDiffArtifacts,
+		supervisorRunner:     defaultSupervisorRunner,
+		setupExecutorRunner:  setuppreflight.RunExecutor,
 	}
 }
 
@@ -154,6 +157,9 @@ func (opts Options) daemonDependencies() daemonDependencies {
 	deps := *opts.dependencies
 	if deps.stageExecutorOutput == nil {
 		deps.stageExecutorOutput = defaults.stageExecutorOutput
+	}
+	if deps.captureDiffArtifacts == nil {
+		deps.captureDiffArtifacts = defaults.captureDiffArtifacts
 	}
 	if deps.supervisorRunner == nil {
 		deps.supervisorRunner = defaults.supervisorRunner

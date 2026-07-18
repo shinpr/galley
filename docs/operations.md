@@ -65,9 +65,9 @@ galley task archive ~/.galley/tasks/done/TASK.yaml
 
 `galley task list` shows task state, status, PR URL, latest verdict, and latest summary across the workflow root.
 
-`galley task show` accepts a task file or task ID and prints the latest attempt, supervisor verdict, risk, and failed verification context. Accepted terminal tasks show prior attempt errors as audit history, not active failures.
+`galley task show` accepts a task file or task ID and prints the latest attempt, supervisor verdict, risk, and failed verification context. Accepted terminal tasks show prior attempt errors as audit history, not active failures. When the latest attempt is an executor interruption, `task show` marks it (`latest_executor_interruption: true`), points at the attempt evidence directory, and prints a `latest_recovery` line with the `galley task requeue` command to run after the interruption cause is resolved.
 
-`galley task requeue` accepts a task ID or task file, returns a reviewed task from `tasks/failed`, `tasks/done`, or `tasks/running` to `tasks/queued`, records an optional reason, and increments `supervisor.review_iterations`. When the task worktree is reused, successful setup and acceptance-skeleton phases are reused rather than repeated.
+`galley task requeue` accepts a task ID or task file, returns a reviewed task from `tasks/failed`, `tasks/done`, or `tasks/running` to `tasks/queued`, records an optional reason, and increments `supervisor.review_iterations`. When the task worktree is reused, successful setup and acceptance-skeleton phases are reused rather than repeated. An executor interruption preserves the dirty worktree, so requeueing resumes the next executor attempt from the retained tracked and untracked changes.
 
 ## Profiles
 

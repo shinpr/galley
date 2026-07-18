@@ -220,6 +220,13 @@ func newTaskShowCommand() *cobra.Command {
 						if last.Error.ArtifactDir != "" {
 							fmt.Fprintf(cmd.OutOrStdout(), "%s_error_artifact_dir: %s\n", prefix, last.Error.ArtifactDir)
 						}
+						// An executor interruption stops before Supervisor and
+						// keeps the worktree, so surface the resume path instead
+						// of implying a review verdict is pending.
+						if isExecutorInterruption(last) {
+							fmt.Fprintf(cmd.OutOrStdout(), "%s_executor_interruption: true\n", prefix)
+							fmt.Fprintf(cmd.OutOrStdout(), "%s_recovery: resolve the interruption cause, then run: galley task requeue %s\n", prefix, loaded.ID)
+						}
 					}
 				}
 				if len(loaded.Risks) > 0 {
@@ -391,6 +398,17 @@ func taskFiles(dir string) ([]string, error) {
 // though the supervisor already approved the work.
 func isAcceptedTerminalStatus(status string) bool {
 	return task.IsAcceptedTerminal(status)
+}
+
+// isExecutorInterruption reports whether an attempt ended because the executor
+// was interrupted before Supervisor review. Interruptions are the only executor
+// attempts that carry an executor-phase error with the non-verdict marker
+// `not_reviewed`; ordinary completed attempts always record a Supervisor
+// verdict, and infrastructure failures record their own phase and kind marker.
+func isExecutorInterruption(attempt task.Attempt) bool {
+	return attempt.Error != nil &&
+		attempt.Error.Phase == "executor" &&
+		attempt.SupervisorVerdict == "not_reviewed"
 }
 
 func taskSummary(path string, loaded task.Task) taskListItem {

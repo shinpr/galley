@@ -186,7 +186,10 @@ func TestRunOnceRecordsSupervisorTimeoutInTaskAttempt(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeDaemonTask(t, taskPath, repo)
-	setTimeoutMS(t, taskPath, 50)
+	// The timeout must let the fast executor reach its normal terminal while the
+	// sleeping supervisor still exceeds it, so the recorded failure is the
+	// supervisor timeout rather than an executor interruption.
+	setTimeoutMS(t, taskPath, 500)
 
 	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
@@ -750,7 +753,11 @@ func TestRunOnceParseFailureNeedsSupervisorReview(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	claudeBin := writeFakeClaude(t, "echo not-json\n")
+	// A real Claude run that finishes normally but emits non-JSON still ends its
+	// stream with a success result event; only the embedded executor result is
+	// unparseable. That normal terminal must reach Supervisor review rather than
+	// be misclassified as an interruption.
+	claudeBin := writeFakeClaude(t, `printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"not-json","session_id":"sess-parse"}'`+"\n")
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -922,7 +929,9 @@ if [ "$supervisor" = "1" ]; then
   fi
   exit 0
 fi
-`+body)
+`+body+`
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"fake-claude-session"}'
+`)
 }
 
 func prepareDonePRTask(t *testing.T, taskPath, repo, prStatus string) (task.Task, string) {

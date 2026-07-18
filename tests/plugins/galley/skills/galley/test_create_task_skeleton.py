@@ -23,8 +23,8 @@ import sys
 import tempfile
 
 
-SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
-GENERATOR = SCRIPT_DIR / "create_task_skeleton.py"
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[5]
+GENERATOR = REPO_ROOT / "plugins" / "galley" / "skills" / "galley" / "scripts" / "create_task_skeleton.py"
 
 spec = importlib.util.spec_from_file_location("create_task_skeleton", GENERATOR)
 if spec is None or spec.loader is None:

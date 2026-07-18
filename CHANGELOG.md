@@ -6,12 +6,17 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Added
+
+- The Galley skill includes a helper for changing task-level executor CLI, model, and effort overrides before validation and requeue.
+
 ### Changed
 
 - Supervisor review now completes AC review before quality review, records quality pass and gap IDs independently from consolidated findings, and persists passed AC and quality items across attempts. Changed task direction, source repository path, or placed input content invalidates stale passes.
 - Codex supervisor review now builds acceptance results, quality results, consolidated findings, and the final verdict through explicit completion gates.
 - Executor summaries report current-attempt changes for regression routing while `files_modified` and supervisor scope validation use the cumulative final diff.
-- Packaged Galley plugins are version `0.1.27` and include the daemon-owned review-progress task schema.
+- Executor interruptions now bypass Supervisor, preserve the worktree and run evidence, and resume through `galley task requeue`; result-validation failures after a normal provider terminal remain reviewable.
+- Packaged Claude, Codex, and Grok Galley plugins are now versioned as `0.1.27`, combining executor-interruption recovery guidance and task-level executor override tooling with the daemon-owned review-progress task schema.
 
 ### Fixed
 

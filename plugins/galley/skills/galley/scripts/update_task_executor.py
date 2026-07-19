@@ -8,7 +8,7 @@ import json
 import pathlib
 import re
 import sys
-from typing import Final
+from typing import Final, NamedTuple
 
 
 FIELDS: Final = ("cli", "model", "effort")
@@ -16,7 +16,7 @@ UNCHANGED: Final = object()
 EXECUTOR_HEADER = re.compile(r"^executor:[ \t]*(?:\{\})?[ \t]*(?:\r?\n|$)", re.MULTILINE)
 ANY_EXECUTOR_HEADER = re.compile(r"^executor:", re.MULTILINE)
 TOP_LEVEL_KEY = re.compile(r"^[A-Za-z0-9_-]+:", re.MULTILINE)
-FIELD_LINE = re.compile(r"^  (cli|model|effort):[ \t]*(.*)$")
+FIELD_LINE = re.compile(r"^( +)(cli|model|effort):[ \t]*(.*)$")
 ANY_FIELD_LINE = re.compile(r"^\s+(cli|model|effort):")
 INSERT_BEFORE = re.compile(
     r"^(?:preflight|decisions|risks|discussion_items|revision_requests|attempts|verification|pr):",
@@ -26,6 +26,12 @@ INSERT_BEFORE = re.compile(
 
 class UpdateError(ValueError):
     """Raised when the canonical executor mapping cannot be updated."""
+
+
+class ExecutorFields(NamedTuple):
+    values: dict[str, str]
+    extras: list[str]
+    indent: str
 
 
 def executor_block(text: str) -> tuple[int, int, str] | None:
@@ -43,26 +49,35 @@ def executor_block(text: str) -> tuple[int, int, str] | None:
     return header.start(), end, text[header.end() : end]
 
 
-def existing_fields(body: str) -> tuple[dict[str, str], list[str]]:
+def existing_fields(body: str) -> ExecutorFields:
     values: dict[str, str] = {}
     extras: list[str] = []
+    indent = ""
     for line in body.splitlines():
         match = FIELD_LINE.fullmatch(line)
         if match:
-            field = match.group(1)
+            current_indent = match.group(1)
+            if indent and current_indent != indent:
+                raise UpdateError("executor fields must use consistent indentation")
+            indent = current_indent
+            field = match.group(2)
             if field in values:
                 raise UpdateError(f"executor.{field} appears more than once")
-            values[field] = match.group(2)
+            values[field] = match.group(3)
         elif ANY_FIELD_LINE.match(line):
-            raise UpdateError("executor fields must use two-space indentation")
+            raise UpdateError("executor fields must use consistent space indentation")
         elif line.strip():
             extras.append(line)
-    return values, extras
+    return ExecutorFields(values, extras, indent or "  ")
 
 
-def rendered_block(values: dict[str, str], extras: list[str], newline: str) -> str:
-    lines = [f"  {field}: {values[field]}" for field in FIELDS if field in values]
-    lines.extend(extras)
+def rendered_block(fields: ExecutorFields, newline: str) -> str:
+    lines = [
+        f"{fields.indent}{field}: {fields.values[field]}"
+        for field in FIELDS
+        if field in fields.values
+    ]
+    lines.extend(fields.extras)
     if not lines:
         return ""
     return newline.join(["executor:", *lines]) + newline
@@ -71,16 +86,16 @@ def rendered_block(values: dict[str, str], extras: list[str], newline: str) -> s
 def update_executor_yaml(text: str, changes: dict[str, object]) -> str:
     newline = "\r\n" if "\r\n" in text else "\n"
     block = executor_block(text)
-    values, extras = existing_fields(block[2]) if block else ({}, [])
+    fields = existing_fields(block[2]) if block else ExecutorFields({}, [], "  ")
     for field, requested in changes.items():
         if requested is UNCHANGED:
             continue
         if requested is None:
-            values.pop(field, None)
+            fields.values.pop(field, None)
         else:
-            values[field] = json.dumps(requested, ensure_ascii=False)
+            fields.values[field] = json.dumps(requested, ensure_ascii=False)
 
-    rendered = rendered_block(values, extras, newline)
+    rendered = rendered_block(fields, newline)
     if block:
         return text[: block[0]] + rendered + text[block[1] :]
     if not rendered:

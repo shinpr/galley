@@ -150,6 +150,7 @@ func NewCommand(use string) *cobra.Command {
 		newStartCommand(&opts, &pidFile, &logFile, &readinessTimeout),
 		newStopCommand(&opts, &pidFile, &stopTimeout),
 		newStatusCommand(&opts, &pidFile),
+		newConfigCommand(&opts),
 	)
 
 	return cmd
@@ -238,6 +239,41 @@ func explicitOptionsFromFlags(cmd *cobra.Command) daemon.ExplicitOptions {
 		ShutdownTimeout:      changed("shutdown-timeout"),
 		IdleTimeout:          changed("idle-timeout"),
 		Supervisor:           changed("supervisor"),
+	}
+}
+
+func newConfigCommand(opts *daemon.Options) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:           "config",
+		Short:         "Manage daemon.yaml configuration",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+	}
+	cmd.AddCommand(newConfigInitCommand(opts))
+	return cmd
+}
+
+func newConfigInitCommand(opts *daemon.Options) *cobra.Command {
+	return &cobra.Command{
+		Use:           "init",
+		Short:         "Create daemon.yaml with documented defaults without starting the daemon",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// EnsureDefault is the sole daemon.yaml writer, so init creates the
+			// same editable defaults as daemon startup and preserves existing files.
+			created, err := daemonconfig.EnsureDefault(opts.Root)
+			if err != nil {
+				return err
+			}
+			path := daemonconfig.Path(opts.Root)
+			if created {
+				fmt.Fprintf(cmd.OutOrStdout(), "created %s\n", path)
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s already exists; leaving it unchanged\n", path)
+			}
+			return nil
+		},
 	}
 }
 

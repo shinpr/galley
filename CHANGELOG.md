@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Added
+
+- Added `galley daemon config init` to create the default `daemon.yaml` (or report an existing one) without starting the daemon, so operators can edit configuration before the first `galley daemon start`.
+
 ### Changed
 
 - Successful `galley daemon stop --force` now moves tasks owned by that daemon to `failed` with interruption evidence while retaining their worktrees for requeue or archive.

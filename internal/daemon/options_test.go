@@ -82,6 +82,9 @@ func TestPreflightAcceptsEveryCanonicalSupervisor(t *testing.T) {
 			if supervisor == "glm" {
 				opts.GLMAuthToken = "zai-token"
 			}
+			if supervisor == "kimi" {
+				opts.KimiAPIKey = "kimi-token"
+			}
 			if _, err := Preflight(opts); err != nil {
 				t.Fatalf("Preflight should accept canonical supervisor %q: %v", supervisor, err)
 			}

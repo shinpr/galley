@@ -18,9 +18,9 @@ func TestDaemonSupervisorFlagAcceptsEveryCanonicalValue(t *testing.T) {
 		supervisor := supervisor
 		t.Run(supervisor, func(t *testing.T) {
 			root := t.TempDir()
-			if supervisor == "glm" { // glm needs a token to pass Preflight
-
-				if err := os.WriteFile(filepath.Join(root, daemonconfig.Filename), []byte("glm_api_key: \"test-token\"\n"), 0o600); err != nil {
+			if supervisor == "glm" || supervisor == "kimi" {
+				config := supervisor + "_api_key: \"test-token\"\n"
+				if err := os.WriteFile(filepath.Join(root, daemonconfig.Filename), []byte(config), 0o600); err != nil {
 					t.Fatal(err)
 				}
 			}

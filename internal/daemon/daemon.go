@@ -19,6 +19,7 @@ import (
 	setuppreflight "github.com/shinpr/galley/internal/preflight/setup"
 	skeletonpreflight "github.com/shinpr/galley/internal/preflight/skeleton"
 	"github.com/shinpr/galley/internal/profile"
+	"github.com/shinpr/galley/internal/provider"
 	"github.com/shinpr/galley/internal/queue"
 	"github.com/shinpr/galley/internal/runartifact"
 	"github.com/shinpr/galley/internal/runner"
@@ -111,12 +112,9 @@ type Options struct {
 	GrokBin              string
 	GitBin               string
 	GHBin                string
-	// GLMAuthToken is the Z.ai API token used when a task selects executor.cli
-	// "glm". It is resolved from daemon.yaml (glm_api_key) and injected only
-	// into the executor child environment as ANTHROPIC_AUTH_TOKEN; it never
-	// reaches argv or run evidence. Empty means GLM is not configured, which is
-	// only an error when a task actually requests executor.cli "glm".
+	// Redirected Claude providers receive credentials only in child environments.
 	GLMAuthToken string
+	KimiAPIKey   string
 	// Notifications is the opt-in, best-effort notification command hook
 	// resolved from daemon.yaml. A nil pointer disables notifications. It has
 	// no CLI flag because the hook is operator configuration, not a
@@ -343,17 +341,31 @@ func Preflight(opts Options) (Options, error) {
 	if !daemonconfig.IsValidSupervisor(opts.Supervisor) {
 		return Options{}, fmt.Errorf("supervisor must be one of: %s", strings.Join(daemonconfig.SupervisorCLIs(), ", "))
 	}
-	// glm rides the Claude binary, so a glm supervisor needs the same token as a
-	// glm executor. Fail fast at startup rather than at first review.
-	if opts.Supervisor == "glm" {
-		if _, err := runner.ResolveGLMToken(opts.GLMAuthToken); err != nil {
-			return Options{}, fmt.Errorf("supervisor is \"glm\": %w", err)
-		}
+	if err := validateProviderCredential(opts.Supervisor, opts); err != nil {
+		return Options{}, fmt.Errorf("supervisor is %q: %w", opts.Supervisor, err)
 	}
 	if err := queue.EnsureLayout(opts.Root); err != nil {
 		return Options{}, err
 	}
 	return opts, nil
+}
+
+func claudeProviderOptions(providerID string, opts Options) runner.ClaudeProviderOptions {
+	return runner.ClaudeProviderOptions{
+		Provider: providerID,
+		Credentials: runner.ClaudeCredentials{
+			GLMAuthToken: opts.GLMAuthToken,
+			KimiAPIKey:   opts.KimiAPIKey,
+		},
+	}
+}
+
+func validateProviderCredential(providerID string, opts Options) error {
+	transport, ok := provider.TransportFor(providerID)
+	if !ok || transport != provider.TransportClaude {
+		return nil
+	}
+	return runner.ValidateClaudeProvider(claudeProviderOptions(providerID, opts))
 }
 
 func (opts Options) withDefaults() Options {
@@ -632,18 +644,12 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 		return failClaimedStage(opts.Root, runningPath, &loaded, "executor_preflight", "executor_config_failed", err, runDir)
 	}
 
-	// A per-task environment.yaml supervisor.default_cli: glm override bypasses
-	// startup Preflight, so validate the token here — before setup/executor —
-	// rather than failing at the supervisor call after a full attempt ran.
-	if effectiveOpts.Supervisor == "glm" {
-		if _, tokenErr := runner.ResolveGLMToken(opts.GLMAuthToken); tokenErr != nil {
-			return failClaimedStage(opts.Root, runningPath, &loaded, "supervisor_preflight", "supervisor_config_failed", fmt.Errorf("supervisor is \"glm\": %w", tokenErr), runDir)
-		}
+	// Per-task provider overrides bypass startup Preflight, so validate before setup and execution.
+	if credentialErr := validateProviderCredential(effectiveOpts.Supervisor, opts); credentialErr != nil {
+		return failClaimedStage(opts.Root, runningPath, &loaded, "supervisor_preflight", "supervisor_config_failed", fmt.Errorf("supervisor is %q: %w", effectiveOpts.Supervisor, credentialErr), runDir)
 	}
-	if effectiveExecutor.CLI == "glm" {
-		if _, tokenErr := runner.ResolveGLMToken(opts.GLMAuthToken); tokenErr != nil {
-			return failClaimedStage(opts.Root, runningPath, &loaded, "executor_preflight", "executor_config_failed", fmt.Errorf("executor is \"glm\": %w", tokenErr), runDir)
-		}
+	if credentialErr := validateProviderCredential(effectiveExecutor.CLI, opts); credentialErr != nil {
+		return failClaimedStage(opts.Root, runningPath, &loaded, "executor_preflight", "executor_config_failed", fmt.Errorf("executor is %q: %w", effectiveExecutor.CLI, credentialErr), runDir)
 	}
 
 	prepared, err := prepareClaimedWorkspace(ctx, opts, profiles, runningPath, runDir, &loaded, effectiveExecutor)
@@ -671,6 +677,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 			CodexBin:               opts.CodexBin,
 			GrokBin:                opts.GrokBin,
 			GLMAuthToken:           opts.GLMAuthToken,
+			KimiAPIKey:             opts.KimiAPIKey,
 			EnvironmentProfilePath: resolvedProfiles.EnvironmentProfileFile,
 			ExecutorRunner:         opts.daemonDependencies().setupExecutorRunner,
 		})
@@ -714,6 +721,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 				CodexBin:     opts.CodexBin,
 				GrokBin:      opts.GrokBin,
 				GLMAuthToken: opts.GLMAuthToken,
+				KimiAPIKey:   opts.KimiAPIKey,
 			})
 		}
 		if perr != nil {

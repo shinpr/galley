@@ -6,6 +6,20 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.12.0 - 2026-07-19
+
+### Added
+
+- Added `kimi` as an executor and supervisor backend through the shared Claude CLI transport, configured by `daemon.yaml` `kimi_api_key`.
+
+### Changed
+
+- Packaged Claude, Codex, and Grok Galley plugins are now versioned as `0.1.28`: task-authoring, setup, and profile guidance document the `kimi` backend and its `kimi_api_key` requirement; bundled task/environment schemas and skeleton generation now accept `kimi`.
+
+### Fixed
+
+- Setup executor output now requires its plan source, and Claude guard correction guidance includes that field, preventing a valid ready setup from failing after structured-output correction.
+
 ## v0.11.1 - 2026-07-19
 
 ### Changed

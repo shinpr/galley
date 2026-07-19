@@ -111,7 +111,7 @@ def main() -> int:
     assert_not_matches(yaml_text, r"^\s+max_budget_usd:", "executor.max_budget_usd in default skeleton")
     assert_not_matches(yaml_text, r"^\s+effort:", "executor.effort in default skeleton")
 
-    for cli in ("claude", "codex", "glm", "grok"):
+    for cli in ("claude", "codex", "glm", "grok", "kimi"):
         with tempfile.TemporaryDirectory() as tmp:
             yaml_text = generate_skeleton(pathlib.Path(tmp), "--executor-cli", cli)
         if generated_executor_cli(yaml_text) != cli:

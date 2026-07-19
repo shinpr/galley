@@ -22,7 +22,7 @@ import (
 
 func TestExecutorCLIAcceptsClaudeAndCodex(t *testing.T) {
 	t.Parallel()
-	for _, cli := range []string{"claude", "codex", "glm", "grok"} {
+	for _, cli := range []string{"claude", "codex", "glm", "grok", "kimi"} {
 		cli := cli
 		t.Run(cli, func(t *testing.T) {
 			base := validTask(t)
@@ -72,6 +72,8 @@ func TestExecutorEffortValidationDependsOnCLI(t *testing.T) {
 		{name: "claude rejects unknown", cli: "claude", effort: "turbo", wantError: "executor.effort for claude must be one of"},
 		{name: "glm accepts xhigh", cli: "glm", effort: "xhigh", wantValid: true},
 		{name: "glm rejects unknown", cli: "glm", effort: "turbo", wantError: "executor.effort for glm must be one of"},
+		{name: "kimi accepts xhigh", cli: "kimi", effort: "xhigh", wantValid: true},
+		{name: "kimi rejects unknown", cli: "kimi", effort: "turbo", wantError: "executor.effort for kimi must be one of"},
 	}
 
 	for _, tc := range tests {
@@ -103,7 +105,7 @@ func TestExecutorEffortValidationDependsOnCLI(t *testing.T) {
 func TestExecutorCLISchemaEnumIncludesClaudeAndCodex(t *testing.T) {
 	t.Parallel()
 	got := ExecutorCLIEnum()
-	want := []string{"claude", "codex", "glm", "grok"}
+	want := []string{"claude", "codex", "glm", "grok", "kimi"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ExecutorCLIEnum() = %#v, want %#v", got, want)
 	}
@@ -150,8 +152,8 @@ func TestExecutorEffortSchemaConditionDependsOnCLI(t *testing.T) {
 	props, _ := doc["properties"].(map[string]any)
 	exec, _ := props["executor"].(map[string]any)
 	allOf, _ := exec["allOf"].([]any)
-	if len(allOf) != 4 {
-		t.Fatalf("executor schema allOf = %#v, want 4 conditional effort rules", allOf)
+	if len(allOf) != 5 {
+		t.Fatalf("executor schema allOf = %#v, want 5 conditional effort rules", allOf)
 	}
 
 	got := map[string][]string{}
@@ -184,6 +186,9 @@ func TestExecutorEffortSchemaConditionDependsOnCLI(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got["grok"], []string{"", "none", "minimal", "low", "medium", "high", "xhigh", "max"}) {
 		t.Fatalf("grok effort enum drift: %#v", got["grok"])
+	}
+	if !reflect.DeepEqual(got["kimi"], []string{"", "low", "medium", "high", "xhigh", "max"}) {
+		t.Fatalf("kimi effort enum drift: %#v", got["kimi"])
 	}
 	// Retired prompt transport fields must not reappear on the task contract.
 	execProps, _ := exec["properties"].(map[string]any)

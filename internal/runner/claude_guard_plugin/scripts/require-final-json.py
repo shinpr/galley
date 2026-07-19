@@ -42,7 +42,8 @@ SETUP_EXECUTOR_TEMPLATE = """{
     {"run": "setup command that should be persisted", "why": "Why this command makes the worktree ready"}
   ],
   "inspected_files": ["package.json"],
-  "readiness_evidence": "The setup command and a representative required check passed."
+  "readiness_evidence": "The setup command and a representative required check passed.",
+  "source": "environment_commands"
 }"""
 
 

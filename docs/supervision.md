@@ -18,12 +18,13 @@ The supervisor is not a substitute for suitable acceptance criteria or repositor
 
 ## Supported Backends
 
-Executors and supervisors support `claude`, `codex`, `glm`, and `grok`.
+Executors and supervisors support `claude`, `codex`, `glm`, `grok`, and `kimi`.
 
 - Claude uses the `claude` CLI.
 - Codex uses the `codex` CLI.
 - GLM uses the `claude` CLI with the Z.ai endpoint and requires `glm_api_key` in `daemon.yaml`.
 - Grok uses the logged-in `grok` CLI state.
+- Kimi uses the `claude` CLI with the Kimi Code endpoint and requires `kimi_api_key` in `daemon.yaml`.
 
 All backends use Galley-owned prompt transport, result contracts, and evidence layout.
 

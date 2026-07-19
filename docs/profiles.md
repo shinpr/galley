@@ -139,12 +139,12 @@ Supported fields:
 - `id`: profile identifier.
 - `cwd`: absolute path to the repository this profile describes.
 - `commands`: named local commands the executor and supervisor can reference.
-- `executor.default_cli`: runtime default for omitted task `executor.cli` (`claude`, `codex`, `glm`, `grok`). When unset, Galley uses Claude.
+- `executor.default_cli`: runtime default for omitted task `executor.cli` (`claude`, `codex`, `glm`, `grok`, `kimi`). When unset, Galley uses Claude.
 - `executor.model`: optional model name passed unchanged to the selected executor CLI when the task omits `executor.model`. Empty keeps the CLI default.
-- `executor.effort`: optional default for omitted task effort; effort resolves as task override, then this environment override, then the selected provider CLI's own default when both are empty. Claude and `glm` accept `low`, `medium`, `high`, `xhigh`, or `max`; Codex also accepts `minimal`; Grok also accepts `none` and `minimal`. Without `executor.default_cli`, profile validation accepts the provider union; Galley validates the resolved pair before executor roles run.
-- `supervisor.default_cli`: optional repository-scoped supervisor adapter. Values are `claude`, `codex`, `glm`, and `grok`. When set, it overrides daemon startup supervisor settings for tasks in this repository.
+- `executor.effort`: optional default for omitted task effort; effort resolves as task override, then this environment override, then the selected provider CLI's own default when both are empty. Claude, `glm`, and `kimi` accept `low`, `medium`, `high`, `xhigh`, or `max`; Codex also accepts `minimal`; Grok also accepts `none` and `minimal`. Without `executor.default_cli`, profile validation accepts the provider union; Galley validates the resolved pair before executor roles run.
+- `supervisor.default_cli`: optional repository-scoped supervisor adapter. Values are `claude`, `codex`, `glm`, `grok`, and `kimi`. When set, it overrides daemon startup supervisor settings for tasks in this repository.
 - `supervisor.model`: optional model name passed unchanged to the selected supervisor CLI. Omit it or use an empty value to keep the CLI default; `runs/<run-id>/supervisor.json` records the effective setting.
-- `supervisor.effort`: optional reasoning effort. Claude and `glm` accept `low`, `medium`, `high`, `xhigh`, or `max`; Codex also accepts `minimal`; Grok also accepts `none` and `minimal`. Empty uses the CLI default, invalid provider values fail before review, and `supervisor.json` records the value and source.
+- `supervisor.effort`: optional reasoning effort. Claude, `glm`, and `kimi` accept `low`, `medium`, `high`, `xhigh`, or `max`; Codex also accepts `minimal`; Grok also accepts `none` and `minimal`. Empty uses the CLI default, invalid provider values fail before review, and `supervisor.json` records the value and source.
 - `required_checks.shell`: optional shell for Galley-owned `quality.required_checks` execution. Values are `auto`, `sh`, `bash`, `cmd`, `powershell`, and `pwsh`.
 - `required_checks.shell_path`: optional executable path override for required-check shell selection. When both `shell` and `shell_path` are set, `shell_path` wins.
 - `constraints.network`: local network policy.

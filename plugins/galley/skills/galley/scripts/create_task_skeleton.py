@@ -16,7 +16,7 @@ from typing import Any
 
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 SCHEMA_PATH = SCRIPT_DIR.parent / "references" / "task.schema.json"
-VALID_EXECUTOR_CLIS = {"claude", "codex", "glm", "grok"}
+VALID_EXECUTOR_CLIS = {"claude", "codex", "glm", "grok", "kimi"}
 ROOT_ORDER = [
     "id",
     "goal",

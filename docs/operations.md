@@ -57,7 +57,7 @@ notifications:
 
 | Field | Purpose |
 | --- | --- |
-| `supervisor` | Daemon-level supervisor backend: `claude`, `codex`, `glm`, or `grok`. A repository environment profile can override it. |
+| `supervisor` | Daemon-level supervisor backend: `claude`, `codex`, `glm`, `grok`, or `kimi`. A repository environment profile can override it. |
 | `max_concurrent_tasks` | Maximum tasks run at once. Must be at least 1. |
 | `max_concurrent_per_repo` | Maximum concurrent tasks for one source repository. `0` disables the per-repository limit. |
 | `poll_interval` | Delay between queue and maintenance polls. |
@@ -65,6 +65,7 @@ notifications:
 | `shutdown_timeout` | Time active attempts may finish after shutdown is requested. |
 | `idle_timeout` | Time an executor or supervisor process may produce no output before Galley kills it. |
 | `glm_api_key` | Z.ai credential used when GLM is selected as executor or supervisor. |
+| `kimi_api_key` | Kimi Code credential used when Kimi is selected as executor or supervisor. |
 | `notifications` | Optional terminal-state command hook described below. |
 
 Explicit flags on `daemon start` or `daemon run` override `daemon.yaml` for that process. Missing file values use built-in defaults. Unknown keys are ignored; invalid values for known keys fail daemon startup.

@@ -5,6 +5,7 @@
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Plugin-purple)](https://claude.ai/code)
 [![Codex CLI](https://img.shields.io/badge/Codex%20CLI-Supported-10a37f)](https://developers.openai.com/codex/cli)
 [![GLM](https://img.shields.io/badge/GLM-Backend-2f6bff)](https://z.ai/)
+[![Kimi](https://img.shields.io/badge/Kimi-Backend-000000)](https://www.kimi.com/code/en)
 [![Grok Build](https://img.shields.io/badge/Grok%20Build-Plugin-black)](https://x.ai/)
 [![Agent Skills](https://img.shields.io/badge/Agent%20Skills-Spec%20Compliant-blue)](https://developers.openai.com/codex/skills/)
 [![CI](https://github.com/shinpr/galley/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/shinpr/galley/actions/workflows/ci.yml)
@@ -142,8 +143,8 @@ run evidence + git diff
 - **Task YAML**: trusted local input describing the goal, acceptance criteria, scope, executor overrides, verification, and worktree. See [docs/task-yaml.md](docs/task-yaml.md).
 - **Quality profile**: repository review policy for required checks, review dimensions, evidence, and pass criteria. The setup skill creates it from repository evidence and the user's chosen review strictness. See [docs/profiles.md](docs/profiles.md).
 - **Environment profile**: repository runtime defaults for commands, executor CLI/model/effort, constraints, PR behavior, and cleanup. The setup skill creates it from repository evidence and approved execution settings. See [docs/profiles.md](docs/profiles.md).
-- **Executor**: Claude Code, Codex, GLM, or Grok Build backend that implements the task. Each executor field resolves from the task, then the environment profile; only `cli` has a built-in default (`claude`), while an omitted `model` or `effort` defers to the selected provider CLI's own default. GLM requires `glm_api_key`; Grok uses its logged-in CLI state.
-- **Supervisor**: Claude, Codex, GLM, or Grok Build backend that reviews the result against acceptance criteria, required checks, and recorded evidence. It is the acceptance gate; the default is Claude.
+- **Executor**: Claude Code, Codex, GLM, Kimi, or Grok Build backend that implements the task. Each executor field resolves from the task, then the environment profile; only `cli` has a built-in default (`claude`), while an omitted `model` or `effort` defers to the selected provider CLI's own default. GLM and Kimi use the Claude CLI and require `glm_api_key` or `kimi_api_key`; Grok uses its logged-in CLI state.
+- **Supervisor**: Claude, Codex, GLM, Kimi, or Grok Build backend that reviews the result against acceptance criteria, required checks, and recorded evidence. It is the acceptance gate; the default is Claude.
 - **Worktree**: isolated git checkout used for AFK execution so the source repository stays clean.
 - **Evidence**: files under `runs/<run-id>/` that make each attempt auditable after the fact.
 

@@ -78,3 +78,51 @@ func TestRunAdapterPayloadGLMFailsFastWithoutToken(t *testing.T) {
 		t.Fatalf("error must name the missing config key, got %q", err)
 	}
 }
+
+func TestRunAdapterPayloadKimiRedirectsToEndpointAndStripsAuthToken(t *testing.T) {
+	skipPOSIXFakeSupervisorOnWindows(t)
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "inherited-token")
+
+	envPath := filepath.Join(t.TempDir(), "claude.env")
+	fakeClaude := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(fakeClaude, []byte(`#!/bin/sh
+printf 'BASE=%s\nAUTH=[%s]\nKEY=%s\n' "$ANTHROPIC_BASE_URL" "$ANTHROPIC_AUTH_TOKEN" "$ANTHROPIC_API_KEY" > `+envPath+`
+cat >/dev/null
+printf '%s\n' '{"status":"accepted","summary":"ok","acceptance_passes":["AC1"],"quality_passes":[],"findings":[],"discussion_items":[]}'
+`), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := RunAdapterPayload(context.Background(), AdapterOptions{
+		Provider:    "kimi",
+		WorkDir:     t.TempDir(),
+		ArtifactDir: t.TempDir(),
+		ClaudeBin:   fakeClaude,
+		KimiAPIKey:  "kimi-token",
+	}, []byte(`{"evidence":{"task":{"id":"task"},"diff":""}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(env)
+	for _, want := range []string{"BASE=https://api.kimi.com/coding/", "AUTH=[]", "KEY=kimi-token"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("child env missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRunAdapterPayloadKimiFailsFastWithoutKey(t *testing.T) {
+	_, err := RunAdapterPayload(context.Background(), AdapterOptions{
+		Provider:    "kimi",
+		WorkDir:     t.TempDir(),
+		ArtifactDir: t.TempDir(),
+		ClaudeBin:   filepath.Join(t.TempDir(), "claude-does-not-run"),
+	}, []byte(`{"evidence":{"task":{"id":"task"},"diff":""}}`))
+	if err == nil || !strings.Contains(err.Error(), "kimi_api_key") {
+		t.Fatalf("expected missing kimi_api_key error, got %v", err)
+	}
+}

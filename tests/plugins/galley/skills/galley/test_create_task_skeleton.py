@@ -91,7 +91,7 @@ def main() -> int:
     )
     assert_contains(yaml_text, "execution_policy:\n", "execution_policy block")
     assert_contains(yaml_text, "  loop_budget:", "loop_budget")
-    assert_contains(yaml_text, "  timeout_ms:", "timeout_ms")
+    assert_contains(yaml_text, "  timeout_ms: 3600000\n", "60-minute timeout_ms baseline")
 
     assert_not_matches(yaml_text, r"^mode:", "mode in default skeleton")
     assert_not_matches(yaml_text, r"^status:", "status in default skeleton")

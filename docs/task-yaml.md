@@ -26,7 +26,7 @@ scope:
   permission: "sandbox-full-access"
 execution_policy:
   loop_budget: 10
-  timeout_ms: 1200000
+  timeout_ms: 3600000
 worktree:
   branch: "agent/task-20260509-example"
   path: "../repo.worktrees/task-20260509-example"

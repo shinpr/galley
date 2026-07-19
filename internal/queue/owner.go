@@ -12,6 +12,8 @@ import (
 
 const ownerSuffix = ".owner"
 
+var ErrInvalidOwner = errors.New("invalid task owner")
+
 // Owner records which daemon process claimed a running task so startup recovery
 // can distinguish a task interrupted by a dead daemon from one a live daemon
 // still owns.
@@ -47,7 +49,7 @@ func ReadOwner(runningPath string) (Owner, error) {
 	}
 	var owner Owner
 	if err := json.Unmarshal(data, &owner); err != nil || owner.PID <= 0 {
-		return Owner{}, fmt.Errorf("invalid task owner file %s", OwnerPath(runningPath))
+		return Owner{}, fmt.Errorf("%w file %s", ErrInvalidOwner, OwnerPath(runningPath))
 	}
 	return owner, nil
 }

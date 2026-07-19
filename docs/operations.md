@@ -169,7 +169,9 @@ Sample hooks are in [`docs/examples/notifications/`](examples/notifications/).
 
 Use `galley daemon stop --force` only when normal stop cannot end a stalled daemon. Galley first tries normal shutdown, then terminates the verified daemon and its recorded executor and supervisor process groups.
 
-Force stop can interrupt active work. The next daemon startup recovers tasks left in `running`; inspect their latest state and evidence before deciding whether to requeue.
+After the daemon and its recorded child processes stop, Galley moves tasks owned by that daemon from `running` to `failed`. Their worktrees, revision requests, and run evidence remain available for `task show`, `task requeue`, or `task archive`. Tasks with missing or invalid owner metadata remain unchanged for ClaimTTL recovery. If the running directory cannot be inspected or a matching task cannot be loaded or published, force stop returns an error and keeps the daemon PID and unresolved task ownership evidence.
+
+Unexpected daemon loss is different: the next daemon startup requeues tasks whose recorded owner is dead or cannot be verified. A successful explicit force stop leaves its tasks failed until an operator chooses recovery or archive.
 
 On Unix, normal foreground and background shutdown stops new claims and gives active attempts the configured shutdown timeout. On Windows, background stop uses immediate process termination because a console-less process has no SIGTERM equivalent. Run `galley daemon run` in the foreground and stop it with `Ctrl+C` when graceful Windows shutdown is required.
 

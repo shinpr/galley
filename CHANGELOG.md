@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- Successful `galley daemon stop --force` now moves tasks owned by that daemon to `failed` with interruption evidence while retaining their worktrees for requeue or archive.
+
 ## v0.12.0 - 2026-07-19
 
 ### Added

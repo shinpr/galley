@@ -411,8 +411,19 @@ func newStopCommand(opts *daemon.Options, pidFile *string, stopTimeout *time.Dur
 				if err := cleanupOnForce(cmd, force, opts.Root, status.Meta.PID, *stopTimeout); err != nil {
 					return err
 				}
+				failedTasks := 0
+				if force {
+					failedTasks, err = failOwnedRunningTasks(opts.Root, status.Meta)
+					if err != nil {
+						return err
+					}
+				}
 				if err := daemonctl.RemovePID(paths.PIDFile, status.Meta.PID); err != nil {
 					return err
+				}
+				if force && failedTasks > 0 {
+					fmt.Fprintf(cmd.OutOrStdout(), "galley daemon force stopped pid=%d\n", status.Meta.PID)
+					return nil
 				}
 				return daemonctl.ErrNotRunning
 			}
@@ -432,7 +443,7 @@ func newStopCommand(opts *daemon.Options, pidFile *string, stopTimeout *time.Dur
 				forced = wasForced
 			} else {
 				if err := stopVerifiedForCommand(status.Meta, *stopTimeout); err != nil && !errors.Is(err, daemonctl.ErrNotRunning) {
-					return err
+					return fmt.Errorf("shutdown remains in progress; normal stop will not signal again; use stop --force to recover, which interrupts active attempts: %w", err)
 				}
 				defer removeStopIntent(intentPath)
 			}
@@ -447,6 +458,11 @@ func newStopCommand(opts *daemon.Options, pidFile *string, stopTimeout *time.Dur
 			// observing a falsely-clean stop.
 			if err := cleanupOnForce(cmd, force, opts.Root, status.Meta.PID, *stopTimeout); err != nil {
 				return err
+			}
+			if force {
+				if _, err := failOwnedRunningTasks(opts.Root, status.Meta); err != nil {
+					return err
+				}
 			}
 			if err := daemonctl.RemovePID(paths.PIDFile, status.Meta.PID); err != nil {
 				return err

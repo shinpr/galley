@@ -88,6 +88,42 @@ def test_updates_only_requested_executor_fields(tmpdir: pathlib.Path) -> None:
         raise AssertionError("unrequested executor fields were not preserved")
 
 
+def test_updates_daemon_serialized_executor_fields(tmpdir: pathlib.Path) -> None:
+    task_path = tmpdir / "task.yaml"
+    original = (
+        "id: task-1\n"
+        "executor:\n"
+        "    cli: kimi\n"
+        "    model: k3\n"
+        "    effort: high\n"
+        "risks: []\n"
+    )
+    write_task(task_path, original)
+
+    result = run_updater(
+        task_path,
+        "--cli",
+        "glm",
+        "--model",
+        "glm-5.2",
+        "--effort",
+        "xhigh",
+    )
+
+    if result.returncode != 0:
+        raise AssertionError(result.stderr)
+    expected = (
+        "id: task-1\n"
+        "executor:\n"
+        '    cli: "glm"\n'
+        '    model: "glm-5.2"\n'
+        '    effort: "xhigh"\n'
+        "risks: []\n"
+    )
+    if task_path.read_text(encoding="utf-8") != expected:
+        raise AssertionError("daemon-serialized executor indentation was not preserved")
+
+
 def test_removes_empty_executor_block(tmpdir: pathlib.Path) -> None:
     task_path = tmpdir / "task.yaml"
     write_task(task_path, "id: task-1\nexecutor:\n  cli: codex\nrisks: []\n")
@@ -164,6 +200,7 @@ def main() -> int:
     tests = (
         test_adds_executor_block_without_interpreting_task_status,
         test_updates_only_requested_executor_fields,
+        test_updates_daemon_serialized_executor_fields,
         test_removes_empty_executor_block,
         test_preserves_crlf_line_endings,
         test_preserves_bom_before_first_executor_block,

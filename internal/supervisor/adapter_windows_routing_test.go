@@ -45,7 +45,7 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 cat > `+stdinPath+`
-printf '%s\n' '{"status":"accepted","summary":"ok","acceptance_gaps":[],"reviewed_files":["README.md"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["checked"]}],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"medium","next_work_order":""}'
+printf '%s\n' '{"status":"accepted","summary":"ok","acceptance_passes":["AC1"],"quality_passes":[],"findings":[],"discussion_items":[]}'
 `), 0o700); err != nil {
 		t.Fatal(err)
 	}

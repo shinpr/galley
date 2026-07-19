@@ -170,16 +170,6 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 	return outcome, nil
 }
 
-func markRevisionRequestsAddressed(loaded *task.Task, evidence string) {
-	for i := range loaded.RevisionRequests {
-		if loaded.RevisionRequests[i].Status == "addressed" {
-			continue
-		}
-		loaded.RevisionRequests[i].Status = "addressed"
-		loaded.RevisionRequests[i].Evidence = evidence
-	}
-}
-
 func mergeAttemptEvidence(loaded *task.Task, outcome attemptOutcome, runID, workDir, attemptDir string) {
 	loaded.Attempts = append(loaded.Attempts, task.Attempt{
 		Number:            len(loaded.Attempts) + 1,
@@ -371,8 +361,9 @@ func appendSupervisorFailureAttempt(loaded *task.Task, outcome attemptOutcome, e
 		Summary:           err.Error(),
 		Error:             attemptError("supervisor", kind, err, attemptDir),
 	})
-	// A supervisor failure is not a verdict on the executor's work.
-	loaded.Status = "needs_supervisor_review"
+	// A supervisor failure is not a human review decision. Preserve the
+	// evidence as an operational failure so the task can be requeued.
+	loaded.Status = "failed"
 	if supervisor.IsVerdictContractError(err) {
 		appendRisk(loaded, "supervisor-invalid-verdict", "partial_verification", fmt.Sprintf("Supervisor evaluation failed (%s): %s", kind, err.Error()), "Inspect the supervisor-try-1 validation evidence and requeue with the same or another supervisor after correcting the output-contract issue.", true)
 		return
@@ -396,7 +387,7 @@ func appendSupervisorIdleTimeoutAttempt(loaded *task.Task, outcome attemptOutcom
 			ArtifactDir: attemptDir,
 		},
 	})
-	loaded.Status = "needs_supervisor_review"
+	loaded.Status = "failed"
 	appendRisk(loaded, "supervisor-idle-timeout", "partial_verification", message, "Inspect the supervisor-try-1 evidence under the attempt directory, then requeue the task or adjust the daemon --idle-timeout or --supervisor settings.", true)
 }
 

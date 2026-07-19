@@ -5,16 +5,10 @@
   "required": [
     "status",
     "summary",
-    "acceptance_gaps",
-    "reviewed_files",
-    "acceptance_evidence",
+    "acceptance_passes",
     "quality_passes",
-    "quality_gaps",
     "findings",
-    "residual_risks",
-    "discussion_items",
-    "confidence",
-    "next_work_order"
+    "discussion_items"
   ],
   "properties": {
     "status": {
@@ -25,90 +19,25 @@
       "type": "string",
       "minLength": 1
     },
-    "acceptance_gaps": {
+    "acceptance_passes": {
       "type": "array",
-      "description": "IDs of reviewed acceptance items that did not pass. Use task AC IDs or revision:<request.id>; put explanations in findings.",
+      "description": "The current set of passed task AC and revision:<request.id> IDs.",
       "items": { "type": "string", "minLength": 1 }
-    },
-    "reviewed_files": {
-      "type": "array",
-      "items": { "type": "string", "minLength": 1 }
-    },
-    "acceptance_evidence": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["ac_id", "evidence"],
-        "properties": {
-          "ac_id": { "type": "string", "minLength": 1 },
-          "evidence": {
-            "type": "array",
-            "items": { "type": "string", "minLength": 1 }
-          }
-        }
-      }
     },
     "quality_passes": {
       "type": "array",
-      "description": "Configured quality-dimension IDs that were reviewed and passed.",
-      "items": { "type": "string", "minLength": 1 }
-    },
-    "quality_gaps": {
-      "type": "array",
-      "description": "Configured quality-dimension IDs that were reviewed and did not pass.",
+      "description": "The current set of passed configured quality-dimension IDs.",
       "items": { "type": "string", "minLength": 1 }
     },
     "findings": {
       "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["severity", "category", "file", "summary", "blocks_acceptance", "supersedes"],
-        "properties": {
-          "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
-          "category": { "type": "string", "minLength": 1 },
-          "file": { "type": "string" },
-          "summary": {
-            "type": "string",
-            "minLength": 1,
-            "description": "An independently actionable fix contract: concrete failure and trigger or material-risk evidence, required post-fix behavior across affected boundaries, and verification that proves closure."
-          },
-          "blocks_acceptance": { "type": "boolean" },
-          "supersedes": {
-            "type": "array",
-            "description": "Exact revision:<id> acceptance IDs whose pending supervisor-source repair contracts this finding replaces.",
-            "items": { "type": "string", "pattern": "^revision:.*\\S.*$" }
-          }
-        }
-      }
-    },
-    "residual_risks": {
-      "type": "array",
-      "description": "Non-blocking uncertainty as plain strings only. Do not emit objects here; use findings for severity/category/file/blocking metadata.",
-      "items": { "type": "string" }
+      "description": "The complete current repair batch. Each string states the concrete failure, required outcome, affected location, and closure verification.",
+      "items": { "type": "string", "minLength": 1 }
     },
     "discussion_items": {
       "type": "array",
-      "description": "Accepted-work reviewer notes only. Each object must use topic, summary, and requires_human_decision.",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["topic", "summary", "requires_human_decision"],
-        "properties": {
-          "topic": { "type": "string", "minLength": 1 },
-          "summary": { "type": "string", "minLength": 1 },
-          "requires_human_decision": { "type": "boolean" }
-        }
-      }
-    },
-    "confidence": {
-      "type": "string",
-      "enum": ["high", "medium", "low"]
-    },
-    "next_work_order": {
-      "type": "string",
-      "description": "Batch-level order or dependency guidance for needs_revision; empty when findings are independently executable or status differs."
+      "description": "Information to show the human reviewer in the pull request.",
+      "items": { "type": "string", "minLength": 1 }
     }
   }
 }

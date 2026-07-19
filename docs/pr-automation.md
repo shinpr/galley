@@ -30,7 +30,7 @@ Origin-less local checkouts fall back to `refs/heads/<pr.base>`. The start point
 
 ## PR Body and Title
 
-Galley renders each acceptance criterion in `pr_body.md` using the supervisor verdict, so accepted ACs read as `Status: satisfied` and any IDs the supervisor flagged in `acceptance_gaps` read as `Status: partially_satisfied`.
+Galley renders each acceptance criterion in `pr_body.md` from the supervisor's current pass set. IDs in `acceptance_passes` read as `Status: satisfied`; other IDs read as `Status: partially_satisfied` so incomplete review state remains visible instead of blocking PR creation.
 
 Generated PR titles preserve the task goal up to GitHub's title limit. When truncation is required, Galley cuts on a valid UTF-8 boundary and appends `…`.
 

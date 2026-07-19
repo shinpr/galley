@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/shinpr/galley/internal/inputfiles"
@@ -192,19 +193,19 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 		fmt.Fprintf(os.Stderr, "galley: task %s attempt %d verdict=%s summary=%s\n", loaded.ID, attempt, review.Verdict.Status, review.Verdict.Summary)
 		loaded.Attempts[len(loaded.Attempts)-1].SupervisorVerdict = review.Verdict.Status
 		loaded.Attempts[len(loaded.Attempts)-1].Summary = fmt.Sprintf("%s; run_id=%s; attempt=%d; workspace=%s", review.Verdict.Summary, runID, attempt, prepared.CWD)
-		nextRevision := supervisorRevisionFromTask(*loaded)
 		if review.Verdict.Status == "needs_revision" {
-			nextRevision = nextSupervisorRevision(nextRevision, len(loaded.Attempts), review.Verdict)
-			*loaded = nextRevision.applyToTask(*loaded)
+			revision = nextSupervisorRevision(len(loaded.Attempts), review.Verdict)
+			*loaded = revision.applyToTask(*loaded)
 		}
 		if err := task.Save(runningPath, *loaded); err != nil {
 			return taskstate.FailMoveToStatus(opts.Root, runningPath, loaded, err)
 		}
-		nextPrompt, done, err := applySupervisorVerdict(ctx, shutdownCtx, verdictApplication{
+		done, err := applySupervisorVerdict(ctx, shutdownCtx, verdictApplication{
 			Opts:              effectiveOpts,
 			RunningPath:       runningPath,
 			Loaded:            loaded,
 			Prepared:          prepared.Prepared,
+			Profiles:          profiles,
 			RunDir:            runDir,
 			Attempt:           attempt,
 			ConsecutiveNoDiff: consecutiveNoDiff,
@@ -213,14 +214,10 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 		if err != nil || done {
 			return err
 		}
-		if nextPrompt != "" {
-			revision = nextRevision
-			continue
-		}
 	}
 	*loaded = revision.applyToTask(*loaded)
-	loaded.Status = "needs_supervisor_review"
-	fmt.Fprintf(os.Stderr, "galley: task %s exhausted attempts; needs supervisor review\n", loaded.ID)
+	loaded.Status = "failed"
+	fmt.Fprintf(os.Stderr, "galley: task %s exhausted attempts\n", loaded.ID)
 	return taskstate.MoveToStatus(opts.Root, runningPath, loaded)
 }
 
@@ -318,24 +315,25 @@ type verdictApplication struct {
 	RunningPath       string
 	Loaded            *task.Task
 	Prepared          workspace.Prepared
+	Profiles          profile.Bundle
 	RunDir            string
 	Attempt           int
 	ConsecutiveNoDiff int
 	Verdict           supervisor.Verdict
 }
 
-func applySupervisorVerdict(ctx, shutdownCtx context.Context, req verdictApplication) (string, bool, error) {
+func applySupervisorVerdict(ctx, shutdownCtx context.Context, req verdictApplication) (bool, error) {
 	if shutdownCtx.Err() != nil && req.Verdict.Status == "needs_revision" {
 		fmt.Fprintf(os.Stderr, "galley: task %s stopped after attempt %d due to shutdown\n", req.Loaded.ID, req.Attempt)
-		return "", true, degradeToSupervisorReview(req, "shutdown", "Shutdown was requested after an attempt that needs revision; Galley did not start another retry attempt.", "Review the run evidence and requeue the task when ready.")
+		return true, failVerdictApplication(req, "shutdown", "Shutdown was requested after an attempt that needs revision; Galley did not start another retry attempt.", "Review the run evidence and requeue the task when ready.")
 	}
 	if shutdownCtx.Err() != nil && req.Verdict.Status == "accepted" && req.Opts.CommitOnAccept {
 		fmt.Fprintf(os.Stderr, "galley: task %s accepted during shutdown; skipped finalization\n", req.Loaded.ID)
-		return "", true, degradeToSupervisorReview(req, "shutdown-finalize", "Shutdown was requested before accepted work was finalized; Galley skipped commit, push, and PR creation to avoid an interrupted external side effect.", "Inspect the accepted diff and requeue or finalize manually when ready.")
+		return true, failVerdictApplication(req, "shutdown-finalize", "Shutdown was requested before accepted work was finalized; Galley skipped commit, push, and PR creation to avoid an interrupted external side effect.", "Inspect the accepted diff and requeue or finalize manually when ready.")
 	}
 	if req.Verdict.Status == "needs_revision" && req.ConsecutiveNoDiff >= progressNoDiffThreshold {
 		fmt.Fprintf(os.Stderr, "galley: task %s stopped by progress invariant: consecutive no-diff attempts\n", req.Loaded.ID)
-		return "", true, degradeToSupervisorReview(req, "progress", "Two consecutive executor attempts produced no git diff.", "A supervisor should inspect the task, work order, and executor logs before requeueing.")
+		return true, failVerdictApplication(req, "progress", "Two consecutive executor attempts produced no git diff.", "Inspect the task, work order, and executor logs before requeueing.")
 	}
 
 	switch req.Verdict.Status {
@@ -343,44 +341,43 @@ func applySupervisorVerdict(ctx, shutdownCtx context.Context, req verdictApplica
 		// Required skeleton coverage is a task contract that cannot be waived
 		// by the supervisor.
 		if reason, ok := evaluateAcceptanceGate(req.Loaded, req.RunDir); !ok {
-			fmt.Fprintf(os.Stderr, "galley: task %s accepted-verdict downgraded by acceptance gate: %s\n", req.Loaded.ID, reason)
-			return "", true, degradeToSupervisorReview(req, "acceptance-gate", "Accepted verdict downgraded by acceptance skeleton gate: "+reason, "Inspect preflight_result.json before re-finalizing.")
+			fmt.Fprintf(os.Stderr, "galley: task %s accepted verdict rejected by acceptance gate: %s\n", req.Loaded.ID, reason)
+			return true, failVerdictApplication(req, "acceptance-gate", "Accepted verdict rejected by acceptance skeleton gate: "+reason, "Inspect preflight_result.json before re-finalizing.")
 		}
-		return "", true, acceptSupervisorVerdict(ctx, req.Opts, req.RunningPath, req.Loaded, req.Prepared, req.RunDir, req.Verdict)
+		return true, acceptSupervisorVerdict(ctx, req.Opts, req.RunningPath, req.Loaded, req.Prepared, req.Profiles, req.RunDir, req.Verdict)
 	case "needs_revision":
-		return req.Verdict.NextWorkOrder, false, nil
+		return false, nil
 	case "hard_stop":
 		req.Loaded.Status = "failed"
-		return "", true, taskstate.MoveToStatus(req.Opts.Root, req.RunningPath, req.Loaded)
+		return true, taskstate.MoveToStatus(req.Opts.Root, req.RunningPath, req.Loaded)
 	case "needs_supervisor_review":
 		req.Loaded.Status = "needs_supervisor_review"
-		return "", true, taskstate.MoveToStatus(req.Opts.Root, req.RunningPath, req.Loaded)
+		return true, taskstate.MoveToStatus(req.Opts.Root, req.RunningPath, req.Loaded)
 	default:
 		fmt.Fprintf(os.Stderr, "galley: task %s unknown supervisor verdict=%q\n", req.Loaded.ID, req.Verdict.Status)
-		return "", true, degradeToSupervisorReview(req, "supervisor-verdict", fmt.Sprintf("Supervisor returned unknown verdict status %q.", req.Verdict.Status), "Inspect supervisor_verdict.json and rerun after correcting the supervisor output.")
+		return true, failVerdictApplication(req, "supervisor-verdict", fmt.Sprintf("Supervisor returned unknown verdict status %q.", req.Verdict.Status), "Inspect supervisor_verdict.json and rerun after correcting the supervisor output.")
 	}
 }
 
-func degradeToSupervisorReview(req verdictApplication, riskPrefix, detail, mitigation string) error {
-	req.Loaded.Status = "needs_supervisor_review"
+func failVerdictApplication(req verdictApplication, riskPrefix, detail, mitigation string) error {
+	req.Loaded.Status = "failed"
 	appendRisk(req.Loaded, riskPrefix, "partial_verification", detail, mitigation, true)
 	return taskstate.MoveToStatus(req.Opts.Root, req.RunningPath, req.Loaded)
 }
 
-func acceptSupervisorVerdict(ctx context.Context, opts Options, runningPath string, loaded *task.Task, prepared workspace.Prepared, runDir string, verdict supervisor.Verdict) error {
-	markRevisionRequestsAddressed(loaded, verdict.Summary)
-	clearSupervisorGuidance(loaded)
-	applyAcceptedAcceptanceCriteria(loaded, verdict)
-	mergeDiscussionItems(loaded, verdict)
+func acceptSupervisorVerdict(ctx context.Context, opts Options, runningPath string, loaded *task.Task, prepared workspace.Prepared, profiles profile.Bundle, runDir string, verdict supervisor.Verdict) error {
+	mergeDiscussionItems(loaded, profiles, verdict)
+	*loaded = (supervisorRevision{}).applyToTask(*loaded)
+	applyAcceptedAcceptanceCriteria(loaded)
 	if opts.CommitOnAccept {
 		fmt.Fprintf(os.Stderr, "galley: task %s accepted; finalizing commit/pr\n", loaded.ID)
 		if err := finalizeAcceptedChange(ctx, opts, loaded, prepared.CWD, prepared.BaseSHA, runDir); err != nil {
-			loaded.Status = "needs_supervisor_review"
+			loaded.Status = "failed"
 			appendRisk(loaded, "finalize", "partial_verification", err.Error(), "The executor diff and run evidence were stored; a supervisor should inspect and finish commit or PR creation.", true)
 			return taskstate.FailMoveToStatus(opts.Root, runningPath, loaded, err)
 		}
 	} else if err := inputfiles.CleanupNonCommitted(prepared.CWD, loaded.Files); err != nil {
-		loaded.Status = "needs_supervisor_review"
+		loaded.Status = "failed"
 		appendRisk(loaded, "input-file-cleanup", "partial_verification", err.Error(), "Remove non-committed task input files from the execution workspace before archiving or reusing it.", true)
 		return taskstate.FailMoveToStatus(opts.Root, runningPath, loaded, err)
 	}
@@ -432,15 +429,54 @@ func evaluateSupervisor(ctx context.Context, opts Options, evidence supervisor.E
 	return verdict, nil
 }
 
-func mergeDiscussionItems(loaded *task.Task, verdict supervisor.Verdict) {
-	for _, item := range verdict.DiscussionItems {
-		loaded.DiscussionItems = append(loaded.DiscussionItems, task.DiscussionItem{
-			ID:                    fmt.Sprintf("discussion-%d", len(loaded.DiscussionItems)+1),
-			Topic:                 item.Topic,
-			Summary:               item.Summary,
-			RequiresHumanDecision: item.RequiresHumanDecision,
-		})
+func mergeDiscussionItems(loaded *task.Task, profiles profile.Bundle, verdict supervisor.Verdict) {
+	appendDiscussionItem(loaded, "Supervisor summary", verdict.Summary, false)
+	for _, finding := range verdict.Findings {
+		appendDiscussionItem(loaded, "Supervisor finding", finding, true)
 	}
+	for _, item := range verdict.DiscussionItems {
+		appendDiscussionItem(loaded, "Supervisor discussion", item, false)
+	}
+	for _, request := range loaded.RevisionRequests {
+		if request.Status == "addressed" {
+			continue
+		}
+		appendDiscussionItem(
+			loaded,
+			"Unverified revision request",
+			fmt.Sprintf("revision:%s (%s): %s", request.ID, request.Source, request.Text),
+			true,
+		)
+	}
+	if profiles.Quality != nil {
+		passed := map[string]bool{}
+		if loaded.ReviewProgress != nil {
+			for _, id := range loaded.ReviewProgress.Quality {
+				passed[id] = true
+			}
+		}
+		var gaps []string
+		for _, dimension := range profiles.Quality.ReviewDimensions {
+			if !passed[dimension.ID] {
+				gaps = append(gaps, dimension.ID)
+			}
+		}
+		if len(gaps) > 0 {
+			appendDiscussionItem(loaded, "Quality review gaps", strings.Join(gaps, ", "), true)
+		}
+	}
+}
+
+func appendDiscussionItem(loaded *task.Task, topic, summary string, requiresHumanDecision bool) {
+	if strings.TrimSpace(summary) == "" {
+		return
+	}
+	loaded.DiscussionItems = append(loaded.DiscussionItems, task.DiscussionItem{
+		ID:                    fmt.Sprintf("discussion-%d", len(loaded.DiscussionItems)+1),
+		Topic:                 topic,
+		Summary:               summary,
+		RequiresHumanDecision: requiresHumanDecision,
+	})
 }
 
 func attemptBudget(b task.LoopBudget) int {

@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	skeletonpreflight "github.com/shinpr/galley/internal/preflight/skeleton"
-	"github.com/shinpr/galley/internal/supervisor"
 	"github.com/shinpr/galley/internal/task"
 )
 
@@ -84,22 +83,21 @@ func evaluateAcceptanceGate(loaded *task.Task, runDir string) (string, bool) {
 	return reason, ok
 }
 
-// applyAcceptedAcceptanceCriteria prevents stale executor statuses from
-// contradicting an accepted supervisor verdict while preserving reported gaps.
-func applyAcceptedAcceptanceCriteria(loaded *task.Task, verdict supervisor.Verdict) {
-	if verdict.Status != "accepted" {
-		return
-	}
-	gaps := make(map[string]bool, len(verdict.AcceptanceGaps))
-	for _, id := range verdict.AcceptanceGaps {
-		gaps[strings.TrimSpace(id)] = true
+// applyAcceptedAcceptanceCriteria projects the persisted current pass list
+// into the PR-visible acceptance status.
+func applyAcceptedAcceptanceCriteria(loaded *task.Task) {
+	passes := map[string]bool{}
+	if loaded.ReviewProgress != nil {
+		for _, id := range loaded.ReviewProgress.Acceptance {
+			passes[strings.TrimSpace(id)] = true
+		}
 	}
 	for i := range loaded.AcceptanceCriteria {
 		ac := &loaded.AcceptanceCriteria[i]
-		if gaps[ac.ID] {
+		if passes[ac.ID] {
+			ac.Status = "satisfied"
+		} else {
 			ac.Status = "partially_satisfied"
-			continue
 		}
-		ac.Status = "satisfied"
 	}
 }

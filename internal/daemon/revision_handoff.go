@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/shinpr/galley/internal/supervisor"
@@ -11,59 +10,23 @@ import (
 
 const supervisorRevisionSource = "supervisor"
 
-const (
-	supervisorGuidanceRiskPrefix = "requeue-supervisor-attempt-"
-	supervisorGuidanceRiskSuffix = "-guidance"
-)
+const supervisorGuidanceRiskPrefix = "requeue-supervisor-attempt-"
 
 type supervisorRevision struct {
-	SourceAttempt int
-	Guidance      string
-	Requests      []task.RevisionRequest
+	Requests []task.RevisionRequest
 }
 
-func nextSupervisorRevision(previous supervisorRevision, sourceAttempt int, verdict supervisor.Verdict) supervisorRevision {
-	requests := make([]task.RevisionRequest, 0, len(previous.Requests)+len(verdict.Findings))
-	knownText := make(map[string]bool)
-	reviewedGaps := make(map[string]bool, len(verdict.AcceptanceGaps))
-	for _, id := range verdict.AcceptanceGaps {
-		reviewedGaps[strings.TrimSpace(id)] = true
-	}
-	superseded := make(map[string]bool)
-	for _, finding := range verdict.Findings {
-		for _, rawID := range finding.Supersedes {
-			id := strings.TrimSpace(rawID)
-			if reviewedGaps[id] {
-				superseded[id] = true
-			}
-		}
-	}
-	for _, request := range previous.Requests {
-		if request.Status == "addressed" {
-			requests = append(requests, request)
-			continue
-		}
-		if superseded["revision:"+request.ID] {
-			continue
-		}
-		requests = append(requests, request)
-		knownText[request.Text] = true
-	}
-
+func nextSupervisorRevision(sourceAttempt int, verdict supervisor.Verdict) supervisorRevision {
+	requests := make([]task.RevisionRequest, 0, len(verdict.Findings))
 	for i, finding := range verdict.Findings {
-		request := task.RevisionRequest{
+		requests = append(requests, task.RevisionRequest{
 			ID:     fmt.Sprintf("supervisor-attempt-%d-finding-%d", sourceAttempt, i+1),
 			Source: supervisorRevisionSource,
-			Text:   supervisorFindingText(finding),
+			Text:   strings.TrimSpace(finding),
 			Status: "pending",
-		}
-		if !knownText[request.Text] {
-			requests = append(requests, request)
-			knownText[request.Text] = true
-		}
+		})
 	}
-
-	return supervisorRevision{SourceAttempt: sourceAttempt, Guidance: verdict.NextWorkOrder, Requests: requests}
+	return supervisorRevision{Requests: requests}
 }
 
 func supervisorRevisionFromTask(value task.Task) supervisorRevision {
@@ -71,12 +34,6 @@ func supervisorRevisionFromTask(value task.Task) supervisorRevision {
 	for _, request := range value.RevisionRequests {
 		if request.Source == supervisorRevisionSource {
 			revision.Requests = append(revision.Requests, request)
-		}
-	}
-	for _, risk := range value.Risks {
-		if attempt, ok := supervisorGuidanceAttempt(risk.ID); ok {
-			revision.SourceAttempt = attempt
-			revision.Guidance = risk.Detail
 		}
 	}
 	return revision
@@ -96,48 +53,12 @@ func (revision supervisorRevision) applyToTask(value task.Task) task.Task {
 	}
 	value.RevisionRequests = requests
 
-	risks := make([]task.Risk, 0, len(value.Risks)+1)
+	risks := make([]task.Risk, 0, len(value.Risks))
 	for _, risk := range value.Risks {
-		if _, ok := supervisorGuidanceAttempt(risk.ID); !ok {
+		if !strings.HasPrefix(risk.ID, supervisorGuidanceRiskPrefix) {
 			risks = append(risks, risk)
 		}
-	}
-	if strings.TrimSpace(revision.Guidance) != "" {
-		risks = append(risks, task.Risk{
-			ID:                   fmt.Sprintf("%s%d%s", supervisorGuidanceRiskPrefix, revision.SourceAttempt, supervisorGuidanceRiskSuffix),
-			Type:                 "partial_verification",
-			Detail:               revision.Guidance,
-			Mitigation:           "Complete the pending supervisor revision requests before acceptance.",
-			HumanReviewSuggested: false,
-		})
 	}
 	value.Risks = risks
 	return value
-}
-
-func clearSupervisorGuidance(value *task.Task) {
-	risks := value.Risks[:0]
-	for _, risk := range value.Risks {
-		if _, ok := supervisorGuidanceAttempt(risk.ID); !ok {
-			risks = append(risks, risk)
-		}
-	}
-	value.Risks = risks
-}
-
-func supervisorGuidanceAttempt(id string) (int, bool) {
-	if !strings.HasPrefix(id, supervisorGuidanceRiskPrefix) || !strings.HasSuffix(id, supervisorGuidanceRiskSuffix) {
-		return 0, false
-	}
-	value := strings.TrimSuffix(strings.TrimPrefix(id, supervisorGuidanceRiskPrefix), supervisorGuidanceRiskSuffix)
-	attempt, err := strconv.Atoi(value)
-	return attempt, err == nil
-}
-
-func supervisorFindingText(finding supervisor.Finding) string {
-	location := "category=" + finding.Category
-	if finding.File != "" {
-		location += " file=" + finding.File
-	}
-	return location + ": " + strings.TrimSpace(finding.Summary)
 }

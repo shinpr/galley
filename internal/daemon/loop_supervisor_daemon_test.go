@@ -53,7 +53,7 @@ func TestDaemonSupervisorStallFailsAfterSingleInvocation(t *testing.T) {
 	if loadErr != nil {
 		t.Fatal(loadErr)
 	}
-	if failed.Status != "needs_supervisor_review" || len(failed.Attempts) != 1 || failed.Attempts[0].Error == nil {
+	if failed.Status != "failed" || len(failed.Attempts) != 1 || failed.Attempts[0].Error == nil {
 		t.Fatalf("failed task = %#v", failed)
 	}
 	if failed.Attempts[0].Error.Kind != "supervisor_idle_timeout" {

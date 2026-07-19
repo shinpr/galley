@@ -20,16 +20,10 @@ RESULT_TEMPLATE = """{
 SUPERVISOR_TEMPLATE = """{
   "status": "accepted",
   "summary": "One concise review summary.",
-  "acceptance_gaps": [],
-  "reviewed_files": ["path/to/file.ext"],
-  "acceptance_evidence": [{"ac_id": "AC1", "evidence": ["Concrete evidence from changed files or verification output."]}],
+  "acceptance_passes": ["AC1"],
   "quality_passes": ["configured-dimension-id"],
-  "quality_gaps": [],
   "findings": [],
-  "residual_risks": [],
-  "discussion_items": [],
-  "confidence": "medium",
-  "next_work_order": ""
+  "discussion_items": []
 }"""
 
 CREATOR_TEMPLATE = """{
@@ -203,94 +197,21 @@ def validate_supervisor_verdict(verdict):
     required = [
         "status",
         "summary",
-        "acceptance_gaps",
-        "reviewed_files",
-        "acceptance_evidence",
+        "acceptance_passes",
         "quality_passes",
-        "quality_gaps",
         "findings",
-        "residual_risks",
         "discussion_items",
-        "confidence",
-        "next_work_order",
     ]
     for field in required:
         if field not in verdict:
             raise ValueError(f"{field} is required")
     if not isinstance(verdict["summary"], str) or not verdict["summary"].strip():
         raise ValueError("summary must be a non-empty string")
-    require_array(verdict["acceptance_gaps"], "acceptance_gaps")
-    require_array(verdict["reviewed_files"], "reviewed_files")
-    require_array(verdict["acceptance_evidence"], "acceptance_evidence")
-    validate_quality_results_shape(verdict["quality_passes"], verdict["quality_gaps"])
-    require_array(verdict["findings"], "findings")
-    require_array(verdict["residual_risks"], "residual_risks")
-    require_array(verdict["discussion_items"], "discussion_items")
-    if verdict.get("confidence") not in {"high", "medium", "low"}:
-        raise ValueError("confidence must be high, medium, or low")
-    if not isinstance(verdict["next_work_order"], str):
-        raise ValueError("next_work_order must be a string")
-
-    for index, risk in enumerate(verdict["residual_risks"]):
-        if not isinstance(risk, str):
-            raise ValueError(f"residual_risks[{index}] must be a string")
-
-    for index, item in enumerate(verdict["discussion_items"]):
-        require_object(item, f"discussion_items[{index}]")
-        for field in ["topic", "summary", "requires_human_decision"]:
-            if field not in item:
-                raise ValueError(f"discussion_items[{index}].{field} is required")
-        if not isinstance(item["topic"], str) or not item["topic"].strip():
-            raise ValueError(f"discussion_items[{index}].topic must be a non-empty string")
-        if not isinstance(item["summary"], str) or not item["summary"].strip():
-            raise ValueError(f"discussion_items[{index}].summary must be a non-empty string")
-        if not isinstance(item["requires_human_decision"], bool):
-            raise ValueError(f"discussion_items[{index}].requires_human_decision must be a boolean")
-
-    for index, evidence in enumerate(verdict["acceptance_evidence"]):
-        require_object(evidence, f"acceptance_evidence[{index}]")
-        for field in ["ac_id", "evidence"]:
-            if field not in evidence:
-                raise ValueError(f"acceptance_evidence[{index}].{field} is required")
-        require_array(evidence["evidence"], f"acceptance_evidence[{index}].evidence")
-
-    for index, finding in enumerate(verdict["findings"]):
-        require_object(finding, f"findings[{index}]")
-        for field in ["severity", "category", "file", "summary", "blocks_acceptance", "supersedes"]:
-            if field not in finding:
-                raise ValueError(f"findings[{index}].{field} is required")
-        if finding.get("severity") not in {"critical", "high", "medium", "low"}:
-            raise ValueError(f"findings[{index}].severity is invalid")
-        if not isinstance(finding["blocks_acceptance"], bool):
-            raise ValueError(f"findings[{index}].blocks_acceptance must be a boolean")
-        require_array(finding["supersedes"], f"findings[{index}].supersedes")
-        for supersedes_index, value in enumerate(finding["supersedes"]):
-            if not isinstance(value, str) or not value.startswith("revision:") or not value[len("revision:"):].strip():
-                raise ValueError(
-                    f"findings[{index}].supersedes[{supersedes_index}] must be a revision:<id> string"
-                )
-
-    if verdict["status"] == "needs_revision" and not verdict["findings"] and not verdict["next_work_order"].strip():
-        raise ValueError("a finding or next_work_order is required when status is needs_revision")
-    if verdict["status"] != "needs_revision" and verdict["next_work_order"].strip():
-        raise ValueError("next_work_order must be empty unless status is needs_revision")
-    if verdict["status"] == "accepted" and verdict["confidence"] == "low":
-        raise ValueError("accepted verdicts require medium or high confidence")
-    if verdict["status"] != "accepted" and verdict["discussion_items"]:
-        raise ValueError("discussion_items are only valid for accepted verdicts")
-
-
-def validate_quality_results_shape(passes, gaps):
-    seen = set()
-    for field, values in [("quality_passes", passes), ("quality_gaps", gaps)]:
-        require_array(values, field)
-        for index, value in enumerate(values):
+    for field in ["acceptance_passes", "quality_passes", "findings", "discussion_items"]:
+        require_array(verdict[field], field)
+        for index, value in enumerate(verdict[field]):
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{field}[{index}] must be a non-empty string")
-            normalized = value.strip()
-            if normalized in seen:
-                raise ValueError(f"quality item {normalized!r} appears in both or multiple results")
-            seen.add(normalized)
 
 
 def validate_creator_manifest(manifest):

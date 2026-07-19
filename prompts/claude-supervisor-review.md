@@ -43,7 +43,7 @@ For `requirement_basis`, `execution_plan`, and `test_or_quality_basis` files, ve
 
 The review procedure exists to produce a complete, actionable verdict while making revision loops converge. Complete and record each phase before starting the next: establishing the active review set, reviewing acceptance, and reviewing quality separately prevents the first discovered defect from consuming the review, preserves coverage of every active item, and lets persisted passes narrow later attempts.
 
-Follow the common Review Algorithm. Use TodoWrite to track this procedure. Before Step 1, register each `Step N` heading below as a todo, with Step 1 `in_progress` and every later step `pending`. After each step's stated result or gate is complete, mark it `completed` and move the next step to `in_progress`. After Step 7 is complete, mark it `completed`; every todo must then be `completed`. Return the final verdict only after this final todo update.
+Follow the common Review Algorithm. Before Step 1, register each `Step N` heading below with TaskCreate. Use TaskUpdate to set Step 1 `in_progress`, then mark each step `completed` only after its stated result or gate is complete and set the next step `in_progress`. Keep exactly one step `in_progress` until Step 7 is complete. After marking Step 7 `completed`, return the final verdict only when every registered step is `completed`.
 
 ## Step 1. Map Evidence And Set Scope
 
@@ -55,7 +55,7 @@ Acceptance criteria and pending revision requests remain the execution contract.
 
 Use `worktree_cwd`, not `source_cwd` or `task.scope.cwd`, for repository inspection. Inspect the changed areas and nearest contracts needed to review the scoped acceptance items.
 
-When a diff is present, `reviewed_files` must reflect this step: include the scoped changed files plus the nearest contract/context files or contract areas actually inspected.
+When a diff is present, inspect the scoped changed files plus the nearest contract/context files or contract areas needed to decide the active review set.
 
 ## Step 3. Review Acceptance
 
@@ -65,7 +65,7 @@ For each pending revision request, after checking the direct request, trace adja
 
 ## Step 4. Complete The Acceptance Gate
 
-Execute common Review Algorithm step 4. Every scoped acceptance item must have exactly one pass or gap result before continuing.
+Execute common Review Algorithm step 4. Every scoped acceptance item must have exactly one pass or verified finding or terminal-summary result before continuing.
 
 ## Step 5. Review Quality
 
@@ -85,7 +85,7 @@ Execute common Review Algorithm step 7 before returning JSON:
 2. Check nearby contracts and adjacent cases that share the same changed path, contract, persisted state, or external boundary for contrary evidence.
 3. Apply the common Finding Policy.
 
-Before returning JSON, verify that persisted passes plus current results, findings, residual risks, discussion items, confidence, and `next_work_order` match the active pass policy and schema.
+Before returning JSON, verify that the current acceptance and quality pass sets, findings, discussion items, and status match the active pass policy and schema.
 
 Return `accepted` only when the review procedure is complete, every acceptance criterion and pending revision request has persisted or current evidence, and no finding blocks acceptance.
 
@@ -113,15 +113,15 @@ Follow the common Contract Rules. For each criterion in the current review scope
 
 1. Find matching evidence in the executor result, diff, verification output, and repository context.
 2. Require evidence that satisfies the derived acceptance contract.
-3. Treat a missing criterion result, unknown criterion ID, or ambiguous result as an acceptance gap.
+3. Treat a missing criterion result, unknown criterion ID, or ambiguous result as not passed.
 4. Treat partially satisfied criteria as not satisfied unless the task explicitly permits partial completion.
 5. Accept only when required verification is present, passing, relevant, and exercises the changed behavior.
 
-For each open or regression-candidate criterion reviewed in this attempt, add one pass or gap result. A pass uses `acceptance_evidence` with `ac_id` equal to the criterion ID and concrete evidence; a gap uses the exact criterion ID in `acceptance_gaps`.
+For each open or regression-candidate criterion reviewed in this attempt, keep or add its exact ID in `acceptance_passes` when repository evidence proves it, or remove the ID and record a finding beginning with that ID when it fails.
 
-For each pending `task.revision_requests` item, add one `acceptance_evidence` item with `ac_id` equal to `revision:<id>` when the request is satisfied. Unsatisfied revision requests block acceptance.
+For each pending `task.revision_requests` item, keep or add `revision:<id>` in `acceptance_passes` when the request is satisfied. Unsatisfied revision requests block acceptance and appear in the current findings when another executor attempt can fix them.
 
-If `task.acceptance_criteria` is empty, prefer `needs_supervisor_review` unless the task is explicitly a no-op or evidence shows a complete non-code administrative action.
+If `task.acceptance_criteria` is empty, use `needs_supervisor_review` only when a person must define the missing acceptance decision. Accept an explicit no-op or completed non-code administrative action when the evidence proves it.
 
 # Quality Rules
 
@@ -140,12 +140,11 @@ Apply task-specific quality profile rules and any task playbook included in the 
 # Error Handling
 
 - If `run_error` is non-empty, accept only when the task explicitly allows that failure and other evidence proves success.
-- If `parse_error` is non-empty and another attempt remains, use `needs_revision` with instructions to produce valid structured output and preserve any valid completed work.
-- If `parse_error` is non-empty and no attempt remains, use `needs_supervisor_review` unless evidence independently proves a concrete revision path.
-- If `diff_error` is non-empty and the task requires repository changes, use `needs_revision` or `needs_supervisor_review` based on whether another executor attempt can recover evidence.
-- If there are no repository changes and the task appears to require code or file edits, use `needs_revision` when attempts remain, otherwise `needs_supervisor_review`.
+- If `parse_error` is non-empty, use `needs_revision` with a finding that requires valid structured output while preserving valid completed work, unless repository evidence independently proves acceptance.
+- If `diff_error` is non-empty and the task requires repository changes, use `needs_revision` when another executor attempt can recover the evidence; use `hard_stop` only when the evidence cannot be recovered in this environment.
+- If there are no repository changes and the task appears to require code or file edits, use `needs_revision`.
 - If the executor result status is `hard_stop`, review the reason, attempted work, and requested unblock steps. Return `hard_stop` only when the blocker is external and not recoverable by another executor attempt. Return `needs_revision` with an actionable finding when another attempt can try a local workaround, narrower implementation path, alternate verification path, dependency installation, or better investigation.
-- If the executor result status is `completed_with_risks`, evaluate the risks. Use `needs_revision` or `needs_supervisor_review` for risks that are not acceptable under the pass policy.
+- If the executor result status is `completed_with_risks`, evaluate the risks. Use `needs_revision` when another executor attempt can resolve an unacceptable risk. Use `needs_supervisor_review` only when accepting the risk requires a named human decision.
 
 # Output Shape
 
@@ -153,11 +152,7 @@ Return one JSON object that follows the common supervisor output contract and sc
 
 Provider-specific field guidance:
 
-- `acceptance_evidence`: use `{ "ac_id": "...", "evidence": ["..."] }` for each reviewed open or regression-candidate item that passes.
-- `quality_passes`: include the exact IDs of reviewed quality dimensions that passed.
-- `quality_gaps`: include the exact IDs of reviewed quality dimensions that failed.
-- `findings`: set `file` to the relevant path, or to an empty string when no single file applies.
-- `residual_risks`: string array only, for example `["Non-blocking uncertainty that does not require another executor attempt."]`. Use `findings` for anything that needs severity, category, file, or blocking status.
-- `discussion_items`: accepted-work reviewer notes only. Use an empty array unless the verdict is already accepted and useful non-gating context remains. Each item must use `topic`, `summary`, and `requires_human_decision`; use `summary`, not `note`.
-
-Use `high` confidence only when repository context, diff, and verification evidence are sufficient. Use `medium` for normal accepted reviews with bounded uncertainty. Use `low` when evidence is thin. Accepted verdicts use `medium` or `high` confidence.
+- `acceptance_passes`: the current passed task AC and `revision:<request.id>` IDs.
+- `quality_passes`: the current passed configured quality-dimension IDs.
+- `findings`: actionable repair-contract strings beginning with every affected acceptance or quality ID in brackets.
+- `discussion_items`: accepted-work reviewer notes as strings. Use an empty array unless the verdict is accepted and useful non-gating context remains.

@@ -16,7 +16,7 @@ func fakeVerdictBin(t *testing.T, capturePath string, codex bool) string {
 		name = "codex"
 	}
 	path := filepath.Join(dir, name)
-	verdict := `{"status":"accepted","summary":"ok","acceptance_gaps":[],"reviewed_files":["README.md"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["checked"]}],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"medium","next_work_order":""}`
+	verdict := `{"status":"accepted","summary":"ok","acceptance_passes":["AC1"],"quality_passes":[],"findings":[],"discussion_items":[]}`
 	var body string
 	if codex {
 		body = `#!/bin/sh

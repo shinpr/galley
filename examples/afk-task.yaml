@@ -15,7 +15,7 @@ scope:
   permission: "edit"
 execution_policy:
   loop_budget: 10
-  timeout_ms: 1200000
+  timeout_ms: 3600000
 worktree:
   branch: "agent/task-20260508-afk-001"
   path: "../galley.worktrees/task-20260508-afk-001"

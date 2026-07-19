@@ -244,7 +244,7 @@ def main() -> int:
     }
     task["execution_policy"] = {
         "loop_budget": args.loop_budget,
-        "timeout_ms": 1800000,
+        "timeout_ms": 3600000,
     }
     task["worktree"] = {
         "branch": f"agent/{task_id}",

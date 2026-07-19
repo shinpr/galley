@@ -9,6 +9,7 @@ This project follows semantic versioning.
 ### Changed
 
 - Successful `galley daemon stop --force` now moves tasks owned by that daemon to `failed` with interruption evidence while retaining their worktrees for requeue or archive.
+- Packaged Galley plugins are now versioned as `0.1.29`; task authoring uses a 60-minute per-attempt timeout baseline so productive executors can complete without interruption.
 
 ## v0.12.0 - 2026-07-19
 

@@ -28,8 +28,7 @@ func TestDaemonRejectsInvalidEffectiveExecutorBeforeProviderRoles(t *testing.T) 
 cwd: `+workdirQuote(repo)+`
 commands: {}
 executor:
-  default_cli: "grok"
-  effort: "none"
+  default_cli: "claude"
 constraints:
   network: "approval_required"
   secrets_policy: "never_read_env_files"
@@ -50,7 +49,9 @@ constraints:
 	if err != nil {
 		t.Fatal(err)
 	}
-	loaded.Executor = task.Executor{CLI: "claude"}
+	// Effort-only task override combines with the environment cli into an
+	// invalid claude+minimal pair.
+	loaded.Executor = task.Executor{Effort: "minimal"}
 	if err := task.Save(taskPath, loaded); err != nil {
 		t.Fatal(err)
 	}
@@ -90,73 +91,18 @@ constraints:
 	if !strings.Contains(failed.Attempts[0].Error.Message, "executor.effort for claude") {
 		t.Fatalf("message got %q", failed.Attempts[0].Error.Message)
 	}
-	if failed.Executor.Effort != "" {
-		t.Fatalf("failed task must not write environment effort back, got %#v", failed.Executor)
-	}
-	if failed.Executor.CLI != "claude" {
-		t.Fatalf("failed task cli got %q, want claude", failed.Executor.CLI)
+	if failed.Executor.CLI != "" || failed.Executor.Effort != "minimal" {
+		t.Fatalf("failed task must keep the authored effort-only executor, got %#v", failed.Executor)
 	}
 }
 
 func TestDaemonUsesSameEffectiveExecutorAcrossRoles(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	promptPath, schemaPath := writeDaemonPromptFiles(t)
-
-	type observed struct {
-		CLI    string
-		Model  string
-		Effort string
-	}
-	var setupObs observed
-	var supervisorExecutor task.Executor
-
-	envPath := writeSetupEnvironmentProfile(t, t.TempDir(), `id: "shared-effective"
-cwd: `+workdirQuote(repo)+`
-commands:
-  test_unit: "true"
-executor:
-  default_cli: "codex"
-  model: "env-model"
-  effort: "minimal"
-constraints:
-  network: "approval_required"
-  secrets_policy: "never_read_env_files"
-  destructive_commands: "deny"
-setup:
-  commands:
-    - run: "true"
-      why: "no-op setup"
-`)
-
-	withSetupExecutorRunner(t, func(_ context.Context, opts setuppreflight.Options) (*setuppreflight.Result, error) {
-		setupObs = observed{
-			CLI:    opts.Task.Executor.CLI,
-			Model:  opts.Task.Executor.Model,
-			Effort: opts.Task.Executor.Effort,
-		}
-		return &setuppreflight.Result{
-			Status: setuppreflight.StatusReady,
-			Commands: []setuppreflight.CommandAttempt{{
-				Run:      "true",
-				Why:      "no-op setup",
-				Source:   setuppreflight.SourceEnvironmentSetup,
-				ExitCode: 0,
-			}},
-			SuccessfulCommands: []profile.SetupCommand{{
-				Run: "true",
-				Why: "no-op setup",
-			}},
-			ReadinessEvidence: "setup observed effective executor",
-			Source:            setuppreflight.SourceEnvironmentSetup,
-			Provider:          opts.Task.Executor.CLI,
-		}, nil
-	})
-
 	creatorManifest := `{"outputs":[{"ac_id":"AC1","path":"internal/foo/foo_test.go","kind":"go-test","purpose":"verify AC1","satisfies":"AC1 observable behavior","integration_point":"executor completes this skeleton before acceptance","implementation_required":true}],"no_skeletons":[]}`
 	executorResult := `{"status":"completed","summary":"done","files_modified":["daemon-output.txt","internal/foo/foo_test.go"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}`
-	// The fake distinguishes skeleton and implementation through their prompts.
-	codexBin := writeFakeCommand(t, "codex", `out=""
+
+	t.Run("environment fills omitted task fields", func(t *testing.T) {
+		// The fake distinguishes skeleton and implementation through their prompts.
+		codexBin := writeFakeCommand(t, "codex", `out=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --output-last-message)
@@ -182,7 +128,133 @@ case "$input" in
     ;;
 esac
 `)
-	claudeBin := writeFakeClaude(t, "exit 1\n")
+		runEffectiveExecutorAcrossRoles(t, effectiveExecutorRun{
+			envExecutor: `  default_cli: "codex"
+  model: "env-model"
+  effort: "minimal"
+`,
+			authored:  task.Executor{Model: "task-model"},
+			want:      task.Executor{CLI: "codex", Model: "task-model", Effort: "minimal"},
+			claudeBin: writeFakeClaude(t, "exit 1\n"),
+			codexBin:  codexBin,
+			checkPlans: func(t *testing.T, root string) {
+				argv := readSingleCommandPlan(t, root, "preflight_creator_command_plan.json")
+				joined := strings.Join(argv, " ")
+				if filepath.Base(argv[0]) != "codex" {
+					t.Fatalf("skeleton creator cli = %v, want codex", argv)
+				}
+				if !strings.Contains(joined, "task-model") {
+					t.Fatalf("skeleton creator missing effective model: %v", argv)
+				}
+				if !strings.Contains(joined, `model_reasoning_effort="minimal"`) && !strings.Contains(joined, "model_reasoning_effort=minimal") {
+					t.Fatalf("skeleton creator missing effective effort: %v", argv)
+				}
+			},
+		})
+	})
+
+	t.Run("task-selected cli keeps environment model and effort out", func(t *testing.T) {
+		claudeBin := writeFakeClaude(t, `creator=0
+for arg in "$@"; do
+  case "$arg" in
+    *"Galley Acceptance Skeleton Manifest"*) creator=1 ;;
+  esac
+done
+if [ "$creator" = "1" ]; then
+  mkdir -p internal/foo
+  printf 'package foo_test\n' > internal/foo/foo_test.go
+  printf '%s\n' '{"type":"result","result":"{\"outputs\":[{\"ac_id\":\"AC1\",\"path\":\"internal/foo/foo_test.go\",\"kind\":\"go-test\",\"purpose\":\"verify AC1\",\"satisfies\":\"AC1 observable behavior\",\"integration_point\":\"executor completes this skeleton before acceptance\",\"implementation_required\":true}],\"no_skeletons\":[]}"}'
+  exit 0
+fi
+echo change > daemon-output.txt
+printf '%s\n' '`+executorResult+`'
+`)
+		runEffectiveExecutorAcrossRoles(t, effectiveExecutorRun{
+			envExecutor: `  default_cli: "grok"
+  model: "grok-model"
+  effort: "none"
+`,
+			authored:  task.Executor{CLI: "claude"},
+			want:      task.Executor{CLI: "claude"},
+			claudeBin: claudeBin,
+			codexBin:  writeFakeCommand(t, "codex", "exit 1\n"),
+			checkPlans: func(t *testing.T, root string) {
+				matches, err := filepath.Glob(filepath.Join(root, "runs", "*", "*_command_plan.json"))
+				if err != nil || len(matches) == 0 {
+					t.Fatalf("command plan glob = %v (err %v)", matches, err)
+				}
+				for _, planPath := range matches {
+					argv := readCommandPlanArgv(t, planPath)
+					for _, arg := range argv {
+						if arg == "--model" || arg == "--effort" || arg == "grok-model" || arg == "none" {
+							t.Fatalf("plan %s carries environment model or effort override %q: %v", planPath, arg, argv)
+						}
+					}
+				}
+				creator := readSingleCommandPlan(t, root, "preflight_creator_command_plan.json")
+				if filepath.Base(creator[0]) != "claude" {
+					t.Fatalf("skeleton creator cli = %v, want claude", creator)
+				}
+			},
+		})
+	})
+}
+
+type effectiveExecutorRun struct {
+	envExecutor string
+	authored    task.Executor
+	want        task.Executor
+	claudeBin   string
+	codexBin    string
+	checkPlans  func(t *testing.T, root string)
+}
+
+// runEffectiveExecutorAcrossRoles asserts setup, skeleton, implementation, and
+// persisted run evidence use cfg.want while the stored task keeps cfg.authored.
+func runEffectiveExecutorAcrossRoles(t *testing.T, cfg effectiveExecutorRun) {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+
+	var setupObs task.Executor
+	var supervisorExecutor task.Executor
+
+	envPath := writeSetupEnvironmentProfile(t, t.TempDir(), `id: "shared-effective"
+cwd: `+workdirQuote(repo)+`
+commands:
+  test_unit: "true"
+executor:
+`+cfg.envExecutor+`constraints:
+  network: "approval_required"
+  secrets_policy: "never_read_env_files"
+  destructive_commands: "deny"
+setup:
+  commands:
+    - run: "true"
+      why: "no-op setup"
+`)
+
+	withSetupExecutorRunner(t, func(_ context.Context, opts setuppreflight.Options) (*setuppreflight.Result, error) {
+		setupObs = opts.Task.Executor
+		return &setuppreflight.Result{
+			Status: setuppreflight.StatusReady,
+			Commands: []setuppreflight.CommandAttempt{{
+				Run:      "true",
+				Why:      "no-op setup",
+				Source:   setuppreflight.SourceEnvironmentSetup,
+				ExitCode: 0,
+			}},
+			SuccessfulCommands: []profile.SetupCommand{{
+				Run: "true",
+				Why: "no-op setup",
+			}},
+			ReadinessEvidence: "setup observed effective executor",
+			Source:            setuppreflight.SourceEnvironmentSetup,
+			Provider:          opts.Task.Executor.CLI,
+		}, nil
+	})
+
 	supervisorRunner := func(_ context.Context, _ Options, evidence supervisor.Evidence, _, _ string) (supervisor.Verdict, error) {
 		supervisorExecutor = evidence.Task.Executor
 		return supervisor.Verdict{Status: "accepted", Summary: "effective executor observed"}, nil
@@ -197,7 +269,7 @@ esac
 	if err != nil {
 		t.Fatal(err)
 	}
-	loaded.Executor = task.Executor{Model: "task-model"}
+	loaded.Executor = cfg.authored
 	loaded.Preflight = &task.Preflight{AcceptanceSkeleton: &task.AcceptanceSkeletonConfig{Enabled: true}}
 	if err := task.Save(taskPath, loaded); err != nil {
 		t.Fatal(err)
@@ -211,19 +283,18 @@ esac
 		Once:                   true,
 		MaxConcurrentTasks:     1,
 		Supervisor:             "claude",
-		ClaudeBin:              claudeBin,
-		CodexBin:               codexBin,
+		ClaudeBin:              cfg.claudeBin,
+		CodexBin:               cfg.codexBin,
 		dependencies:           &daemonDependencies{supervisorRunner: supervisorRunner},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	want := observed{CLI: "codex", Model: "task-model", Effort: "minimal"}
-	if setupObs != want {
-		t.Fatalf("setup effective executor = %#v, want %#v", setupObs, want)
+	if setupObs != cfg.want {
+		t.Fatalf("setup effective executor = %#v, want %#v", setupObs, cfg.want)
 	}
-	if supervisorExecutor != (task.Executor{CLI: want.CLI, Model: want.Model, Effort: want.Effort}) {
-		t.Fatalf("supervisor effective executor = %#v, want %#v", supervisorExecutor, want)
+	if supervisorExecutor != cfg.want {
+		t.Fatalf("supervisor effective executor = %#v, want %#v", supervisorExecutor, cfg.want)
 	}
 
 	effectiveMatches, err := filepath.Glob(filepath.Join(root, "runs", "*", "task.effective.yaml"))
@@ -234,15 +305,44 @@ esac
 	if err != nil {
 		t.Fatal(err)
 	}
-	if effectiveSnapshot.Executor != (task.Executor{CLI: want.CLI, Model: want.Model, Effort: want.Effort}) {
-		t.Fatalf("run effective executor = %#v, want %#v", effectiveSnapshot.Executor, want)
+	if effectiveSnapshot.Executor != cfg.want {
+		t.Fatalf("run effective executor = %#v, want %#v", effectiveSnapshot.Executor, cfg.want)
 	}
 
-	matches, err := filepath.Glob(filepath.Join(root, "runs", "*", "preflight_creator_command_plan.json"))
-	if err != nil || len(matches) != 1 {
-		t.Fatalf("preflight_creator_command_plan.json glob = %v (err %v)", matches, err)
+	cfg.checkPlans(t, root)
+
+	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
+	done, err := task.Load(donePath)
+	if err != nil {
+		t.Fatalf("expected done task: %v", err)
 	}
-	data, err := os.ReadFile(matches[0])
+	if done.Executor != cfg.authored {
+		t.Fatalf("authored executor must stay unchanged after run, got %#v, want %#v", done.Executor, cfg.authored)
+	}
+	foundCLI := false
+	for _, vc := range done.Verification.Commands {
+		if strings.Contains(vc.Cmd, cfg.want.CLI) {
+			foundCLI = true
+			break
+		}
+	}
+	if !foundCLI {
+		t.Fatalf("implementation verification missing %s command: %#v", cfg.want.CLI, done.Verification.Commands)
+	}
+}
+
+func readSingleCommandPlan(t *testing.T, root, name string) []string {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(root, "runs", "*", name))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("%s glob = %v (err %v)", name, matches, err)
+	}
+	return readCommandPlanArgv(t, matches[0])
+}
+
+func readCommandPlanArgv(t *testing.T, path string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,35 +352,7 @@ esac
 	if err := json.Unmarshal(data, &plan); err != nil {
 		t.Fatal(err)
 	}
-	joined := strings.Join(plan.Argv, " ")
-	if filepath.Base(plan.Argv[0]) != "codex" {
-		t.Fatalf("skeleton creator cli = %v, want codex", plan.Argv)
-	}
-	if !strings.Contains(joined, "task-model") {
-		t.Fatalf("skeleton creator missing effective model: %v", plan.Argv)
-	}
-	if !strings.Contains(joined, `model_reasoning_effort="minimal"`) && !strings.Contains(joined, "model_reasoning_effort=minimal") {
-		t.Fatalf("skeleton creator missing effective effort: %v", plan.Argv)
-	}
-
-	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
-	done, err := task.Load(donePath)
-	if err != nil {
-		t.Fatalf("expected done task: %v", err)
-	}
-	if done.Executor.CLI != "" || done.Executor.Effort != "" || done.Executor.Model != "task-model" {
-		t.Fatalf("authored executor must stay partial after run, got %#v", done.Executor)
-	}
-	foundCodex := false
-	for _, vc := range done.Verification.Commands {
-		if strings.Contains(vc.Cmd, "codex") {
-			foundCodex = true
-			break
-		}
-	}
-	if !foundCodex {
-		t.Fatalf("implementation verification missing codex command: %#v", done.Verification.Commands)
-	}
+	return plan.Argv
 }
 
 func TestDaemonEmptyEffortDelegatesToProviderAcrossRoles(t *testing.T) {

@@ -195,7 +195,7 @@
           "type": "string"
         },
         "effort": {
-          "description": "Optional reasoning effort used as a repository runtime default. Empty leaves resolution to the task, then the selected provider CLI's own default; the effective provider is validated before setup, skeleton, or implementation.",
+          "description": "Optional reasoning effort used as a repository runtime default. Applies only when the task omits executor.cli; a task-selected cli keeps the task's own model and effort, with empty values delegating to that provider CLI. Empty here leaves resolution to the task, then the selected provider CLI's own default; the effective provider is validated before setup, skeleton, or implementation.",
           "enum": [
             "",
             "low",
@@ -209,7 +209,7 @@
           "type": "string"
         },
         "model": {
-          "description": "Optional model name passed unchanged to the selected executor CLI. Omit or leave empty to use the CLI default; accepted values depend on the provider.",
+          "description": "Optional model name passed unchanged to the selected executor CLI when the task omits executor.cli and executor.model. Omit or leave empty to use the CLI default; accepted values depend on the provider.",
           "type": "string"
         }
       },

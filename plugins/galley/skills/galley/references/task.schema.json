@@ -338,7 +338,7 @@
           "type": "string"
         },
         "effort": {
-          "description": "Optional reasoning effort override. Empty resolves from the environment profile, then the selected provider CLI's own default; the effective provider is validated before setup, skeleton, or implementation.",
+          "description": "Optional reasoning effort override. A task that selects cli keeps this value exactly as authored, with empty delegating to that provider CLI; without a task cli, empty resolves from the environment profile, then the selected provider CLI's own default. The effective provider is validated before setup, skeleton, or implementation.",
           "enum": [
             "",
             "low",
@@ -352,7 +352,7 @@
           "type": "string"
         },
         "model": {
-          "description": "Optional model override. Omit or leave empty to use the selected CLI's configured default model.",
+          "description": "Optional model override. A task that selects cli keeps this value exactly as authored, with empty delegating to that provider CLI's configured default; without a task cli, empty resolves from the environment profile, then the CLI default.",
           "type": "string"
         }
       },

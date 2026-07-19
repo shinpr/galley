@@ -63,7 +63,7 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 - `scope`: repository path, expected implementation paths, protected paths, and permission level.
 - `execution_policy`: author-chosen attempt budget and timeout only (`loop_budget`, `timeout_ms`).
 - `worktree`: isolated branch and sibling worktree location. `enabled` defaults to true for AFK; authors set `branch` and `path`.
-- `executor`: optional per-field overrides for CLI, model, and effort.
+- `executor`: optional overrides for CLI, model, and effort. Setting `cli` makes the task's model and effort authoritative for the run.
 - `preflight.acceptance_skeleton.enabled`: optional boolean that selects the fixed skeleton preflight flow.
 - `decisions`, `risks`: author and executor notes.
 - `supervisor`, `attempts`, `verification`, `pr`: daemon-owned runtime state populated during lifecycle transitions. An attempt that ended in an executor interruption records `supervisor_verdict: not_reviewed` and an executor-phase `error` with the retained provider detail; see [Troubleshooting](troubleshooting.md#executor-interruption).
@@ -74,10 +74,10 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 - `execution_policy.timeout_ms`: positive per-attempt timeout in milliseconds.
 - Galley fixes the AFK decision policy at `choose-smallest-reversible`.
 - Destructive-operation, missing-secret, and external-service blockers remain executor results; task YAML has no blocker switches.
-- `executor`: optional. Each `cli`, `model`, and `effort` field resolves from the task, then current `environment.yaml`. Only `cli` has a built-in fallback (`claude`); an omitted `effort` or `model` lets the selected provider CLI choose its own reasoning effort and model. Environment values remain runtime-only.
+- `executor`: optional. A task that sets `executor.cli` runs with the task's `model` and `effort` exactly as authored; omitted or empty values stay empty and delegate to the selected provider CLI's own defaults, so `environment.yaml` values for another provider never cross into a task-selected CLI. When the task omits `executor.cli`, each `cli`, `model`, and `effort` field resolves from the task, then current `environment.yaml`. Only `cli` has a built-in fallback (`claude`). Environment values remain runtime-only.
 - `executor.cli`: selects `claude`, `codex`, `glm`, `grok`, or `kimi`. GLM and Kimi use the `claude` CLI; Grok uses the logged-in `grok` CLI.
-- `executor.model`: optional model override. Omit it to use the selected CLI's configured default model.
-- `executor.effort`: optional effort hint. Claude, `glm`, and `kimi` accept `low`, `medium`, `high`, `xhigh`, and `max`; Codex also accepts `minimal`; Grok also accepts `none` and `minimal`. Omit it to let the selected provider CLI use its own configured reasoning-effort default. Invalid provider combinations fail before executor roles run.
+- `executor.model`: optional model override passed unchanged to the effective executor CLI.
+- `executor.effort`: optional effort hint. Claude, `glm`, and `kimi` accept `low`, `medium`, `high`, `xhigh`, and `max`; Codex also accepts `minimal`; Grok also accepts `none` and `minimal`. Resolution follows the executor rule above; invalid provider combinations fail before executor roles run.
 - Prompt transport is Galley-owned. Task YAML no longer accepts `executor.prompt_profile` or `executor.prompt_mode`; older files that still include those keys are ignored by the unknown-field-tolerant decoder.
 
 ## Permissions

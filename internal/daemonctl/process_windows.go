@@ -18,23 +18,18 @@ type ProcessInfoResult struct {
 	StartedAt  string
 }
 
-// ProcessInfo returns process identity fields for pid. It mirrors the Unix
-// implementation's shell-out approach (ps) using Windows PowerShell, which is
-// present on every supported Windows install. CreationDate is formatted as a
-// stable, locale-independent ISO-8601 string so ProcessStartedAt comparisons in
-// Verify and interrupted-task recovery are reproducible across calls for the
-// same live process.
+// ProcessInfo returns stable identity fields for a Windows process using
+// PowerShell's direct process API rather than the transient CIM service.
 func ProcessInfo(pid int) (ProcessInfoResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	script := fmt.Sprintf(
 		`$ErrorActionPreference='Stop';`+
-			`$p=Get-CimInstance Win32_Process -Filter "ProcessId=%d";`+
-			`if($null -eq $p){exit 1};`+
+			`$p=Get-Process -Id %d -ErrorAction Stop;`+
 			`[Console]::Out.Write((ConvertTo-Json -Compress ([ordered]@{`+
-			`Executable=[string]$p.ExecutablePath;`+
-			`Command=[string]$p.CommandLine;`+
-			`StartedAt=$p.CreationDate.ToUniversalTime().ToString("o")})))`,
+			`Executable=[string]$p.Path;`+
+			`Command='';`+
+			`StartedAt=$p.StartTime.ToUniversalTime().ToString("o")})))`,
 		pid)
 	output, err := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script).Output()
 	if err != nil {

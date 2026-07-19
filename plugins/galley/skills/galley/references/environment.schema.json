@@ -153,6 +153,33 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "default_cli": {
+                "const": "kimi"
+              }
+            },
+            "required": [
+              "default_cli"
+            ]
+          },
+          "then": {
+            "properties": {
+              "effort": {
+                "enum": [
+                  "",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ],
+                "type": "string"
+              }
+            }
+          }
         }
       ],
       "properties": {
@@ -162,7 +189,8 @@
             "claude",
             "codex",
             "glm",
-            "grok"
+            "grok",
+            "kimi"
           ],
           "type": "string"
         },
@@ -396,6 +424,33 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "default_cli": {
+                "const": "kimi"
+              }
+            },
+            "required": [
+              "default_cli"
+            ]
+          },
+          "then": {
+            "properties": {
+              "effort": {
+                "enum": [
+                  "",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ],
+                "type": "string"
+              }
+            }
+          }
         }
       ],
       "properties": {
@@ -405,7 +460,8 @@
             "claude",
             "codex",
             "glm",
-            "grok"
+            "grok",
+            "kimi"
           ],
           "type": "string"
         },

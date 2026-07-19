@@ -23,6 +23,7 @@ var descriptors = []Descriptor{
 	{ID: "codex", Transport: TransportCodex, Executor: true, Supervisor: true},
 	{ID: "glm", Transport: TransportClaude, Executor: true, Supervisor: true},
 	{ID: "grok", Transport: TransportGrok, Executor: true, Supervisor: true},
+	{ID: "kimi", Transport: TransportClaude, Executor: true, Supervisor: true},
 }
 
 // Galley validates provider-level values and leaves model compatibility to each CLI.

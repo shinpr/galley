@@ -71,6 +71,31 @@ func TestBuildBuiltinCreatorCommandPlanGLMFailsFastWithoutToken(t *testing.T) {
 	}
 }
 
+func TestBuildBuiltinCreatorCommandPlanKimiRedirects(t *testing.T) {
+	opts := glmSkeletonOptions(t, "")
+	opts.Task.Executor.CLI = "kimi"
+	opts.KimiAPIKey = "kimi-token"
+	cmd, perr := buildBuiltinCreatorCommandPlan(opts, []byte("{}"))
+	if perr != nil {
+		t.Fatalf("buildBuiltinCreatorCommandPlan: %v", perr)
+	}
+	joined := strings.Join(cmd.EnvAppend, "\n")
+	for _, want := range []string{"ANTHROPIC_BASE_URL=https://api.kimi.com/coding/", "ANTHROPIC_API_KEY=kimi-token"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("EnvAppend missing %q: %#v", want, cmd.EnvAppend)
+		}
+	}
+}
+
+func TestBuildBuiltinCreatorCommandPlanKimiFailsFastWithoutKey(t *testing.T) {
+	opts := glmSkeletonOptions(t, "")
+	opts.Task.Executor.CLI = "kimi"
+	_, perr := buildBuiltinCreatorCommandPlan(opts, []byte("{}"))
+	if perr == nil || !strings.Contains(perr.Error(), "kimi_api_key") {
+		t.Fatalf("expected missing kimi_api_key error, got %v", perr)
+	}
+}
+
 func TestBuildBuiltinCreatorCommandPlanGrok(t *testing.T) {
 	work, runDir := t.TempDir(), t.TempDir()
 	cmd, perr := buildBuiltinCreatorCommandPlan(Options{Task: task.Task{ID: "task-grok", Executor: task.Executor{CLI: "grok", Effort: "high"}}, WorkDir: work, RunDir: runDir, GrokBin: "/path/to/grok"}, []byte("{}"))

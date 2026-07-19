@@ -160,6 +160,8 @@ poll_interval: 30s
 claim_ttl: 1h
 shutdown_timeout: 2m
 idle_timeout: 5m
+glm_api_key: glm-token
+kimi_api_key: kimi-token
 `
 	if err := os.WriteFile(filepath.Join(root, Filename), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
@@ -179,6 +181,9 @@ idle_timeout: 5m
 	}
 	if file.MaxConcurrentPerRepo == nil || *file.MaxConcurrentPerRepo != 2 {
 		t.Fatalf("max_concurrent_per_repo got %#v", file.MaxConcurrentPerRepo)
+	}
+	if file.GLMAPIKey != "glm-token" || file.KimiAPIKey != "kimi-token" {
+		t.Fatalf("provider API keys did not load: %#v", file)
 	}
 	if file.PollInterval != "30s" || file.ClaimTTL != "1h" || file.ShutdownTimeout != "2m" || file.IdleTimeout != "5m" {
 		t.Fatalf("durations got %#v", file)

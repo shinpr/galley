@@ -12,6 +12,7 @@ import (
 	"github.com/shinpr/galley/internal/executorflow"
 	skeletonpreflight "github.com/shinpr/galley/internal/preflight/skeleton"
 	"github.com/shinpr/galley/internal/profile"
+	"github.com/shinpr/galley/internal/provider"
 	"github.com/shinpr/galley/internal/runartifact"
 	"github.com/shinpr/galley/internal/runner"
 	claudeguard "github.com/shinpr/galley/internal/runner/claude_guard_plugin"
@@ -75,17 +76,20 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 		stderrPath  string
 		err         error
 	)
-	switch cli {
-	case "claude":
-		commandPlan, stdoutPath, stderrPath, err = prepareClaudeExecutorPlan(opts, loaded, workDir, prompt, attemptDir)
-	case "glm":
-		commandPlan, stdoutPath, stderrPath, err = prepareGLMExecutorPlan(opts, loaded, workDir, prompt, attemptDir)
-	case "codex":
-		commandPlan, stdoutPath, stderrPath, err = prepareCodexExecutorPlan(opts, loaded, workDir, prompt, attemptDir)
-	case "grok":
-		commandPlan, stdoutPath, stderrPath, err = prepareGrokExecutorPlan(opts, loaded, workDir, prompt, attemptDir)
-	default:
+	transport, ok := provider.TransportFor(cli)
+	if !ok || !provider.IsExecutor(cli) {
 		return attemptOutcome{}, fmt.Errorf("unsupported executor.cli %q; must be one of: %s", cli, strings.Join(task.ExecutorCLIEnum(), ", "))
+	}
+	switch transport {
+	case provider.TransportClaude:
+		commandPlan, stdoutPath, stderrPath, err = prepareClaudeExecutorPlan(opts, loaded, workDir, prompt, attemptDir)
+		if err == nil {
+			err = runner.ConfigureClaudeProvider(&commandPlan, claudeProviderOptions(cli, opts))
+		}
+	case provider.TransportCodex:
+		commandPlan, stdoutPath, stderrPath, err = prepareCodexExecutorPlan(opts, loaded, workDir, prompt, attemptDir)
+	case provider.TransportGrok:
+		commandPlan, stdoutPath, stderrPath, err = prepareGrokExecutorPlan(opts, loaded, workDir, prompt, attemptDir)
 	}
 	if err != nil {
 		return attemptOutcome{}, err
@@ -228,18 +232,22 @@ func executorArtifactLabel(cli string) string {
 }
 
 func executorVerificationCmd(cli string) string {
-	switch cli {
-	case "codex":
-		return "codex exec"
-	case "glm":
-		return "claude -p (glm)"
-	case "grok":
-		return "grok"
-	case "", "claude":
+	if cli == "" {
 		return "claude -p"
-	default:
-		return "unknown"
 	}
+	transport, _ := provider.TransportFor(cli)
+	switch transport {
+	case provider.TransportCodex:
+		return "codex exec"
+	case provider.TransportGrok:
+		return "grok"
+	case provider.TransportClaude:
+		if cli != "claude" {
+			return fmt.Sprintf("claude -p (%s)", cli)
+		}
+		return "claude -p"
+	}
+	return "unknown"
 }
 
 func executorAttemptError(outcome attemptOutcome, attemptDir string) *task.AttemptError {
@@ -419,20 +427,6 @@ func prepareClaudeExecutorPlan(opts Options, loaded task.Task, workDir, prompt, 
 		return runner.Command{}, "", "", err
 	}
 	return plan, filepath.Join(attemptDir, "claude.stdout.jsonl"), filepath.Join(attemptDir, "claude.stderr.log"), nil
-}
-
-// GLM uses Claude's transport and evidence format with a redirected endpoint.
-func prepareGLMExecutorPlan(opts Options, loaded task.Task, workDir, prompt, attemptDir string) (runner.Command, string, string, error) {
-	token, err := runner.ResolveGLMToken(opts.GLMAuthToken)
-	if err != nil {
-		return runner.Command{}, "", "", err
-	}
-	plan, stdoutPath, stderrPath, err := prepareClaudeExecutorPlan(opts, loaded, workDir, prompt, attemptDir)
-	if err != nil {
-		return runner.Command{}, "", "", err
-	}
-	runner.RedirectClaudeToGLM(&plan, token)
-	return plan, stdoutPath, stderrPath, nil
 }
 
 func prepareCodexExecutorPlan(opts Options, loaded task.Task, workDir, prompt, attemptDir string) (runner.Command, string, string, error) {

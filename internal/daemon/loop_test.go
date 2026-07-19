@@ -10,3 +10,10 @@ func TestExecutorVerificationCmdUnknownIsStable(t *testing.T) {
 		t.Fatalf("executorVerificationCmd unknown got %q, want unknown", got)
 	}
 }
+
+func TestExecutorVerificationCmdEmptyUsesClaudeDefault(t *testing.T) {
+	t.Parallel()
+	if got := executorVerificationCmd(""); got != "claude -p" {
+		t.Fatalf("executorVerificationCmd empty got %q, want claude -p", got)
+	}
+}

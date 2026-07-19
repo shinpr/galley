@@ -64,6 +64,8 @@ type File struct {
 	// GLMAPIKey is the Z.ai token used when glm is the executor or supervisor.
 	// Absent/empty is valid; a missing token fails fast only when glm is selected.
 	GLMAPIKey string `yaml:"glm_api_key,omitempty"`
+	// KimiAPIKey is used only when kimi is selected as executor or supervisor.
+	KimiAPIKey string `yaml:"kimi_api_key,omitempty"`
 	// Notifications configures the opt-in, best-effort notification command
 	// hook the daemon runs after a task reaches a terminal published status.
 	// A nil pointer (absent block) disables notifications entirely; the
@@ -322,6 +324,9 @@ func marshalDocumentedDefaults() ([]byte, error) {
 	buf.WriteString("# or the supervisor (--supervisor glm / supervisor.default_cli). Leave unset\n")
 	buf.WriteString("# unless you use glm. Example:\n")
 	buf.WriteString("#   glm_api_key: \"<your-z.ai-token>\"\n")
+	buf.WriteString("# kimi_api_key: Kimi Code API key used when kimi is the executor or supervisor.\n")
+	buf.WriteString("# Leave unset unless you use kimi. Example:\n")
+	buf.WriteString("#   kimi_api_key: \"<your-kimi-api-key>\"\n")
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
 	if err := enc.Encode(defaults); err != nil {

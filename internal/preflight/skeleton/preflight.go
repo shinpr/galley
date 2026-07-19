@@ -140,6 +140,7 @@ type Options struct {
 	CodexBin     string
 	GrokBin      string
 	GLMAuthToken string
+	KimiAPIKey   string
 }
 
 // AcceptanceSkeletonPreflight runs the skeleton creator stage in the prepared

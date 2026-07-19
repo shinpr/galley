@@ -105,7 +105,12 @@ func TestGLMExecutorCommandPlanRedirectsChildEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	RedirectClaudeToGLM(&plan, token)
+	if err := ConfigureClaudeProvider(&plan, ClaudeProviderOptions{
+		Provider:    "glm",
+		Credentials: ClaudeCredentials{GLMAuthToken: token},
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	result, err := RunCommand(context.Background(), plan, RunOptions{})
 	if err != nil {

@@ -44,6 +44,34 @@ func TestBuildExecutorCommandPlanGLMFailsFastWithoutToken(t *testing.T) {
 	}
 }
 
+func TestBuildExecutorCommandPlanKimiRedirects(t *testing.T) {
+	opts := glmSetupOptions(t, "")
+	opts.Task.Executor.CLI = "kimi"
+	opts.KimiAPIKey = "kimi-token"
+	cmd, provider, err := BuildExecutorCommandPlan(opts, []byte("{}"))
+	if err != nil {
+		t.Fatalf("BuildExecutorCommandPlan: %v", err)
+	}
+	if provider != "claude" || cmd.Argv[0] != "claude" {
+		t.Fatalf("Kimi must use Claude transport, provider=%q argv=%#v", provider, cmd.Argv)
+	}
+	joined := strings.Join(cmd.EnvAppend, "\n")
+	for _, want := range []string{"ANTHROPIC_BASE_URL=https://api.kimi.com/coding/", "ANTHROPIC_API_KEY=kimi-token"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("EnvAppend missing %q: %#v", want, cmd.EnvAppend)
+		}
+	}
+}
+
+func TestBuildExecutorCommandPlanKimiFailsFastWithoutKey(t *testing.T) {
+	opts := glmSetupOptions(t, "")
+	opts.Task.Executor.CLI = "kimi"
+	_, _, err := BuildExecutorCommandPlan(opts, []byte("{}"))
+	if err == nil || !strings.Contains(err.Error(), "kimi_api_key") {
+		t.Fatalf("expected missing kimi_api_key error, got %v", err)
+	}
+}
+
 // assertGLMEnv verifies the shared GLM redirect was applied to a command plan.
 func assertGLMEnv(t *testing.T, envAppend, envRemove []string) {
 	t.Helper()

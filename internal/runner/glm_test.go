@@ -5,12 +5,17 @@ import (
 	"testing"
 )
 
-func TestRedirectClaudeToGLMInjectsEndpointAndTokenViaEnvOnly(t *testing.T) {
+func TestConfigureClaudeProviderGLMInjectsEndpointAndTokenViaEnvOnly(t *testing.T) {
 	t.Parallel()
 	const token = "zai-secret-token"
 	plan := Command{Argv: []string{"claude", "-p", "--model", "glm-4.6"}}
 
-	RedirectClaudeToGLM(&plan, token)
+	if err := ConfigureClaudeProvider(&plan, ClaudeProviderOptions{
+		Provider:    "glm",
+		Credentials: ClaudeCredentials{GLMAuthToken: token},
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	want := map[string]bool{
 		"ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic": false,
@@ -44,14 +49,21 @@ func TestRedirectClaudeToGLMInjectsEndpointAndTokenViaEnvOnly(t *testing.T) {
 	}
 }
 
-func TestResolveGLMTokenTrimsAndValidates(t *testing.T) {
+func TestValidateClaudeProviderGLMTrimsAndValidates(t *testing.T) {
 	t.Parallel()
-	if got, err := ResolveGLMToken("  tok-123  "); err != nil || got != "tok-123" {
-		t.Fatalf("ResolveGLMToken trim = (%q, %v), want (%q, nil)", got, err, "tok-123")
+	if err := ValidateClaudeProvider(ClaudeProviderOptions{
+		Provider:    "glm",
+		Credentials: ClaudeCredentials{GLMAuthToken: "  tok-123  "},
+	}); err != nil {
+		t.Fatalf("ValidateClaudeProvider rejected a trimmed token: %v", err)
 	}
 	for _, raw := range []string{"", "   "} {
-		if _, err := ResolveGLMToken(raw); err == nil {
-			t.Fatalf("ResolveGLMToken(%q) expected error", raw)
+		err := ValidateClaudeProvider(ClaudeProviderOptions{
+			Provider:    "glm",
+			Credentials: ClaudeCredentials{GLMAuthToken: raw},
+		})
+		if err == nil {
+			t.Fatalf("ValidateClaudeProvider(%q) expected error", raw)
 		} else if !strings.Contains(err.Error(), "glm_api_key") {
 			t.Fatalf("error must name the config key, got %q", err)
 		}

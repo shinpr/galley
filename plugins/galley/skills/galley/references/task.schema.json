@@ -296,6 +296,33 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "cli": {
+                "const": "kimi"
+              }
+            },
+            "required": [
+              "cli"
+            ]
+          },
+          "then": {
+            "properties": {
+              "effort": {
+                "enum": [
+                  "",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ],
+                "type": "string"
+              }
+            }
+          }
         }
       ],
       "properties": {
@@ -305,7 +332,8 @@
             "claude",
             "codex",
             "glm",
-            "grok"
+            "grok",
+            "kimi"
           ],
           "type": "string"
         },

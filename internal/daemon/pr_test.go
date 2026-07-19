@@ -7,6 +7,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/shinpr/galley/internal/profile"
 	"github.com/shinpr/galley/internal/supervisor"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/internal/workspace"
@@ -197,8 +198,8 @@ func TestRenderPRBodyShowsSupervisorAcceptedStatus(t *testing.T) {
 	// existing per-attempt merge code path.
 	loaded.AcceptanceCriteria[0].Status = "not_satisfied"
 
-	verdict := supervisor.Verdict{Status: "accepted", Summary: "looks good"}
-	applyAcceptedAcceptanceCriteria(&loaded, verdict)
+	loaded.ReviewProgress = &task.ReviewProgress{Acceptance: []string{"AC1", "AC2"}}
+	applyAcceptedAcceptanceCriteria(&loaded)
 
 	body := renderPRBody(loaded)
 	if !strings.Contains(body, "`AC1` Behavior") || !strings.Contains(body, "Status: satisfied") {
@@ -209,7 +210,7 @@ func TestRenderPRBodyShowsSupervisorAcceptedStatus(t *testing.T) {
 	}
 }
 
-func TestApplyAcceptedAcceptanceCriteriaPreservesGaps(t *testing.T) {
+func TestApplyAcceptedAcceptanceCriteriaUsesPassList(t *testing.T) {
 	t.Parallel()
 	loaded := task.Task{
 		AcceptanceCriteria: []task.AcceptanceCriterion{
@@ -217,24 +218,13 @@ func TestApplyAcceptedAcceptanceCriteriaPreservesGaps(t *testing.T) {
 			{ID: "AC2", Status: "not_satisfied"},
 		},
 	}
-	verdict := supervisor.Verdict{Status: "accepted", AcceptanceGaps: []string{"AC2"}}
-	applyAcceptedAcceptanceCriteria(&loaded, verdict)
+	loaded.ReviewProgress = &task.ReviewProgress{Acceptance: []string{"AC1"}}
+	applyAcceptedAcceptanceCriteria(&loaded)
 	if loaded.AcceptanceCriteria[0].Status != "satisfied" {
 		t.Fatalf("AC1 status got %q want satisfied", loaded.AcceptanceCriteria[0].Status)
 	}
 	if loaded.AcceptanceCriteria[1].Status != "partially_satisfied" {
 		t.Fatalf("AC2 status got %q want partially_satisfied", loaded.AcceptanceCriteria[1].Status)
-	}
-}
-
-func TestApplyAcceptedAcceptanceCriteriaNoOpOnNonAccepted(t *testing.T) {
-	t.Parallel()
-	loaded := task.Task{
-		AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Status: "not_satisfied"}},
-	}
-	applyAcceptedAcceptanceCriteria(&loaded, supervisor.Verdict{Status: "needs_revision"})
-	if loaded.AcceptanceCriteria[0].Status != "not_satisfied" {
-		t.Fatalf("non-accepted verdict must not mutate AC status, got %q", loaded.AcceptanceCriteria[0].Status)
 	}
 }
 
@@ -361,6 +351,57 @@ func TestRenderPRBodyIsReviewerFacing(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("PR body missing %q:\n%s", want, body)
 		}
+	}
+}
+
+func TestAcceptedPRShowsUnverifiedRevisionsWithoutEscalatingDiscussion(t *testing.T) {
+	t.Parallel()
+	loaded := task.Task{
+		ID:   "T1",
+		Goal: "Ship it",
+		RevisionRequests: []task.RevisionRequest{
+			{ID: "supervisor-open", Source: supervisorRevisionSource, Text: "fix the remaining edge case", Status: "pending"},
+			{ID: "reviewer-open", Source: "pr-review", Text: "preserve the public behavior", Status: "pending"},
+			{ID: "supervisor-done", Source: supervisorRevisionSource, Text: "already fixed", Status: "addressed"},
+		},
+	}
+	mergeDiscussionItems(&loaded, profile.Bundle{}, supervisor.Verdict{
+		Summary:         "Accepted with recorded context.",
+		DiscussionItems: []string{"The fallback remains intentionally conservative."},
+	})
+	loaded = (supervisorRevision{}).applyToTask(loaded)
+
+	if len(loaded.RevisionRequests) != 1 || loaded.RevisionRequests[0].ID != "reviewer-open" {
+		t.Fatalf("historical supervisor revisions were not cleared: %#v", loaded.RevisionRequests)
+	}
+	unverified := 0
+	for _, item := range loaded.DiscussionItems {
+		if item.Topic == "Supervisor discussion" && item.RequiresHumanDecision {
+			t.Fatalf("non-gating supervisor discussion requires a human decision: %#v", item)
+		}
+		if item.Topic == "Unverified revision request" {
+			unverified++
+			if !item.RequiresHumanDecision {
+				t.Fatalf("unverified revision request does not require a human decision: %#v", item)
+			}
+		}
+	}
+	if unverified != 2 {
+		t.Fatalf("unverified revision discussions got %d, want 2: %#v", unverified, loaded.DiscussionItems)
+	}
+	body := renderPRBody(loaded)
+	for _, want := range []string{
+		"revision:supervisor-open",
+		"fix the remaining edge case",
+		"revision:reviewer-open",
+		"preserve the public behavior",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("PR body missing unverified revision %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "revision:supervisor-done") || strings.Contains(body, "already fixed") {
+		t.Fatalf("PR body included addressed revision:\n%s", body)
 	}
 }
 

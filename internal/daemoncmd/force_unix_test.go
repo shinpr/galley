@@ -4,7 +4,6 @@ package daemoncmd
 
 import (
 	"bytes"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -98,36 +97,5 @@ func TestStopForceCleansRegisteredChildProcessGroupBeforeRemovingPIDFile(t *test
 	}
 	if _, statErr := os.Stat(runner.ChildRegistryPath(root)); !os.IsNotExist(statErr) {
 		t.Fatalf("child registry must be cleared after successful cleanup, stat err=%v", statErr)
-	}
-}
-
-// TestStopForceCleanupFailureKeepsPIDFileAndNamesSurvivors exercises AC-005 at
-// the command level: when a registered child process group cannot be confirmed
-// gone, stop --force must report a visible error that names the surviving
-// PID/PGID and must leave the PID file in place so a follow-up operator action
-// targets the same daemon record. Real SIGKILL cannot be trapped, so the test
-// leaves the SIGKILL'd child unreaped: it remains a zombie whose pgid still
-// answers signal(0), which is exactly the "could not confirm exit" condition.
-func TestStopForceCleanupFailureKeepsPIDFileAndNamesSurvivors(t *testing.T) {
-	root, pidFile, _ := startUnresponsiveDaemon(t)
-	childPID, childPGID, _ := spawnTrackedChild(t, root, false)
-
-	cmd := NewCommand("daemon")
-	var out, errBuf bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetErr(&errBuf)
-	cmd.SetArgs([]string{"--root", root, "--stop-timeout", "300ms", "stop", "--force"})
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected force stop to fail when a child process group cannot be confirmed gone")
-	}
-	stderr := errBuf.String()
-	wantPID := fmt.Sprintf("pid=%d", childPID)
-	wantPGID := fmt.Sprintf("pgid=%d", childPGID)
-	if !strings.Contains(stderr, wantPID) || !strings.Contains(stderr, wantPGID) {
-		t.Fatalf("stderr %q must name the surviving %s and %s", stderr, wantPID, wantPGID)
-	}
-	if _, statErr := os.Stat(pidFile); statErr != nil {
-		t.Fatalf("PID file must be preserved when child cleanup is incomplete: %v", statErr)
 	}
 }

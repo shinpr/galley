@@ -62,9 +62,9 @@ Galley persists verified passes in daemon-owned task state. Later attempts revie
 
 A normal requeue preserves review progress when the task direction and review contract remain the same. Galley resets stale passes when the goal, acceptance contract, review policy, source repository, or placed input content changes in a way that invalidates earlier review.
 
-## Acceptance Requirements
+## Acceptance Review
 
-An accepted implementation task needs:
+The supervisor is instructed to accept implementation work only when it has:
 
 - a normal executor terminal with valid structured output
 - a repository diff unless the task is explicitly investigation or review-only
@@ -73,7 +73,9 @@ An accepted implementation task needs:
 - all required quality dimensions and the configured weighted score
 - no unresolved finding at a blocking severity
 
-Incomplete work can continue while the loop budget remains when the supervisor returns actionable revision work. Human decisions, exhausted budgets, supervisor failures, and finalization problems move the task to `needs_supervisor_review`. A hard stop or executor interruption ends the run without another attempt.
+Incomplete work can continue while the loop budget remains when the supervisor returns actionable findings. `needs_supervisor_review` is reserved for a named decision that only a person can make. Exhausted budgets, provider failures, finalization failures, hard stops, and executor interruptions end the run as `failed` with their evidence preserved.
+
+Galley does not turn an incomplete pass list or an accepted finding into a daemon failure. Accepted work can proceed to PR creation, where missing acceptance and quality passes and any accepted findings remain visible for human review.
 
 `completed_with_risks` means the executor considers the implementation coherent but has verification limits, assumptions, or residual risks for the supervisor to evaluate.
 
@@ -83,13 +85,14 @@ Incomplete work can continue while the loop budget remains when the supervisor r
 | --- | --- |
 | Accepted | Moves the task to `done/accepted`, then performs configured PR handoff. |
 | Executor-actionable revision | Starts another executor attempt while the loop budget remains. |
-| Human decision or exhausted loop | Moves the task to `failed/needs_supervisor_review` with the latest evidence and work order. |
-| Supervisor process or verdict failure | Preserves supervisor artifacts and moves the task to `needs_supervisor_review`. |
+| Human-only decision | Moves the task to `failed/needs_supervisor_review` with the decision named in the latest verdict. |
+| Exhausted loop or no progress | Preserves the latest findings and moves the task to `failed/failed`. |
+| Supervisor process or verdict failure | Preserves supervisor artifacts and moves the task to `failed/failed`. |
 | Hard stop | Moves the task to `failed/failed` without retry. |
 | Executor interruption before a normal terminal | Preserves the worktree and evidence, skips supervisor review, and moves the task to `failed/failed`. |
 | Two consecutive attempts with no diff | Stops early as a no-progress safeguard. |
 
-`needs_supervisor_review` is a task state, not a daemon process failure. `galley daemon run --once` can exit successfully after recording it.
+`needs_supervisor_review` is a human-decision task state, not a catch-all daemon failure. `galley daemon run --once` can exit successfully after recording it.
 
 Hard stops are reserved for conditions that leave no useful executor action, such as missing required secrets, inaccessible required systems, contradictory acceptance criteria, protected destructive actions, or unreadable required files.
 

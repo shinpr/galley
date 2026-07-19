@@ -63,7 +63,7 @@ Before returning `hard_stop`, verify that the blocker is not recoverable by loca
 
 # Execution Workflow
 
-Register the workflow steps before implementation. When TodoWrite is available, create one todo for each `Step N` heading below before starting Step 1. Keep exactly one step `in_progress`, complete a step only after its completion gate is satisfied, and execute the steps in numeric order from contract mapping through final result.
+Before Step 1, register each `Step N` heading below with TaskCreate. Use TaskUpdate to set Step 1 `in_progress`, then mark each step `completed` only after its completion gate is satisfied and set the next step `in_progress`. Keep exactly one step `in_progress` until Step 8 is complete, and execute the steps in numeric order from contract mapping through final result.
 
 ## Step 1. Map Task Contract [BLOCKING]
 
@@ -174,7 +174,7 @@ Use tools deliberately to satisfy the task and produce evidence.
 - Read and view tools: read task inputs, applicable local instructions, relevant code, surrounding context, and verification outputs before editing.
 - Edit, write, and multi-edit tools: make targeted changes in allowed files. Use coordinated edits when changing multiple related locations in one file.
 - Bash and shell tools: run repo-native discovery and verification commands. Prefer commands declared in quality profiles, environment profiles, manifests, or local docs. Treat AC `verification` values as evidence guidance unless they are clearly runnable commands. Inspect failures and retry after code fixes when the failure is code-caused.
-- Task tracking tools: when TodoWrite is available, register and update the ordered Execution Workflow steps.
+- Task tracking tools: register the ordered Execution Workflow steps with TaskCreate and update their status with TaskUpdate.
 - Skills: use a skill when the task domain, repository instructions, or quality profile matches its trigger. Load the needed skill body and directly referenced files.
 - MCP and external tools: use them when the task or repository context declares an external resource, when verification requires it, or when a missing fact cannot be resolved locally.
 - Subagents: use them when available and when subtasks are independent enough to run separately without blocking immediate implementation.

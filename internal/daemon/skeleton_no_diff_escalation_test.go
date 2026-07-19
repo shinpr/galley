@@ -10,23 +10,8 @@ import (
 	"github.com/shinpr/galley/internal/task"
 )
 
-// TestRunOnceSkeletonOnlyAttemptsEscalateViaNoDiffInvariant drives the
-// content-baseline progress seam end-to-end. Preflight materializes an AC-linked
-// skeleton file in the worktree before the executor runs, so every attempt sees
-// that skeleton in the dirty diff. Without the post-preflight baseline, that
-// standing skeleton diff would read as progress forever and the consecutive
-// no-diff escalation would never fire. hasNonSkeletonProgress excludes the
-// unchanged skeleton, so repeated skeleton-only attempts must still increment
-// consecutiveNoDiff and escalate through degradeToSupervisorReview("progress").
-//
-// hasNonSkeletonProgress has unit coverage, but nothing drives the seam through
-// runSupervisorLoop, where the preflight baseline, the executor's standing
-// skeleton, the supervisor verdict, and the progress counter interact. This test
-// reproduces exactly the skeleton with no additional change across attempts and
-// asserts the task lands in needs_supervisor_review carrying the no-diff
-// progress risk, while the skeleton file remains present in the worktree (proving
-// there was a real skeleton diff that the baseline correctly discounted).
-func TestRunOnceSkeletonOnlyAttemptsEscalateViaNoDiffInvariant(t *testing.T) {
+// A standing preflight skeleton diff must not hide repeated no-progress attempts.
+func TestRunOnceSkeletonOnlyAttemptsFailViaNoDiffInvariant(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
@@ -83,8 +68,8 @@ echo '{"status":"completed_with_risks","summary":"only reproduced the skeleton",
 	if err != nil {
 		t.Fatal(err)
 	}
-	if failedTask.Status != "needs_supervisor_review" {
-		t.Fatalf("status got %q, want needs_supervisor_review", failedTask.Status)
+	if failedTask.Status != "failed" {
+		t.Fatalf("status got %q, want failed", failedTask.Status)
 	}
 	// The escalation must be the consecutive no-diff progress invariant, not any
 	// other risk: the standing skeleton diff must have been discounted.

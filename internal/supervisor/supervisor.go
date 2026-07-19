@@ -29,40 +29,12 @@ func IsVerdictContractError(err error) bool {
 
 // Verdict is the supervisor decision for one executor attempt.
 type Verdict struct {
-	Status             string               `json:"status"`
-	Summary            string               `json:"summary"`
-	AcceptanceGaps     []string             `json:"acceptance_gaps"`
-	ReviewedFiles      []string             `json:"reviewed_files"`
-	AcceptanceEvidence []AcceptanceEvidence `json:"acceptance_evidence"`
-	QualityPasses      []string             `json:"quality_passes"`
-	QualityGaps        []string             `json:"quality_gaps"`
-	Findings           []Finding            `json:"findings"`
-	ResidualRisks      []string             `json:"residual_risks"`
-	DiscussionItems    []DiscussionItem     `json:"discussion_items"`
-	Confidence         string               `json:"confidence"`
-	NextWorkOrder      string               `json:"next_work_order"`
-}
-
-// AcceptanceEvidence links one task or revision acceptance item to concrete evidence.
-type AcceptanceEvidence struct {
-	ACID     string   `json:"ac_id"`
-	Evidence []string `json:"evidence"`
-}
-
-// Finding is a structured supervisor review issue.
-type Finding struct {
-	Severity         string `json:"severity"`
-	Category         string `json:"category"`
-	File             string `json:"file"`
-	Summary          string `json:"summary"`
-	BlocksAcceptance bool   `json:"blocks_acceptance"`
-}
-
-// DiscussionItem records accepted-work follow-up context for human reviewers.
-type DiscussionItem struct {
-	Topic                 string `json:"topic"`
-	Summary               string `json:"summary"`
-	RequiresHumanDecision bool   `json:"requires_human_decision"`
+	Status           string   `json:"status"`
+	Summary          string   `json:"summary"`
+	AcceptancePasses []string `json:"acceptance_passes"`
+	QualityPasses    []string `json:"quality_passes"`
+	Findings         []string `json:"findings"`
+	DiscussionItems  []string `json:"discussion_items"`
 }
 
 // Evidence is the local evidence sent to a model supervisor.

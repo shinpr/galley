@@ -452,7 +452,7 @@ func assertInvalidResultReviewedAndRetried(t *testing.T, cli, claudeBin, executo
 	opts = testDaemonOptions(opts)
 	opts = withSupervisorSeam(opts, countingSupervisor(&supCalls, func(attempt int) supervisor.Verdict {
 		if attempt == 1 {
-			return supervisor.Verdict{Status: "needs_revision", Summary: "fix invalid result", NextWorkOrder: "Return valid structured JSON."}
+			return supervisor.Verdict{Status: "needs_revision", Summary: "fix invalid result", Findings: []string{"Return valid structured JSON."}}
 		}
 		return supervisor.Verdict{Status: "accepted", Summary: "accepted after revision"}
 	}))

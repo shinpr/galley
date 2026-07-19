@@ -354,7 +354,7 @@ func TestShutdownStopsBeforeRetryAttempt(t *testing.T) {
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
 	attemptLog := filepath.Join(t.TempDir(), "attempts.log")
 	claudeBin := writeFakeClaude(t, "echo attempt >> "+attemptLog+"\nsleep 0.05\necho change >> daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
-	codexBin := writeFakeCodexSupervisor(t, `{"status":"needs_revision","summary":"codex wants retry","acceptance_gaps":["AC1"],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[],"quality_passes":[],"quality_gaps":[],"findings":[{"severity":"medium","category":"acceptance","file":"daemon-output.txt","summary":"retry","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"try again"}`)
+	codexBin := writeFakeCodexSupervisor(t, `{"status":"needs_revision","summary":"codex wants retry","acceptance_passes":[],"quality_passes":[],"findings":["retry"],"discussion_items":[]}`)
 	queueDir := filepath.Join(root, "tasks", "queued")
 	if err := os.MkdirAll(queueDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -394,13 +394,13 @@ func TestShutdownStopsBeforeRetryAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if failedTask.Status != "needs_supervisor_review" {
+	if failedTask.Status != "failed" {
 		t.Fatalf("status got %q", failedTask.Status)
 	}
 	if len(failedTask.Risks) == 0 || !strings.Contains(failedTask.Risks[len(failedTask.Risks)-1].ID, "shutdown-") {
 		t.Fatalf("shutdown risk missing: %#v", failedTask.Risks)
 	}
-	assertSupervisorRevisionState(t, failedTask, "supervisor-attempt-1-finding-1", "retry", "try again")
+	assertSupervisorRevisionState(t, failedTask, "supervisor-attempt-1-finding-1", "retry")
 }
 
 func TestInterruptedRecoveryPreservesPendingSupervisorRevision(t *testing.T) {
@@ -432,11 +432,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 request="$(cat)"
-if printf '%s' "$request" | grep -q 'supervisor-attempt-1-finding-1'; then
-  verdict='{"status":"needs_revision","summary":"codex wants retry","acceptance_gaps":["AC1","revision:supervisor-attempt-1-finding-1"],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[],"quality_passes":[],"quality_gaps":[],"findings":[{"severity":"medium","category":"acceptance","file":"daemon-output.txt","summary":"persist this revision","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"apply the persisted revision"}'
-else
-  verdict='{"status":"needs_revision","summary":"codex wants retry","acceptance_gaps":["AC1"],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[],"quality_passes":[],"quality_gaps":[],"findings":[{"severity":"medium","category":"acceptance","file":"daemon-output.txt","summary":"persist this revision","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"apply the persisted revision"}'
-fi
+verdict='{"status":"needs_revision","summary":"codex wants retry","acceptance_passes":[],"quality_passes":[],"findings":["persist this revision"],"discussion_items":[]}'
 printf '%s\n' "$verdict" > "$out"
 printf '%s\n' '{"event":"done"}'
 `)
@@ -468,7 +464,7 @@ printf '%s\n' '{"event":"done"}'
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertSupervisorRevisionState(t, runningTask, "supervisor-attempt-1-finding-1", "persist this revision", "apply the persisted revision")
+	assertSupervisorRevisionState(t, runningTask, "supervisor-attempt-1-finding-1", "persist this revision")
 
 	recoveryRoot := filepath.Join(t.TempDir(), ".agent-workflow")
 	if err := queue.EnsureLayout(recoveryRoot); err != nil {
@@ -488,7 +484,7 @@ printf '%s\n' '{"event":"done"}'
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertSupervisorRevisionState(t, recoveredTask, "supervisor-attempt-1-finding-1", "persist this revision", "apply the persisted revision")
+	assertSupervisorRevisionState(t, recoveredTask, "supervisor-attempt-1-finding-1", "persist this revision")
 
 	if err := os.WriteFile(releaseSecondAttempt, []byte("release"), 0o600); err != nil {
 		t.Fatal(err)

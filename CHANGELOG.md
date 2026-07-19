@@ -6,9 +6,14 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.11.1 - 2026-07-19
+
 ### Changed
 
 - Documentation now provides a goal-based guide, clearer model and review configuration, and task-state troubleshooting.
+- Revision loops now hand off the latest actionable finding batch with preserved passes, while Codex reviews filter optional hardening.
+- Supervisor verdicts now keep only current pass sets and actionable findings; incomplete accepted review details remain visible in the PR, and human-review status is reserved for decisions the loop cannot make.
+- Claude executor and supervisor prompts now track gated workflow steps with TaskCreate and TaskUpdate.
 
 ## v0.11.0 - 2026-07-18
 

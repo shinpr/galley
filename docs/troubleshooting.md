@@ -18,7 +18,7 @@ galley daemon status --output json
 | `draft` | The task has not been queued. | Review and validate it, then queue it. |
 | `queued` | The task is waiting for a daemon. | Confirm the daemon is running and uses the same root. |
 | `running` | A daemon owns the task. | Let the attempt finish. If its daemon is gone, restart the daemon to recover the task. |
-| `needs_supervisor_review` | Galley preserved the result but needs a person to resolve a review, policy, or environment issue. | Read the latest verdict and work order. Change the relevant task, profile, model, or environment before requeueing. |
+| `needs_supervisor_review` | The loop cannot continue until a person makes the decision named in the latest verdict. | Resolve that product, design, authority, or task-premise decision, then requeue. |
 | `failed` with `latest_executor_interruption: true` | The executor did not reach a reliable normal terminal. The supervisor was not run. | Resolve the provider or runtime problem, then requeue the retained worktree. |
 | `failed` | Galley reached a hard stop or another terminal failure. | Read the latest error and risk before deciding whether the task can safely resume. |
 | `accepted` | The work passed review and remains local. | Inspect the worktree or archive the task when it is no longer needed. |
@@ -62,15 +62,14 @@ Requeueing is appropriate when the task direction is unchanged and the retained 
 galley task show TASK_ID
 ```
 
-The persisted supervisor requests and the latest verdict artifact should identify whether the next step belongs to the executor or a person. Typical cases are:
+The latest verdict summary names the decision the loop cannot make. Typical cases are:
 
-- the loop budget ended with unresolved review findings
-- a required check or quality policy needs a human decision
-- the supervisor process or verdict failed
-- the accepted diff could not be finalized safely
-- an external service or credential is unavailable
+- acceptance criteria conflict and require a product decision
+- repository evidence contradicts a task premise
+- an authoritative human request is ambiguous
+- required authority or destructive approval is missing
 
-Change only the layer that owns the problem. Edit the task for task-specific scope or executor overrides, the repository profiles for persistent quality or runtime settings, and `daemon.yaml` for daemon-wide operation. Then requeue with a reason that records what changed.
+Update the task or authoritative source that owns the decision, then requeue with a reason that records what changed. Provider, timeout, exhausted-loop, and finalization failures use `failed`; follow the recorded error and risk instead of treating them as review decisions.
 
 ## A Running Task Outlives Its Daemon
 

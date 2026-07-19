@@ -77,7 +77,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 cat >/dev/null
-printf '%s\n' '{"status":"accepted","summary":"ok","acceptance_gaps":[],"reviewed_files":["README.md"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["checked"]}],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"medium","next_work_order":""}' > "$out"
+printf '%s\n' '{"status":"accepted","summary":"ok","acceptance_passes":["AC1"],"quality_passes":[],"findings":[],"discussion_items":[]}' > "$out"
 printf '%s\n' '{"event":"done"}'
 `), 0o700); err != nil {
 		t.Fatal(err)
@@ -122,8 +122,16 @@ printf '%s\n' '{"event":"done"}'
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(schema), `"quality_passes"`) || !strings.Contains(string(schema), `"quality_gaps"`) {
+	if !strings.Contains(string(schema), `"acceptance_passes"`) || !strings.Contains(string(schema), `"quality_passes"`) {
 		t.Fatalf("Codex supervisor schema lost quality results: %s", schema)
+	}
+	var converted map[string]any
+	if err := json.Unmarshal(schema, &converted); err != nil {
+		t.Fatalf("decode Codex supervisor schema: %v", err)
+	}
+	required, _ := converted["required"].([]any)
+	if len(required) != len(converted["properties"].(map[string]any)) {
+		t.Fatalf("Codex supervisor schema did not require every property: %s", schema)
 	}
 	if strings.Contains(string(schema), `"uniqueItems"`) {
 		t.Fatalf("Codex supervisor schema retained unsupported uniqueItems: %s", schema)
@@ -134,7 +142,7 @@ func TestRunAdapterPayloadGrokUsesEnvelopeAndReadOnlySandbox(t *testing.T) {
 	skipPOSIXFakeSupervisorOnWindows(t)
 	bin := filepath.Join(t.TempDir(), "grok")
 	argsPath := filepath.Join(t.TempDir(), "args")
-	verdict := `{"status":"accepted","summary":"ok","acceptance_gaps":[],"reviewed_files":["README.md"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["checked"]}],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"medium","next_work_order":""}`
+	verdict := `{"status":"accepted","summary":"ok","acceptance_passes":["AC1"],"quality_passes":[],"findings":[],"discussion_items":[]}`
 	script := "#!/bin/sh\nprintf '%s' \"$*\" > '" + argsPath + "'\nprintf '%s' '" + `{"text":` + shellJSONQuote(verdict) + `,"stopReason":"EndTurn","sessionId":"s"}` + "'\n"
 	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
@@ -192,7 +200,7 @@ func TestRunAdapterPayloadClaudeUsesEmbeddedPromptAndSchema(t *testing.T) {
 printf '%s\n' "$*" > `+capturePath+`
 printf '%s\n' "$GALLEY_CLAUDE_GUARD_MODE" > `+envPath+`
 cat >/dev/null
-printf '%s\n' '{"status":"accepted","summary":"ok","acceptance_gaps":[],"reviewed_files":["README.md"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["checked"]}],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"medium","next_work_order":""}'
+printf '%s\n' '{"status":"accepted","summary":"ok","acceptance_passes":["AC1"],"quality_passes":[],"findings":[],"discussion_items":[]}'
 `), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +254,7 @@ func TestRunAdapterPayloadClaudeReadsFullStdoutVerdict(t *testing.T) {
 	longSummary := strings.Repeat("x", 70*1024)
 	if err := os.WriteFile(fakeClaude, []byte(`#!/bin/sh
 cat >/dev/null
-printf '%s' '{"status":"accepted","summary":"`+longSummary+`","acceptance_gaps":[],"reviewed_files":["README.md"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["checked"]}],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"medium","next_work_order":""}'
+printf '%s' '{"status":"accepted","summary":"`+longSummary+`","acceptance_passes":["AC1"],"quality_passes":[],"findings":[],"discussion_items":[]}'
 `), 0o700); err != nil {
 		t.Fatal(err)
 	}

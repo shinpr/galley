@@ -50,7 +50,7 @@ func skeletonOutput() skeletonpreflight.Output {
 	}
 }
 
-func TestAcceptanceGateDowngradesOnMissingRequiredSkeletonCoverage(t *testing.T) {
+func TestAcceptanceGateRejectsMissingRequiredSkeletonCoverage(t *testing.T) {
 	t.Parallel()
 	runDir := writeAcceptanceGateRun(t, "completed", nil)
 	reason, ok := evaluateAcceptanceGate(acceptanceGateTask(), runDir)
@@ -71,7 +71,7 @@ func TestAcceptanceGateAllowsWhenRequiredSkeletonCoverageExists(t *testing.T) {
 	}
 }
 
-func TestAcceptanceGateDowngradesOnFailedPreflightResult(t *testing.T) {
+func TestAcceptanceGateRejectsFailedPreflightResult(t *testing.T) {
 	t.Parallel()
 	runDir := t.TempDir()
 	res := &skeletonpreflight.Result{
@@ -89,11 +89,10 @@ func TestAcceptanceGateDowngradesOnFailedPreflightResult(t *testing.T) {
 	}
 }
 
-// TestAcceptanceGateLifecycleDowngradesAcceptedVerdictBeforeFinalize proves the
-// daemon downgrades an accepted supervisor verdict to needs_supervisor_review —
-// and never reaches acceptSupervisorVerdict / the "done" state — when required
+// TestAcceptanceGateLifecycleRejectsAcceptedVerdictBeforeFinalize proves the
+// daemon records a failed task and never reaches the "done" state when required
 // skeleton coverage is missing.
-func TestAcceptanceGateLifecycleDowngradesAcceptedVerdictBeforeFinalize(t *testing.T) {
+func TestAcceptanceGateLifecycleRejectsAcceptedVerdictBeforeFinalize(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	runningDir := filepath.Join(root, "tasks", "running")
@@ -109,7 +108,7 @@ func TestAcceptanceGateLifecycleDowngradesAcceptedVerdictBeforeFinalize(t *testi
 	}
 	runDir := writeAcceptanceGateRun(t, "completed", nil)
 
-	nextPrompt, done, err := applySupervisorVerdict(context.Background(), context.Background(), verdictApplication{
+	done, err := applySupervisorVerdict(context.Background(), context.Background(), verdictApplication{
 		Opts:        Options{Root: root}.withDefaults(),
 		RunningPath: runningPath,
 		Loaded:      loaded,
@@ -120,18 +119,18 @@ func TestAcceptanceGateLifecycleDowngradesAcceptedVerdictBeforeFinalize(t *testi
 	if err != nil {
 		t.Fatalf("applySupervisorVerdict: %v", err)
 	}
-	if !done || nextPrompt != "" {
-		t.Fatalf("done=%v nextPrompt=%q", done, nextPrompt)
+	if !done {
+		t.Fatal("accepted verdict rejection must end the run")
 	}
-	if loaded.Status != "needs_supervisor_review" {
-		t.Fatalf("status = %q; want needs_supervisor_review", loaded.Status)
+	if loaded.Status != "failed" {
+		t.Fatalf("status = %q; want failed", loaded.Status)
 	}
 	// The downgrade must move the task to tasks/failed (not tasks/done).
 	if _, statErr := os.Stat(filepath.Join(root, "tasks", "failed", "task.yaml")); statErr != nil {
 		t.Fatalf("downgraded task not in tasks/failed: %v", statErr)
 	}
 	if _, statErr := os.Stat(filepath.Join(root, "tasks", "done", "task.yaml")); statErr == nil {
-		t.Fatal("accepted-then-downgraded task must not reach tasks/done")
+		t.Fatal("rejected task must not reach tasks/done")
 	}
 	saved, err := task.Load(filepath.Join(root, "tasks", "failed", "task.yaml"))
 	if err != nil {

@@ -66,55 +66,21 @@ func ReconcileReviewProgressWithContext(value *task.Task, profiles profile.Bundl
 		value.ReviewProgress.Quality,
 		qualityIDs(profiles.Quality),
 	)
-	projectAcceptancePasses(value, nil)
+	projectAcceptancePasses(value)
 }
 
-// ApplyReviewProgress merges one scoped verdict into the persisted pass set.
-// Persisted passes remain closed; recognized explicit gaps reopen them.
+// ApplyReviewProgress replaces the persisted pass sets with the recognized IDs
+// returned by the latest supervisor review.
 func ApplyReviewProgress(value *task.Task, profiles profile.Bundle, verdict Verdict) {
 	ApplyReviewProgressWithContext(value, profiles, ReviewContractContext{}, verdict)
 }
 
 func ApplyReviewProgressWithContext(value *task.Task, profiles profile.Bundle, context ReviewContractContext, verdict Verdict) {
 	ReconcileReviewProgressWithContext(value, profiles, context)
-	acceptance := stringSet(value.ReviewProgress.Acceptance)
-	quality := stringSet(value.ReviewProgress.Quality)
-
-	knownAcceptance := acceptanceResultIDs(*value)
-	gaps := make(map[string]bool)
-	for _, rawID := range verdict.AcceptanceGaps {
-		if id := strings.TrimSpace(rawID); knownAcceptance[id] {
-			gaps[id] = true
-			delete(acceptance, id)
-		}
-	}
-	acceptanceResultsValid := false
-	if _, err := validateAcceptanceResultEntries(verdict, *value); err == nil {
-		acceptanceResultsValid = true
-		for _, evidence := range verdict.AcceptanceEvidence {
-			id := strings.TrimSpace(evidence.ACID)
-			if _, ok := acceptanceIDSet(*value)[id]; ok {
-				acceptance[id] = true
-			}
-		}
-	}
-
-	failedQuality := qualityGapIDs(verdict.QualityGaps, profiles.Quality)
-	for id := range failedQuality {
-		delete(quality, id)
-	}
-	if err := validateQualityResults(verdict.QualityPasses, verdict.QualityGaps, profiles.Quality, nil); err == nil {
-		for _, rawID := range verdict.QualityPasses {
-			quality[strings.TrimSpace(rawID)] = true
-		}
-	}
-
-	value.ReviewProgress.Acceptance = idsInOrder(acceptance, acceptanceIDs(*value))
-	value.ReviewProgress.Quality = idsInOrder(quality, qualityIDs(profiles.Quality))
-	projectAcceptancePasses(value, gaps)
-	if acceptanceResultsValid {
-		projectRevisionEvidence(value, verdict.AcceptanceEvidence, gaps)
-	}
+	value.ReviewProgress.Acceptance = orderedIDs(verdict.AcceptancePasses, acceptanceIDs(*value))
+	value.ReviewProgress.Quality = orderedIDs(verdict.QualityPasses, qualityIDs(profiles.Quality))
+	projectAcceptancePasses(value)
+	projectRevisionPasses(value, verdict.AcceptancePasses)
 }
 
 func reviewContractHash(value task.Task, profiles profile.Bundle, context ReviewContractContext) string {
@@ -285,17 +251,6 @@ func qualityIDs(quality *profile.Quality) []string {
 	return ids
 }
 
-func qualityGapIDs(gaps []string, quality *profile.Quality) map[string]bool {
-	configured := stringSet(qualityIDs(quality))
-	failed := make(map[string]bool)
-	for _, rawID := range gaps {
-		if id := strings.TrimSpace(rawID); configured[id] {
-			failed[id] = true
-		}
-	}
-	return failed
-}
-
 func orderedIDs(current []string, ids []string) []string {
 	return idsInOrder(stringSet(current), ids)
 }
@@ -320,17 +275,25 @@ func stringSet(values []string) map[string]bool {
 	return set
 }
 
-func projectAcceptancePasses(value *task.Task, gaps map[string]bool) {
+func projectAcceptancePasses(value *task.Task) {
 	passed := stringSet(value.ReviewProgress.Acceptance)
 	for i := range value.AcceptanceCriteria {
 		criterion := &value.AcceptanceCriteria[i]
-		switch {
-		case passed[criterion.ID]:
+		if passed[criterion.ID] {
 			criterion.Status = "satisfied"
-		case gaps[criterion.ID]:
-			criterion.Status = "not_satisfied"
-		default:
+		} else {
 			criterion.Status = "pending"
+		}
+	}
+}
+
+func projectRevisionPasses(value *task.Task, passes []string) {
+	passed := stringSet(passes)
+	for i := range value.RevisionRequests {
+		request := &value.RevisionRequests[i]
+		if passed["revision:"+request.ID] {
+			request.Status = "addressed"
+			request.Evidence = "Verified by the supervisor."
 		}
 	}
 }

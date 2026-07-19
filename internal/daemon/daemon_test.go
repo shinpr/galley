@@ -145,7 +145,7 @@ func TestRunOnceUsesModelSupervisorProvider(t *testing.T) {
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
 	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
-	codexBin := writeFakeCodexSupervisor(t, `{"status":"accepted","summary":"codex accepted","acceptance_gaps":[],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["diff"]}],"quality_passes":[],"quality_gaps":[],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}`)
+	codexBin := writeFakeCodexSupervisor(t, `{"status":"accepted","summary":"codex accepted","acceptance_passes":["AC1"],"quality_passes":[],"findings":[],"discussion_items":[]}`)
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -180,7 +180,7 @@ func TestRunOnceRecordsSupervisorTimeoutInTaskAttempt(t *testing.T) {
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
 	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
-	codexBin := writeFakeCommand(t, "codex", "cat >/dev/null\nsleep 2\n")
+	codexBin := writeFakeCommand(t, "codex", "cat >/dev/null\nsleep 5\n")
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -189,7 +189,7 @@ func TestRunOnceRecordsSupervisorTimeoutInTaskAttempt(t *testing.T) {
 	// The timeout must let the fast executor reach its normal terminal while the
 	// sleeping supervisor still exceeds it, so the recorded failure is the
 	// supervisor timeout rather than an executor interruption.
-	setTimeoutMS(t, taskPath, 500)
+	setTimeoutMS(t, taskPath, 1500)
 
 	err := runTestDaemon(context.Background(), Options{
 		Root:               root,
@@ -273,8 +273,8 @@ fi
 	if doneTask.Attempts[0].SupervisorVerdict != "needs_revision" || doneTask.Attempts[1].SupervisorVerdict != "accepted" {
 		t.Fatalf("attempt verdicts got %#v", doneTask.Attempts)
 	}
-	if len(doneTask.RevisionRequests) != 1 || doneTask.RevisionRequests[0].Status != "addressed" {
-		t.Fatalf("accepted task did not retain the addressed supervisor revision: %#v", doneTask.RevisionRequests)
+	if len(doneTask.RevisionRequests) != 0 {
+		t.Fatalf("accepted task retained historical supervisor findings: %#v", doneTask.RevisionRequests)
 	}
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", "supervisor_verdict.json"), 1)
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-2", "supervisor_verdict.json"), 1)
@@ -300,7 +300,6 @@ fi
 	for _, want := range []string{
 		"source=`supervisor`",
 		"executor reported risks",
-		"Resolve the reported risks and rerun verification.",
 		"`revision:supervisor-attempt-1-finding-1`",
 	} {
 		if !strings.Contains(retryPrompt, want) {
@@ -343,16 +342,16 @@ echo '{"status":"completed_with_risks","summary":"risky","files_modified":["daem
 	if err != nil {
 		t.Fatal(err)
 	}
-	if failedTask.Status != "needs_supervisor_review" {
+	if failedTask.Status != "failed" {
 		t.Fatalf("status got %q", failedTask.Status)
 	}
-	assertSupervisorRevisionState(t, failedTask, "supervisor-attempt-1-finding-1", "executor reported risks", "Resolve the reported risks and rerun verification.")
+	assertSupervisorRevisionState(t, failedTask, "supervisor-attempt-1-finding-1", "executor reported risks")
 
 	requeued, err := task.Requeue(failedPath, task.RequeueOptions{Root: root})
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertSupervisorRevisionState(t, requeued.Task, "supervisor-attempt-1-finding-1", "executor reported risks", "Resolve the reported risks and rerun verification.")
+	assertSupervisorRevisionState(t, requeued.Task, "supervisor-attempt-1-finding-1", "executor reported risks")
 
 	acceptedClaudeBin := writeFakeClaude(t, `echo fixed >> daemon-output.txt
 echo '{"status":"completed","summary":"fixed","files_modified":["daemon-output.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"},{"id":"revision:supervisor-attempt-1-finding-1","status":"satisfied","evidence":["diff"],"notes":"resolved"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}'
@@ -372,8 +371,8 @@ echo '{"status":"completed","summary":"fixed","files_modified":["daemon-output.t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if doneTask.Status != "accepted" || len(doneTask.RevisionRequests) != 1 || doneTask.RevisionRequests[0].Status != "addressed" {
-		t.Fatalf("accepted task did not retain addressed revision audit: status=%q revisions=%#v", doneTask.Status, doneTask.RevisionRequests)
+	if doneTask.Status != "accepted" || len(doneTask.RevisionRequests) != 0 {
+		t.Fatalf("accepted task retained historical supervisor findings: status=%q revisions=%#v", doneTask.Status, doneTask.RevisionRequests)
 	}
 	for _, risk := range doneTask.Risks {
 		if strings.HasPrefix(risk.ID, "requeue-supervisor-attempt-") {
@@ -780,7 +779,7 @@ func TestRunOnceParseFailureNeedsSupervisorReview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if failedTask.Status != "needs_supervisor_review" {
+	if failedTask.Status != "failed" {
 		t.Fatalf("status got %q", failedTask.Status)
 	}
 	if len(failedTask.Risks) == 0 {
@@ -788,7 +787,7 @@ func TestRunOnceParseFailureNeedsSupervisorReview(t *testing.T) {
 	}
 }
 
-func TestRunOnceCompletedWithRisksNeedsSupervisorReview(t *testing.T) {
+func TestRunOnceCompletedWithRisksExhaustionFails(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
@@ -815,7 +814,7 @@ func TestRunOnceCompletedWithRisksNeedsSupervisorReview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if failedTask.Status != "needs_supervisor_review" {
+	if failedTask.Status != "failed" {
 		t.Fatalf("status got %q", failedTask.Status)
 	}
 	if len(failedTask.Risks) == 0 {
@@ -823,7 +822,7 @@ func TestRunOnceCompletedWithRisksNeedsSupervisorReview(t *testing.T) {
 	}
 }
 
-func TestRunOnceCompletedWithoutDiffNeedsSupervisorReview(t *testing.T) {
+func TestRunOnceCompletedWithoutDiffExhaustionFails(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
@@ -850,7 +849,7 @@ func TestRunOnceCompletedWithoutDiffNeedsSupervisorReview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if failedTask.Status != "needs_supervisor_review" {
+	if failedTask.Status != "failed" {
 		t.Fatalf("status got %q", failedTask.Status)
 	}
 	if len(failedTask.Risks) == 0 {
@@ -886,7 +885,7 @@ func TestRunOnceStopsAfterConsecutiveNoDiffAttempts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if failedTask.Status != "needs_supervisor_review" {
+	if failedTask.Status != "failed" {
 		t.Fatalf("status got %q", failedTask.Status)
 	}
 	if len(failedTask.Attempts) != 2 {
@@ -895,7 +894,7 @@ func TestRunOnceStopsAfterConsecutiveNoDiffAttempts(t *testing.T) {
 	if len(failedTask.Risks) == 0 || !strings.Contains(failedTask.Risks[len(failedTask.Risks)-1].Detail, "no git diff") {
 		t.Fatalf("progress risk missing: %#v", failedTask.Risks)
 	}
-	assertSupervisorRevisionState(t, failedTask, "supervisor-attempt-1-finding-1", "no repository diff was produced", "Make the required repository change and return valid structured JSON.")
+	assertSupervisorRevisionState(t, failedTask, "supervisor-attempt-2-finding-1", "no repository diff was produced")
 }
 
 func writeFakeClaude(t *testing.T, body string) string {
@@ -908,23 +907,19 @@ for arg in "$@"; do
 done
 if [ "$supervisor" = "1" ]; then
   request="$(cat)"
-  revision_gap=
-  if printf '%s' "$request" | grep -q 'supervisor-attempt-1-finding-1'; then
-    revision_gap=',"revision:supervisor-attempt-1-finding-1"'
-  fi
   if printf '%s' "$request" | grep -q '"status":"hard_stop"'; then
-    printf '%s\n' '{"status":"hard_stop","summary":"executor reported hard_stop","acceptance_gaps":[],"reviewed_files":[],"acceptance_evidence":[],"quality_passes":[],"quality_gaps":[],"findings":[{"severity":"high","category":"execution","file":"","summary":"executor reported hard_stop","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}'
+    printf '%s\n' '{"status":"hard_stop","summary":"executor reported hard_stop","acceptance_passes":[],"quality_passes":[],"findings":["executor reported hard_stop"],"discussion_items":[]}'
   elif printf '%s' "$request" | grep -q '"parse_error":"'; then
-    printf '%s\n' '{"status":"needs_revision","summary":"executor result was invalid","acceptance_gaps":["AC1"'"$revision_gap"'],"reviewed_files":[],"acceptance_evidence":[],"quality_passes":[],"quality_gaps":[],"findings":[{"severity":"medium","category":"verification","file":"","summary":"executor result JSON is invalid","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"Return valid structured JSON and preserve any useful workspace changes."}'
+    printf '%s\n' '{"status":"needs_revision","summary":"executor result was invalid","acceptance_passes":[],"quality_passes":[],"findings":["executor result JSON is invalid"],"discussion_items":[]}'
   elif printf '%s' "$request" | grep -q '"status":"completed_with_risks"'; then
-    printf '%s\n' '{"status":"needs_revision","summary":"executor reported risks","acceptance_gaps":["AC1"'"$revision_gap"'],"reviewed_files":[],"acceptance_evidence":[],"quality_passes":[],"quality_gaps":[],"findings":[{"severity":"medium","category":"verification","file":"","summary":"executor reported risks","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"Resolve the reported risks and rerun verification."}'
+    printf '%s\n' '{"status":"needs_revision","summary":"executor reported risks","acceptance_passes":[],"quality_passes":[],"findings":["executor reported risks"],"discussion_items":[]}'
   elif printf '%s' "$request" | grep -q '"diff_dirty":false'; then
-    printf '%s\n' '{"status":"needs_revision","summary":"no repository diff was produced","acceptance_gaps":["AC1"'"$revision_gap"'],"reviewed_files":[],"acceptance_evidence":[],"quality_passes":[],"quality_gaps":[],"findings":[{"severity":"medium","category":"acceptance","file":"","summary":"no repository diff was produced","blocks_acceptance":true}],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":"Make the required repository change and return valid structured JSON."}'
+    printf '%s\n' '{"status":"needs_revision","summary":"no repository diff was produced","acceptance_passes":[],"quality_passes":[],"findings":["no repository diff was produced"],"discussion_items":[]}'
   else
     if printf '%s' "$request" | grep -q 'supervisor-attempt-1-finding-1'; then
-      printf '%s\n' '{"status":"accepted","summary":"fake claude supervisor accepted","acceptance_gaps":[],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["diff"]},{"ac_id":"revision:supervisor-attempt-1-finding-1","evidence":["resolved in the retry diff"]}],"quality_passes":[],"quality_gaps":[],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}'
+      printf '%s\n' '{"status":"accepted","summary":"fake claude supervisor accepted","acceptance_passes":["AC1","revision:supervisor-attempt-1-finding-1"],"quality_passes":[],"findings":[],"discussion_items":[]}'
     else
-      printf '%s\n' '{"status":"accepted","summary":"fake claude supervisor accepted","acceptance_gaps":[],"reviewed_files":["daemon-output.txt"],"acceptance_evidence":[{"ac_id":"AC1","evidence":["diff"]}],"quality_passes":[],"quality_gaps":[],"findings":[],"residual_risks":[],"discussion_items":[],"confidence":"high","next_work_order":""}'
+      printf '%s\n' '{"status":"accepted","summary":"fake claude supervisor accepted","acceptance_passes":["AC1"],"quality_passes":[],"findings":[],"discussion_items":[]}'
     fi
   fi
   exit 0

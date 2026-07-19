@@ -181,7 +181,7 @@ Galley uses two independent timeout boundaries:
 - daemon `idle_timeout` or `--idle-timeout` stops an executor or supervisor that produces no output
 - task `execution_policy.timeout_ms` limits the total wall-clock duration of one executor attempt
 
-Executor idle timeouts are recorded as executor interruptions. A supervisor idle timeout preserves its supervisor artifacts and moves the task to `needs_supervisor_review`. Use `task show` before changing a timeout; an authentication or provider failure should be fixed rather than hidden behind a longer limit.
+Executor idle timeouts are recorded as executor interruptions. A supervisor idle timeout preserves its supervisor artifacts and moves the task to `failed`. Use `task show` before changing a timeout; an authentication or provider failure should be fixed rather than hidden behind a longer limit.
 
 ## Filesystems and Concurrency
 

@@ -86,7 +86,13 @@ A normal daemon stop lets active attempts finish until the shutdown timeout. Use
 galley daemon stop --force
 ```
 
-Force stop can interrupt active executor or supervisor processes. The next daemon startup recovers their tasks; inspect each recovered task before requeueing work that failed.
+Successful force stop moves tasks owned by that daemon to `failed` and preserves their worktrees and evidence. Inspect each task, then use the existing requeue or archive workflow:
+
+```sh
+galley task show TASK_ID
+galley task requeue TASK.yaml --reason "environment recovered"
+galley task archive TASK.yaml --reason "discard interrupted work"
+```
 
 See [Operations](operations.md#force-stop) for platform-specific process behavior.
 

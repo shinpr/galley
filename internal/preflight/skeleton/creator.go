@@ -104,13 +104,14 @@ func buildBuiltinCreatorCommandPlan(opts Options, payload []byte) (runner.Comman
 	if perr != nil {
 		return runner.Command{}, perr
 	}
-	// glm redirects the skeleton creator to GLM's endpoint like any executor role.
-	if opts.Task.Executor.CLI == "glm" {
-		token, terr := runner.ResolveGLMToken(opts.GLMAuthToken)
-		if terr != nil {
-			return runner.Command{}, creatorErr("%v", terr)
-		}
-		runner.RedirectClaudeToGLM(&cmd, token)
+	if err := runner.ConfigureClaudeProvider(&cmd, runner.ClaudeProviderOptions{
+		Provider: opts.Task.Executor.CLI,
+		Credentials: runner.ClaudeCredentials{
+			GLMAuthToken: opts.GLMAuthToken,
+			KimiAPIKey:   opts.KimiAPIKey,
+		},
+	}); err != nil {
+		return runner.Command{}, creatorErr("%v", err)
 	}
 	return cmd, nil
 }

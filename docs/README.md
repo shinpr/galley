@@ -32,6 +32,6 @@ Galley keeps settings at the scope where they apply:
 | Task YAML | One task | Goal, acceptance criteria, implementation scope, executor overrides, attempt budget, and worktree |
 | `quality.yaml` | One repository | Required checks, review dimensions, evidence expectations, and pass policy |
 | `environment.yaml` | One repository | Executor and supervisor defaults, commands, constraints, PR behavior, and worktree cleanup |
-| `daemon.yaml` | One Galley daemon | Concurrency, polling, timeouts, daemon-level supervisor default, GLM credentials, and notifications |
+| `daemon.yaml` | One Galley daemon | Concurrency, polling, timeouts, daemon-level supervisor default, provider credentials, and notifications |
 
 The Galley skill is the recommended way to create task and profile files. The reference documents describe the resulting contracts for review, manual adjustment, and troubleshooting.

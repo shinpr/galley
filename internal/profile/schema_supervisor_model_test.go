@@ -63,8 +63,8 @@ func TestEnvironmentSchemaSupervisorEffortContract(t *testing.T) {
 	}
 
 	allOf, ok := supervisor["allOf"].([]any)
-	if !ok || len(allOf) != 4 {
-		t.Fatalf("supervisor allOf = %#v, want 4 conditional effort rules", supervisor["allOf"])
+	if !ok || len(allOf) != 5 {
+		t.Fatalf("supervisor allOf = %#v, want 5 conditional effort rules", supervisor["allOf"])
 	}
 	got := map[string][]string{}
 	for _, raw := range allOf {
@@ -85,6 +85,9 @@ func TestEnvironmentSchemaSupervisorEffortContract(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got["glm"], wantClaude) {
 		t.Fatalf("supervisor glm effort enum = %#v, want %#v", got["glm"], wantClaude)
+	}
+	if !reflect.DeepEqual(got["kimi"], wantClaude) {
+		t.Fatalf("supervisor kimi effort enum = %#v, want %#v", got["kimi"], wantClaude)
 	}
 	wantGrok := []string{"", "none", "minimal", "low", "medium", "high", "xhigh", "max"}
 	if !reflect.DeepEqual(got["grok"], wantGrok) {

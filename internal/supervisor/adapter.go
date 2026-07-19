@@ -40,10 +40,9 @@ type AdapterOptions struct {
 	CodexBin    string
 	ClaudeBin   string
 	GrokBin     string
-	// GLMAuthToken is the Z.ai token used when Provider is "glm". A glm
-	// supervisor is the Claude adapter pointed at GLM's endpoint, so it reuses
-	// the entire Claude review path and only redirects via the child env.
+	// Redirected Claude providers receive credentials only in child environments.
 	GLMAuthToken string
+	KimiAPIKey   string
 }
 
 // AdapterRequest is the JSON request consumed by built-in supervisor adapters.
@@ -358,13 +357,14 @@ func runClaudeAdapterForOS(ctx context.Context, opts AdapterOptions, request []b
 		Stdin:     string(request),
 		EnvAppend: []string{"GALLEY_CLAUDE_GUARD_MODE=supervisor"},
 	}
-	// glm redirects this same Claude review command to GLM's endpoint.
-	if opts.Provider == "glm" {
-		token, terr := runner.ResolveGLMToken(opts.GLMAuthToken)
-		if terr != nil {
-			return nil, terr
-		}
-		runner.RedirectClaudeToGLM(&commandPlan, token)
+	if err := runner.ConfigureClaudeProvider(&commandPlan, runner.ClaudeProviderOptions{
+		Provider: opts.Provider,
+		Credentials: runner.ClaudeCredentials{
+			GLMAuthToken: opts.GLMAuthToken,
+			KimiAPIKey:   opts.KimiAPIKey,
+		},
+	}); err != nil {
+		return nil, err
 	}
 	_, err = runner.RunCommand(ctx, commandPlan, runner.RunOptions{Timeout: opts.Timeout, IdleTimeout: opts.IdleTimeout, StdoutPath: stdoutPath})
 	if err != nil {

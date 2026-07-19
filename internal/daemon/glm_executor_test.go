@@ -3,33 +3,28 @@ package daemon
 import (
 	"strings"
 	"testing"
-
-	"github.com/shinpr/galley/internal/task"
 )
 
-func TestPrepareGLMExecutorPlanFailsFastWithoutToken(t *testing.T) {
-	t.Parallel()
-	for _, token := range []string{"", "   "} {
-		token := token
-		t.Run("token="+token, func(t *testing.T) {
-			t.Parallel()
-			opts := Options{GLMAuthToken: token}
-			// The token check runs before any task-derived work, so an empty
-			// task is sufficient to exercise the fail-fast path.
-			_, _, _, err := prepareGLMExecutorPlan(opts, task.Task{}, t.TempDir(), "prompt", t.TempDir())
+func TestClaudeProviderCredentialFailsFast(t *testing.T) {
+	for _, provider := range []string{"glm", "kimi"} {
+		provider := provider
+		t.Run(provider, func(t *testing.T) {
+			err := validateProviderCredential(provider, Options{})
 			if err == nil {
-				t.Fatal("expected fail-fast error when GLM token is missing")
+				t.Fatal("expected fail-fast error when provider credential is missing")
 			}
-			if !strings.Contains(err.Error(), "glm_api_key") {
+			if !strings.Contains(err.Error(), provider+"_api_key") {
 				t.Fatalf("error must name the missing config key, got %q", err)
 			}
 		})
 	}
 }
 
-func TestExecutorVerificationCmdGLM(t *testing.T) {
-	t.Parallel()
-	if got := executorVerificationCmd("glm"); got != "claude -p (glm)" {
-		t.Fatalf("executorVerificationCmd(glm) = %q, want %q", got, "claude -p (glm)")
+func TestExecutorVerificationCmdRedirectedClaudeProviders(t *testing.T) {
+	for _, provider := range []string{"glm", "kimi"} {
+		want := "claude -p (" + provider + ")"
+		if got := executorVerificationCmd(provider); got != want {
+			t.Fatalf("executorVerificationCmd(%s) = %q, want %q", provider, got, want)
+		}
 	}
 }

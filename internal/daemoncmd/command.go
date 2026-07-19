@@ -213,10 +213,9 @@ func applyDaemonConfig(opts *daemon.Options, pollInterval *time.Duration, cfg da
 	// hook is operator configuration. The block is already validated by
 	// daemonconfig.Load before it reaches here.
 	opts.Notifications = cfg.Notifications
-	// GLM auth token is operator configuration with no CLI flag: the secret must
-	// not appear in process listings or shell history. It is resolved here and
-	// injected only into the executor child environment at dispatch time.
+	// Provider API keys are injected only into selected child environments.
 	opts.GLMAuthToken = cfg.GLMAPIKey
+	opts.KimiAPIKey = cfg.KimiAPIKey
 	return nil
 }
 

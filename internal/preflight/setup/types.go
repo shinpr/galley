@@ -123,6 +123,7 @@ type Options struct {
 	CodexBin               string
 	GrokBin                string
 	GLMAuthToken           string
+	KimiAPIKey             string
 	EnvironmentProfilePath string
 	// RepositorySignals is an optional list of repository setup signal paths
 	// (manifests, lockfiles, setup docs) that Galley surfaces to the setup

@@ -22,7 +22,7 @@ Backend defaults are intentionally separate:
 - Review supervisor default: optionally stored in `environment.yaml` as `supervisor.default_cli`; unset falls back to daemon startup state and then Claude.
 - Review supervisor model: set `supervisor.model` to an exact provider model name; omit it or use an empty value to keep that CLI's default.
 - Review supervisor effort: set `supervisor.effort` to `low`, `medium`, `high`, `xhigh`, or `max`; Codex also accepts `minimal`. Empty keeps the CLI default, and invalid provider values fail before review.
-- Valid backends for either default are `claude`, `codex`, `glm`, and `grok`. Grok uses its installed, authenticated CLI. The supervisor is the acceptance gate, so its default is the user's choice; the daemon default is `claude`.
+- Valid backends for either default are `claude`, `codex`, `glm`, `grok`, and `kimi`. Grok uses its installed, authenticated CLI. The supervisor is the acceptance gate, so its default is the user's choice; the daemon default is `claude`.
 
 Use the bundled schemas as the profile field contract:
 
@@ -117,8 +117,8 @@ Environment profile questions:
 
 1. What is the target repo absolute path?
 2. Which discovered commands are available and safe to run repeatedly?
-3. Which implementation executor should runs use by default: `claude`, `codex`, `glm`, `grok`, or unset to use Galley's built-in Claude backend at run time?
-4. Should this repository set a review supervisor default: `claude`, `codex`, `glm`, `grok`, or unset so daemon startup state decides?
+3. Which implementation executor should runs use by default: `claude`, `codex`, `glm`, `grok`, `kimi`, or unset to use Galley's built-in Claude backend at run time?
+4. Should this repository set a review supervisor default: `claude`, `codex`, `glm`, `grok`, `kimi`, or unset so daemon startup state decides?
 5. Which discovered setup commands should prepare a fresh task worktree before implementation, if they are known?
 6. Does the repo require local services: DB, Docker, Redis, browser, dev server, Figma MCP, Playwright, cloud CLI?
 7. Is network access allowed, approval-gated, or unavailable?
@@ -268,9 +268,9 @@ Blocking severities:
 - <severity list>
 
 Environment constraints:
-- executor default: <claude|codex|glm|grok|unset>
+- executor default: <claude|codex|glm|grok|kimi|unset>
 - required check shell: <auto|sh|bash|cmd|powershell|pwsh>
-- supervisor default: <claude|codex|glm|grok|unset>
+- supervisor default: <claude|codex|glm|grok|kimi|unset>
 - network: <value>
 - secrets: <value>
 - destructive commands: <value>

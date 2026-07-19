@@ -96,6 +96,7 @@ func defaultSupervisorRunner(ctx context.Context, opts Options, evidence supervi
 		CodexBin:     opts.CodexBin,
 		GrokBin:      opts.GrokBin,
 		GLMAuthToken: opts.GLMAuthToken,
+		KimiAPIKey:   opts.KimiAPIKey,
 	}, evidence)
 }
 

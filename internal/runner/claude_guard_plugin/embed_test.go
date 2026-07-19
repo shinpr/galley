@@ -204,6 +204,38 @@ func TestRequireFinalJSONRejectsIncompleteSupervisorStructure(t *testing.T) {
 	}
 }
 
+func TestRequireFinalJSONSetupCorrectionIncludesRequiredReadyFields(t *testing.T) {
+	dir, err := Ensure(filepath.Join(t.TempDir(), "guard"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := pythonCommand(t, filepath.Join(dir, "scripts", "require-final-json.py"))
+	cmd.Env = append(os.Environ(), "GALLEY_CLAUDE_GUARD_MODE=setup_executor")
+	cmd.Stdin = strings.NewReader(`{"last_assistant_message":"{\"status\":\"ready\",\"commands\":[]}"}`)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("guard script failed: %v\n%s", err, output)
+	}
+	got := string(output)
+	if !strings.Contains(got, `"decision": "block"`) {
+		t.Fatalf("expected block output, got %s", got)
+	}
+	var response struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(output, &response); err != nil {
+		t.Fatalf("decode guard output: %v\n%s", err, output)
+	}
+	if count := strings.Count(response.Reason, `"source": "environment_commands"`); count != 2 {
+		t.Fatalf("setup correction template source count = %d, want command and top-level source: %s", count, response.Reason)
+	}
+	for _, field := range []string{`"successful_commands"`, `"readiness_evidence"`} {
+		if !strings.Contains(response.Reason, field) {
+			t.Fatalf("setup correction template missing %s: %s", field, response.Reason)
+		}
+	}
+}
+
 func pythonCommand(t *testing.T, script string) *exec.Cmd {
 	t.Helper()
 	if runtime.GOOS != "windows" {

@@ -3,7 +3,7 @@
   "title": "Galley Setup Executor Result",
   "type": "object",
   "additionalProperties": false,
-  "required": ["status", "commands"],
+  "required": ["status", "commands", "source"],
   "properties": {
     "status": {
       "type": "string",
@@ -69,12 +69,12 @@
     },
     "provider": {
       "type": "string",
-      "enum": ["claude", "codex", "glm", "grok"],
+      "enum": ["claude", "codex", "glm", "grok", "kimi"],
       "description": "Daemon-owned provider metadata. If a setup executor emits this field, the daemon overwrites it from the resolved executor.cli before persisting setup_result.json. Prefer executor_cli when present; provider remains a CLI mirror for older evidence."
     },
     "executor_cli": {
       "type": "string",
-      "enum": ["claude", "codex", "glm", "grok"],
+      "enum": ["claude", "codex", "glm", "grok", "kimi"],
       "description": "Resolved executor CLI used for this setup preflight. Reused ready evidence is valid only when the current run's resolved CLI, model, and effort match these fields."
     },
     "executor_model": {
@@ -88,7 +88,7 @@
     "source": {
       "type": "string",
       "enum": ["environment_setup", "environment_commands", "discovered"],
-      "description": "Where the canonical successful setup plan came from. Required by the daemon when status is ready. `environment_setup` means the prior environment.setup plan made the worktree ready unchanged. `environment_commands` means the plan reused named environment commands. `discovered` means the setup executor composed the plan from repository signals or conventions."
+      "description": "Where the setup plan came from. For ready results this identifies the canonical successful plan; for failed results it identifies the attempted plan whose failure is reported. `environment_setup` means a prior environment.setup plan, `environment_commands` means named environment commands, and `discovered` means a plan composed from repository signals or conventions."
     }
   }
 }

@@ -120,11 +120,7 @@ func buildCodexSetupExecutorCommandPlan(opts Options, payload []byte) (runner.Co
 	codexOpts.WorkDir = opts.WorkDir
 	codexOpts.Prompt = string(payload)
 	codexOpts.SystemPrompt = prompts.SetupExecutorCodex()
-	schema, err := runner.CodexCompatibleOutputSchema(schemas.SetupResult)
-	if err != nil {
-		return runner.Command{}, fmt.Errorf("prepare setup executor schema: %w", err)
-	}
-	codexOpts.JSONSchema = schema
+	codexOpts.JSONSchema = schemas.SetupResult
 	codexOpts.AttemptDir = opts.RunDir
 
 	commandPlan, err := runner.CodexCommandPlan(codexOpts)

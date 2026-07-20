@@ -31,11 +31,7 @@ func buildCodexCreatorCommandPlan(opts Options, payload []byte) (runner.Command,
 	codexOpts.WorkDir = opts.WorkDir
 	codexOpts.Prompt = string(payload)
 	codexOpts.SystemPrompt = prompts.AcceptanceSkeletonCreatorCodex()
-	schema, err := runner.CodexCompatibleOutputSchema(schemas.AcceptanceSkeletonManifest)
-	if err != nil {
-		return runner.Command{}, creatorErr("prepare built-in creator schema: %v", err)
-	}
-	codexOpts.JSONSchema = schema
+	codexOpts.JSONSchema = schemas.AcceptanceSkeletonManifest
 	codexOpts.AttemptDir = opts.RunDir
 
 	commandPlan, err := runner.CodexCommandPlan(codexOpts)

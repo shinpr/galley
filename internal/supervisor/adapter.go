@@ -242,21 +242,17 @@ func runCodexAdapter(ctx context.Context, opts AdapterOptions, request []byte) (
 
 	requestPath := filepath.Join(dir, "codex_supervisor_request.json")
 	promptPath := filepath.Join(dir, "codex_supervisor_prompt.md")
-	schemaPath := filepath.Join(dir, "supervisor-verdict.schema.json")
-	outPath := filepath.Join(dir, "codex_supervisor_last_message.json")
-	eventsPath := filepath.Join(dir, "codex_supervisor_events.jsonl")
-	prompt := prompts.CodexSupervisor() + "\n\n# Evidence JSON\n\n" + string(request)
-	schema, err := runner.CodexCompatibleOutputSchema(schemas.SupervisorVerdict)
+	schemaPath, err := runner.PrepareCodexOutputSchema(runner.CodexOptions{JSONSchema: schemas.SupervisorVerdict}, dir, "supervisor-verdict.schema.json")
 	if err != nil {
 		return nil, fmt.Errorf("prepare Codex supervisor schema: %w", err)
 	}
+	outPath := filepath.Join(dir, "codex_supervisor_last_message.json")
+	eventsPath := filepath.Join(dir, "codex_supervisor_events.jsonl")
+	prompt := prompts.CodexSupervisor() + "\n\n# Evidence JSON\n\n" + string(request)
 	if err := writeSupervisorFile(requestPath, request); err != nil {
 		return nil, err
 	}
 	if err := writeSupervisorFile(promptPath, []byte(prompt)); err != nil {
-		return nil, err
-	}
-	if err := writeSupervisorFile(schemaPath, []byte(schema)); err != nil {
 		return nil, err
 	}
 	args := []string{

@@ -12,10 +12,8 @@ import (
 	"github.com/shinpr/galley/schemas"
 )
 
-// CodexOutputSchemaFilename is the attempt-scoped filename Galley writes when
-// the caller supplies the executor result schema as inline content rather than
-// a real file. `codex exec --output-schema` requires a real path, so Galley
-// materializes the embedded schema here before invoking the CLI.
+// CodexOutputSchemaFilename is the attempt-scoped filename for the normalized
+// provider schema artifact Galley materializes before invoking Codex.
 const CodexOutputSchemaFilename = "codex.output-schema.json"
 
 // CodexLastMessageFilename is the attempt-scoped filename Galley requests for
@@ -47,11 +45,11 @@ type CodexOptions struct {
 	JSONSchemaFile        string
 	JSONSchema            string
 	OutputLastMessageFile string
-	OutputSchemaFile      string
-	// AttemptDir, when set, lets CodexCommandPlan materialize attempt-scoped
-	// derivative files (the output schema file when only embedded schema
-	// content is available, and the --output-last-message capture file) so the
-	// upstream `codex exec` CLI flags receive real paths.
+	// OutputSchemaFile is exclusively the caller-selected destination for the
+	// normalized provider bytes; it is never treated as a canonical schema source.
+	OutputSchemaFile string
+	// AttemptDir is the attempt-scoped destination for derivative files: the
+	// normalized output schema and the --output-last-message capture file.
 	AttemptDir string
 	Prompt     string
 }
@@ -98,11 +96,7 @@ func CodexCommandPlan(opts CodexOptions) (Command, error) {
 	if opts.Prompt == "" {
 		return Command{}, fmt.Errorf("prompt is required")
 	}
-	var err error
-	opts, err = withDefaultEmbeddedCodexOptions(opts)
-	if err != nil {
-		return Command{}, err
-	}
+	opts = applyDefaultCodexSystemPrompt(opts)
 	resolvedOpts, err := resolveCodexAttemptFiles(opts)
 	if err != nil {
 		return Command{}, err
@@ -173,24 +167,87 @@ func CodexEffectiveSystemPrompt(opts CodexOptions) (string, error) {
 	return prompts.CodexExecutorFull(), nil
 }
 
-func withDefaultEmbeddedCodexOptions(opts CodexOptions) (CodexOptions, error) {
+// applyDefaultCodexSystemPrompt embeds the default Codex executor system
+// prompt when the caller supplies neither a prompt body nor a prompt file.
+func applyDefaultCodexSystemPrompt(opts CodexOptions) CodexOptions {
 	if opts.SystemPromptFile == "" && opts.SystemPrompt == "" {
 		opts.SystemPrompt = prompts.CodexExecutorFull()
 	}
-	if opts.JSONSchemaFile == "" && opts.JSONSchema == "" {
-		schema, err := CodexExecutorResultSchema()
-		if err != nil {
-			return opts, err
-		}
-		opts.JSONSchema = schema
-	}
-	return opts, nil
+	return opts
 }
 
-// CodexExecutorResultSchema removes unsupported generation constraints;
-// ExecutorResult.Validate enforces them after parsing.
-func CodexExecutorResultSchema() (string, error) {
-	return CodexCompatibleOutputSchema(schemas.ClaudeResult)
+// PrepareCodexOutputSchema normalizes opts' canonical schema and writes the
+// provider artifact to destDir/filename; it is the sole Codex normalization site.
+func PrepareCodexOutputSchema(opts CodexOptions, destDir, filename string) (string, error) {
+	canonical, err := codexCanonicalSchema(opts)
+	if err != nil {
+		return "", err
+	}
+	normalized, err := CodexCompatibleOutputSchema(canonical)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(destDir, filename)
+	if codexSchemaDestinationAliasesSource(opts.JSONSchemaFile, path) {
+		return "", fmt.Errorf("codex output schema destination %s aliases canonical source %s: use a distinct OutputSchemaFile or AttemptDir", path, opts.JSONSchemaFile)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", fmt.Errorf("create codex output-schema dir: %w", err)
+	}
+	if err := os.WriteFile(path, []byte(normalized), 0o600); err != nil {
+		return "", fmt.Errorf("write codex output-schema file %s: %w", path, err)
+	}
+	return path, nil
+}
+
+// codexSchemaDestinationAliasesSource reports whether destPath resolves to the
+// same physical file as sourcePath, catching exact-path, symlink, and hard-link aliases.
+func codexSchemaDestinationAliasesSource(sourcePath, destPath string) bool {
+	if sourcePath == "" {
+		return false
+	}
+	if sameCodexSchemaPath(sourcePath, destPath) {
+		return true
+	}
+	sourceInfo, err := os.Stat(sourcePath)
+	if err != nil {
+		return false
+	}
+	destInfo, err := os.Stat(destPath)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(sourceInfo, destInfo)
+}
+
+// sameCodexSchemaPath reports whether two paths are textually identical after
+// cleaning, so an exact-path alias is caught even before the destination exists.
+func sameCodexSchemaPath(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	absA, errA := filepath.Abs(a)
+	absB, errB := filepath.Abs(b)
+	if errA == nil && errB == nil {
+		return filepath.Clean(absA) == filepath.Clean(absB)
+	}
+	return filepath.Clean(a) == filepath.Clean(b)
+}
+
+// codexCanonicalSchema returns the canonical schema bytes resolved from
+// JSONSchemaFile, JSONSchema, or the embedded executor result schema default.
+func codexCanonicalSchema(opts CodexOptions) (string, error) {
+	if opts.JSONSchemaFile != "" {
+		body, err := os.ReadFile(opts.JSONSchemaFile)
+		if err != nil {
+			return "", fmt.Errorf("read codex output schema file %s: %w", opts.JSONSchemaFile, err)
+		}
+		return string(body), nil
+	}
+	if opts.JSONSchema != "" {
+		return opts.JSONSchema, nil
+	}
+	return schemas.ClaudeResult, nil
 }
 
 // CodexCompatibleOutputSchema adapts Galley's persisted JSON schemas for the
@@ -211,35 +268,40 @@ func CodexCompatibleOutputSchema(schema string) (string, error) {
 func normalizeCodexOutputSchema(node any) {
 	switch v := node.(type) {
 	case map[string]any:
-		delete(v, "allOf")
-		delete(v, "pattern")
-		delete(v, "uniqueItems")
-		props, _ := v["properties"].(map[string]any)
-		originalRequired := requiredNameSet(v["required"])
-		if props != nil {
-			names := make([]string, 0, len(props))
-			for name := range props {
-				names = append(names, name)
-			}
-			sort.Strings(names)
-			required := make([]any, 0, len(names))
-			for _, name := range names {
-				required = append(required, name)
-				prop := props[name]
-				if !originalRequired[name] {
-					allowNullSchema(prop)
-				}
-				normalizeCodexOutputSchema(prop)
-			}
-			v["required"] = required
-		}
-		if items, ok := v["items"]; ok {
-			normalizeCodexOutputSchema(items)
-		}
+		normalizeCodexObjectSchema(v)
 	case []any:
 		for _, item := range v {
 			normalizeCodexOutputSchema(item)
 		}
+	}
+}
+
+// normalizeCodexObjectSchema strips incompatible keywords from one object
+// node, forces required properties, null-allows optionals, then recurses.
+func normalizeCodexObjectSchema(m map[string]any) {
+	delete(m, "allOf")
+	delete(m, "pattern")
+	delete(m, "uniqueItems")
+	props, _ := m["properties"].(map[string]any)
+	originalRequired := requiredNameSet(m["required"])
+	if props != nil {
+		names := make([]string, 0, len(props))
+		for name := range props {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		required := make([]any, 0, len(names))
+		for _, name := range names {
+			required = append(required, name)
+			if !originalRequired[name] {
+				allowNullSchema(props[name])
+			}
+			normalizeCodexOutputSchema(props[name])
+		}
+		m["required"] = required
+	}
+	if items, ok := m["items"]; ok {
+		normalizeCodexOutputSchema(items)
 	}
 }
 
@@ -303,36 +365,43 @@ func combineRolePrompt(systemPrompt, workOrder string) string {
 	return systemPrompt + "\n\n# Work Order\n\n" + workOrder
 }
 
-// resolveCodexAttemptFiles maps the JSONSchemaFile/JSONSchema fields into a
-// concrete `codex exec --output-schema <file>` path and, when AttemptDir is
-// available, makes sure `--output-last-message <file>` is requested as well.
-//
-// The Codex CLI rejects --output-schema arguments that point at non-existent
-// files, so when only embedded schema content is available the runner writes
-// it to attemptDir/CodexOutputSchemaFilename before invoking the CLI. The
-// last-message path is similarly attempt-scoped so per-attempt evidence is
-// preserved alongside the other run artifacts. Callers that supply their own
-// OutputSchemaFile or OutputLastMessageFile keep those values intact.
+// resolveCodexAttemptFiles routes the canonical schema through the runner-owned
+// normalization boundary and ensures the last-message capture path is set.
 func resolveCodexAttemptFiles(opts CodexOptions) (CodexOptions, error) {
-	if opts.OutputSchemaFile == "" {
-		switch {
-		case opts.JSONSchemaFile != "":
-			opts.OutputSchemaFile = opts.JSONSchemaFile
-		case opts.AttemptDir != "" && opts.JSONSchema != "":
-			path := filepath.Join(opts.AttemptDir, CodexOutputSchemaFilename)
-			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-				return opts, fmt.Errorf("create codex output-schema dir: %w", err)
-			}
-			if err := os.WriteFile(path, []byte(opts.JSONSchema), 0o600); err != nil {
-				return opts, fmt.Errorf("write codex output-schema file %s: %w", path, err)
-			}
-			opts.OutputSchemaFile = path
+	if codexSchemaActive(opts) {
+		destDir, filename, err := codexSchemaDestination(opts)
+		if err != nil {
+			return opts, err
 		}
+		path, err := PrepareCodexOutputSchema(opts, destDir, filename)
+		if err != nil {
+			return opts, err
+		}
+		opts.OutputSchemaFile = path
 	}
 	if opts.OutputLastMessageFile == "" && opts.AttemptDir != "" {
 		opts.OutputLastMessageFile = filepath.Join(opts.AttemptDir, CodexLastMessageFilename)
 	}
 	return opts, nil
+}
+
+// codexSchemaActive reports whether the caller wants a Codex output schema:
+// a destination or an explicit canonical schema input activates normalization.
+func codexSchemaActive(opts CodexOptions) bool {
+	return opts.OutputSchemaFile != "" || opts.AttemptDir != "" ||
+		opts.JSONSchema != "" || opts.JSONSchemaFile != ""
+}
+
+// codexSchemaDestination resolves the derivative destination: OutputSchemaFile
+// is the caller-selected path, otherwise AttemptDir/CodexOutputSchemaFilename.
+func codexSchemaDestination(opts CodexOptions) (string, string, error) {
+	if opts.OutputSchemaFile != "" {
+		return filepath.Dir(opts.OutputSchemaFile), filepath.Base(opts.OutputSchemaFile), nil
+	}
+	if opts.AttemptDir != "" {
+		return opts.AttemptDir, CodexOutputSchemaFilename, nil
+	}
+	return "", "", fmt.Errorf("codex output schema destination is required: set CodexOptions.AttemptDir or OutputSchemaFile")
 }
 
 // ExtractCodexLastMessageFile parses a Codex final-message capture.

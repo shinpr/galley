@@ -12,10 +12,8 @@ import (
 	"github.com/shinpr/galley/schemas"
 )
 
-// CodexOutputSchemaFilename is the attempt-scoped filename Galley writes when
-// the caller supplies the executor result schema as inline content rather than
-// a real file. `codex exec --output-schema` requires a real path, so Galley
-// materializes the embedded schema here before invoking the CLI.
+// CodexOutputSchemaFilename is the attempt-scoped filename for the normalized
+// provider schema artifact Galley materializes before invoking Codex.
 const CodexOutputSchemaFilename = "codex.output-schema.json"
 
 // CodexLastMessageFilename is the attempt-scoped filename Galley requests for
@@ -298,45 +296,13 @@ func normalizeCodexObjectSchema(m map[string]any) {
 			if !originalRequired[name] {
 				allowNullSchema(props[name])
 			}
+			normalizeCodexOutputSchema(props[name])
 		}
 		m["required"] = required
 	}
-	for _, key := range codexSubschemaObjectKeys {
-		if child, ok := m[key].(map[string]any); ok {
-			normalizeCodexOutputSchema(child)
-		}
+	if items, ok := m["items"]; ok {
+		normalizeCodexOutputSchema(items)
 	}
-	for _, key := range codexSubschemaArrayKeys {
-		if children, ok := m[key].([]any); ok {
-			for _, child := range children {
-				normalizeCodexOutputSchema(child)
-			}
-		}
-	}
-	for _, key := range codexSubschemaMapKeys {
-		if children, ok := m[key].(map[string]any); ok {
-			for _, child := range children {
-				normalizeCodexOutputSchema(child)
-			}
-		}
-	}
-}
-
-// Single-subschema JSON Schema keyword locations Galley recurses through.
-var codexSubschemaObjectKeys = []string{
-	"items", "additionalProperties", "propertyNames", "contains",
-	"if", "then", "else", "not", "unevaluatedItems", "unevaluatedProperties",
-	"contentSchema",
-}
-
-// Array-of-subschema JSON Schema keyword locations Galley recurses through.
-var codexSubschemaArrayKeys = []string{
-	"prefixItems", "anyOf", "oneOf",
-}
-
-// Map<string, subschema> JSON Schema keyword locations Galley recurses through.
-var codexSubschemaMapKeys = []string{
-	"properties", "patternProperties", "$defs", "definitions", "dependentSchemas",
 }
 
 func requiredNameSet(raw any) map[string]bool {

@@ -146,73 +146,32 @@ func TestCodexCompatibleOutputSchemaRecursivelyRequiresObjectProperties(t *testi
 	}
 }
 
-// AC1: normalization must descend through every supported schema-bearing branch
-// (anyOf, oneOf, $defs, additionalProperties) so nested gaps cannot survive.
-func TestCodexCompatibleOutputSchemaNormalizesNestedSchemaBranches(t *testing.T) {
+func TestCodexCompatibleOutputSchemaDoesNotRewriteLogicalSubschemas(t *testing.T) {
 	t.Parallel()
-	schema := `{
+	body, err := CodexCompatibleOutputSchema(`{
   "type": "object",
-  "$defs": {"Role": {"type": "string", "pattern": "^[a-z]+$", "enum": ["admin"]}},
-  "properties": {
-    "primary": {
-      "anyOf": [
-        {"type": "object", "allOf": [{"required": ["code"]}], "properties": {"code": {"type": "string", "pattern": "^[0-9]+$"}}, "required": []},
-        {"type": "null"}
-      ]
-    },
-    "extras": {"type": "object", "additionalProperties": {"type": "string", "pattern": "@"}, "properties": {"note": {"type": "string", "uniqueItems": true}}, "required": []},
-    "secondary": {"oneOf": [{"type": "object", "properties": {"kind": {"type": "string", "pattern": "^k-"}}, "required": []}]}
-  },
-  "required": ["primary", "extras", "secondary"]
-}`
-	body, err := CodexCompatibleOutputSchema(schema)
+  "not": {
+    "type": "object",
+    "properties": {
+      "blocked": {"type": "string", "pattern": "^x$"}
+    }
+  }
+}`)
 	if err != nil {
 		t.Fatalf("CodexCompatibleOutputSchema: %v", err)
 	}
 	var doc map[string]any
 	if err := json.Unmarshal([]byte(body), &doc); err != nil {
-		t.Fatalf("normalized nested schema invalid JSON: %v", err)
-	}
-	for _, bad := range []string{"allOf", "pattern", "uniqueItems"} {
-		assertNoSchemaKeyword(t, doc, bad)
-	}
-	props := objectProp(t, doc, "properties")
-
-	anyBranches := objectProp(t, props, "primary")["anyOf"].([]any)
-	anyBranch := anyBranches[0].(map[string]any)
-	if !requiredSet(t, anyBranch)["code"] {
-		t.Fatalf("anyOf branch optional 'code' must be required: %#v", anyBranch["required"])
-	}
-	code := objectProp(t, objectProp(t, anyBranch, "properties"), "code")
-	if !typeAllowsNull(code["type"]) {
-		t.Fatalf("anyOf branch optional 'code' must be null-allowed: %#v", code["type"])
+		t.Fatalf("normalized schema is not valid JSON: %v", err)
 	}
 
-	extras := objectProp(t, props, "extras")
-	addl, ok := extras["additionalProperties"].(map[string]any)
-	if !ok {
-		t.Fatalf("extras.additionalProperties must remain a schema: %#v", extras["additionalProperties"])
+	notSchema := objectProp(t, doc, "not")
+	if _, rewritten := notSchema["required"]; rewritten {
+		t.Fatalf("logical subschema must not gain required constraints: %#v", notSchema)
 	}
-	if _, still := addl["pattern"]; still {
-		t.Fatalf("additionalProperties schema must strip pattern: %#v", addl)
-	}
-
-	defs, ok := doc["$defs"].(map[string]any)
-	if !ok {
-		t.Fatalf("$defs must remain a map after normalization: %#v", doc["$defs"])
-	}
-	if _, still := objectProp(t, defs, "Role")["pattern"]; still {
-		t.Fatalf("$defs Role must strip pattern: %#v", defs["Role"])
-	}
-
-	oneBranches := objectProp(t, props, "secondary")["oneOf"].([]any)
-	oneBranch := oneBranches[0].(map[string]any)
-	if !requiredSet(t, oneBranch)["kind"] {
-		t.Fatalf("oneOf branch optional 'kind' must be required: %#v", oneBranch["required"])
-	}
-	kind := objectProp(t, objectProp(t, oneBranch, "properties"), "kind")
-	if !typeAllowsNull(kind["type"]) {
-		t.Fatalf("oneOf branch optional 'kind' must be null-allowed: %#v", kind["type"])
+	blocked := objectProp(t, objectProp(t, notSchema, "properties"), "blocked")
+	if blocked["pattern"] != "^x$" || blocked["type"] != "string" {
+		t.Fatalf("logical subschema must remain unchanged: %#v", blocked)
 	}
 }
 
@@ -485,71 +444,6 @@ func TestCodexCommandPlanRejectsAliasedOutputSchemaFile(t *testing.T) {
 	}
 	if !bytes.Equal(source, []byte(codexCanonicalTestSchema)) {
 		t.Fatalf("canonical source must remain unchanged when plan rejects alias")
-	}
-}
-
-// AC1: Draft 2020-12 contentSchema is a schema-bearing location; incompatible
-// keywords beneath it must be stripped and optional properties required/null-allowed.
-func TestCodexCompatibleOutputSchemaNormalizesContentSchema(t *testing.T) {
-	t.Parallel()
-	schema := `{
-  "type": "object",
-  "properties": {
-    "payload": {
-      "type": "string",
-      "contentMediaType": "application/json",
-      "contentSchema": {
-        "type": "object",
-        "pattern": "^.*$",
-        "uniqueItems": true,
-        "allOf": [{"required": ["code"]}],
-        "properties": {
-          "code": {"type": "string", "pattern": "^[0-9]+$"},
-          "note": {"type": "string", "enum": ["a", "b"]}
-        },
-        "required": ["code"]
-      }
-    }
-  },
-  "required": ["payload"]
-}`
-	body, err := CodexCompatibleOutputSchema(schema)
-	if err != nil {
-		t.Fatalf("CodexCompatibleOutputSchema: %v", err)
-	}
-	var doc map[string]any
-	if err := json.Unmarshal([]byte(body), &doc); err != nil {
-		t.Fatalf("normalized contentSchema doc invalid JSON: %v", err)
-	}
-	for _, bad := range []string{"allOf", "pattern", "uniqueItems"} {
-		assertNoSchemaKeyword(t, doc, bad)
-	}
-	payload := objectProp(t, objectProp(t, doc, "properties"), "payload")
-	contentSchema := objectProp(t, payload, "contentSchema")
-	if _, still := contentSchema["allOf"]; still {
-		t.Fatalf("contentSchema must strip allOf: %#v", contentSchema)
-	}
-	if _, still := contentSchema["pattern"]; still {
-		t.Fatalf("contentSchema must strip pattern: %#v", contentSchema)
-	}
-	if _, still := contentSchema["uniqueItems"]; still {
-		t.Fatalf("contentSchema must strip uniqueItems: %#v", contentSchema)
-	}
-	contentProps := objectProp(t, contentSchema, "properties")
-	contentRequired := requiredSet(t, contentSchema)
-	if !contentRequired["note"] {
-		t.Fatalf("contentSchema optional 'note' must be required: %#v", contentSchema["required"])
-	}
-	note := objectProp(t, contentProps, "note")
-	if !typeAllowsNull(note["type"]) {
-		t.Fatalf("contentSchema optional 'note' must be null-allowed: %#v", note["type"])
-	}
-	if !enumAllowsNull(note["enum"]) {
-		t.Fatalf("contentSchema optional 'note' enum must allow null: %#v", note["enum"])
-	}
-	code := objectProp(t, contentProps, "code")
-	if _, still := code["pattern"]; still {
-		t.Fatalf("contentSchema nested 'code' must strip pattern: %#v", code)
 	}
 }
 

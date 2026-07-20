@@ -121,7 +121,7 @@ func executorSchema() map[string]any {
 	return object(
 		properties(map[string]any{
 			"cli":    enumSchema(append([]string{""}, validExecutorCLIs...)),
-			"model":  stringSchema("description", "Optional model override. Omit or leave empty to use the selected CLI's configured default model."),
+			"model":  stringSchema("description", "Optional model override. A task that selects cli keeps this value exactly as authored, with empty delegating to that provider CLI's configured default; without a task cli, empty resolves from the environment profile, then the CLI default."),
 			"effort": taskExecutorEffortBaseSchema(),
 		}),
 		func(m map[string]any) {
@@ -132,7 +132,7 @@ func executorSchema() map[string]any {
 
 func taskExecutorEffortBaseSchema() map[string]any {
 	m := enumSchema(append([]string{""}, provider.ExecutorEfforts()...))
-	m["description"] = "Optional reasoning effort override. Empty resolves from the environment profile, then the selected provider CLI's own default; the effective provider is validated before setup, skeleton, or implementation."
+	m["description"] = "Optional reasoning effort override. A task that selects cli keeps this value exactly as authored, with empty delegating to that provider CLI; without a task cli, empty resolves from the environment profile, then the selected provider CLI's own default. The effective provider is validated before setup, skeleton, or implementation."
 	return m
 }
 

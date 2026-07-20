@@ -33,9 +33,34 @@ Interactive AI coding sessions work well for short tasks. Longer work needs expl
 - **Isolated AFK work**: execution runs in a managed git worktree, with retry limits and escalation when the task needs human judgment.
 - **Review-ready handoff**: the recommended setup commits and opens accepted work as a pull request for final human review.
 
+## Provider Requirements
+
+The Galley plugin installs Galley tooling, not the CLIs used by executors and supervisors. Before repository setup, install and authenticate only the backends you plan to select.
+
+| Backend | Required CLI | Setup |
+| --- | --- | --- |
+| Claude | [`claude`](https://code.claude.com/docs/en/setup) | Run `curl -fsSL https://claude.ai/install.sh \| bash` on macOS/Linux/WSL or `irm https://claude.ai/install.ps1 \| iex` in Windows PowerShell, then start `claude` and complete authentication. |
+| Codex | [`codex`](https://developers.openai.com/codex/cli/) | Run `npm install -g @openai/codex`, then start `codex` and complete authentication. |
+| GLM | [`claude`](https://code.claude.com/docs/en/setup) | Install Claude Code as above and create a [Z.AI API key](https://docs.z.ai/guides/overview/quick-start). |
+| Kimi | [`claude`](https://code.claude.com/docs/en/setup) | Install Claude Code and complete Kimi's [Claude Code setup and API key creation](https://www.kimi.com/code/docs/en/third-party-tools/other-coding-agents). |
+| Grok | [`grok`](https://docs.x.ai/build/overview) | Run `curl -fsSL https://x.ai/cli/install.sh \| bash` on macOS/Linux/WSL or `irm https://x.ai/cli/install.ps1 \| iex` in Windows PowerShell, then start `grok` and complete authentication. |
+
+GLM and Kimi do not require separate provider CLIs. Galley runs both through Claude Code with the configured provider endpoint and API key. After installing Galley, create the default `~/.galley/daemon.yaml`:
+
+```sh
+galley daemon config init
+```
+
+Add the keys for the backends you use, then start the daemon:
+
+```yaml
+glm_api_key: "<your-Z.AI-api-key>"
+kimi_api_key: "<your-Kimi-api-key>"
+```
+
 ## Quick Start
 
-Use the Galley skill to set up each repository. It installs or verifies the CLI, prepares repository profiles, drafts valid task YAML, and queues tasks only after approval.
+Use the Galley skill to set up each repository. It installs or verifies the Galley CLI, checks the selected provider CLI, prepares repository profiles, drafts valid task YAML, and queues tasks only after approval.
 
 Claude Code:
 
@@ -143,14 +168,16 @@ run evidence + git diff
 - **Task YAML**: trusted local input describing the goal, acceptance criteria, scope, executor overrides, verification, and worktree. See [docs/task-yaml.md](docs/task-yaml.md).
 - **Quality profile**: repository review policy for required checks, review dimensions, evidence, and pass criteria. The setup skill creates it from repository evidence and the user's chosen review strictness. See [docs/profiles.md](docs/profiles.md).
 - **Environment profile**: repository runtime defaults for commands, executor CLI/model/effort, constraints, PR behavior, and cleanup. The setup skill creates it from repository evidence and approved execution settings. See [docs/profiles.md](docs/profiles.md).
-- **Executor**: Claude Code, Codex, GLM, Kimi, or Grok Build backend that implements the task. Each executor field resolves from the task, then the environment profile; only `cli` has a built-in default (`claude`), while an omitted `model` or `effort` defers to the selected provider CLI's own default. GLM and Kimi use the Claude CLI and require `glm_api_key` or `kimi_api_key`; Grok uses its logged-in CLI state.
+- **Executor**: Claude Code, Codex, GLM, Kimi, or Grok Build backend that implements the task. A task that selects its executor `cli` runs with the task's `model` and `effort` exactly as authored, with empty values deferring to that provider CLI's own defaults; otherwise each field resolves from the task, then the environment profile, and only `cli` has a built-in default (`claude`). GLM and Kimi use the Claude CLI and require `glm_api_key` or `kimi_api_key`; Grok uses its logged-in CLI state.
 - **Supervisor**: Claude, Codex, GLM, Kimi, or Grok Build backend that reviews the result against acceptance criteria, required checks, and recorded evidence. It is the acceptance gate; the default is Claude.
 - **Worktree**: isolated git checkout used for AFK execution so the source repository stays clean.
 - **Evidence**: files under `runs/<run-id>/` that make each attempt auditable after the fact.
 
-## Manual CLI Installation
+## Manual CLI Installation and Updates
 
 Most users should start with the skill. Install the binary manually when scripting setup or debugging the CLI outside the skill workflow.
+
+Run the installer for your platform for both the first installation and updates to the latest release.
 
 macOS and Linux:
 
@@ -165,17 +192,30 @@ Invoke-WebRequest https://raw.githubusercontent.com/shinpr/galley/main/scripts/i
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-Or use Go directly:
+When updating, the installers stop a verified running daemon before replacing the binary but do not restart it. If the daemon was running, start it again after the update:
+
+```sh
+galley daemon start
+```
+
+Or use Go directly for the first installation:
 
 ```sh
 go install github.com/shinpr/galley/cmd/galley@latest
 ```
 
-Installing only the binary does not create repository profiles or start a daemon for a project. After manual installation, run the setup skill for the repository you want Galley to manage.
+After the first installation, create the default daemon configuration:
+
+```sh
+galley daemon config init
+```
+
+This creates `~/.galley/daemon.yaml` if it does not exist. It does not create repository profiles or start a daemon; run the setup skill for the repository you want Galley to manage.
 
 Useful direct checks:
 
 ```sh
+galley --version
 galley --help
 galley daemon status --output json
 galley daemon run --once

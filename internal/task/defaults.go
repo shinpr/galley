@@ -39,12 +39,15 @@ func Defaulted(t Task) Task {
 	return t
 }
 
-// ResolveEffectiveExecutor applies task, then environment precedence per field.
-// Only cli has a Galley built-in fallback; empty model and effort stay empty so
-// the selected provider CLI owns model and reasoning-effort selection.
+// ResolveEffectiveExecutor makes a task-selected cli authoritative for model and
+// effort; without one, fields resolve task then environment with a cli fallback.
 func ResolveEffectiveExecutor(taskExec Executor, env *profile.ExecutorDefault) Executor {
-	cli := taskExec.CLI
-	if cli == "" && env != nil {
+	if taskExec.CLI != "" {
+		return Executor{CLI: taskExec.CLI, Model: taskExec.Model, Effort: taskExec.Effort}
+	}
+
+	cli := ""
+	if env != nil {
 		cli = env.DefaultCLI
 	}
 	if cli == "" {

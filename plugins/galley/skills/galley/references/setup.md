@@ -41,6 +41,16 @@ Use `galley` for later commands when it works on `PATH`; otherwise use the verif
 
 The installer installs the `galley` binary. By default it downloads a prebuilt GitHub Release asset; `--local` builds from the current checkout. Daemon operations are available under `<galley-bin> daemon ...`.
 
+## CLI Updates
+
+After approval:
+
+1. Run `<galley-bin> daemon status --output json` and retain its `running` and `verified` values. When it reports `running: true` and `verified: false`, report the status and wait for direction.
+2. Run the release installer for the current platform. Continue only when it exits 0 and `<galley-bin> --version` matches the latest version from the notice.
+3. When the recorded status was both `running` and `verified`, run `<galley-bin> daemon start` and confirm that its status is `running: true` and `verified: true`.
+
+Resume the active flow from its first unfinished step after the applicable steps succeed. If a step fails, report the command, output, and current daemon state, then wait for direction.
+
 Check the selected provider CLI with `claude --version`, `codex --version`, or `grok --version`. GLM and Kimi use the Claude binary and require `glm_api_key` or `kimi_api_key` in `daemon.yaml`; Grok uses its normal logged-in CLI state. Check `gh auth status` when the accepted profile proposal enables PR automation.
 
 ## Repository Layout
@@ -114,7 +124,7 @@ Answer each separately:
 
 Choose daemon settings before startup. Explain the defaults and ask for changes when the user has not already chosen:
 
-- implementation executor: store repository defaults in `environment.yaml`. Resolve each field independently from the task, then `environment.yaml`. When neither layer sets CLI, Galley uses Claude. When neither layer sets model, the selected provider CLI chooses the model; when neither sets effort, it chooses its own reasoning-effort default.
+- implementation executor: store repository defaults in `environment.yaml`. A task that sets `executor.cli` runs with the task's model and effort exactly as authored, with empty values delegating to that provider CLI; environment model and effort apply only when the task omits `executor.cli`, resolving each field from the task, then `environment.yaml`. When neither layer sets CLI, Galley uses Claude. When the resolved model is empty, the selected provider CLI chooses the model; when the resolved effort is empty, it chooses its own reasoning-effort default.
 - supervisor: Claude is the daemon default when unset; a non-default review backend from the list above can be selected at daemon start.
 - PR automation, PR comment handling, base branch, and worktree cleanup: use the resolved `environment.yaml`.
 - run mode: `daemon start` keeps working in the background; `daemon run --once` drains the current queue once.

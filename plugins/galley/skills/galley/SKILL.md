@@ -23,14 +23,14 @@ Use this table to choose the active flow. Load every required file for that flow
 | Profile authoring | User wants `quality.yaml` or `environment.yaml`, or setup finds missing profiles. | `references/profile-authoring.md`, `references/authoring-quality.md`, `references/quality.schema.json`, `references/environment.schema.json` | Review strictness is chosen before repository inspection; profiles come from schema defaults, repository evidence, and user policy; profiles validate before completion. |
 | Setup / daemon | User wants installation, repository setup, daemon start/status/stop, supervisor choice, or PR automation setup. | `references/setup.md`; when profile creation is needed, switch to Profile authoring files. | Setup makes Galley usable for the target repo without requiring manual task YAML or daemon option knowledge; profile-owned behavior stays in profiles. |
 | Handoff / queue | User wants validation, queueing, requeueing, archiving, or daemon handoff for an existing task. | `references/handoff-and-queueing.md` | Queue and requeue happen only after validation and explicit user approval; report task file, queue target, daemon state, and next action. |
-| Troubleshooting | User asks why a task or run failed, stalled, became stale, or looks confusing. | `references/troubleshooting.md` | Diagnose from task state and run evidence before suggesting requeue; distinguish task failure from daemon or process failure. |
+| Troubleshooting | A Galley command fails, reports a warning or available update, or the user asks why a task or run failed, stalled, became stale, or looks confusing. | `references/troubleshooting.md` | Classify command output or diagnose from task state and run evidence before selecting a recovery action; distinguish advisory notices from failures. |
 | Codex daemon/eval | Galley is being run from Codex CLI, especially sandboxed daemon execution or evals. | `references/codex.md` plus the active flow files. | Account for Codex sandbox and writable-root limits when starting daemons or creating sibling worktrees. |
 
 Supplemental references:
 
 | Condition | Add file | Purpose |
 | --- | --- | --- |
-| Galley required-check execution host is Windows | `references/windows.md` | Select `environment.required_checks.shell` and align required-check command syntax with that shell. |
+| Galley is running on Windows | `references/windows.md` | Use Windows installation and required-check shell guidance. |
 
 ## Global Invariants
 

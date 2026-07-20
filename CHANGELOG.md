@@ -6,6 +6,8 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.12.1 - 2026-07-20
+
 ### Added
 
 - Interactive CLI runs now check at most once per 24 hours (only when stderr is a TTY) whether a newer stable Galley release exists on GitHub and print a concise stderr notice; non-interactive execution never performs the check, and failures never affect the command.
@@ -14,10 +16,11 @@ This project follows semantic versioning.
 ### Changed
 
 - Successful `galley daemon stop --force` now moves tasks owned by that daemon to `failed` with interruption evidence while retaining their worktrees for requeue or archive.
-- Packaged Galley plugins are now versioned as `0.1.30`; task authoring uses a 60-minute per-attempt timeout baseline so productive executors can complete without interruption, and the executor override helper preserves hand-authored and daemon-serialized YAML indentation.
+- Packaged Galley plugins are now versioned as `0.1.31`; task authoring uses a 60-minute per-attempt timeout baseline, the executor override helper preserves hand-authored and daemon-serialized YAML indentation, bundled guidance and schemas keep task-selected executor model and effort overrides provider-local, the README identifies each backend's CLI and authentication prerequisites, and troubleshooting routes CLI update notices through an approved update and daemon-restoration flow.
 
 ### Fixed
 
+- A task that sets `executor.cli` now runs with the task's `model` and `effort` exactly as authored, with omitted values staying empty and delegating to that provider CLI, instead of inheriting environment model and effort defaults written for another provider.
 - Codex structured-output schemas are now normalized at a single runner-owned boundary shared by the implementation executor, setup, acceptance-skeleton creator, and supervisor invocations, so no Codex surface can pass a canonical Galley schema to `codex exec --output-schema` without Codex-compatible adaptation.
 
 ## v0.12.0 - 2026-07-19

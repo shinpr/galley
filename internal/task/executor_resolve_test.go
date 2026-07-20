@@ -27,6 +27,18 @@ func TestResolveEffectiveExecutorFieldPrecedence(t *testing.T) {
 			want: Executor{CLI: "claude", Model: "task-model", Effort: "max"},
 		},
 		{
+			name: "task cli keeps empty model and effort away from another provider's environment values",
+			task: Executor{CLI: "claude"},
+			env:  &profile.ExecutorDefault{DefaultCLI: "grok", Model: "grok-model", Effort: "none"},
+			want: Executor{CLI: "claude", Model: "", Effort: ""},
+		},
+		{
+			name: "task cli with model keeps empty effort away from environment effort",
+			task: Executor{CLI: "claude", Model: "task-model"},
+			env:  env,
+			want: Executor{CLI: "claude", Model: "task-model", Effort: ""},
+		},
+		{
 			name: "partial task override keeps sibling environment defaults",
 			task: Executor{Model: "task-model"},
 			env:  env,

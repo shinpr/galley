@@ -30,15 +30,15 @@ All backends use Galley-owned prompt transport, result contracts, and evidence l
 
 ## Executor Configuration
 
-Galley resolves `cli`, `model`, and `effort` independently at the start of every run:
+Galley resolves the implementation executor at the start of every run:
 
-1. the task's `executor` field
-2. the repository `environment.yaml` executor defaults
-3. the built-in `cli: claude` fallback
+1. A task that sets `executor.cli` runs with the task's `model` and `effort` exactly as authored; empty values stay empty and delegate to that provider CLI, so repository defaults for another provider never cross into a task-selected CLI.
+2. When the task omits `executor.cli`, each `cli`, `model`, and `effort` field resolves from the task, then the repository `environment.yaml` executor defaults.
+3. When neither layer sets `cli`, Galley uses the built-in `cli: claude` fallback.
 
-There is no built-in model or effort default. When both the task and environment profile omit one of those fields, the selected provider CLI uses its own configured default.
+There is no built-in model or effort default. When the resolved model or effort is empty, the selected provider CLI uses its own configured default.
 
-Task overrides are useful for a single job. Environment defaults define the repository's normal implementation setup. A requeued task picks up repository-level model changes because Galley reads the profile at the start of each run.
+Task overrides are useful for a single job. Environment defaults define the repository's normal implementation setup and are read again on requeue when the task does not select its own executor CLI.
 
 See [Task YAML](task-yaml.md#execution-policy-and-executor) for task overrides, [Profiles](profiles.md#environmentyaml) for repository defaults, and the [Codex task example](../examples/afk-task-codex.yaml) for a complete file.
 

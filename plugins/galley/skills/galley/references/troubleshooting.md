@@ -1,8 +1,10 @@
 # Troubleshooting
 
-Use this reference when a task is failed, stale, accepted unexpectedly, stuck in running, or producing weak output.
+Use this reference when a Galley command fails, reports a warning or available update, or a task is failed, stale, accepted unexpectedly, stuck in running, or producing weak output.
 
 ## First Checks
+
+For task and run problems:
 
 ```bash
 galley daemon status --output json
@@ -48,6 +50,7 @@ Read the files that exist. Focus on the newest attempt first.
 
 | Symptom | Likely Cause | Action |
 | --- | --- | --- |
+| `galley update available: <current> -> <latest>` | A newer CLI release is available independently of the command result. | Use the exit status to determine command success. Report the current and latest versions and ask once whether to update and restore a verified running daemon. Continue the active flow from its first unfinished step if declined; after approval, switch to the Setup / daemon CLI update procedure. |
 | task remains in `queued` | daemon stopped, concurrency limit, or queue mismatch | Check `galley daemon status`, daemon log, and the queued file path. |
 | task remains in `running` | stale claim or active attempt | Check heartbeat age and claim TTL. |
 | `needs_revision` loops | AC too broad, executor missing context, or supervisor finding unclear | Rewrite AC or add `revision_requests` with concrete next work. |

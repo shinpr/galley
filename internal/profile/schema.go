@@ -140,7 +140,7 @@ func executorSchema() map[string]any {
 	m := object(
 		properties(map[string]any{
 			"default_cli": enumSchema(append([]string{""}, provider.ExecutorIDs()...)),
-			"model":       stringSchema("description", "Optional model name passed unchanged to the selected executor CLI. Omit or leave empty to use the CLI default; accepted values depend on the provider."),
+			"model":       stringSchema("description", "Optional model name passed unchanged to the selected executor CLI when the task omits executor.cli and executor.model. Omit or leave empty to use the CLI default; accepted values depend on the provider."),
 			"effort":      executorEffortBaseSchema(),
 		}),
 	)
@@ -150,7 +150,7 @@ func executorSchema() map[string]any {
 
 func executorEffortBaseSchema() map[string]any {
 	m := enumSchema(append([]string{""}, provider.ExecutorEfforts()...))
-	m["description"] = "Optional reasoning effort used as a repository runtime default. Empty leaves resolution to the task, then the selected provider CLI's own default; the effective provider is validated before setup, skeleton, or implementation."
+	m["description"] = "Optional reasoning effort used as a repository runtime default. Applies only when the task omits executor.cli; a task-selected cli keeps the task's own model and effort, with empty values delegating to that provider CLI. Empty here leaves resolution to the task, then the selected provider CLI's own default; the effective provider is validated before setup, skeleton, or implementation."
 	return m
 }
 

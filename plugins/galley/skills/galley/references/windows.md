@@ -1,6 +1,6 @@
 # Windows Guidance
 
-Use this reference with the active flow when Galley runs `quality.required_checks` on a Windows host.
+Use this reference with the active flow when Galley runs on Windows.
 
 ## Installation
 

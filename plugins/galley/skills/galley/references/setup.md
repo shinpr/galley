@@ -41,6 +41,16 @@ Use `galley` for later commands when it works on `PATH`; otherwise use the verif
 
 The installer installs the `galley` binary. By default it downloads a prebuilt GitHub Release asset; `--local` builds from the current checkout. Daemon operations are available under `<galley-bin> daemon ...`.
 
+## CLI Updates
+
+After approval:
+
+1. Run `<galley-bin> daemon status --output json` and retain its `running` and `verified` values. When it reports `running: true` and `verified: false`, report the status and wait for direction.
+2. Run the release installer for the current platform. Continue only when it exits 0 and `<galley-bin> --version` matches the latest version from the notice.
+3. When the recorded status was both `running` and `verified`, run `<galley-bin> daemon start` and confirm that its status is `running: true` and `verified: true`.
+
+Resume the active flow from its first unfinished step after the applicable steps succeed. If a step fails, report the command, output, and current daemon state, then wait for direction.
+
 Check the selected provider CLI with `claude --version`, `codex --version`, or `grok --version`. GLM and Kimi use the Claude binary and require `glm_api_key` or `kimi_api_key` in `daemon.yaml`; Grok uses its normal logged-in CLI state. Check `gh auth status` when the accepted profile proposal enables PR automation.
 
 ## Repository Layout

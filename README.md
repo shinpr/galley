@@ -45,14 +45,13 @@ The Galley plugin installs Galley tooling, not the CLIs used by executors and su
 | Kimi | [`claude`](https://code.claude.com/docs/en/setup) | Install Claude Code and complete Kimi's [Claude Code setup and API key creation](https://www.kimi.com/code/docs/en/third-party-tools/other-coding-agents). |
 | Grok | [`grok`](https://docs.x.ai/build/overview) | Run `curl -fsSL https://x.ai/cli/install.sh \| bash` on macOS/Linux/WSL or `irm https://x.ai/cli/install.ps1 \| iex` in Windows PowerShell, then start `grok` and complete authentication. |
 
-GLM and Kimi do not require separate provider CLIs. Galley runs both through Claude Code with the configured provider endpoint and API key. After installing Galley, start and stop the daemon once to create the default `~/.galley/daemon.yaml`:
+GLM and Kimi do not require separate provider CLIs. Galley runs both through Claude Code with the configured provider endpoint and API key. After installing Galley, create the default `~/.galley/daemon.yaml`:
 
 ```sh
-galley daemon start
-galley daemon stop
+galley daemon config init
 ```
 
-Add the keys for the backends you use, then start the daemon again:
+Add the keys for the backends you use, then start the daemon:
 
 ```yaml
 glm_api_key: "<your-Z.AI-api-key>"
@@ -174,9 +173,11 @@ run evidence + git diff
 - **Worktree**: isolated git checkout used for AFK execution so the source repository stays clean.
 - **Evidence**: files under `runs/<run-id>/` that make each attempt auditable after the fact.
 
-## Manual CLI Installation
+## Manual CLI Installation and Updates
 
 Most users should start with the skill. Install the binary manually when scripting setup or debugging the CLI outside the skill workflow.
+
+Run the installer for your platform for both the first installation and updates to the latest release.
 
 macOS and Linux:
 
@@ -191,17 +192,30 @@ Invoke-WebRequest https://raw.githubusercontent.com/shinpr/galley/main/scripts/i
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-Or use Go directly:
+When updating, the installers stop a verified running daemon before replacing the binary but do not restart it. If the daemon was running, start it again after the update:
+
+```sh
+galley daemon start
+```
+
+Or use Go directly for the first installation:
 
 ```sh
 go install github.com/shinpr/galley/cmd/galley@latest
 ```
 
-Installing only the binary does not create repository profiles or start a daemon for a project. After manual installation, run the setup skill for the repository you want Galley to manage.
+After the first installation, create the default daemon configuration:
+
+```sh
+galley daemon config init
+```
+
+This creates `~/.galley/daemon.yaml` if it does not exist. It does not create repository profiles or start a daemon; run the setup skill for the repository you want Galley to manage.
 
 Useful direct checks:
 
 ```sh
+galley --version
 galley --help
 galley daemon status --output json
 galley daemon run --once

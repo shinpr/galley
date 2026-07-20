@@ -2,11 +2,13 @@ package cli
 
 import (
 	"github.com/shinpr/galley/internal/daemoncmd"
+	"github.com/shinpr/galley/internal/updatecheck"
 	"github.com/shinpr/galley/internal/version"
 	"github.com/spf13/cobra"
 )
 
 func Execute() error {
+	updatecheck.Run(updatecheck.Options{})
 	root := NewRootCommand()
 	if err := root.Execute(); err != nil {
 		return err

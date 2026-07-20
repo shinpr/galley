@@ -40,7 +40,15 @@ By default, the background files are:
 
 ## Daemon Configuration
 
-`daemon start` and `daemon run` create `daemon.yaml` under the selected root on first use. Edit this file for durable daemon-wide defaults:
+To configure a daemon before its first start, create the default configuration, edit it, then start the daemon:
+
+```sh
+galley daemon config init
+# edit ~/.galley/daemon.yaml
+galley daemon start
+```
+
+`daemon config init` writes `daemon.yaml` under the selected root without starting the daemon or processing queued tasks. When the file already exists, it reports the existing file and leaves it unchanged. `daemon start` and `daemon run` also create `daemon.yaml` on first use when it is missing. Edit this file for durable daemon-wide defaults:
 
 ```yaml
 supervisor: claude

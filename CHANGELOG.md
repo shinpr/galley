@@ -11,6 +11,10 @@ This project follows semantic versioning.
 - Successful `galley daemon stop --force` now moves tasks owned by that daemon to `failed` with interruption evidence while retaining their worktrees for requeue or archive.
 - Packaged Galley plugins are now versioned as `0.1.30`; task authoring uses a 60-minute per-attempt timeout baseline so productive executors can complete without interruption, and the executor override helper preserves hand-authored and daemon-serialized YAML indentation.
 
+### Fixed
+
+- Codex structured-output schemas are now normalized at a single runner-owned boundary shared by the implementation executor, setup, acceptance-skeleton creator, and supervisor invocations, so no Codex surface can pass a canonical Galley schema to `codex exec --output-schema` without Codex-compatible adaptation.
+
 ## v0.12.0 - 2026-07-19
 
 ### Added

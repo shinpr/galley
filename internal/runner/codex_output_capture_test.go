@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -36,6 +37,9 @@ func TestCodexCommandPlanMaterializesEmbeddedSchemaWhenOnlyContentAvailable(t *t
 	}
 	if strings.Contains(string(body), `"allOf"`) {
 		t.Fatalf("Codex output schema must not contain allOf; schema=%s", string(body))
+	}
+	if strings.Contains(string(body), `"pattern"`) {
+		t.Fatalf("Codex output schema must not contain pattern; schema=%s", string(body))
 	}
 	var doc map[string]any
 	if err := json.Unmarshal(body, &doc); err != nil {
@@ -142,48 +146,377 @@ func TestCodexCompatibleOutputSchemaRecursivelyRequiresObjectProperties(t *testi
 	}
 }
 
-func TestCodexExecutorResultSchemaRemovesUnsupportedPatterns(t *testing.T) {
+func TestCodexCompatibleOutputSchemaDoesNotRewriteLogicalSubschemas(t *testing.T) {
 	t.Parallel()
-	body, err := CodexExecutorResultSchema()
+	body, err := CodexCompatibleOutputSchema(`{
+  "type": "object",
+  "not": {
+    "type": "object",
+    "properties": {
+      "blocked": {"type": "string", "pattern": "^x$"}
+    }
+  }
+}`)
 	if err != nil {
-		t.Fatalf("CodexExecutorResultSchema: %v", err)
+		t.Fatalf("CodexCompatibleOutputSchema: %v", err)
 	}
-	var doc any
+	var doc map[string]any
 	if err := json.Unmarshal([]byte(body), &doc); err != nil {
-		t.Fatalf("compatible executor schema is not valid JSON: %v", err)
+		t.Fatalf("normalized schema is not valid JSON: %v", err)
 	}
-	assertNoSchemaKeyword(t, doc, "pattern")
+
+	notSchema := objectProp(t, doc, "not")
+	if _, rewritten := notSchema["required"]; rewritten {
+		t.Fatalf("logical subschema must not gain required constraints: %#v", notSchema)
+	}
+	blocked := objectProp(t, objectProp(t, notSchema, "properties"), "blocked")
+	if blocked["pattern"] != "^x$" || blocked["type"] != "string" {
+		t.Fatalf("logical subschema must remain unchanged: %#v", blocked)
+	}
 }
 
-func TestCodexCommandPlanReusesCallerSuppliedSchemaFile(t *testing.T) {
+func TestCodexCommandPlanConvergesCanonicalSchemaInputs(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	schemaPath := filepath.Join(dir, "external.schema.json")
-	if err := os.WriteFile(schemaPath, []byte(`{"type":"object"}`), 0o600); err != nil {
-		t.Fatal(err)
+	canonical := codexCanonicalTestSchema
+	cases := []struct {
+		name   string
+		inline string
+		file   string
+	}{
+		{name: "inline-json-schema", inline: canonical},
+		{name: "canonical-schema-file", file: writeCanonicalSchemaFile(t, canonical)},
 	}
-	attemptDir := t.TempDir()
+	derivatives := make([][]byte, 0, len(cases))
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			attemptDir := t.TempDir()
+			opts := CodexFromTask(minimalCodexTask())
+			opts.WorkDir = "/tmp/codex-schema-boundary"
+			opts.AttemptDir = attemptDir
+			opts.JSONSchema = tc.inline
+			opts.JSONSchemaFile = tc.file
+			opts.Prompt = "work order"
 
+			plan, err := CodexCommandPlan(opts)
+			if err != nil {
+				t.Fatalf("CodexCommandPlan: %v", err)
+			}
+			schemaFlag := flagValue(t, plan.Argv, "--output-schema")
+			if schemaFlag == "" {
+				t.Fatalf("argv missing --output-schema: %v", plan.Argv)
+			}
+			if filepath.Dir(schemaFlag) != attemptDir {
+				t.Fatalf("output-schema must be attempt-scoped derivative: got %q, want under %q", schemaFlag, attemptDir)
+			}
+			if tc.file != "" && schemaFlag == tc.file {
+				t.Fatalf("argv must reference normalized derivative, not canonical file %q", tc.file)
+			}
+			derivative, err := os.ReadFile(schemaFlag)
+			if err != nil {
+				t.Fatalf("read materialized derivative: %v", err)
+			}
+			assertCodexNormalized(t, derivative)
+			if tc.file != "" {
+				source, err := os.ReadFile(tc.file)
+				if err != nil {
+					t.Fatalf("read canonical source: %v", err)
+				}
+				if !bytes.Equal(source, []byte(canonical)) {
+					t.Fatalf("canonical source file must not be mutated")
+				}
+			}
+			derivatives = append(derivatives, derivative)
+		})
+	}
+	if !bytes.Equal(derivatives[0], derivatives[1]) {
+		t.Fatalf("canonical inputs must converge on one normalized artifact")
+	}
+}
+
+func TestCodexCommandPlanFailsBeforeExecOnInvalidSchema(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, opts *CodexOptions)
+		want  string
+	}{
+		{name: "attempt-dir-malformed-inline", setup: func(t *testing.T, o *CodexOptions) {
+			o.JSONSchema = `{not json`
+			o.AttemptDir = t.TempDir()
+		}, want: "decode codex output schema"},
+		{name: "caller-destination-malformed-inline", setup: func(t *testing.T, o *CodexOptions) {
+			o.JSONSchema = `{not json`
+			o.OutputSchemaFile = filepath.Join(t.TempDir(), "caller.schema.json")
+		}, want: "decode codex output schema"},
+		{name: "caller-destination-missing-file", setup: func(t *testing.T, o *CodexOptions) {
+			o.JSONSchemaFile = filepath.Join(t.TempDir(), "missing.schema.json")
+			o.OutputSchemaFile = filepath.Join(t.TempDir(), "caller.schema.json")
+		}, want: "read codex output schema file"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			opts := CodexFromTask(minimalCodexTask())
+			opts.Prompt = "work order"
+			tc.setup(t, &opts)
+			_, err := CodexCommandPlan(opts)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected error containing %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+// AC1/AC3: a preselected OutputSchemaFile is a destination only, so the
+// boundary still decodes and normalizes the canonical schema into it.
+func TestCodexCommandPlanMaterializesSchemaAtCallerSelectedDestination(t *testing.T) {
+	t.Parallel()
+	dest := filepath.Join(t.TempDir(), "caller.schema.json")
 	opts := CodexFromTask(minimalCodexTask())
-	opts.WorkDir = "/tmp/codex-output-schema-file"
-	opts.JSONSchemaFile = schemaPath
-	opts.AttemptDir = attemptDir
+	opts.WorkDir = "/tmp/codex-output-schema-dest"
+	opts.JSONSchema = codexCanonicalTestSchema
+	opts.OutputSchemaFile = dest
 	opts.Prompt = "work order"
 
 	plan, err := CodexCommandPlan(opts)
 	if err != nil {
 		t.Fatalf("CodexCommandPlan: %v", err)
 	}
+	if schemaFlag := flagValue(t, plan.Argv, "--output-schema"); schemaFlag != dest {
+		t.Fatalf("argv --output-schema must reference caller destination: got %q want %q", schemaFlag, dest)
+	}
+	body, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read materialized derivative at caller destination: %v", err)
+	}
+	assertCodexNormalized(t, body)
+}
 
-	got := flagValue(t, plan.Argv, "--output-schema")
-	if got != schemaPath {
-		t.Fatalf("output-schema should reuse caller-supplied file: got %q, want %q", got, schemaPath)
+// AC3: explicit canonical schema input without a destination must fail before
+// execution rather than silently omitting --output-schema.
+func TestCodexCommandPlanErrorsOnCanonicalSchemaWithoutDestination(t *testing.T) {
+	t.Parallel()
+	opts := CodexFromTask(minimalCodexTask())
+	opts.WorkDir = "/tmp/codex-output-schema-dest"
+	opts.JSONSchema = codexCanonicalTestSchema
+	opts.Prompt = "work order"
+	_, err := CodexCommandPlan(opts)
+	if err == nil || !strings.Contains(err.Error(), "codex output schema destination is required") {
+		t.Fatalf("expected missing-destination error, got %v", err)
 	}
-	// The runner must not write a second attempt-scoped schema file when the
-	// caller already supplied a real path.
-	if _, err := os.Stat(filepath.Join(attemptDir, CodexOutputSchemaFilename)); !os.IsNotExist(err) {
-		t.Fatalf("attempt-scoped schema file should not be created when JSONSchemaFile is supplied: err=%v", err)
+}
+
+func TestPrepareCodexOutputSchemaReportsSchemaPreparationFailures(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	cases := []struct {
+		name string
+		opts CodexOptions
+		want string
+	}{
+		{name: "malformed-inline-json", opts: CodexOptions{JSONSchema: `{not json`}, want: "decode codex output schema"},
+		{name: "malformed-file-json", opts: CodexOptions{JSONSchemaFile: writeCanonicalSchemaFile(t, `{not json`)}, want: "decode codex output schema"},
+		{name: "missing-schema-file", opts: CodexOptions{JSONSchemaFile: filepath.Join(dir, "missing.schema.json")}, want: "read codex output schema file"},
 	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := PrepareCodexOutputSchema(tc.opts, t.TempDir(), CodexOutputSchemaFilename)
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error %q must identify %q", err.Error(), tc.want)
+			}
+		})
+	}
+}
+
+// AC1: when the destination aliases the canonical source file (exact-path, symlink,
+// or hard link), the boundary must reject it before writing so canonical bytes survive.
+func TestPrepareCodexOutputSchemaRejectsAliasedDestination(t *testing.T) {
+	t.Parallel()
+	canonical := codexCanonicalTestSchema
+	sourcePath := writeCanonicalSchemaFile(t, canonical)
+	want := "aliases canonical source"
+
+	cases := []struct {
+		name  string
+		setup func(t *testing.T) (destDir, filename string)
+	}{
+		{name: "exact-path", setup: func(t *testing.T) (string, string) {
+			return filepath.Dir(sourcePath), filepath.Base(sourcePath)
+		}},
+		{name: "cleaned-path", setup: func(t *testing.T) (string, string) {
+			return filepath.Dir(sourcePath), "./" + filepath.Base(sourcePath)
+		}},
+		{name: "symlink-alias", setup: func(t *testing.T) (string, string) {
+			linkDir := t.TempDir()
+			link := filepath.Join(linkDir, "link.schema.json")
+			if err := os.Symlink(sourcePath, link); err != nil {
+				t.Skipf("symlink unsupported: %v", err)
+			}
+			return linkDir, "link.schema.json"
+		}},
+		{name: "hard-link-alias", setup: func(t *testing.T) (string, string) {
+			linkDir := t.TempDir()
+			link := filepath.Join(linkDir, "hard.schema.json")
+			if err := os.Link(sourcePath, link); err != nil {
+				t.Skipf("hard link unsupported: %v", err)
+			}
+			return linkDir, "hard.schema.json"
+		}},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			destDir, filename := tc.setup(t)
+			before, err := os.ReadFile(sourcePath)
+			if err != nil {
+				t.Fatalf("read canonical source before: %v", err)
+			}
+			_, err = PrepareCodexOutputSchema(CodexOptions{JSONSchemaFile: sourcePath}, destDir, filename)
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("expected error containing %q, got %v", want, err)
+			}
+			after, err := os.ReadFile(sourcePath)
+			if err != nil {
+				t.Fatalf("read canonical source after: %v", err)
+			}
+			if !bytes.Equal(before, after) {
+				t.Fatalf("canonical source bytes must remain unchanged: before=%q after=%q", string(before), string(after))
+			}
+			if bytes.Equal(after, []byte(canonical)) == false {
+				t.Fatalf("canonical source must still equal original canonical bytes")
+			}
+		})
+	}
+}
+
+// AC1: a distinct caller destination must still succeed and normalize, proving
+// the alias rejection does not over-block legitimate distinct destinations.
+func TestPrepareCodexOutputSchemaAcceptsDistinctDestination(t *testing.T) {
+	t.Parallel()
+	sourcePath := writeCanonicalSchemaFile(t, codexCanonicalTestSchema)
+	destDir := t.TempDir()
+	path, err := PrepareCodexOutputSchema(CodexOptions{JSONSchemaFile: sourcePath}, destDir, CodexOutputSchemaFilename)
+	if err != nil {
+		t.Fatalf("PrepareCodexOutputSchema distinct destination: %v", err)
+	}
+	if filepath.Dir(path) != destDir {
+		t.Fatalf("distinct derivative must live in destDir: got %q", path)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read derivative: %v", err)
+	}
+	assertCodexNormalized(t, body)
+	source, err := os.ReadFile(sourcePath)
+	if err != nil {
+		t.Fatalf("read canonical source: %v", err)
+	}
+	if !bytes.Equal(source, []byte(codexCanonicalTestSchema)) {
+		t.Fatalf("canonical source must remain unchanged for distinct destination")
+	}
+}
+
+// AC1 boundary: the alias rejection must surface through CodexCommandPlan so the
+// argv never references an aliased canonical source as --output-schema.
+func TestCodexCommandPlanRejectsAliasedOutputSchemaFile(t *testing.T) {
+	t.Parallel()
+	sourcePath := writeCanonicalSchemaFile(t, codexCanonicalTestSchema)
+	opts := CodexFromTask(minimalCodexTask())
+	opts.WorkDir = "/tmp/codex-alias-plan"
+	opts.JSONSchemaFile = sourcePath
+	opts.OutputSchemaFile = sourcePath
+	opts.Prompt = "work order"
+	_, err := CodexCommandPlan(opts)
+	if err == nil || !strings.Contains(err.Error(), "aliases canonical source") {
+		t.Fatalf("expected alias error through CodexCommandPlan, got %v", err)
+	}
+	source, err := os.ReadFile(sourcePath)
+	if err != nil {
+		t.Fatalf("read canonical source: %v", err)
+	}
+	if !bytes.Equal(source, []byte(codexCanonicalTestSchema)) {
+		t.Fatalf("canonical source must remain unchanged when plan rejects alias")
+	}
+}
+
+// codexCanonicalTestSchema carries every Codex-incompatible keyword the
+// boundary must normalize away: allOf, pattern, uniqueItems, optional enums.
+const codexCanonicalTestSchema = `{
+  "title": "Galley Codex Schema Boundary Test",
+  "type": "object",
+  "allOf": [{"required": ["name"]}],
+  "properties": {
+    "name": {"type": "string", "pattern": "^[a-z]+$"},
+    "tags": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "profile": {
+      "type": "object",
+      "properties": {
+        "email": {"type": "string", "pattern": "@"},
+        "role": {"type": "string", "enum": ["admin", "user"]}
+      },
+      "required": ["email"]
+    },
+    "status": {"type": "string", "enum": ["active", "archived"]}
+  },
+  "required": ["name", "tags", "profile"]
+}`
+
+func writeCanonicalSchemaFile(t *testing.T, schema string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "canonical.schema.json")
+	if err := os.WriteFile(path, []byte(schema), 0o600); err != nil {
+		t.Fatalf("write canonical schema: %v", err)
+	}
+	return path
+}
+
+func assertCodexNormalized(t *testing.T, body []byte) {
+	t.Helper()
+	for _, bad := range []string{`"allOf"`, `"pattern"`, `"uniqueItems"`} {
+		if strings.Contains(string(body), bad) {
+			t.Fatalf("derivative must not contain %s: %s", bad, string(body))
+		}
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(body, &doc); err != nil {
+		t.Fatalf("derivative is not valid JSON: %v", err)
+	}
+	props := objectProp(t, doc, "properties")
+	status := objectProp(t, props, "status")
+	if !typeAllowsNull(status["type"]) {
+		t.Fatalf("optional status must be nullable: %#v", status["type"])
+	}
+	if !enumAllowsNull(status["enum"]) {
+		t.Fatalf("optional status enum must allow null: %#v", status["enum"])
+	}
+	role := objectProp(t, objectProp(t, objectProp(t, props, "profile"), "properties"), "role")
+	if !typeAllowsNull(role["type"]) {
+		t.Fatalf("optional nested role must be nullable: %#v", role["type"])
+	}
+	if !enumAllowsNull(role["enum"]) {
+		t.Fatalf("optional nested role enum must allow null: %#v", role["enum"])
+	}
+}
+
+func enumAllowsNull(raw any) bool {
+	items, ok := raw.([]any)
+	if !ok {
+		return false
+	}
+	for _, item := range items {
+		if item == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func TestExtractCodexLastMessageFileParsesCompletedResult(t *testing.T) {

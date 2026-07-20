@@ -8,7 +8,7 @@ This project follows semantic versioning.
 
 ### Added
 
-- Interactive CLI runs now check at most once per 24 hours (only when stderr is a TTY) whether a newer stable Galley release exists on GitHub and print a concise stderr notice with update instructions; non-interactive execution never performs the check, and failures never affect the command.
+- Interactive CLI runs now check at most once per 24 hours (only when stderr is a TTY) whether a newer stable Galley release exists on GitHub and print a concise stderr notice; non-interactive execution never performs the check, and failures never affect the command.
 - Added `galley daemon config init` to create the default `daemon.yaml` (or report an existing one) without starting the daemon, so operators can edit configuration before the first `galley daemon start`.
 
 ### Changed

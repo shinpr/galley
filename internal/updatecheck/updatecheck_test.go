@@ -300,7 +300,7 @@ func TestVersionMatrixNoticeOnlyForNewerStable(t *testing.T) {
 	}
 }
 
-func TestNoticeGoesOnlyToStderr(t *testing.T) {
+func TestNoticeIsConciseAndMachineRecognizable(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	transport := &fakeTransport{handler: func(req *http.Request) (*http.Response, error) {
@@ -312,15 +312,8 @@ func TestNoticeGoesOnlyToStderr(t *testing.T) {
 
 	Run(opts)
 
-	notice := stderr.String()
-	if !strings.Contains(notice, "0.12.0") || !strings.Contains(notice, "0.13.0") {
-		t.Fatalf("notice missing versions: %q", notice)
-	}
-	if !strings.Contains(notice, "github.com/shinpr/galley") {
-		t.Fatalf("notice missing update guidance: %q", notice)
-	}
-	if lines := strings.Count(strings.TrimRight(notice, "\n"), "\n"); lines != 0 {
-		t.Fatalf("notice must be one concise line, got %q", notice)
+	if got, want := stderr.String(), "galley update available: 0.12.0 -> v0.13.0\n"; got != want {
+		t.Fatalf("notice got %q, want %q", got, want)
 	}
 }
 

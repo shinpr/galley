@@ -91,7 +91,7 @@ func Run(opts Options) {
 	if stderr == nil {
 		stderr = os.Stderr
 	}
-	fmt.Fprintf(stderr, "galley update available: %s -> %s; update instructions: https://github.com/shinpr/galley#manual-cli-installation\n", current, tag)
+	fmt.Fprintf(stderr, "galley update available: %s -> %s\n", current, tag)
 }
 
 // stderrIsTTY reports whether stderr is a real terminal, so redirected output

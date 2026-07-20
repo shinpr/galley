@@ -6,6 +6,8 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.12.1 - 2026-07-20
+
 ### Added
 
 - Interactive CLI runs now check at most once per 24 hours (only when stderr is a TTY) whether a newer stable Galley release exists on GitHub and print a concise stderr notice; non-interactive execution never performs the check, and failures never affect the command.

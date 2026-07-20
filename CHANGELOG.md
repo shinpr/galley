@@ -6,6 +6,11 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Added
+
+- Interactive CLI runs now check at most once per 24 hours (only when stderr is a TTY) whether a newer stable Galley release exists on GitHub and print a concise stderr notice; non-interactive execution never performs the check, and failures never affect the command.
+- Added `galley daemon config init` to create the default `daemon.yaml` (or report an existing one) without starting the daemon, so operators can edit configuration before the first `galley daemon start`.
+
 ### Changed
 
 - Successful `galley daemon stop --force` now moves tasks owned by that daemon to `failed` with interruption evidence while retaining their worktrees for requeue or archive.
@@ -14,6 +19,10 @@ This project follows semantic versioning.
 ### Fixed
 
 - A task that sets `executor.cli` now runs with the task's `model` and `effort` exactly as authored, with omitted values staying empty and delegating to that provider CLI, instead of inheriting environment model and effort defaults written for another provider.
+
+### Fixed
+
+- Codex structured-output schemas are now normalized at a single runner-owned boundary shared by the implementation executor, setup, acceptance-skeleton creator, and supervisor invocations, so no Codex surface can pass a canonical Galley schema to `codex exec --output-schema` without Codex-compatible adaptation.
 
 ## v0.12.0 - 2026-07-19
 

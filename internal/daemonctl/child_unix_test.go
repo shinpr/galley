@@ -61,10 +61,8 @@ func TestTerminateChildProcessUnixUsesSIGTERM(t *testing.T) {
 			// delivered termination.
 			return
 		}
-		// Documented contract: Unix path uses SIGTERM, not SIGKILL. We do
-		// not assert the exact signal value to keep the test portable
-		// across BSDs, but exiting via a signal (not a normal exit) is
-		// the observable invariant.
+		// The Unix path uses SIGTERM, not SIGKILL. The observable invariant
+		// on macOS and Linux is signal exit rather than the exact value.
 		if _, signaled := state.Signal().(interface{ Signal() }); signaled {
 			t.Fatalf("unexpected non-signal exit state")
 		}

@@ -2,28 +2,30 @@ package pathutil
 
 import (
 	"path"
-	"runtime"
 	"strings"
 )
 
-// InsideAnyLogicalPath compares slash-authored paths using host filesystem case rules.
+// InsideAnyLogicalPath compares slash-authored paths case-sensitively.
 func InsideAnyLogicalPath(value string, prefixes []string) bool {
-	return InsideAnyLogicalPathForOS(value, prefixes, runtime.GOOS)
+	return insideAnyPath(value, prefixes, false)
 }
 
-// InsideAnyLogicalPathForOS exposes deterministic target-OS comparison for tests.
-func InsideAnyLogicalPathForOS(value string, prefixes []string, goos string) bool {
+// InsideAnyProtectedPath compares protected paths case-insensitively.
+func InsideAnyProtectedPath(value string, prefixes []string) bool {
+	return insideAnyPath(value, prefixes, true)
+}
+
+func insideAnyPath(value string, prefixes []string, foldCase bool) bool {
 	if value == "" {
 		return false
 	}
 	value = cleanLogicalPath(value)
-	caseInsensitive := goos == "darwin" || goos == "windows"
-	if caseInsensitive {
+	if foldCase {
 		value = strings.ToLower(value)
 	}
 	for _, prefix := range prefixes {
 		prefix = cleanLogicalPath(prefix)
-		if caseInsensitive {
+		if foldCase {
 			prefix = strings.ToLower(prefix)
 		}
 		if prefix == "." || value == prefix || strings.HasPrefix(value, prefix+"/") {

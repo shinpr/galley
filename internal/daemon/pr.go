@@ -43,7 +43,7 @@ func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task
 		return err
 	}
 	changedFiles := sortedChangedFiles(snapshot)
-	if forbidden := pathsInsideScope(changedFiles, loaded.Scope.ForbiddenPaths); len(forbidden) > 0 {
+	if forbidden := pathsInsideProtectedScope(changedFiles, loaded.Scope.ForbiddenPaths); len(forbidden) > 0 {
 		return fmt.Errorf("accepted diff changes paths inside task.scope.forbidden_paths: %s", strings.Join(forbidden, ", "))
 	}
 	addScopeExpansionDiscussion(loaded, changedFiles)
@@ -145,10 +145,10 @@ func sortedChangedFiles(snapshot workspace.Snapshot) []string {
 	return files
 }
 
-func pathsInsideScope(paths, prefixes []string) []string {
+func pathsInsideProtectedScope(paths, prefixes []string) []string {
 	var matches []string
 	for _, path := range paths {
-		if pathInsideAnyPrefix(path, prefixes) {
+		if pathutil.InsideAnyProtectedPath(path, prefixes) {
 			matches = append(matches, path)
 		}
 	}
@@ -158,15 +158,11 @@ func pathsInsideScope(paths, prefixes []string) []string {
 func pathsOutsideScope(paths, prefixes []string) []string {
 	var matches []string
 	for _, path := range paths {
-		if !pathInsideAnyPrefix(path, prefixes) {
+		if !pathutil.InsideAnyLogicalPath(path, prefixes) {
 			matches = append(matches, path)
 		}
 	}
 	return matches
-}
-
-func pathInsideAnyPrefix(path string, prefixes []string) bool {
-	return pathutil.InsideAnyLogicalPath(path, prefixes)
 }
 
 func addScopeExpansionDiscussion(loaded *task.Task, changedFiles []string) {

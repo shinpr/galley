@@ -2,29 +2,36 @@ package pathutil
 
 import "testing"
 
-func TestInsideAnyLogicalPathNormalizesSeparatorsAndCaseByOS(t *testing.T) {
+func TestInsideAnyLogicalPathNormalizesSeparatorsAndPreservesCase(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name     string
 		path     string
 		prefixes []string
-		goos     string
 		want     bool
 	}{
-		{name: "slash descendant", path: "internal/task/file.go", prefixes: []string{"internal"}, goos: "linux", want: true},
-		{name: "backslash descendant", path: `internal\task\file.go`, prefixes: []string{"internal/task"}, goos: "linux", want: true},
-		{name: "sibling", path: "internal-task/file.go", prefixes: []string{"internal"}, goos: "linux", want: false},
-		{name: "mac case fold", path: "Secrets/key.go", prefixes: []string{"secrets"}, goos: "darwin", want: true},
-		{name: "windows case fold", path: "Secrets/key.go", prefixes: []string{"secrets"}, goos: "windows", want: true},
-		{name: "linux case sensitive", path: "Secrets/key.go", prefixes: []string{"secrets"}, goos: "linux", want: false},
-		{name: "root", path: "anything", prefixes: []string{"."}, goos: "linux", want: true},
+		{name: "slash descendant", path: "internal/task/file.go", prefixes: []string{"internal"}, want: true},
+		{name: "backslash descendant", path: `internal\task\file.go`, prefixes: []string{"internal/task"}, want: true},
+		{name: "sibling", path: "internal-task/file.go", prefixes: []string{"internal"}, want: false},
+		{name: "case differs", path: "Secrets/key.go", prefixes: []string{"secrets"}, want: false},
+		{name: "root", path: "anything", prefixes: []string{"."}, want: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := InsideAnyLogicalPathForOS(tc.path, tc.prefixes, tc.goos); got != tc.want {
+			if got := InsideAnyLogicalPath(tc.path, tc.prefixes); got != tc.want {
 				t.Fatalf("got %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestInsideAnyProtectedPathFoldsCase(t *testing.T) {
+	t.Parallel()
+	if !InsideAnyProtectedPath("Secrets/key.go", []string{"secrets"}) {
+		t.Fatal("protected paths must not be bypassed by case changes")
+	}
+	if InsideAnyProtectedPath("secrets-old/key.go", []string{"secrets"}) {
+		t.Fatal("protected paths must preserve segment boundaries")
 	}
 }

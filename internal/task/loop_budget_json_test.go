@@ -28,3 +28,30 @@ func TestLoopBudgetJSONMatchesIntegerTaskContract(t *testing.T) {
 		})
 	}
 }
+
+func TestLoopBudgetJSONRoundTrip(t *testing.T) {
+	t.Parallel()
+	for _, count := range []int{0, 3} {
+		data, err := json.Marshal(LoopBudget{Count: count, Set: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got LoopBudget
+		if err := json.Unmarshal(data, &got); err != nil {
+			t.Fatal(err)
+		}
+		if !got.Set || got.Count != count {
+			t.Fatalf("round trip got %#v, want set count=%d", got, count)
+		}
+	}
+}
+
+func TestLoopBudgetJSONRejectsInvalidValues(t *testing.T) {
+	t.Parallel()
+	for _, value := range []string{"null", "-1"} {
+		var got LoopBudget
+		if err := json.Unmarshal([]byte(value), &got); err == nil {
+			t.Fatalf("json.Unmarshal(%s) succeeded, want error", value)
+		}
+	}
+}

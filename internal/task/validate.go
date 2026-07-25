@@ -355,7 +355,7 @@ func pathAllowedByScope(path string, allowed []string) bool {
 }
 
 func pathForbiddenByScope(path string, forbidden []string) bool {
-	return pathutil.InsideAnyLogicalPath(path, forbidden)
+	return pathutil.InsideAnyProtectedPath(path, forbidden)
 }
 
 func validateRelativePath(result *ValidationResult, field, p string) {

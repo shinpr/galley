@@ -6,9 +6,12 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.12.2 - 2026-07-25
+
 ### Fixed
 
-- Task JSON now emits `loop_budget` as the documented integer, daemon status rejects unsupported output formats, executor cancellation is classified consistently on Windows, and scope containment uses one cross-platform logical-path rule.
+- Task JSON now round-trips valid `loop_budget` integers, daemon status rejects unsupported output formats, executor cancellation is classified consistently on Windows, and task publication preserves existing destinations across supported filesystems and long Windows paths.
+- `scope.forbidden_paths` now matches paths case-insensitively, preventing casing changes such as `secrets` to `Secrets` from bypassing protected-path checks.
 
 ## v0.12.1 - 2026-07-20
 

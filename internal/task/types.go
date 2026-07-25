@@ -118,6 +118,20 @@ func (b LoopBudget) MarshalJSON() ([]byte, error) {
 	return json.Marshal(count)
 }
 
+// UnmarshalJSON accepts the integer shape emitted by MarshalJSON.
+func (b *LoopBudget) UnmarshalJSON(data []byte) error {
+	var count *int
+	if err := json.Unmarshal(data, &count); err != nil {
+		return fmt.Errorf("loop_budget must be an integer >= 0; use 0 for unlimited: %w", err)
+	}
+	if count == nil || *count < 0 {
+		return fmt.Errorf("loop_budget must be an integer >= 0; use 0 for unlimited")
+	}
+	b.Count = *count
+	b.Set = true
+	return nil
+}
+
 // UnmarshalYAML accepts an integer. Zero means unlimited.
 func (b *LoopBudget) UnmarshalYAML(value *yaml.Node) error {
 	b.Set = true

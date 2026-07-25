@@ -39,26 +39,52 @@ func WriteFileNoOverwriteAtomic(path string, data []byte, perm os.FileMode) erro
 	if err != nil {
 		return err
 	}
-	lockPath := path + ".lock"
-	lock, err := os.OpenFile(lockPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	err = WithExclusiveMarker(path+".lock", func() error {
+		return stageAndMove(dir, path, data, perm, publishNoReplace)
+	})
+	var markerErr *markerExistsError
+	if errors.As(err, &markerErr) {
+		return fmt.Errorf("destination already exists: %s: %w", path, os.ErrExist)
+	}
+	return err
+}
+
+type markerExistsError struct {
+	path string
+}
+
+func (e *markerExistsError) Error() string {
+	return fmt.Sprintf("exclusive marker already exists at %s", e.path)
+}
+
+func (e *markerExistsError) Unwrap() error {
+	return os.ErrExist
+}
+
+// WithExclusiveMarker runs fn while path exists as an exclusive marker.
+func WithExclusiveMarker(path string, fn func() error) (err error) {
+	marker, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
-			return fmt.Errorf("%w: destination already exists: %s", os.ErrExist, path)
+			return &markerExistsError{path: path}
 		}
-		return fmt.Errorf("reserve %s: %w", lockPath, err)
+		return fmt.Errorf("create exclusive marker %s: %w", path, err)
 	}
-	if err := lock.Close(); err != nil {
-		_ = os.Remove(lockPath)
-		return fmt.Errorf("close reservation %s: %w", lockPath, err)
+	if closeErr := marker.Close(); closeErr != nil {
+		removeErr := removeMarker(path)
+		return errors.Join(fmt.Errorf("close exclusive marker %s: %w", path, closeErr), removeErr)
 	}
-	defer os.Remove(lockPath)
+	defer func() {
+		err = errors.Join(err, removeMarker(path))
+	}()
+	return fn()
+}
 
-	if _, err := os.Stat(path); err == nil {
-		return fmt.Errorf("%w: destination already exists: %s", os.ErrExist, path)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("check destination %s: %w", path, err)
+func removeMarker(path string) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove exclusive marker %s: %w", path, err)
 	}
-	return stageAndRename(dir, path, data, perm)
+	return nil
 }
 
 func prepareWriteDir(path string) (string, error) {
@@ -70,6 +96,15 @@ func prepareWriteDir(path string) (string, error) {
 }
 
 func stageAndRename(dir, path string, data []byte, perm os.FileMode) error {
+	return stageAndMove(dir, path, data, perm, func(src, dst string) error {
+		if err := os.Rename(src, dst); err != nil {
+			return fmt.Errorf("rename temp file %s to %s: %w", src, dst, err)
+		}
+		return nil
+	})
+}
+
+func stageAndMove(dir, path string, data []byte, perm os.FileMode, move func(string, string) error) error {
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
 	if err != nil {
 		return fmt.Errorf("create temp file for %s: %w", path, err)
@@ -96,8 +131,8 @@ func stageAndRename(dir, path string, data []byte, perm os.FileMode) error {
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close temp file %s: %w", tmpPath, err)
 	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("rename temp file %s to %s: %w", tmpPath, path, err)
+	if err := move(tmpPath, path); err != nil {
+		return err
 	}
 	cleanup = false
 	SyncDir(dir)

@@ -1,7 +1,6 @@
 package skeleton
 
 import (
-	"runtime"
 	"testing"
 )
 
@@ -17,13 +16,14 @@ func TestPathInsideEffectiveSeparatorBoundary(t *testing.T) {
 	}
 }
 
-func TestPathInsideEffectiveCaseFolding(t *testing.T) {
-	inside := pathInsideEffective("Secrets/key.go", []string{"secrets"})
-	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
-		if !inside {
-			t.Fatal("on case-insensitive filesystems Secrets must be treated as inside secrets")
-		}
-	} else if inside {
-		t.Fatal("on case-sensitive filesystems case must not be folded")
+func TestPathInsideEffectiveIsCaseSensitive(t *testing.T) {
+	if pathInsideEffective("Secrets/key.go", []string{"secrets"}) {
+		t.Fatal("logical task paths must preserve case")
+	}
+}
+
+func TestPathInsideProtectedFoldsCase(t *testing.T) {
+	if !pathInsideProtected("Secrets/key.go", []string{"secrets"}) {
+		t.Fatal("protected paths must not be bypassed by case changes")
 	}
 }

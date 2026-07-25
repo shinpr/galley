@@ -72,10 +72,10 @@ func (r acceptanceSkeletonPreflightRun) validateOneDeclaration(i int, decl task.
 	if !pathInsideEffective(decl.Path, r.allowed) {
 		return providerErr("declared output %d path %q is outside the effective allowed paths", i, decl.Path)
 	}
-	if pathInsideEffective(decl.Path, r.forbidden) {
+	if pathInsideProtected(decl.Path, r.forbidden) {
 		return providerErr("declared output %d path %q is inside scope.forbidden_paths", i, decl.Path)
 	}
-	if runRel := cleanContainedRel(r.opts.WorkDir, r.opts.RunDir); runRel != "" && pathInsideEffective(decl.Path, []string{runRel}) {
+	if runRel := cleanContainedRel(r.opts.WorkDir, r.opts.RunDir); runRel != "" && pathInsideProtected(decl.Path, []string{runRel}) {
 		return providerErr("declared output %d path %q is inside the Galley run evidence directory", i, decl.Path)
 	}
 	return nil
@@ -174,7 +174,7 @@ func (r acceptanceSkeletonPreflightRun) validateCreatorWorkspaceChanges(changed 
 		if !pathInsideEffective(clean, r.allowed) {
 			return creatorErr("creator changed path %q outside the effective allowed paths", clean)
 		}
-		if pathInsideEffective(clean, r.forbidden) {
+		if pathInsideProtected(clean, r.forbidden) {
 			return creatorErr("creator changed path %q inside scope.forbidden_paths", clean)
 		}
 	}
@@ -238,6 +238,10 @@ func unsafeSkeletonOutputPath(rel string) string {
 
 func pathInsideEffective(rel string, prefixes []string) bool {
 	return pathutil.InsideAnyLogicalPath(rel, prefixes)
+}
+
+func pathInsideProtected(rel string, prefixes []string) bool {
+	return pathutil.InsideAnyProtectedPath(rel, prefixes)
 }
 
 // EffectivePreflightPaths returns scope paths for acceptance-skeleton writes.

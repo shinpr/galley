@@ -44,6 +44,10 @@ func TestWriteFileNoOverwriteAtomicCreatesAndRefuses(t *testing.T) {
 	if !errors.Is(err, os.ErrExist) {
 		t.Fatalf("duplicate error must wrap os.ErrExist: %v", err)
 	}
+	wantErr := fmt.Sprintf("destination already exists: %s: %s", path, os.ErrExist)
+	if err.Error() != wantErr {
+		t.Fatalf("duplicate error got %q, want %q", err, wantErr)
+	}
 	// The duplicate destination must not be clobbered.
 	data, err = os.ReadFile(path)
 	if err != nil {
@@ -51,6 +55,147 @@ func TestWriteFileNoOverwriteAtomicCreatesAndRefuses(t *testing.T) {
 	}
 	if string(data) != "first" {
 		t.Fatalf("after refusal contents got %q, want %q", string(data), "first")
+	}
+}
+
+func TestWriteFileNoOverwriteAtomicReportsReservationAsDestinationConflict(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "queued.yaml")
+	if err := os.WriteFile(path+".lock", nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := WriteFileNoOverwriteAtomic(path, []byte("task"), 0o600)
+	want := fmt.Sprintf("destination already exists: %s: %s", path, os.ErrExist)
+	if err == nil || err.Error() != want || !errors.Is(err, os.ErrExist) {
+		t.Fatalf("reservation conflict got %v, want %q wrapping os.ErrExist", err, want)
+	}
+}
+
+func TestPublishNoReplaceConcurrentWriters(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "destination.yaml")
+	sources := []string{filepath.Join(dir, "first.tmp"), filepath.Join(dir, "second.tmp")}
+	for i, src := range sources {
+		if err := os.WriteFile(src, []byte(fmt.Sprintf("writer-%d", i)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	start := make(chan struct{})
+	results := make(chan error, len(sources))
+	for _, src := range sources {
+		src := src
+		go func() {
+			<-start
+			results <- publishNoReplace(src, dst)
+		}()
+	}
+	close(start)
+
+	var successes, conflicts int
+	for range sources {
+		err := <-results
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, os.ErrExist):
+			conflicts++
+		default:
+			t.Fatalf("unexpected rename error: %v", err)
+		}
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("successes=%d conflicts=%d, want one each", successes, conflicts)
+	}
+	data, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "writer-0" && string(data) != "writer-1" {
+		t.Fatalf("destination contains unexpected data %q", data)
+	}
+}
+
+func TestRenameUnderMarkerFallbackMovesWithoutDuplicateState(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "queued.yaml")
+	dst := filepath.Join(dir, "running.yaml")
+	if err := os.WriteFile(src, []byte("task"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := renameUnderMarkerFallback(src, dst); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(src); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("source still exists after state move: %v", err)
+	}
+	data, err := os.ReadFile(dst)
+	if err != nil || string(data) != "task" {
+		t.Fatalf("destination got %q, err=%v", data, err)
+	}
+}
+
+func TestLinkAndUnlinkNoReplace(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "source.yaml")
+	dst := filepath.Join(dir, "destination.yaml")
+	if err := os.WriteFile(src, []byte("source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, []byte("existing"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := linkAndUnlinkNoReplace(src, dst); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("existing destination error got %v, want os.ErrExist", err)
+	}
+	if err := os.Remove(dst); err != nil {
+		t.Fatal(err)
+	}
+	if err := linkAndUnlinkNoReplace(src, dst); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(src); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("source still exists: %v", err)
+	}
+	data, err := os.ReadFile(dst)
+	if err != nil || string(data) != "source" {
+		t.Fatalf("destination got %q, err=%v", data, err)
+	}
+}
+
+func TestWriteFileNoOverwriteAtomicSupportsLongPath(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	for i := 0; len(dir) < 280; i++ {
+		dir = filepath.Join(dir, fmt.Sprintf("segment-%02d-abcdefghijklmnop", i))
+	}
+	path := filepath.Join(dir, "queued.yaml")
+	if err := WriteFileNoOverwriteAtomic(path, []byte("task"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "task" {
+		t.Fatalf("long-path contents got %q, err=%v", data, err)
+	}
+}
+
+func TestWithExclusiveMarkerReportsCleanupFailure(t *testing.T) {
+	t.Parallel()
+	marker := filepath.Join(t.TempDir(), "task.lock")
+	err := WithExclusiveMarker(marker, func() error {
+		if err := os.Remove(marker); err != nil {
+			return err
+		}
+		if err := os.Mkdir(marker, 0o700); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(marker, "blocker"), []byte("x"), 0o600)
+	})
+	if err == nil || !strings.Contains(err.Error(), "remove exclusive marker") {
+		t.Fatalf("cleanup error got %v", err)
 	}
 }
 

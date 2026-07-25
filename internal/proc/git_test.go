@@ -113,7 +113,7 @@ func TestProductionGitInvocationsUseGitArgs(t *testing.T) {
 		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
-		if rel == "internal/runner/git.go" {
+		if rel == "internal/proc/git.go" {
 			return nil
 		}
 		file, err := parser.ParseFile(fset, path, nil, 0)

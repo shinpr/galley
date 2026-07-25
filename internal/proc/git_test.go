@@ -1,4 +1,4 @@
-package runner
+package proc
 
 import (
 	"go/ast"
@@ -113,7 +113,7 @@ func TestProductionGitInvocationsUseGitArgs(t *testing.T) {
 		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
-		if rel == "internal/runner/git.go" {
+		if rel == "internal/proc/git.go" {
 			return nil
 		}
 		file, err := parser.ParseFile(fset, path, nil, 0)
@@ -139,7 +139,7 @@ func TestProductionGitInvocationsUseGitArgs(t *testing.T) {
 		t.Fatalf("scan production git invocations: %v", err)
 	}
 	if len(violations) > 0 {
-		t.Fatalf("Galley-owned git invocations must use runner.GitArgs:\n%s", strings.Join(violations, "\n"))
+		t.Fatalf("Galley-owned git invocations must use proc.GitArgs:\n%s", strings.Join(violations, "\n"))
 	}
 }
 

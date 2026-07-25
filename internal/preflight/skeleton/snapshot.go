@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/shinpr/galley/internal/runner"
+	"github.com/shinpr/galley/internal/proc"
 )
 
 // HashSkeletonFiles computes sha256 hashes for each worktree-relative path.
@@ -47,10 +47,10 @@ func snapshotPreflightFiles(ctx context.Context, root, excludeRoot, gitBin strin
 		return files, fmt.Errorf("workdir is required for preflight snapshot")
 	}
 	excludeRel := cleanContainedRel(root, excludeRoot)
-	result, err := runner.RunCommand(ctx, runner.Command{
+	result, err := proc.RunCommand(ctx, proc.Command{
 		WorkDir: root,
-		Argv:    runner.GitArgs(gitBin, "-C", root, "ls-files", "--cached", "--others", "--exclude-standard", "-z"),
-	}, runner.RunOptions{TailBytes: -1})
+		Argv:    proc.GitArgs(gitBin, "-C", root, "ls-files", "--cached", "--others", "--exclude-standard", "-z"),
+	}, proc.RunOptions{TailBytes: -1})
 	if err != nil {
 		return nil, fmt.Errorf("list git-visible preflight files: %w", err)
 	}

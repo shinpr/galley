@@ -10,13 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shinpr/galley/internal/runner"
+	"github.com/shinpr/galley/internal/proc"
 	"github.com/shinpr/galley/internal/supervisor"
 	"github.com/shinpr/galley/internal/task"
 )
 
-func runnerCommandErr(kind runner.CommandErrorKind, err error) error {
-	return &runner.CommandError{Kind: kind, Err: err}
+func runnerCommandErr(kind proc.CommandErrorKind, err error) error {
+	return &proc.CommandError{Kind: kind, Err: err}
 }
 
 func TestEvaluateSupervisorRunsOnceAndWritesVerdict(t *testing.T) {
@@ -86,7 +86,7 @@ func TestEvaluateSupervisorReturnsIdleTimeoutWithoutRetry(t *testing.T) {
 	calls := 0
 	runnerForTest := func(_ context.Context, _ Options, _ supervisor.Evidence, _, _ string) (supervisor.Verdict, error) {
 		calls++
-		return supervisor.Verdict{}, runnerCommandErr(runner.CommandErrorIdleTimeout, errors.New("no output"))
+		return supervisor.Verdict{}, runnerCommandErr(proc.CommandErrorIdleTimeout, errors.New("no output"))
 	}
 
 	opts := Options{Supervisor: "codex", IdleTimeout: 90 * time.Second, dependencies: &daemonDependencies{supervisorRunner: runnerForTest}}

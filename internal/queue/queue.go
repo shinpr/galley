@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shinpr/galley/internal/fileutil"
 	"github.com/shinpr/galley/internal/pathutil"
 	"github.com/shinpr/galley/internal/task"
 )
@@ -204,47 +205,11 @@ func requeueRunningTask(root, runningPath string) error {
 }
 
 func noOverwriteRename(src, dst string) error {
-	// Claim locks are represented by exclusive marker files. The descriptor can
-	// close after creation; ownership is the marker's presence until defer removes it.
 	srcLockPath := src + ".lock"
-	srcLock, err := createClaimLock(srcLockPath)
-	if err != nil {
-		return err
-	}
-	defer removeClaimLock(srcLockPath)
-	if err := srcLock.Close(); err != nil {
-		return err
-	}
-
 	dstLockPath := dst + ".lock"
-	dstLock, err := createClaimLock(dstLockPath)
-	if err != nil {
-		return err
-	}
-	defer removeClaimLock(dstLockPath)
-	if err := dstLock.Close(); err != nil {
-		return err
-	}
-
-	if _, err := os.Stat(dst); err == nil {
-		return fmt.Errorf("%w: destination exists at %s", os.ErrExist, dst)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return os.Rename(src, dst)
-}
-
-func createClaimLock(path string) (*os.File, error) {
-	lock, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		if errors.Is(err, os.ErrExist) {
-			return nil, fmt.Errorf("%w: task is locked at %s", os.ErrExist, path)
-		}
-		return nil, err
-	}
-	return lock, nil
-}
-
-func removeClaimLock(path string) {
-	_ = os.Remove(path)
+	return fileutil.WithExclusiveMarker(srcLockPath, func() error {
+		return fileutil.WithExclusiveMarker(dstLockPath, func() error {
+			return fileutil.RenameNoReplaceUnderMarker(src, dst)
+		})
+	})
 }

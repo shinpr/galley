@@ -13,6 +13,17 @@ import (
 	"github.com/shinpr/galley/internal/workspace"
 )
 
+func TestScopePathCasePolicies(t *testing.T) {
+	t.Parallel()
+	paths := []string{"Secrets/key.go"}
+	if got := pathsInsideProtectedScope(paths, []string{"secrets"}); len(got) != 1 {
+		t.Fatalf("protected matches got %v, want case-folded match", got)
+	}
+	if got := pathsOutsideScope(paths, []string{"secrets"}); len(got) != 1 {
+		t.Fatalf("allowed-scope expansion got %v, want case-sensitive outside path", got)
+	}
+}
+
 func TestPRTitleTruncatesRunes(t *testing.T) {
 	t.Parallel()
 	// Use single-byte ASCII so the byte-budget pass does not engage and we

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shinpr/galley/internal/runner"
+	"github.com/shinpr/galley/internal/proc"
 )
 
 // TestCleanupRegisteredChildrenSurfacesSurvivingPIDs exercises AC-005: if a
@@ -22,8 +22,8 @@ import (
 func TestCleanupRegisteredChildrenSurfacesSurvivingPIDs(t *testing.T) {
 	t.Parallel()
 	registryPath := filepath.Join(t.TempDir(), "children.json")
-	reg := runner.NewChildRegistry(registryPath)
-	rec := runner.ChildRecord{PID: 424242, PGID: 424242, Argv0: "fake-supervisor"}
+	reg := proc.NewChildRegistry(registryPath)
+	rec := proc.ChildRecord{PID: 424242, PGID: 424242, Argv0: "fake-supervisor"}
 	if err := reg.Register(rec); err != nil {
 		t.Fatalf("register fake child: %v", err)
 	}
@@ -72,8 +72,8 @@ func TestCleanupRegisteredChildrenSurfacesSurvivingPIDs(t *testing.T) {
 func TestCleanupRegisteredChildrenPrunesRecordWhenProcessGroupDead(t *testing.T) {
 	t.Parallel()
 	registryPath := filepath.Join(t.TempDir(), "children.json")
-	reg := runner.NewChildRegistry(registryPath)
-	rec := runner.ChildRecord{PID: 525252, PGID: 525252, Argv0: "fake-supervisor"}
+	reg := proc.NewChildRegistry(registryPath)
+	rec := proc.ChildRecord{PID: 525252, PGID: 525252, Argv0: "fake-supervisor"}
 	if err := reg.Register(rec); err != nil {
 		t.Fatalf("register fake child: %v", err)
 	}

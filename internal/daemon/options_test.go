@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shinpr/galley/internal/daemonconfig"
 	"github.com/shinpr/galley/internal/profile"
+	"github.com/shinpr/galley/internal/provider"
 )
 
 func TestWithDefaultsAppliesIdleTimeout(t *testing.T) {
@@ -74,7 +74,7 @@ func TestPreflightAcceptsEveryCanonicalSupervisor(t *testing.T) {
 	// Bind Preflight to the single supervisor-CLI source: every canonical value
 	// must be accepted here, so a new value cannot be valid in daemonconfig yet
 	// rejected at daemon startup.
-	for _, supervisor := range daemonconfig.SupervisorCLIs() {
+	for _, supervisor := range provider.SupervisorIDs() {
 		supervisor := supervisor
 		t.Run(supervisor, func(t *testing.T) {
 			t.Parallel()

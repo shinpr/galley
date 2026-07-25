@@ -10,7 +10,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/shinpr/galley/internal/inputfiles"
+	"github.com/shinpr/galley/internal/pathutil"
 	"github.com/shinpr/galley/internal/retry"
+	"github.com/shinpr/galley/internal/runartifact"
 	"github.com/shinpr/galley/internal/strutil"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/internal/vcs"
@@ -41,12 +43,12 @@ func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task
 		return err
 	}
 	changedFiles := sortedChangedFiles(snapshot)
-	if forbidden := pathsInsideScope(changedFiles, loaded.Scope.ForbiddenPaths); len(forbidden) > 0 {
+	if forbidden := pathsInsideProtectedScope(changedFiles, loaded.Scope.ForbiddenPaths); len(forbidden) > 0 {
 		return fmt.Errorf("accepted diff changes paths inside task.scope.forbidden_paths: %s", strings.Join(forbidden, ", "))
 	}
 	addScopeExpansionDiscussion(loaded, changedFiles)
 
-	prBodyPath := filepath.Join(runDir, "pr_body.md")
+	prBodyPath := runartifact.Path(runDir, runartifact.PRBodyFilename)
 	if err := os.WriteFile(prBodyPath, []byte(renderPRBody(*loaded)), 0o600); err != nil {
 		return fmt.Errorf("write pr body: %w", err)
 	}
@@ -143,10 +145,10 @@ func sortedChangedFiles(snapshot workspace.Snapshot) []string {
 	return files
 }
 
-func pathsInsideScope(paths, prefixes []string) []string {
+func pathsInsideProtectedScope(paths, prefixes []string) []string {
 	var matches []string
 	for _, path := range paths {
-		if pathInsideAnyPrefix(path, prefixes) {
+		if pathutil.InsideAnyProtectedPath(path, prefixes) {
 			matches = append(matches, path)
 		}
 	}
@@ -156,22 +158,11 @@ func pathsInsideScope(paths, prefixes []string) []string {
 func pathsOutsideScope(paths, prefixes []string) []string {
 	var matches []string
 	for _, path := range paths {
-		if !pathInsideAnyPrefix(path, prefixes) {
+		if !pathutil.InsideAnyLogicalPath(path, prefixes) {
 			matches = append(matches, path)
 		}
 	}
 	return matches
-}
-
-func pathInsideAnyPrefix(path string, prefixes []string) bool {
-	cleanPath := filepath.ToSlash(filepath.Clean(path))
-	for _, prefix := range prefixes {
-		cleanPrefix := filepath.ToSlash(filepath.Clean(prefix))
-		if cleanPrefix == "." || cleanPrefix == cleanPath || strings.HasPrefix(cleanPath, cleanPrefix+"/") {
-			return true
-		}
-	}
-	return false
 }
 
 func addScopeExpansionDiscussion(loaded *task.Task, changedFiles []string) {

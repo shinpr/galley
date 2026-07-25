@@ -7,6 +7,7 @@ package skeleton
 import (
 	"os"
 
+	"github.com/shinpr/galley/internal/proc"
 	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/prompts"
 	"github.com/shinpr/galley/schemas"
@@ -22,7 +23,7 @@ import (
 // materializes the `--output-schema` file and requests the
 // `--output-last-message` capture file alongside the other preflight creator
 // evidence.
-func buildCodexCreatorCommandPlan(opts Options, payload []byte) (runner.Command, *preflightErr) {
+func buildCodexCreatorCommandPlan(opts Options, payload []byte) (proc.Command, *preflightErr) {
 	codexOpts := runner.CodexFromTask(opts.Task)
 	codexOpts.Bin = opts.CodexBin
 	if codexOpts.Bin == "" {
@@ -36,7 +37,7 @@ func buildCodexCreatorCommandPlan(opts Options, payload []byte) (runner.Command,
 
 	commandPlan, err := runner.CodexCommandPlan(codexOpts)
 	if err != nil {
-		return runner.Command{}, creatorErr("plan built-in creator: %v", err)
+		return proc.Command{}, creatorErr("plan built-in creator: %v", err)
 	}
 	return commandPlan, nil
 }

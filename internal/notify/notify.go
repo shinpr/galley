@@ -1,21 +1,5 @@
-// Package notify runs the daemon's opt-in, best-effort notification command
-// hook after a task reaches a terminal published status.
-//
-// Trust boundary: the configured command string is operator-owned and is the
-// only thing placed in the shell's argument vector. Every task-derived value
-// (id, status, repo, summary, run dir) is untrusted content and is delivered
-// exclusively through a JSON object on stdin and namespaced GALLEY_*
-// environment variables. Task content is never concatenated into the command
-// string, so shell metacharacters or environment-like names in a task summary
-// or repo path cannot alter the executed command. This mirrors how the Claude
-// and Codex runners already pass untrusted prompt content via stdin.
-//
-// Execution reuses internal/profilecmd shell resolution (the same machinery as
-// required checks) so macOS, Linux, and Windows invocation paths are covered by
-// one shell-selection contract, and internal/runner.RunCommand for the bounded
-// timeout plus process-group kill. The hook is best-effort: a non-zero exit,
-// start failure, timeout, or hang surfaces as a returned error for the caller
-// to log; it must not affect the already-successful task state transition.
+// Package notify runs operator-owned terminal hooks; untrusted task data is
+// passed only through JSON stdin and namespaced environment variables.
 package notify
 
 import (
@@ -25,9 +9,9 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/shinpr/galley/internal/proc"
 	"github.com/shinpr/galley/internal/profile"
 	"github.com/shinpr/galley/internal/profilecmd"
-	"github.com/shinpr/galley/internal/runner"
 )
 
 // DefaultTimeout bounds a single notification hook invocation. The hook is
@@ -121,14 +105,14 @@ func (e Event) env() []string {
 // content lives in stdin/env) without spawning a process. The returned cleanup
 // is non-nil on platforms that materialize a wrapper script and must be called
 // once the command has run.
-func BuildCommand(command string, ev Event, opts Options) (runner.Command, func(), error) {
+func BuildCommand(command string, ev Event, opts Options) (proc.Command, func(), error) {
 	goos := opts.GOOS
 	if goos == "" {
 		goos = runtime.GOOS
 	}
 	argv, cleanup, _, err := profilecmd.ShellArgvForOSWithResolver(goos, command, opts.ScratchDir, profile.RequiredCheckEnvironment{}, opts.Resolver)
 	if err != nil {
-		return runner.Command{}, nil, err
+		return proc.Command{}, nil, err
 	}
 	if cleanup == nil {
 		cleanup = func() {}
@@ -136,9 +120,9 @@ func BuildCommand(command string, ev Event, opts Options) (runner.Command, func(
 	stdin, err := ev.stdinJSON()
 	if err != nil {
 		cleanup()
-		return runner.Command{}, nil, err
+		return proc.Command{}, nil, err
 	}
-	return runner.Command{
+	return proc.Command{
 		Argv:      argv,
 		Stdin:     stdin,
 		EnvAppend: ev.env(),
@@ -149,17 +133,17 @@ func BuildCommand(command string, ev Event, opts Options) (runner.Command, func(
 // and any execution error. The error is non-nil on a non-zero exit, start
 // failure, timeout, or forced kill; callers log and continue because the hook
 // is best-effort and must not affect task state.
-func Run(ctx context.Context, command string, ev Event, opts Options) (runner.RunResult, error) {
+func Run(ctx context.Context, command string, ev Event, opts Options) (proc.RunResult, error) {
 	cmd, cleanup, err := BuildCommand(command, ev, opts)
 	if err != nil {
-		return runner.RunResult{}, err
+		return proc.RunResult{}, err
 	}
 	defer cleanup()
 	timeout := opts.Timeout
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
-	return runner.RunCommand(ctx, cmd, runner.RunOptions{Timeout: timeout})
+	return proc.RunCommand(ctx, cmd, proc.RunOptions{Timeout: timeout})
 }
 
 // truncateRunes keeps at most max runes of content, appending a single-rune

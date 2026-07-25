@@ -46,17 +46,6 @@ func TestExtractJSONObjectStripsSurroundingProse(t *testing.T) {
 	}
 }
 
-func TestAppendSupervisorModel(t *testing.T) {
-	base := []string{"supervisor"}
-	if got := appendSupervisorModel(base, ""); len(got) != 1 {
-		t.Fatalf("empty model changed argv: %v", got)
-	}
-	got := appendSupervisorModel(base, "provider-model-x")
-	if strings.Join(got, " ") != "supervisor --model provider-model-x" {
-		t.Fatalf("configured model argv got %v", got)
-	}
-}
-
 func TestRunAdapterPayloadCodexUsesEmbeddedPromptAndSchema(t *testing.T) {
 	skipPOSIXFakeSupervisorOnWindows(t)
 	binDir := t.TempDir()

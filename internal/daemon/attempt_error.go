@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/shinpr/galley/internal/runner"
+	"github.com/shinpr/galley/internal/proc"
 	"github.com/shinpr/galley/internal/supervisor"
 	"github.com/shinpr/galley/internal/task"
 )
@@ -58,10 +58,10 @@ func classifyFailureKind(defaultKind string, err error) string {
 	// substrings so a wording change in the runner cannot silently reclassify
 	// an idle/total timeout as a generic executor failure and hide the
 	// actionable timeout signal from downstream recovery.
-	if errors.Is(err, runner.ErrIdleTimeout) {
+	if errors.Is(err, proc.ErrIdleTimeout) {
 		return "idle_timeout"
 	}
-	if errors.Is(err, runner.ErrTimeout) || errors.Is(err, context.DeadlineExceeded) {
+	if errors.Is(err, proc.ErrTimeout) || errors.Is(err, context.DeadlineExceeded) {
 		return "timed_out"
 	}
 	return defaultKind

@@ -18,6 +18,7 @@ import (
 	"github.com/shinpr/galley/internal/jsonio"
 	setuppreflight "github.com/shinpr/galley/internal/preflight/setup"
 	skeletonpreflight "github.com/shinpr/galley/internal/preflight/skeleton"
+	"github.com/shinpr/galley/internal/proc"
 	"github.com/shinpr/galley/internal/profile"
 	"github.com/shinpr/galley/internal/provider"
 	"github.com/shinpr/galley/internal/queue"
@@ -226,9 +227,9 @@ func Run(ctx context.Context, opts Options) error {
 	// any pgids that are still alive after the daemon exits, so a daemon
 	// teardown does not orphan executor/supervisor children that were
 	// intentionally started in their own process groups.
-	registry := runner.NewChildRegistry(runner.ChildRegistryPath(opts.Root))
-	runner.SetDefaultChildRegistry(registry)
-	defer runner.SetDefaultChildRegistry(nil)
+	registry := proc.NewChildRegistry(proc.ChildRegistryPath(opts.Root))
+	proc.SetDefaultChildRegistry(registry)
+	defer proc.SetDefaultChildRegistry(nil)
 	defer func() { _ = registry.Clear() }()
 	opts.notifyDispatcher = newNotificationDispatcher(ctx)
 	defer opts.notifyDispatcher.Wait()
@@ -338,8 +339,8 @@ func processQueuedTasks(ctx context.Context, opts Options) (int, error) {
 // Preflight resolves daemon options and verifies startup prerequisites.
 func Preflight(opts Options) (Options, error) {
 	opts = opts.withDefaults()
-	if !daemonconfig.IsValidSupervisor(opts.Supervisor) {
-		return Options{}, fmt.Errorf("supervisor must be one of: %s", strings.Join(daemonconfig.SupervisorCLIs(), ", "))
+	if !provider.IsSupervisor(opts.Supervisor) {
+		return Options{}, fmt.Errorf("supervisor must be one of: %s", strings.Join(provider.SupervisorIDs(), ", "))
 	}
 	if err := validateProviderCredential(opts.Supervisor, opts); err != nil {
 		return Options{}, fmt.Errorf("supervisor is %q: %w", opts.Supervisor, err)
@@ -443,13 +444,13 @@ func processAvailable(ctx context.Context, opts Options) (int, error) {
 
 	var wg sync.WaitGroup
 	errs := make(chan error, limit)
-	taskCtx, stopTaskCtx := gracefulTaskContext(ctx, opts.ShutdownTimeout)
-	defer stopTaskCtx()
+	execCtx, stopExecCtx := gracefulTaskContext(ctx, opts.ShutdownTimeout)
+	defer stopExecCtx()
 	repoCounts, err := queue.RunningRepoCounts(opts.Root)
 	if err != nil {
 		return 0, err
 	}
-	claimedCount, firstClaimErr := claimAvailableTasks(ctx, taskCtx, opts, queued, limit, repoCounts, &wg, errs)
+	claimedCount, firstClaimErr := claimAvailableTasks(ctx, execCtx, opts, queued, limit, repoCounts, &wg, errs)
 	// This wait is load-bearing: each daemon iteration completes its claimed
 	// task goroutines before the next stale-recovery pass can run. That prevents
 	// Galley from requeueing work it started in the same process.
@@ -465,7 +466,7 @@ func processAvailable(ctx context.Context, opts Options) (int, error) {
 	return claimedCount, firstErr
 }
 
-func claimAvailableTasks(ctx, taskCtx context.Context, opts Options, queued []string, limit int, repoCounts map[string]int, wg *sync.WaitGroup, errs chan<- error) (int, error) {
+func claimAvailableTasks(daemonCtx, execCtx context.Context, opts Options, queued []string, limit int, repoCounts map[string]int, wg *sync.WaitGroup, errs chan<- error) (int, error) {
 	claimedCount := 0
 	var firstClaimErr error
 	for _, queuedPath := range queued {
@@ -473,8 +474,8 @@ func claimAvailableTasks(ctx, taskCtx context.Context, opts Options, queued []st
 			break
 		}
 		select {
-		case <-ctx.Done():
-			return claimedCount, firstNonNil(firstClaimErr, ctx.Err())
+		case <-daemonCtx.Done():
+			return claimedCount, firstNonNil(firstClaimErr, daemonCtx.Err())
 		default:
 		}
 		repoKey, skip, err := repoKeyForClaim(opts, queuedPath, repoCounts)
@@ -510,7 +511,7 @@ func claimAvailableTasks(ctx, taskCtx context.Context, opts Options, queued []st
 		go func(path string) {
 			defer wg.Done()
 			defer func() { _ = queue.RemoveOwner(path) }()
-			if err := processClaimedTask(taskCtx, ctx, opts, path); err != nil {
+			if err := processClaimedTask(execCtx, daemonCtx, opts, path); err != nil {
 				errs <- err
 			}
 		}(claimed)
@@ -602,16 +603,16 @@ func gracefulTaskContext(parent context.Context, timeout time.Duration) (context
 	}
 }
 
-func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningPath string) error {
+func processClaimedTask(execCtx, daemonCtx context.Context, opts Options, runningPath string) error {
 	var runDir string
 	// Notification observes published terminal state and cannot change it.
-	defer func() { notifyTerminalPublication(ctx, opts, runningPath, &runDir) }()
+	defer func() { notifyTerminalPublication(execCtx, opts, runningPath, &runDir) }()
 
 	loaded, err := loadClaimedTask(runningPath)
 	if err != nil {
 		return taskstate.RecoverUnreadableClaimToFailed(opts.Root, runningPath, err)
 	}
-	stopHeartbeat := startHeartbeat(ctx, runningPath, opts.HeartbeatInterval)
+	stopHeartbeat := startHeartbeat(execCtx, runningPath, opts.HeartbeatInterval)
 	defer stopHeartbeat()
 
 	validation, err := validateClaimedTask(&loaded)
@@ -652,7 +653,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 		return failClaimedStage(opts.Root, runningPath, &loaded, "executor_preflight", "executor_config_failed", fmt.Errorf("executor is %q: %w", effectiveExecutor.CLI, credentialErr), runDir)
 	}
 
-	prepared, err := prepareClaimedWorkspace(ctx, opts, profiles, runningPath, runDir, &loaded, effectiveExecutor)
+	prepared, err := prepareClaimedWorkspace(execCtx, opts, profiles, runningPath, runDir, &loaded, effectiveExecutor)
 	if err != nil {
 		return taskstate.FailMoveToStatus(opts.Root, runningPath, &loaded, err)
 	}
@@ -668,7 +669,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 	}
 	var setupErr error
 	if !setupReused {
-		setupRes, setupUpdate, setupErr = setuppreflight.Run(ctx, setuppreflight.Options{
+		setupRes, setupUpdate, setupErr = setuppreflight.Run(execCtx, setuppreflight.Options{
 			Task:                   task.WithExecutor(loaded, effectiveExecutor),
 			WorkDir:                prepared.CWD,
 			RunDir:                 runDir,
@@ -711,7 +712,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 		}
 		var perr error
 		if !preflightReused {
-			res, perr = skeletonpreflight.Run(ctx, skeletonpreflight.Options{
+			res, perr = skeletonpreflight.Run(execCtx, skeletonpreflight.Options{
 				Task:         task.WithExecutor(loaded, effectiveExecutor),
 				WorkDir:      prepared.CWD,
 				RunDir:       runDir,
@@ -737,7 +738,7 @@ func processClaimedTask(ctx, shutdownCtx context.Context, opts Options, runningP
 			}
 		}
 	}
-	return runSupervisorLoop(ctx, shutdownCtx, effectiveOpts, runningPath, &loaded, prepared, profiles, runDir, runID, effectiveExecutor)
+	return runSupervisorLoop(execCtx, daemonCtx, effectiveOpts, runningPath, &loaded, prepared, profiles, runDir, runID, effectiveExecutor)
 }
 
 func failClaimedStage(root, runningPath string, loaded *task.Task, phase, kind string, err error, runDir string) error {
@@ -959,7 +960,7 @@ func startHeartbeat(ctx context.Context, path string, interval time.Duration) fu
 	}
 }
 
-func executorStatus(result runner.RunResult, err error) string {
+func executorStatus(result proc.RunResult, err error) string {
 	if err == nil {
 		return "completed"
 	}

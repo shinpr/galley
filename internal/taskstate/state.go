@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/shinpr/galley/internal/fileutil"
 	"github.com/shinpr/galley/internal/task"
 )
 
@@ -69,24 +70,7 @@ func RecoverUnreadableClaimToFailed(root, runningPath string, primary error) err
 
 func renameNoOverwrite(src, dst string) error {
 	lockPath := dst + ".lock"
-	lock, err := os.OpenFile(lockPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		if errors.Is(err, os.ErrExist) {
-			return fmt.Errorf("%w: destination is locked at %s", os.ErrExist, lockPath)
-		}
-		return err
-	}
-	if err := lock.Close(); err != nil {
-		_ = os.Remove(lockPath)
-		return err
-	}
-	defer func() {
-		_ = os.Remove(lockPath)
-	}()
-	if _, err := os.Stat(dst); err == nil {
-		return fmt.Errorf("%w: destination exists at %s", os.ErrExist, dst)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return os.Rename(src, dst)
+	return fileutil.WithExclusiveMarker(lockPath, func() error {
+		return fileutil.RenameNoReplaceUnderMarker(src, dst)
+	})
 }

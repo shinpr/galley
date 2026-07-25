@@ -1,12 +1,13 @@
 package runner
 
 import (
+	"github.com/shinpr/galley/internal/proc"
 	"strings"
 	"testing"
 )
 
 func TestConfigureClaudeProviderKimiUsesDedicatedEndpointAndAPIKey(t *testing.T) {
-	plan := Command{Argv: []string{"claude", "-p"}}
+	plan := proc.Command{Argv: []string{"claude", "-p"}}
 	err := ConfigureClaudeProvider(&plan, ClaudeProviderOptions{
 		Provider:    "kimi",
 		Credentials: ClaudeCredentials{KimiAPIKey: "kimi-token"},
@@ -33,7 +34,7 @@ func TestConfigureClaudeProviderFailsFastWithoutConfiguredCredential(t *testing.
 	for _, provider := range []string{"glm", "kimi"} {
 		provider := provider
 		t.Run(provider, func(t *testing.T) {
-			plan := Command{Argv: []string{"claude", "-p"}}
+			plan := proc.Command{Argv: []string{"claude", "-p"}}
 			err := ConfigureClaudeProvider(&plan, ClaudeProviderOptions{Provider: provider})
 			if err == nil {
 				t.Fatal("expected missing credential error")

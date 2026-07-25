@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/shinpr/galley/internal/proc"
+	"github.com/shinpr/galley/internal/provider"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/prompts"
 	"github.com/shinpr/galley/schemas"
@@ -41,24 +43,6 @@ type ClaudeOptions struct {
 	AttemptDir string
 }
 
-// Command is an execution plan suitable for exec.Command plus cmd.Dir.
-type Command struct {
-	WorkDir string   `json:"work_dir"`
-	Argv    []string `json:"argv"`
-	Stdin   string   `json:"stdin,omitempty"`
-	// EnvAppend contains Galley-owned per-command environment entries. It is
-	// intentionally not serialized into command-plan evidence and never holds
-	// the parent process environment.
-	EnvAppend []string `json:"-"`
-	// EnvRemove lists environment variable names to strip from the inherited
-	// parent environment before EnvAppend is applied. Like EnvAppend it is
-	// never serialized into evidence. It exists so a command can delete an
-	// inherited credential (for example ANTHROPIC_API_KEY when redirecting the
-	// Claude binary at a different endpoint) rather than merely shadowing it.
-	EnvRemove []string `json:"-"`
-	Warnings  []string `json:"warnings,omitempty"`
-}
-
 // FromTask maps a validated Galley task into Claude runner options.
 func FromTask(t task.Task) ClaudeOptions {
 	permissionMode := "acceptEdits"
@@ -79,20 +63,6 @@ func FromTask(t task.Task) ClaudeOptions {
 	}
 }
 
-// ClaudeArgv returns the executable argv for Claude Code.
-//
-// Prompt and schema files are read by Go and embedded as argument values on
-// macOS and Linux. On Windows the work order prompt is delivered through
-// stdin and the system prompt through --system-prompt-file, so the returned
-// argv intentionally omits the work order and JSON schema bodies.
-func ClaudeArgv(opts ClaudeOptions) ([]string, error) {
-	command, err := ClaudeCommandPlan(opts)
-	if err != nil {
-		return nil, err
-	}
-	return command.Argv, nil
-}
-
 // ClaudeCommandPlan returns the work directory, argv, stdin, and warnings for
 // a Claude Code run on the current host OS.
 //
@@ -103,16 +73,16 @@ func ClaudeArgv(opts ClaudeOptions) ([]string, error) {
 // CommandLineToArgvW length limit. The JSON schema body is intentionally not
 // passed on argv on Windows; Galley relies on the Claude guard hook and the
 // executor result validators to reject malformed output.
-func ClaudeCommandPlan(opts ClaudeOptions) (Command, error) {
+func ClaudeCommandPlan(opts ClaudeOptions) (proc.Command, error) {
 	return ClaudeCommandPlanForOS(opts, runtime.GOOS)
 }
 
 // ClaudeCommandPlanForOS builds a Claude Code command plan for the requested
 // target OS. It is exported so tests can construct Windows-shaped plans
 // regardless of the host OS.
-func ClaudeCommandPlanForOS(opts ClaudeOptions, goos string) (Command, error) {
+func ClaudeCommandPlanForOS(opts ClaudeOptions, goos string) (proc.Command, error) {
 	if opts.Prompt == "" {
-		return Command{}, fmt.Errorf("prompt is required")
+		return proc.Command{}, fmt.Errorf("prompt is required")
 	}
 	opts = withDefaultEmbeddedOptions(opts)
 
@@ -120,18 +90,18 @@ func ClaudeCommandPlanForOS(opts ClaudeOptions, goos string) (Command, error) {
 	if goos == "windows" {
 		argv, stdin, extraWarnings, err := buildClaudeArgvWindows(opts)
 		if err != nil {
-			return Command{}, err
+			return proc.Command{}, err
 		}
 		warnings = append(warnings, extraWarnings...)
-		return Command{WorkDir: opts.WorkDir, Argv: argv, Stdin: stdin, Warnings: warnings}, nil
+		return proc.Command{WorkDir: opts.WorkDir, Argv: argv, Stdin: stdin, Warnings: warnings}, nil
 	}
 	argv, err := buildClaudeArgv(opts, func(label, path string) (string, error) {
 		return readOptionFile(label, path)
 	})
 	if err != nil {
-		return Command{}, err
+		return proc.Command{}, err
 	}
-	return Command{WorkDir: opts.WorkDir, Argv: argv, Warnings: warnings}, nil
+	return proc.Command{WorkDir: opts.WorkDir, Argv: argv, Warnings: warnings}, nil
 }
 
 // ClaudeShellPreview returns a human-oriented shell preview of a Claude Code run.
@@ -233,12 +203,7 @@ type claudeCommonArgs struct {
 
 func buildClaudeCommonArgs(opts ClaudeOptions) claudeCommonArgs {
 	var common claudeCommonArgs
-	if opts.Model != "" {
-		common.Prefix = append(common.Prefix, "--model", opts.Model)
-	}
-	if opts.Effort != "" {
-		common.Prefix = append(common.Prefix, "--effort", opts.Effort)
-	}
+	common.Prefix = AppendProviderModelEffortArgs(common.Prefix, provider.TransportClaude, opts.Model, opts.Effort)
 	if opts.PermissionMode != "" {
 		common.Prefix = append(common.Prefix, "--permission-mode", opts.PermissionMode)
 	}

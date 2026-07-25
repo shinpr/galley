@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/shinpr/galley/internal/proc"
+	"github.com/shinpr/galley/internal/provider"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/prompts"
 	"github.com/shinpr/galley/schemas"
@@ -77,29 +79,16 @@ func CodexFromTask(t task.Task) CodexOptions {
 	}
 }
 
-// CodexArgv returns the executable argv for the Codex CLI.
-func CodexArgv(opts CodexOptions) ([]string, error) {
-	plan, err := CodexCommandPlan(opts)
-	if err != nil {
-		return nil, err
-	}
-	return plan.Argv, nil
-}
-
-// CodexCommandPlan returns the work directory, argv, stdin, and warnings for a Codex executor run.
-//
-// When no system prompt is supplied, the built-in Codex executor prompt is
-// used. The Codex CLI does not accept --system-prompt; the system prompt is
-// concatenated with the work order prompt and delivered through stdin. The
-// resulting Command.Stdin is the effective combined prompt the CLI sees.
-func CodexCommandPlan(opts CodexOptions) (Command, error) {
+// CodexCommandPlan builds a Codex executor command, combining its system
+// prompt and work order in stdin because Codex has no --system-prompt flag.
+func CodexCommandPlan(opts CodexOptions) (proc.Command, error) {
 	if opts.Prompt == "" {
-		return Command{}, fmt.Errorf("prompt is required")
+		return proc.Command{}, fmt.Errorf("prompt is required")
 	}
 	opts = applyDefaultCodexSystemPrompt(opts)
 	resolvedOpts, err := resolveCodexAttemptFiles(opts)
 	if err != nil {
-		return Command{}, err
+		return proc.Command{}, err
 	}
 	opts = resolvedOpts
 
@@ -116,7 +105,7 @@ func CodexCommandPlan(opts CodexOptions) (Command, error) {
 	if opts.SystemPromptFile != "" {
 		body, err := readOptionFile("system prompt", opts.SystemPromptFile)
 		if err != nil {
-			return Command{}, err
+			return proc.Command{}, err
 		}
 		systemPrompt = body
 	}
@@ -130,22 +119,12 @@ func CodexCommandPlan(opts CodexOptions) (Command, error) {
 	if opts.OutputLastMessageFile != "" {
 		argv = append(argv, "--output-last-message", opts.OutputLastMessageFile)
 	}
-	if opts.Model != "" {
-		argv = append(argv, "--model", opts.Model)
-	}
-	// `codex exec` does not expose a top-level --effort flag. The reasoning
-	// effort hint is delivered through the generic config override surface
-	// (`-c model_reasoning_effort=<value>`) so the executor still honors the
-	// task's executor.effort selection without invoking a flag that the local
-	// `codex exec --help` rejects.
-	if opts.Effort != "" {
-		argv = append(argv, "-c", fmt.Sprintf("model_reasoning_effort=%q", opts.Effort))
-	}
+	argv = AppendProviderModelEffortArgs(argv, provider.TransportCodex, opts.Model, opts.Effort)
 	argv = append(argv, "-")
 
 	warnings := codexWarnings(opts)
 
-	return Command{
+	return proc.Command{
 		WorkDir:  opts.WorkDir,
 		Argv:     argv,
 		Stdin:    combined,

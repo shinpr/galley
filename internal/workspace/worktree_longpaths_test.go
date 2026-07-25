@@ -11,11 +11,8 @@ import (
 	"github.com/shinpr/galley/internal/task"
 )
 
-// AC7/AC8: workspace.Prepare, statusPorcelain, branch lookups, and
-// workspace.Remove all run through the shared runner.GitArgs argv wrapper,
-// so every captured invocation must carry `-c core.longpaths=true` even
-// when the operation itself is a worktree create or remove that can fail on
-// Windows MAX_PATH boundaries.
+// These tests capture workspace git argv and require core.longpaths on every
+// Galley-owned invocation.
 
 func writeFakeGit(t *testing.T, dir, capturePath string) string {
 	t.Helper()
@@ -58,11 +55,8 @@ func assertLongpathsFlagPresent(t *testing.T, label string, lines []string) {
 	}
 }
 
-// TestWorkspaceGitInvocationsCarryLongpathsFlag drives workspace.Prepare and
-// workspace.Remove through a capturing fake git and asserts every argv built
-// through the shared runner.GitArgs wrapper carries `-c core.longpaths=true`,
-// even for the worktree create/remove operations that can fail on Windows
-// MAX_PATH boundaries.
+// TestWorkspaceGitInvocationsCarryLongpathsFlag covers prepare and remove,
+// including operations that can cross Windows MAX_PATH.
 func TestWorkspaceGitInvocationsCarryLongpathsFlag(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses POSIX shell fake git binary")

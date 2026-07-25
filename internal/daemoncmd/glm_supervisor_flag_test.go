@@ -1,6 +1,6 @@
 package daemoncmd
 
-// Drives the real --supervisor flag over daemonconfig.SupervisorCLIs() so the
+// Drives the real --supervisor flag over provider.SupervisorIDs() so the
 // flag can never reject a value the daemon core accepts (the glm drift).
 
 import (
@@ -11,10 +11,11 @@ import (
 	"testing"
 
 	"github.com/shinpr/galley/internal/daemonconfig"
+	"github.com/shinpr/galley/internal/provider"
 )
 
 func TestDaemonSupervisorFlagAcceptsEveryCanonicalValue(t *testing.T) {
-	for _, supervisor := range daemonconfig.SupervisorCLIs() {
+	for _, supervisor := range provider.SupervisorIDs() {
 		supervisor := supervisor
 		t.Run(supervisor, func(t *testing.T) {
 			root := t.TempDir()
@@ -49,7 +50,7 @@ func TestDaemonSupervisorFlagRejectsOffEnumValue(t *testing.T) {
 	if !strings.Contains(err.Error(), "--supervisor must be one of") {
 		t.Fatalf("rejection must name the accepted set, got: %v", err)
 	}
-	for _, supervisor := range daemonconfig.SupervisorCLIs() {
+	for _, supervisor := range provider.SupervisorIDs() {
 		if !strings.Contains(err.Error(), supervisor) {
 			t.Fatalf("error message missing canonical value %q: %v", supervisor, err)
 		}

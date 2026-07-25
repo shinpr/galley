@@ -44,11 +44,19 @@ const (
 	SupervisorVerdictFilename      = "supervisor_verdict.json"
 	ModelSupervisorVerdictFilename = "model_supervisor_verdict.json"
 	SupervisorErrorFilename        = "supervisor_error.json"
+	SupervisorTryDirname           = "supervisor-try-1"
+	SupervisorEvidenceFilename     = "supervisor.json"
+	PRBodyFilename                 = "pr_body.md"
 
 	// VCS review artifacts.
 	GitStatusFilename = "git_status.json"
 	DiffPatchFilename = "diff.patch"
 )
+
+// AttemptDirname returns the stable run-evidence directory for one attempt.
+func AttemptDirname(number int) string {
+	return fmt.Sprintf("attempt-%d", number)
+}
 
 func Path(dir, name string) string {
 	return filepath.Join(dir, name)

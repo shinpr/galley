@@ -1,6 +1,6 @@
-//go:build darwin || linux || freebsd || netbsd || openbsd
+//go:build darwin || linux
 
-package runner
+package proc
 
 import (
 	"os/exec"

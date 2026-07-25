@@ -7,15 +7,14 @@ import (
 	"time"
 
 	"github.com/shinpr/galley/internal/jsonio"
-	"github.com/shinpr/galley/internal/profile"
+	"github.com/shinpr/galley/internal/proc"
 	"github.com/shinpr/galley/internal/runartifact"
-	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/workspace"
 )
 
 type CommandAttemptOptions struct {
 	AttemptDir  string
-	CommandPlan runner.Command
+	CommandPlan proc.Command
 	Timeout     time.Duration
 	IdleTimeout time.Duration
 	StdoutPath  string
@@ -25,7 +24,7 @@ type CommandAttemptOptions struct {
 type CommandAttemptResult struct {
 	Started   time.Time
 	Completed time.Time
-	RunResult runner.RunResult
+	RunResult proc.RunResult
 	RunErr    error
 }
 
@@ -36,7 +35,7 @@ func RunCommandAttempt(ctx context.Context, opts CommandAttemptOptions) (Command
 	}
 
 	started := time.Now().UTC()
-	runResult, runErr := runner.RunCommand(ctx, opts.CommandPlan, runner.RunOptions{
+	runResult, runErr := proc.RunCommand(ctx, opts.CommandPlan, proc.RunOptions{
 		Timeout:     opts.Timeout,
 		IdleTimeout: opts.IdleTimeout,
 		StdoutPath:  opts.StdoutPath,
@@ -69,8 +68,4 @@ func CaptureDiffArtifacts(ctx context.Context, workDir, baseSHA, attemptDir stri
 		return DiffArtifacts{}, fmt.Errorf("write diff.patch: %w", err)
 	}
 	return DiffArtifacts{Snapshot: snapshot, Dirty: dirty, Diff: snapshot.Diff}, nil
-}
-
-type RequiredCheckContext struct {
-	Profiles profile.Bundle
 }

@@ -128,6 +128,9 @@ func TestPathForbiddenByScopeNormalizesSeparators(t *testing.T) {
 	if !pathForbiddenByScope(".env\\local", forbidden) {
 		t.Fatalf("expected pathForbiddenByScope to match .env\\local via separator normalization")
 	}
+	if !pathForbiddenByScope(".ENV/local", forbidden) {
+		t.Fatalf("expected pathForbiddenByScope to reject case-changed protected path")
+	}
 }
 
 // windowsAbsoluteForms enumerates the host-foreign absolute path shapes that

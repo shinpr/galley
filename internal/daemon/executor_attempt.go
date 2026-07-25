@@ -10,8 +10,7 @@ import (
 	"time"
 
 	"github.com/shinpr/galley/internal/executorflow"
-	skeletonpreflight "github.com/shinpr/galley/internal/preflight/skeleton"
-	"github.com/shinpr/galley/internal/profile"
+	"github.com/shinpr/galley/internal/proc"
 	"github.com/shinpr/galley/internal/provider"
 	"github.com/shinpr/galley/internal/runartifact"
 	"github.com/shinpr/galley/internal/runner"
@@ -25,7 +24,7 @@ import (
 type attemptOutcome struct {
 	Started        time.Time
 	Completed      time.Time
-	RunResult      runner.RunResult
+	RunResult      proc.RunResult
 	RunErr         error
 	Terminal       runner.ExecutorTerminal
 	ExecutorResult runner.ExecutorResult
@@ -56,7 +55,7 @@ func defaultStageExecutorOutput(ctx context.Context, opts Options, workDir, atte
 	return vcs.StagePathsForReview(ctx, bins, workDir, attemptDir, reviewable)
 }
 
-func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, profiles profile.Bundle, workDir, baseSHA, attemptDir, prompt, taskFile string, preflight *skeletonpreflight.Result) (attemptOutcome, error) {
+func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, workDir, baseSHA, attemptDir, prompt string) (attemptOutcome, error) {
 	attemptCtx := ctx
 	var cancel context.CancelFunc
 	attemptTimeout := time.Duration(loaded.ExecutionPolicy.TimeoutMS) * time.Millisecond
@@ -71,7 +70,7 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 	}
 
 	var (
-		commandPlan runner.Command
+		commandPlan proc.Command
 		stdoutPath  string
 		stderrPath  string
 		err         error
@@ -105,7 +104,7 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, pro
 	if err != nil {
 		return attemptOutcome{}, err
 	}
-	if cli == "grok" {
+	if transport == provider.TransportGrok {
 		data, readErr := os.ReadFile(stdoutPath)
 		if readErr != nil {
 			data = []byte(run.RunResult.Stdout)
@@ -399,7 +398,7 @@ func appendSupervisorIdleTimeoutAttempt(loaded *task.Task, outcome attemptOutcom
 	appendRisk(loaded, "supervisor-idle-timeout", "partial_verification", message, "Inspect the supervisor-try-1 evidence under the attempt directory, then requeue the task or adjust the daemon --idle-timeout or --supervisor settings.", true)
 }
 
-func prepareClaudeExecutorPlan(opts Options, loaded task.Task, workDir, prompt, attemptDir string) (runner.Command, string, string, error) {
+func prepareClaudeExecutorPlan(opts Options, loaded task.Task, workDir, prompt, attemptDir string) (proc.Command, string, string, error) {
 	claudeOpts := runner.FromTask(loaded)
 	claudeOpts.Bin = opts.ClaudeBin
 	claudeOpts.WorkDir = workDir
@@ -414,22 +413,22 @@ func prepareClaudeExecutorPlan(opts Options, loaded task.Task, workDir, prompt, 
 		}
 		guardDir, err := claudeguard.Ensure(guardDir)
 		if err != nil {
-			return runner.Command{}, "", "", err
+			return proc.Command{}, "", "", err
 		}
 		guardDir, err = filepath.Abs(guardDir)
 		if err != nil {
-			return runner.Command{}, "", "", fmt.Errorf("resolve Claude guard plugin dir: %w", err)
+			return proc.Command{}, "", "", fmt.Errorf("resolve Claude guard plugin dir: %w", err)
 		}
 		claudeOpts.PluginDirs = append(claudeOpts.PluginDirs, guardDir)
 	}
 	plan, err := runner.ClaudeCommandPlan(claudeOpts)
 	if err != nil {
-		return runner.Command{}, "", "", err
+		return proc.Command{}, "", "", err
 	}
 	return plan, filepath.Join(attemptDir, "claude.stdout.jsonl"), filepath.Join(attemptDir, "claude.stderr.log"), nil
 }
 
-func prepareCodexExecutorPlan(opts Options, loaded task.Task, workDir, prompt, attemptDir string) (runner.Command, string, string, error) {
+func prepareCodexExecutorPlan(opts Options, loaded task.Task, workDir, prompt, attemptDir string) (proc.Command, string, string, error) {
 	codexOpts := runner.CodexFromTask(loaded)
 	codexOpts.Bin = opts.CodexBin
 	codexOpts.WorkDir = workDir
@@ -439,12 +438,12 @@ func prepareCodexExecutorPlan(opts Options, loaded task.Task, workDir, prompt, a
 	codexOpts.Prompt = prompt
 	plan, err := runner.CodexCommandPlan(codexOpts)
 	if err != nil {
-		return runner.Command{}, "", "", err
+		return proc.Command{}, "", "", err
 	}
 	return plan, filepath.Join(attemptDir, "codex.stdout.jsonl"), filepath.Join(attemptDir, "codex.stderr.log"), nil
 }
 
-func prepareGrokExecutorPlan(opts Options, loaded task.Task, workDir, prompt, attemptDir string) (runner.Command, string, string, error) {
+func prepareGrokExecutorPlan(opts Options, loaded task.Task, workDir, prompt, attemptDir string) (proc.Command, string, string, error) {
 	grokOpts := runner.GrokFromTask(loaded)
 	grokOpts.Bin = opts.GrokBin
 	grokOpts.WorkDir = workDir
@@ -454,7 +453,7 @@ func prepareGrokExecutorPlan(opts Options, loaded task.Task, workDir, prompt, at
 	grokOpts.Prompt = prompt
 	plan, err := runner.GrokCommandPlan(grokOpts)
 	if err != nil {
-		return runner.Command{}, "", "", err
+		return proc.Command{}, "", "", err
 	}
 	return plan, filepath.Join(attemptDir, "grok.stdout.json"), filepath.Join(attemptDir, "grok.stderr.log"), nil
 }

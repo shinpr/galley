@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 
 	"github.com/shinpr/galley/internal/jsonio"
+	"github.com/shinpr/galley/internal/proc"
+	"github.com/shinpr/galley/internal/provider"
 	"github.com/shinpr/galley/internal/runartifact"
 	"github.com/shinpr/galley/internal/runner"
 	claudeguard "github.com/shinpr/galley/internal/runner/claude_guard_plugin"
@@ -35,19 +37,19 @@ func marshalSetupExecutorRequest(opts Options, signals []string) ([]byte, error)
 	return json.MarshalIndent(request, "", " ")
 }
 
-func BuildExecutorCommandPlan(opts Options, payload []byte) (runner.Command, string, error) {
-	provider := task.ExecutorProvider(opts.Task)
-	switch provider {
-	case "codex":
+func BuildExecutorCommandPlan(opts Options, payload []byte) (proc.Command, string, error) {
+	transport := task.ExecutorTransport(opts.Task)
+	switch transport {
+	case provider.TransportCodex:
 		cmd, err := buildCodexSetupExecutorCommandPlan(opts, payload)
-		return cmd, provider, err
-	case "grok":
+		return cmd, string(transport), err
+	case provider.TransportGrok:
 		cmd, err := buildGrokSetupExecutorCommandPlan(opts, payload)
-		return cmd, provider, err
+		return cmd, string(transport), err
 	default:
 		cmd, err := buildClaudeSetupExecutorCommandPlan(opts, payload)
 		if err != nil {
-			return runner.Command{}, "claude", err
+			return proc.Command{}, "claude", err
 		}
 		if err := runner.ConfigureClaudeProvider(&cmd, runner.ClaudeProviderOptions{
 			Provider: opts.Task.Executor.CLI,
@@ -56,13 +58,13 @@ func BuildExecutorCommandPlan(opts Options, payload []byte) (runner.Command, str
 				KimiAPIKey:   opts.KimiAPIKey,
 			},
 		}); err != nil {
-			return runner.Command{}, "claude", err
+			return proc.Command{}, "claude", err
 		}
 		return cmd, "claude", nil
 	}
 }
 
-func buildGrokSetupExecutorCommandPlan(opts Options, payload []byte) (runner.Command, error) {
+func buildGrokSetupExecutorCommandPlan(opts Options, payload []byte) (proc.Command, error) {
 	grokOpts := runner.GrokFromTask(opts.Task)
 	grokOpts.Bin = opts.GrokBin
 	grokOpts.WorkDir = opts.WorkDir
@@ -74,23 +76,23 @@ func buildGrokSetupExecutorCommandPlan(opts Options, payload []byte) (runner.Com
 	grokOpts.PromptFilename = "grok.setup.prompt.md"
 	plan, err := runner.GrokCommandPlan(grokOpts)
 	if err != nil {
-		return runner.Command{}, fmt.Errorf("plan setup executor: %w", err)
+		return proc.Command{}, fmt.Errorf("plan setup executor: %w", err)
 	}
 	return plan, nil
 }
 
-func buildClaudeSetupExecutorCommandPlan(opts Options, payload []byte) (runner.Command, error) {
+func buildClaudeSetupExecutorCommandPlan(opts Options, payload []byte) (proc.Command, error) {
 	bin := opts.ClaudeBin
 	if bin == "" {
 		bin = "claude"
 	}
 	guardDir, err := claudeguard.Ensure(filepath.Join(opts.RunDir, "claude-guard-plugin"))
 	if err != nil {
-		return runner.Command{}, fmt.Errorf("prepare setup guard plugin: %w", err)
+		return proc.Command{}, fmt.Errorf("prepare setup guard plugin: %w", err)
 	}
 	guardDir, err = filepath.Abs(guardDir)
 	if err != nil {
-		return runner.Command{}, fmt.Errorf("resolve setup guard plugin: %w", err)
+		return proc.Command{}, fmt.Errorf("resolve setup guard plugin: %w", err)
 	}
 	commandPlan, err := runner.ClaudeCommandPlan(runner.ClaudeOptions{
 		Bin:            bin,
@@ -105,13 +107,13 @@ func buildClaudeSetupExecutorCommandPlan(opts Options, payload []byte) (runner.C
 		AttemptDir:     opts.RunDir,
 	})
 	if err != nil {
-		return runner.Command{}, fmt.Errorf("plan setup executor: %w", err)
+		return proc.Command{}, fmt.Errorf("plan setup executor: %w", err)
 	}
 	commandPlan.EnvAppend = []string{"GALLEY_CLAUDE_GUARD_MODE=setup_executor"}
 	return commandPlan, nil
 }
 
-func buildCodexSetupExecutorCommandPlan(opts Options, payload []byte) (runner.Command, error) {
+func buildCodexSetupExecutorCommandPlan(opts Options, payload []byte) (proc.Command, error) {
 	codexOpts := runner.CodexFromTask(opts.Task)
 	codexOpts.Bin = opts.CodexBin
 	if codexOpts.Bin == "" {
@@ -125,21 +127,21 @@ func buildCodexSetupExecutorCommandPlan(opts Options, payload []byte) (runner.Co
 
 	commandPlan, err := runner.CodexCommandPlan(codexOpts)
 	if err != nil {
-		return runner.Command{}, fmt.Errorf("plan setup executor: %w", err)
+		return proc.Command{}, fmt.Errorf("plan setup executor: %w", err)
 	}
 	return commandPlan, nil
 }
 
-func writeSetupExecutorCommandPlan(runDir string, commandPlan runner.Command) error {
+func writeSetupExecutorCommandPlan(runDir string, commandPlan proc.Command) error {
 	planPath := runartifact.Path(runDir, runartifact.SetupExecutorPlanFilename)
 	auditPlan := commandPlan
 	return jsonio.Write(planPath, auditPlan)
 }
 
-func RunExecutorCommand(ctx context.Context, opts Options, commandPlan runner.Command) (runner.RunResult, error) {
+func RunExecutorCommand(ctx context.Context, opts Options, commandPlan proc.Command) (proc.RunResult, error) {
 	stdoutPath := runartifact.Path(opts.RunDir, runartifact.SetupExecutorStdoutFilename)
 	stderrPath := runartifact.Path(opts.RunDir, runartifact.SetupExecutorStderrFilename)
-	return runner.RunCommand(ctx, commandPlan, runner.RunOptions{
+	return proc.RunCommand(ctx, commandPlan, proc.RunOptions{
 		Timeout:    setupCommandTimeout(opts.Task),
 		StdoutPath: stdoutPath,
 		StderrPath: stderrPath,

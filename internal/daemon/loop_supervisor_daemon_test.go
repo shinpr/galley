@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shinpr/galley/internal/runner"
+	"github.com/shinpr/galley/internal/proc"
 	"github.com/shinpr/galley/internal/supervisor"
 	"github.com/shinpr/galley/internal/task"
 )
@@ -33,7 +33,7 @@ func TestDaemonSupervisorStallFailsAfterSingleInvocation(t *testing.T) {
 	calls := 0
 	stallingSupervisor := func(_ context.Context, _ Options, _ supervisor.Evidence, _, _ string) (supervisor.Verdict, error) {
 		calls++
-		return supervisor.Verdict{}, &runner.CommandError{Kind: runner.CommandErrorIdleTimeout, Err: errors.New("no output")}
+		return supervisor.Verdict{}, &proc.CommandError{Kind: proc.CommandErrorIdleTimeout, Err: errors.New("no output")}
 	}
 
 	err := runTestDaemon(context.Background(), Options{

@@ -17,7 +17,6 @@ import (
 	"github.com/shinpr/galley/internal/supervisor"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/internal/taskstate"
-	"github.com/shinpr/galley/internal/vcs"
 	"github.com/shinpr/galley/internal/workspace"
 )
 
@@ -51,37 +50,7 @@ func asReviewStagingError(err error) (*reviewStagingError, bool) {
 	return nil, false
 }
 
-// stageExecutorOutput is the package-level seam used by runExecutorAttempt to
-// stage the executor-produced worktree changes Galley hands to the
-// supervisor.
-//
-// It discovers the dirty worktree paths, builds the explicit reviewable path
-// set (dropping empty/non-local entries, deduplicating, and excluding
-// excludePaths — task.files entries declared commit:false), and stages exactly
-// that set. Forbidden-path entries are intentionally kept so the finalize-time
-// forbidden_paths gate still observes them, and the staged diff the supervisor
-// reviews reflects the executor's submitted artifact and nothing else.
-//
-// Tests override this seam to inject deterministic failures and assert the
-// exclude-list contract without spawning a real git process. The signature
-// keeps excludePaths visible at the seam so failure-path tests can document
-// the contract.
-var stageExecutorOutput = func(ctx context.Context, opts Options, workDir, attemptDir string, excludePaths []string) error {
-	bins := vcsBinaries(opts)
-	statusZ, err := vcs.StatusPorcelainZ(ctx, bins, workDir)
-	if err != nil {
-		return err
-	}
-	reviewable := reviewablePathsFromStatus(statusZ, excludePaths)
-	return vcs.StagePathsForReview(ctx, bins, workDir, attemptDir, reviewable)
-}
-
 const progressNoDiffThreshold = 2
-
-// supervisorRunner runs one supervisor evaluation against evidence using
-// artifactDir as the artifact directory. A package-level function variable
-// keeps the handoff testable without spawning a real provider process.
-var supervisorRunner = defaultSupervisorRunner
 
 func defaultSupervisorRunner(ctx context.Context, opts Options, evidence supervisor.Evidence, tryDir, workDir string) (supervisor.Verdict, error) {
 	return supervisor.RunAdapter(ctx, supervisor.AdapterOptions{
@@ -100,14 +69,13 @@ func defaultSupervisorRunner(ctx context.Context, opts Options, evidence supervi
 	}, evidence)
 }
 
-func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPath string, loaded *task.Task, prepared claimedWorkspace, profiles profile.Bundle, runDir, runID string, effectiveExecutor task.Executor) error {
+func runSupervisorLoop(execCtx, daemonCtx context.Context, opts Options, runningPath string, loaded *task.Task, prepared claimedWorkspace, profiles profile.Bundle, runDir, runID string, effectiveExecutor task.Executor) error {
 	fmt.Fprintf(os.Stderr, "galley: task %s running in %s (run_id=%s)\n", loaded.ID, prepared.CWD, runID)
-	effectiveOpts := opts
 	// Persist the resolved supervisor and its source as run evidence.
 	// Reviewers can then tell whether the per-task supervisor came from the
 	// repository environment profile, daemon CLI startup options, daemon.yaml,
 	// or the built-in default without re-deriving the resolution from logs.
-	if err := writeSupervisorEvidence(runDir, effectiveOpts); err != nil {
+	if err := writeSupervisorEvidence(runDir, opts); err != nil {
 		fmt.Fprintf(os.Stderr, "galley: write supervisor evidence for run %s failed: %v\n", runID, err)
 	}
 	preflightResult, err := skeletonpreflight.LoadResult(runDir)
@@ -147,8 +115,8 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 			prompt = setuppreflight.AppendReadinessObligations(prompt, setupResultEvidence, setupUpdateEvidence)
 		}
 		effectiveTask := revision.applyToTask(executionTask(*loaded, prepared.CWD, effectiveExecutor))
-		review, err := runOneSupervisorAttempt(ctx, supervisorAttemptRequest{
-			Opts:          effectiveOpts,
+		review, err := runOneSupervisorAttempt(execCtx, supervisorAttemptRequest{
+			Opts:          opts,
 			Loaded:        loaded,
 			Prepared:      prepared,
 			Profiles:      profiles,
@@ -201,8 +169,8 @@ func runSupervisorLoop(ctx, shutdownCtx context.Context, opts Options, runningPa
 		if err := task.Save(runningPath, *loaded); err != nil {
 			return taskstate.FailMoveToStatus(opts.Root, runningPath, loaded, err)
 		}
-		done, err := applySupervisorVerdict(ctx, shutdownCtx, verdictApplication{
-			Opts:              effectiveOpts,
+		done, err := applySupervisorVerdict(execCtx, daemonCtx, verdictApplication{
+			Opts:              opts,
 			RunningPath:       runningPath,
 			Loaded:            loaded,
 			Prepared:          prepared.Prepared,
@@ -243,13 +211,13 @@ type supervisorAttemptRequest struct {
 
 func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) (attemptReview, error) {
 	fmt.Fprintf(os.Stderr, "galley: task %s attempt %d/%s starting\n", req.Loaded.ID, req.Attempt, req.Loaded.ExecutionPolicy.LoopBudget.String())
-	attemptDir := filepath.Join(req.RunDir, fmt.Sprintf("attempt-%d", req.Attempt))
+	attemptDir := filepath.Join(req.RunDir, runartifact.AttemptDirname(req.Attempt))
 	if err := os.MkdirAll(attemptDir, 0o700); err != nil {
 		appendFailureAttempt(req.Loaded, "attempt_setup", "attempt_setup_failed", err, req.RunDir)
 		return attemptReview{}, fmt.Errorf("create attempt dir %s: %w", attemptDir, err)
 	}
 	effectiveTask := req.EffectiveTask
-	effectiveTaskPath := filepath.Join(attemptDir, "task.effective.yaml")
+	effectiveTaskPath := runartifact.Path(attemptDir, runartifact.EffectiveTaskSnapshotFilename)
 	if err := task.Save(effectiveTaskPath, effectiveTask); err != nil {
 		appendFailureAttempt(req.Loaded, "attempt_setup", "attempt_setup_failed", err, attemptDir)
 		return attemptReview{}, err
@@ -261,7 +229,7 @@ func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) 
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "galley: task %s attempt %d could not load preflight result: %v\n", req.Loaded.ID, req.Attempt, err)
 	}
-	outcome, err := runExecutorAttempt(ctx, req.Opts, effectiveTask, req.Profiles, req.Prepared.CWD, req.Prepared.BaseSHA, attemptDir, req.Prompt, effectiveTaskPath, preflightOutputs)
+	outcome, err := runExecutorAttempt(ctx, req.Opts, effectiveTask, req.Prepared.CWD, req.Prepared.BaseSHA, attemptDir, req.Prompt)
 	if err != nil {
 		// A review-time staging failure is recorded under a distinct phase
 		// and kind so the failed task surfaces the staging-related error to
@@ -323,12 +291,12 @@ type verdictApplication struct {
 	Verdict           supervisor.Verdict
 }
 
-func applySupervisorVerdict(ctx, shutdownCtx context.Context, req verdictApplication) (bool, error) {
-	if shutdownCtx.Err() != nil && req.Verdict.Status == "needs_revision" {
+func applySupervisorVerdict(execCtx, daemonCtx context.Context, req verdictApplication) (bool, error) {
+	if daemonCtx.Err() != nil && req.Verdict.Status == "needs_revision" {
 		fmt.Fprintf(os.Stderr, "galley: task %s stopped after attempt %d due to shutdown\n", req.Loaded.ID, req.Attempt)
 		return true, failVerdictApplication(req, "shutdown", "Shutdown was requested after an attempt that needs revision; Galley did not start another retry attempt.", "Review the run evidence and requeue the task when ready.")
 	}
-	if shutdownCtx.Err() != nil && req.Verdict.Status == "accepted" && req.Opts.CommitOnAccept {
+	if daemonCtx.Err() != nil && req.Verdict.Status == "accepted" && req.Opts.CommitOnAccept {
 		fmt.Fprintf(os.Stderr, "galley: task %s accepted during shutdown; skipped finalization\n", req.Loaded.ID)
 		return true, failVerdictApplication(req, "shutdown-finalize", "Shutdown was requested before accepted work was finalized; Galley skipped commit, push, and PR creation to avoid an interrupted external side effect.", "Inspect the accepted diff and requeue or finalize manually when ready.")
 	}
@@ -345,7 +313,7 @@ func applySupervisorVerdict(ctx, shutdownCtx context.Context, req verdictApplica
 			fmt.Fprintf(os.Stderr, "galley: task %s accepted verdict rejected by acceptance gate: %s\n", req.Loaded.ID, reason)
 			return true, failVerdictApplication(req, "acceptance-gate", "Accepted verdict rejected by acceptance skeleton gate: "+reason, "Inspect preflight_result.json before re-finalizing.")
 		}
-		return true, acceptSupervisorVerdict(ctx, req.Opts, req.RunningPath, req.Loaded, req.Prepared, req.Profiles, req.RunDir, req.Verdict)
+		return true, acceptSupervisorVerdict(execCtx, req.Opts, req.RunningPath, req.Loaded, req.Prepared, req.Profiles, req.RunDir, req.Verdict)
 	case "needs_revision":
 		return false, nil
 	case "hard_stop":
@@ -400,7 +368,7 @@ func executionTask(loaded task.Task, workDir string, effectiveExecutor task.Exec
 // A failed supervisor invocation is preserved as evidence and returned to the
 // task-state path; Galley does not rerun the same model against unchanged input.
 func evaluateSupervisor(ctx context.Context, opts Options, evidence supervisor.Evidence, attemptDir, workDir string) (supervisor.Verdict, error) {
-	artifactDir := filepath.Join(attemptDir, "supervisor-try-1")
+	artifactDir := runartifact.Path(attemptDir, runartifact.SupervisorTryDirname)
 	if err := os.MkdirAll(artifactDir, 0o700); err != nil {
 		return supervisor.Verdict{}, fmt.Errorf("create supervisor artifact dir %s: %w", artifactDir, err)
 	}
@@ -512,7 +480,7 @@ func writeSupervisorEvidence(runDir string, effectiveOpts Options) error {
 	if effectiveOpts.SupervisorEffort != "" {
 		effortSource = SupervisorEffortSourceRepoProfile
 	}
-	return writeJSON(filepath.Join(runDir, "supervisor.json"), map[string]string{
+	return writeJSON(runartifact.Path(runDir, runartifact.SupervisorEvidenceFilename), map[string]string{
 		"resolved":      effectiveOpts.Supervisor,
 		"source":        effectiveOpts.SupervisorSource,
 		"model":         effectiveOpts.SupervisorModel,

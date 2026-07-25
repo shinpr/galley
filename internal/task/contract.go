@@ -15,8 +15,6 @@ var (
 	validStatuses      = AllStatuses()
 	validPermissions   = []string{"read-only", "edit", "sandbox-full-access"}
 	validExecutorCLIs  = provider.ExecutorIDs()
-	validClaudeEfforts = provider.EffortsForTransport(provider.TransportClaude)
-	validCodexEfforts  = provider.EffortsForTransport(provider.TransportCodex)
 	validTaskIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 )
 

@@ -1,7 +1,8 @@
-package runner
+package proc
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -9,6 +10,17 @@ import (
 	"testing"
 	"time"
 )
+
+func TestCommandErrorKindUsesCancellationState(t *testing.T) {
+	t.Parallel()
+	runErr := errors.New("exit status 1")
+	if got := commandErrorKind(runErr, true); got != CommandErrorKilled {
+		t.Fatalf("canceled kind got %q, want %q", got, CommandErrorKilled)
+	}
+	if got := commandErrorKind(runErr, false); got != CommandErrorExitNonZero {
+		t.Fatalf("ordinary exit kind got %q, want %q", got, CommandErrorExitNonZero)
+	}
+}
 
 func TestRunCommandCapturesOutputAndFiles(t *testing.T) {
 	t.Parallel()

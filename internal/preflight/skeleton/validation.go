@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
+	"github.com/shinpr/galley/internal/pathutil"
 	"github.com/shinpr/galley/internal/task"
 )
 
@@ -72,10 +72,10 @@ func (r acceptanceSkeletonPreflightRun) validateOneDeclaration(i int, decl task.
 	if !pathInsideEffective(decl.Path, r.allowed) {
 		return providerErr("declared output %d path %q is outside the effective allowed paths", i, decl.Path)
 	}
-	if pathInsideEffective(decl.Path, r.forbidden) {
+	if pathInsideProtected(decl.Path, r.forbidden) {
 		return providerErr("declared output %d path %q is inside scope.forbidden_paths", i, decl.Path)
 	}
-	if runRel := cleanContainedRel(r.opts.WorkDir, r.opts.RunDir); runRel != "" && pathInsideEffective(decl.Path, []string{runRel}) {
+	if runRel := cleanContainedRel(r.opts.WorkDir, r.opts.RunDir); runRel != "" && pathInsideProtected(decl.Path, []string{runRel}) {
 		return providerErr("declared output %d path %q is inside the Galley run evidence directory", i, decl.Path)
 	}
 	return nil
@@ -174,7 +174,7 @@ func (r acceptanceSkeletonPreflightRun) validateCreatorWorkspaceChanges(changed 
 		if !pathInsideEffective(clean, r.allowed) {
 			return creatorErr("creator changed path %q outside the effective allowed paths", clean)
 		}
-		if pathInsideEffective(clean, r.forbidden) {
+		if pathInsideProtected(clean, r.forbidden) {
 			return creatorErr("creator changed path %q inside scope.forbidden_paths", clean)
 		}
 	}
@@ -237,31 +237,11 @@ func unsafeSkeletonOutputPath(rel string) string {
 }
 
 func pathInsideEffective(rel string, prefixes []string) bool {
-	if rel == "" {
-		return false
-	}
-	clean := foldPathCase(filepath.Clean(rel))
-	for _, p := range prefixes {
-		cp := foldPathCase(filepath.Clean(p))
-		if cp == "." {
-			return true
-		}
-		if clean == cp || strings.HasPrefix(clean, cp+string(filepath.Separator)) {
-			return true
-		}
-	}
-	return false
+	return pathutil.InsideAnyLogicalPath(rel, prefixes)
 }
 
-// foldPathCase lower-cases a path on platforms whose default filesystem is
-// case-insensitive (Windows NTFS, macOS APFS) so a forbidden_paths entry like
-// "secrets" is not bypassed by a "Secrets" output that lands in the same
-// on-disk directory. On Linux paths stay case-sensitive.
-func foldPathCase(p string) string {
-	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
-		return strings.ToLower(p)
-	}
-	return p
+func pathInsideProtected(rel string, prefixes []string) bool {
+	return pathutil.InsideAnyProtectedPath(rel, prefixes)
 }
 
 // EffectivePreflightPaths returns scope paths for acceptance-skeleton writes.

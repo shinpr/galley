@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/shinpr/galley/internal/proc"
 )
 
 // writeFakeExecutorClaude writes a POSIX shell fake `claude` executor that dumps
@@ -40,12 +42,8 @@ func shellQuoteForTest(path string) string {
 	return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
 }
 
-// TestClaudeExecutorCommandPlanDeliversLoadBearingFlagsToRealProcess builds the
-// executor command plan and actually runs it through RunCommand against a fake
-// claude, closing the gap where the executor plan was only checked by argv
-// string-equality. It asserts the executor's load-bearing flags survive into the
-// child process: the effort selector and the embedded system-prompt / json-schema
-// delivery.
+// TestClaudeExecutorCommandPlanDeliversLoadBearingFlagsToRealProcess verifies
+// the planned flags survive an actual child-process boundary.
 func TestClaudeExecutorCommandPlanDeliversLoadBearingFlagsToRealProcess(t *testing.T) {
 	argvPath := filepath.Join(t.TempDir(), "argv")
 	envPath := filepath.Join(t.TempDir(), "env")
@@ -61,9 +59,9 @@ func TestClaudeExecutorCommandPlanDeliversLoadBearingFlagsToRealProcess(t *testi
 		t.Fatal(err)
 	}
 
-	result, err := RunCommand(context.Background(), plan, RunOptions{})
+	result, err := proc.RunCommand(context.Background(), plan, proc.RunOptions{})
 	if err != nil {
-		t.Fatalf("RunCommand: %v\nstderr: %s", err, result.Stderr)
+		t.Fatalf("proc.RunCommand: %v\nstderr: %s", err, result.Stderr)
 	}
 	if !strings.Contains(result.Stdout, `"status":"completed"`) {
 		t.Fatalf("executor result JSON not returned: %q", result.Stdout)
@@ -112,9 +110,9 @@ func TestGLMExecutorCommandPlanRedirectsChildEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := RunCommand(context.Background(), plan, RunOptions{})
+	result, err := proc.RunCommand(context.Background(), plan, proc.RunOptions{})
 	if err != nil {
-		t.Fatalf("RunCommand: %v\nstderr: %s", err, result.Stderr)
+		t.Fatalf("proc.RunCommand: %v\nstderr: %s", err, result.Stderr)
 	}
 
 	envData, err := os.ReadFile(envPath)

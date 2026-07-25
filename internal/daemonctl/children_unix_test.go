@@ -1,4 +1,4 @@
-//go:build darwin || linux || freebsd || netbsd || openbsd
+//go:build darwin || linux
 
 package daemonctl
 
@@ -9,16 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shinpr/galley/internal/runner"
+	"github.com/shinpr/galley/internal/proc"
 )
 
-// TestCleanupRegisteredChildrenKillsLiveChildProcessGroup exercises AC-004:
-// galley daemon stop --force must SIGKILL a registered daemon-owned child
-// process group and confirm the process group is gone before the function
-// returns. The test spawns a real long-running child in its own pgid, matches
-// how runner.RunCommand records the registry entry, and asserts that
-// CleanupRegisteredChildren returns no surviving children and that the
-// underlying process is no longer alive.
+// TestCleanupRegisteredChildrenKillsLiveChildProcessGroup verifies force-stop
+// kills and confirms a registered process group before returning.
 func TestCleanupRegisteredChildrenKillsLiveChildProcessGroup(t *testing.T) {
 	t.Parallel()
 	sleepPath, err := exec.LookPath("sleep")
@@ -26,7 +21,7 @@ func TestCleanupRegisteredChildrenKillsLiveChildProcessGroup(t *testing.T) {
 		t.Skip("sleep not available")
 	}
 	cmd := exec.Command(sleepPath, "60")
-	// Match how runner.RunCommand puts subprocesses in their own pgid so the
+	// Match how proc.RunCommand puts subprocesses in their own pgid so the
 	// pgid-targeted SIGKILL path is the one under test.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
@@ -47,15 +42,14 @@ func TestCleanupRegisteredChildrenKillsLiveChildProcessGroup(t *testing.T) {
 
 	pgid, err := syscall.Getpgid(cmd.Process.Pid)
 	if err != nil {
-		// Setpgid:true guarantees a process group leader on supported Unix
-		// platforms; if Getpgid still fails fall back to the PID, which is
-		// exactly what runner.processGroupID does.
+		// Setpgid should make a group leader; fall back to the PID if Getpgid
+		// still fails, matching proc.processGroupID.
 		pgid = cmd.Process.Pid
 	}
 
 	registryPath := filepath.Join(t.TempDir(), "children.json")
-	reg := runner.NewChildRegistry(registryPath)
-	if err := reg.Register(runner.ChildRecord{
+	reg := proc.NewChildRegistry(registryPath)
+	if err := reg.Register(proc.ChildRecord{
 		PID:   cmd.Process.Pid,
 		PGID:  pgid,
 		Argv0: "sleep",
@@ -140,8 +134,8 @@ func TestCleanupRegisteredChildrenKeepsGroupWithDeadLeaderButLiveDescendant(t *t
 	}
 
 	registryPath := filepath.Join(t.TempDir(), "children.json")
-	reg := runner.NewChildRegistry(registryPath)
-	if err := reg.Register(runner.ChildRecord{PID: leaderPID, PGID: pgid, Argv0: "sleep"}); err != nil {
+	reg := proc.NewChildRegistry(registryPath)
+	if err := reg.Register(proc.ChildRecord{PID: leaderPID, PGID: pgid, Argv0: "sleep"}); err != nil {
 		t.Fatalf("register child: %v", err)
 	}
 

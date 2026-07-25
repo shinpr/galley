@@ -304,12 +304,8 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 		}, closeErr)
 	}
 	if result.TimedOut {
-		kind := CommandErrorTimeout
-		if waitTimedOut {
-			kind = CommandErrorKilled
-		}
 		return result, errors.Join(&CommandError{
-			Kind:   kind,
+			Kind:   CommandErrorTimeout,
 			Result: result,
 			Err:    fmt.Errorf("command timed out after %s", opts.Timeout),
 		}, closeErr)

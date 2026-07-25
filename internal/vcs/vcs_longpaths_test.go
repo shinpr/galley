@@ -8,12 +8,8 @@ import (
 	"testing"
 )
 
-// AC7/AC8: every Galley-owned git invocation in the vcs package must include
-// `-c core.longpaths=true` so Windows long-path operations (worktree
-// removal, staging, commit, push) do not silently fail. These tests
-// substitute a POSIX shell fake git binary that captures argv to disk and
-// asserts the longpaths flag is present on every invocation built through
-// the shared runner.GitArgs wrapper.
+// These tests capture VCS git argv and require core.longpaths on every
+// Galley-owned invocation.
 
 func writeFakeGit(t *testing.T, dir, capturePath string) string {
 	t.Helper()
@@ -51,11 +47,8 @@ func assertLongpathsFlagPresent(t *testing.T, label, line string) {
 	}
 }
 
-// TestVCSGitInvocationsApplyLongpathsFlag drives every Galley-owned git
-// operation in the vcs package through a capturing fake git and asserts the
-// shared runner.GitArgs wrapper put `-c core.longpaths=true` on every argv.
-// The Windows addPathsForOS case additionally proves the longpaths prefix
-// survives stdin pathspec routing (--pathspec-from-file=-).
+// TestVCSGitInvocationsApplyLongpathsFlag also covers Windows stdin pathspec
+// routing, where the longpaths prefix must survive.
 func TestVCSGitInvocationsApplyLongpathsFlag(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses POSIX shell fake git binary")

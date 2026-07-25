@@ -2,6 +2,7 @@ package runner
 
 import (
 	"errors"
+	"github.com/shinpr/galley/internal/proc"
 	"testing"
 )
 
@@ -10,11 +11,11 @@ import (
 const validExecutorResultLine = `{"status":"completed","summary":"done","files_modified":[],"acceptance_criteria":[],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}`
 
 func TestExecutorTerminalDecision(t *testing.T) {
-	startErr := &CommandError{Kind: CommandErrorStart, Err: errors.New("start claude: no such file")}
-	timeoutErr := &CommandError{Kind: CommandErrorTimeout, Err: errors.New("timed out")}
-	idleErr := &CommandError{Kind: CommandErrorIdleTimeout, Err: errors.New("idle")}
-	killErr := &CommandError{Kind: CommandErrorKilled, Err: errors.New("killed")}
-	exitErr := &CommandError{Kind: CommandErrorExitNonZero, Err: errors.New("exit status 7")}
+	startErr := &proc.CommandError{Kind: proc.CommandErrorStart, Err: errors.New("start claude: no such file")}
+	timeoutErr := &proc.CommandError{Kind: proc.CommandErrorTimeout, Err: errors.New("timed out")}
+	idleErr := &proc.CommandError{Kind: proc.CommandErrorIdleTimeout, Err: errors.New("idle")}
+	killErr := &proc.CommandError{Kind: proc.CommandErrorKilled, Err: errors.New("killed")}
+	exitErr := &proc.CommandError{Kind: proc.CommandErrorExitNonZero, Err: errors.New("exit status 7")}
 
 	tests := []struct {
 		name       string
@@ -178,14 +179,14 @@ func TestClaudeTerminalPreservesProviderIdentity(t *testing.T) {
 	if glm.Provider != "glm" {
 		t.Fatalf("Provider = %q, want glm (%+v)", glm.Provider, glm)
 	}
-	glmInterrupt := ClaudeTerminal("glm", nil, &CommandError{Kind: CommandErrorTimeout, Err: errors.New("t")})
+	glmInterrupt := ClaudeTerminal("glm", nil, &proc.CommandError{Kind: proc.CommandErrorTimeout, Err: errors.New("t")})
 	if glmInterrupt.Provider != "glm" {
 		t.Fatalf("interrupted Provider = %q, want glm (%+v)", glmInterrupt.Provider, glmInterrupt)
 	}
 }
 
 func TestExecutorTerminalRetainsProviderDetailOnNonZeroExit(t *testing.T) {
-	exitErr := &CommandError{Kind: CommandErrorExitNonZero, Err: errors.New("exit status 1")}
+	exitErr := &proc.CommandError{Kind: proc.CommandErrorExitNonZero, Err: errors.New("exit status 1")}
 
 	claude := ClaudeTerminal("claude", []byte(`{"type":"result","subtype":"success","is_error":true,"api_error_status":529,"terminal_reason":"api_error","stop_reason":"stop_sequence","session_id":"s1","result":"api overloaded"}`), exitErr)
 	if claude.Normal {

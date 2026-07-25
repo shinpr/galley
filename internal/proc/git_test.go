@@ -1,4 +1,4 @@
-package runner
+package proc
 
 import (
 	"go/ast"
@@ -139,7 +139,7 @@ func TestProductionGitInvocationsUseGitArgs(t *testing.T) {
 		t.Fatalf("scan production git invocations: %v", err)
 	}
 	if len(violations) > 0 {
-		t.Fatalf("Galley-owned git invocations must use runner.GitArgs:\n%s", strings.Join(violations, "\n"))
+		t.Fatalf("Galley-owned git invocations must use proc.GitArgs:\n%s", strings.Join(violations, "\n"))
 	}
 }
 

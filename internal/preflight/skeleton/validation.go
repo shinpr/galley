@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
+	"github.com/shinpr/galley/internal/pathutil"
 	"github.com/shinpr/galley/internal/task"
 )
 
@@ -237,31 +237,7 @@ func unsafeSkeletonOutputPath(rel string) string {
 }
 
 func pathInsideEffective(rel string, prefixes []string) bool {
-	if rel == "" {
-		return false
-	}
-	clean := foldPathCase(filepath.Clean(rel))
-	for _, p := range prefixes {
-		cp := foldPathCase(filepath.Clean(p))
-		if cp == "." {
-			return true
-		}
-		if clean == cp || strings.HasPrefix(clean, cp+string(filepath.Separator)) {
-			return true
-		}
-	}
-	return false
-}
-
-// foldPathCase lower-cases a path on platforms whose default filesystem is
-// case-insensitive (Windows NTFS, macOS APFS) so a forbidden_paths entry like
-// "secrets" is not bypassed by a "Secrets" output that lands in the same
-// on-disk directory. On Linux paths stay case-sensitive.
-func foldPathCase(p string) string {
-	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
-		return strings.ToLower(p)
-	}
-	return p
+	return pathutil.InsideAnyLogicalPath(rel, prefixes)
 }
 
 // EffectivePreflightPaths returns scope paths for acceptance-skeleton writes.

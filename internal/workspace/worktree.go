@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/shinpr/galley/internal/runner"
+	"github.com/shinpr/galley/internal/proc"
 	"github.com/shinpr/galley/internal/task"
 )
 
@@ -389,15 +389,10 @@ func isAncestor(ancestor, child string) bool {
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
-// runGitCommand executes a git invocation through the shared
-// runner.GitArgs argv wrapper so every Galley-owned git call in the
-// workspace package picks up `core.longpaths=true` automatically (AC7/AC8).
-// Worktree creation, status, diff, and removal all share this entry point,
-// so adding a new git call here does not require remembering the longpaths
-// prefix at the call site.
-func runGitCommand(ctx context.Context, opts Options, cwd string, args ...string) (runner.RunResult, error) {
-	return runner.RunCommand(ctx, runner.Command{
+// runGitCommand routes workspace git calls through the shared longpaths prefix.
+func runGitCommand(ctx context.Context, opts Options, cwd string, args ...string) (proc.RunResult, error) {
+	return proc.RunCommand(ctx, proc.Command{
 		WorkDir: cwd,
-		Argv:    runner.GitArgs(opts.git(), args...),
-	}, runner.RunOptions{TailBytes: -1})
+		Argv:    proc.GitArgs(opts.git(), args...),
+	}, proc.RunOptions{TailBytes: -1})
 }

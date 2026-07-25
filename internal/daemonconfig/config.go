@@ -25,7 +25,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -33,18 +32,6 @@ import (
 
 	"go.yaml.in/yaml/v3"
 )
-
-// supervisorCLIs is the single source the --supervisor flag, daemon.yaml
-// validation, daemon Preflight, and profile validation all consult so the
-// accepted set cannot drift between them. glm additionally needs a token,
-// enforced at startup/per task rather than by this list.
-var supervisorCLIs = provider.SupervisorIDs()
-
-// SupervisorCLIs returns the accepted supervisor adapter values in stable order.
-func SupervisorCLIs() []string { return slices.Clone(supervisorCLIs) }
-
-// IsValidSupervisor reports whether value is an accepted supervisor adapter.
-func IsValidSupervisor(value string) bool { return slices.Contains(supervisorCLIs, value) }
 
 // Filename is the daemon configuration filename written under the daemon root.
 const Filename = "daemon.yaml"
@@ -234,8 +221,8 @@ func (f File) Validate() error {
 	// disagree. The glm-token requirement is enforced separately at daemon
 	// startup and per task, keeping this low-level package decoupled from the
 	// executor runner.
-	if f.Supervisor != "" && !IsValidSupervisor(f.Supervisor) {
-		return fmt.Errorf("supervisor must be one of: %s (got %q)", strings.Join(SupervisorCLIs(), ", "), f.Supervisor)
+	if f.Supervisor != "" && !provider.IsSupervisor(f.Supervisor) {
+		return fmt.Errorf("supervisor must be one of: %s (got %q)", strings.Join(provider.SupervisorIDs(), ", "), f.Supervisor)
 	}
 	// max_concurrent_tasks must be >= 1: the daemon always needs at least
 	// one worker to make progress, and silently accepting 0 here just gets

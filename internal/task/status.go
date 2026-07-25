@@ -107,10 +107,10 @@ func IsAcceptedTerminal(status string) bool {
 	}
 }
 
-func ExecutorProvider(t Task) string {
+func ExecutorTransport(t Task) provider.Transport {
 	transport, ok := provider.TransportFor(t.Executor.CLI)
 	if !ok {
-		return "claude"
+		return provider.TransportClaude
 	}
-	return string(transport)
+	return transport
 }

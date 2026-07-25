@@ -63,6 +63,18 @@ func TestStatusJSONReportsRoot(t *testing.T) {
 	}
 }
 
+func TestStatusRejectsUnsupportedOutputFormat(t *testing.T) {
+	t.Parallel()
+	cmd := NewCommand("daemon")
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"--root", t.TempDir(), "status", "--output", "yaml"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), `unsupported output format "yaml"`) {
+		t.Fatalf("error got %v", err)
+	}
+}
+
 func TestStatusJSONOmitsRuntimeDefaultFields(t *testing.T) {
 	t.Parallel()
 	// AC7 / D3: `galley daemon status --output json` must not include

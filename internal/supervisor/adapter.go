@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shinpr/galley/internal/proc"
 	"github.com/shinpr/galley/internal/profile"
 	"github.com/shinpr/galley/internal/provider"
 	"github.com/shinpr/galley/internal/runner"
@@ -157,11 +158,8 @@ func runGrokAdapter(ctx context.Context, opts AdapterOptions, request []byte) ([
 		return nil, err
 	}
 	args := []string{opts.GrokBin, "--cwd", opts.WorkDir, "--permission-mode", "bypassPermissions", "--sandbox", "read-only", "--prompt-file", promptPath, "--verbatim", "--json-schema", strings.TrimSpace(schemas.SupervisorVerdict)}
-	args = appendSupervisorModel(args, opts.Model)
-	if opts.Effort != "" {
-		args = append(args, "--reasoning-effort", opts.Effort)
-	}
-	command := runner.Command{WorkDir: opts.WorkDir, Argv: args}
+	args = runner.AppendProviderModelEffortArgs(args, provider.TransportGrok, opts.Model, opts.Effort)
+	command := proc.Command{WorkDir: opts.WorkDir, Argv: args}
 	plan, err := json.MarshalIndent(command, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("encode grok supervisor command plan: %w", err)
@@ -169,7 +167,7 @@ func runGrokAdapter(ctx context.Context, opts AdapterOptions, request []byte) ([
 	if err := writeSupervisorFile(filepath.Join(dir, "grok_supervisor_command_plan.json"), plan); err != nil {
 		return nil, err
 	}
-	run, err := runner.RunCommand(ctx, command, runner.RunOptions{Timeout: opts.Timeout, IdleTimeout: opts.IdleTimeout, StdoutPath: stdoutPath, StderrPath: stderrPath})
+	run, err := proc.RunCommand(ctx, command, proc.RunOptions{Timeout: opts.Timeout, IdleTimeout: opts.IdleTimeout, StdoutPath: stdoutPath, StderrPath: stderrPath})
 	if err != nil {
 		return nil, fmt.Errorf("grok supervisor failed: %w", err)
 	}
@@ -209,13 +207,6 @@ func NewAdapterRequest(evidence Evidence) AdapterRequest {
 		SetupResult:            evidence.SetupResult,
 		SetupEnvironmentUpdate: evidence.SetupEnvironmentUpdate,
 	}}
-}
-
-func appendSupervisorModel(args []string, model string) []string {
-	if model == "" {
-		return args
-	}
-	return append(args, "--model", model)
 }
 
 // PreflightEffort rejects values outside the resolved provider's set before spawning the supervisor.
@@ -264,18 +255,13 @@ func runCodexAdapter(ctx context.Context, opts AdapterOptions, request []byte) (
 		"--output-schema", schemaPath,
 		"--output-last-message", outPath,
 	}
-	args = appendSupervisorModel(args, opts.Model)
-	// `codex exec` has no --effort flag; the reasoning effort is delivered
-	// through the generic config override, matching the codex executor runner.
-	if opts.Effort != "" {
-		args = append(args, "-c", fmt.Sprintf("model_reasoning_effort=%q", opts.Effort))
-	}
+	args = runner.AppendProviderModelEffortArgs(args, provider.TransportCodex, opts.Model, opts.Effort)
 	args = append(args, "-")
-	_, err = runner.RunCommand(ctx, runner.Command{
+	_, err = proc.RunCommand(ctx, proc.Command{
 		WorkDir: opts.WorkDir,
 		Argv:    args,
 		Stdin:   prompt,
-	}, runner.RunOptions{Timeout: opts.Timeout, IdleTimeout: opts.IdleTimeout, StdoutPath: eventsPath})
+	}, proc.RunOptions{Timeout: opts.Timeout, IdleTimeout: opts.IdleTimeout, StdoutPath: eventsPath})
 	if err != nil {
 		return nil, fmt.Errorf("codex supervisor failed: %w", err)
 	}
@@ -322,11 +308,7 @@ func runClaudeAdapterForOS(ctx context.Context, opts AdapterOptions, request []b
 		"--disallowedTools", "Write,Edit,MultiEdit,NotebookEdit",
 		"--output-format", "text",
 	}
-	args = appendSupervisorModel(args, opts.Model)
-	// glm reuses this Claude command shape, so --effort covers both providers.
-	if opts.Effort != "" {
-		args = append(args, "--effort", opts.Effort)
-	}
+	args = runner.AppendProviderModelEffortArgs(args, provider.TransportClaude, opts.Model, opts.Effort)
 	if goos == "windows" {
 		systemPromptPath := filepath.Join(dir, ClaudeSupervisorSystemPromptFilename)
 		if err := writeSupervisorFile(systemPromptPath, []byte(prompts.ClaudeSupervisor())); err != nil {
@@ -347,7 +329,7 @@ func runClaudeAdapterForOS(ctx context.Context, opts AdapterOptions, request []b
 	if opts.ArtifactDir != "" {
 		args = append(args, "--debug-file", debugPath)
 	}
-	commandPlan := runner.Command{
+	commandPlan := proc.Command{
 		WorkDir:   opts.WorkDir,
 		Argv:      args,
 		Stdin:     string(request),
@@ -362,7 +344,7 @@ func runClaudeAdapterForOS(ctx context.Context, opts AdapterOptions, request []b
 	}); err != nil {
 		return nil, err
 	}
-	_, err = runner.RunCommand(ctx, commandPlan, runner.RunOptions{Timeout: opts.Timeout, IdleTimeout: opts.IdleTimeout, StdoutPath: stdoutPath})
+	_, err = proc.RunCommand(ctx, commandPlan, proc.RunOptions{Timeout: opts.Timeout, IdleTimeout: opts.IdleTimeout, StdoutPath: stdoutPath})
 	if err != nil {
 		return nil, fmt.Errorf("claude supervisor failed: %w", err)
 	}

@@ -2,6 +2,7 @@ package runner
 
 import (
 	"fmt"
+	"github.com/shinpr/galley/internal/proc"
 	"strings"
 )
 
@@ -21,7 +22,7 @@ type ClaudeProviderOptions struct {
 }
 
 // ConfigureClaudeProvider applies endpoint and credential differences after the shared Claude command is built.
-func ConfigureClaudeProvider(plan *Command, opts ClaudeProviderOptions) error {
+func ConfigureClaudeProvider(plan *proc.Command, opts ClaudeProviderOptions) error {
 	baseURL, authEnv, credential, err := claudeProviderEnvironment(opts)
 	if err != nil || baseURL == "" {
 		return err

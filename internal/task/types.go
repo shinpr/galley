@@ -1,6 +1,7 @@
 package task
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"go.yaml.in/yaml/v3"
@@ -106,6 +107,15 @@ type ExecutionPolicy struct {
 type LoopBudget struct {
 	Count int  `json:"count,omitempty"`
 	Set   bool `yaml:"-" json:"-"`
+}
+
+// MarshalJSON keeps the public JSON shape aligned with the integer YAML/schema contract.
+func (b LoopBudget) MarshalJSON() ([]byte, error) {
+	count := b.Count
+	if !b.Set {
+		count = DefaultLoopBudget
+	}
+	return json.Marshal(count)
 }
 
 // UnmarshalYAML accepts an integer. Zero means unlimited.

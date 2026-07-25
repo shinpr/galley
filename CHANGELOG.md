@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Fixed
+
+- Task JSON now emits `loop_budget` as the documented integer, daemon status rejects unsupported output formats, executor cancellation is classified consistently on Windows, and scope containment uses one cross-platform logical-path rule.
+
 ## v0.12.1 - 2026-07-20
 
 ### Added

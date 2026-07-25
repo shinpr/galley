@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/shinpr/galley/internal/provider"
 	"github.com/shinpr/galley/internal/runner"
 )
 
@@ -13,7 +14,8 @@ import (
 // capture path Galley requests for Codex executor runs (empty for Claude
 // because Claude streams its result directly to stdout JSONL).
 func codexLastMessagePath(cli, attemptDir string) string {
-	if cli != "codex" || attemptDir == "" {
+	transport, ok := provider.TransportFor(cli)
+	if !ok || transport != provider.TransportCodex || attemptDir == "" {
 		return ""
 	}
 	return filepath.Join(attemptDir, runner.CodexLastMessageFilename)
@@ -26,7 +28,8 @@ func codexLastMessagePath(cli, attemptDir string) string {
 // fallback. Galley does not synthesize executor results when no valid final
 // JSON exists.
 func resolveExecutorResult(cli, stdoutPath, stdoutTail, lastMessagePath string) (runner.ExecutorResult, error) {
-	if cli == "grok" {
+	transport, _ := provider.TransportFor(cli)
+	if transport == provider.TransportGrok {
 		data, err := os.ReadFile(stdoutPath)
 		if err != nil {
 			data = []byte(stdoutTail)
@@ -34,7 +37,7 @@ func resolveExecutorResult(cli, stdoutPath, stdoutTail, lastMessagePath string) 
 		return runner.ExtractGrokExecutorResult(data)
 	}
 	var resultErrs []error
-	if cli == "codex" && lastMessagePath != "" {
+	if transport == provider.TransportCodex && lastMessagePath != "" {
 		if lastResult, lastErr := runner.ExtractCodexLastMessageFile(lastMessagePath); lastErr == nil {
 			return lastResult, nil
 		} else {
@@ -62,23 +65,27 @@ func resolveExecutorResult(cli, stdoutPath, stdoutTail, lastMessagePath string) 
 // with an in-memory tail fallback. Process exit code or human-language error
 // text alone never decides routing.
 func classifyExecutorTerminal(cli, stdoutPath, stdoutTail string, runErr error) runner.ExecutorTerminal {
-	switch cli {
-	case "grok":
+	transport, ok := provider.TransportFor(cli)
+	if !ok {
+		transport = provider.TransportClaude
+	}
+	switch transport {
+	case provider.TransportGrok:
 		data, err := os.ReadFile(stdoutPath)
 		if err != nil {
 			data = []byte(stdoutTail)
 		}
 		return runner.GrokTerminal(data, runErr)
-	case "codex":
+	case provider.TransportCodex:
 		return runner.CodexTerminal(readExecutorStdout(stdoutPath, stdoutTail), runErr)
 	default:
 		// cli is "claude", "glm", or empty (defaulting to claude); GLM shares
 		// Claude's transport but keeps its own provider identity in evidence.
-		provider := cli
-		if provider == "" {
-			provider = "claude"
+		providerID := cli
+		if providerID == "" {
+			providerID = "claude"
 		}
-		return runner.ClaudeTerminal(provider, readExecutorStdout(stdoutPath, stdoutTail), runErr)
+		return runner.ClaudeTerminal(providerID, readExecutorStdout(stdoutPath, stdoutTail), runErr)
 	}
 }
 

@@ -5,15 +5,17 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/shinpr/galley/internal/provider"
 )
 
 func TestSupervisorCLIsIsTheValidationSource(t *testing.T) {
-	for _, v := range SupervisorCLIs() {
+	for _, v := range provider.SupervisorIDs() {
 		if err := (File{Supervisor: v}).Validate(); err != nil {
 			t.Fatalf("Validate(supervisor=%q): %v", v, err)
 		}
 	}
-	if IsValidSupervisor("bogus") {
+	if provider.IsSupervisor("bogus") {
 		t.Fatal("off-enum value must be invalid")
 	}
 	if err := (File{Supervisor: "bogus"}).Validate(); err == nil {

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/shinpr/galley/internal/proc"
+	"github.com/shinpr/galley/internal/provider"
 	"github.com/shinpr/galley/internal/task"
 	"github.com/shinpr/galley/prompts"
 	"github.com/shinpr/galley/schemas"
@@ -48,12 +50,12 @@ func GrokFromTask(t task.Task) GrokOptions {
 	return GrokOptions{Model: common.Model, Effort: common.Effort, PermissionMode: "bypassPermissions", Sandbox: sandbox, WorkDir: common.WorkDir}
 }
 
-func GrokCommandPlan(opts GrokOptions) (Command, error) {
+func GrokCommandPlan(opts GrokOptions) (proc.Command, error) {
 	if opts.Prompt == "" {
-		return Command{}, fmt.Errorf("prompt is required")
+		return proc.Command{}, fmt.Errorf("prompt is required")
 	}
 	if opts.AttemptDir == "" {
-		return Command{}, fmt.Errorf("attempt directory is required for grok prompt transport")
+		return proc.Command{}, fmt.Errorf("attempt directory is required for grok prompt transport")
 	}
 	if opts.SystemPrompt == "" && opts.SystemPromptFile == "" {
 		opts.SystemPrompt = prompts.GrokExecutorFull()
@@ -61,7 +63,7 @@ func GrokCommandPlan(opts GrokOptions) (Command, error) {
 	if opts.SystemPromptFile != "" {
 		body, err := readOptionFile("system prompt", opts.SystemPromptFile)
 		if err != nil {
-			return Command{}, err
+			return proc.Command{}, err
 		}
 		opts.SystemPrompt = body
 	}
@@ -71,12 +73,12 @@ func GrokCommandPlan(opts GrokOptions) (Command, error) {
 	if opts.JSONSchemaFile != "" {
 		body, err := readOptionFile("JSON schema", opts.JSONSchemaFile)
 		if err != nil {
-			return Command{}, err
+			return proc.Command{}, err
 		}
 		opts.JSONSchema = body
 	}
 	if err := os.MkdirAll(opts.AttemptDir, 0o700); err != nil {
-		return Command{}, fmt.Errorf("create grok attempt directory: %w", err)
+		return proc.Command{}, fmt.Errorf("create grok attempt directory: %w", err)
 	}
 	promptFilename := opts.PromptFilename
 	if promptFilename == "" {
@@ -85,7 +87,7 @@ func GrokCommandPlan(opts GrokOptions) (Command, error) {
 	promptPath := filepath.Join(opts.AttemptDir, promptFilename)
 	promptBody := combineRolePrompt(opts.SystemPrompt, opts.Prompt)
 	if err := os.WriteFile(promptPath, []byte(promptBody), 0o600); err != nil {
-		return Command{}, fmt.Errorf("write grok prompt file: %w", err)
+		return proc.Command{}, fmt.Errorf("write grok prompt file: %w", err)
 	}
 	bin := opts.Bin
 	if bin == "" {
@@ -100,13 +102,8 @@ func GrokCommandPlan(opts GrokOptions) (Command, error) {
 		sandbox = "workspace"
 	}
 	argv := []string{bin, "--cwd", opts.WorkDir, "--permission-mode", permission, "--sandbox", sandbox, "--prompt-file", promptPath, "--verbatim", "--json-schema", strings.TrimSpace(opts.JSONSchema)}
-	if opts.Model != "" {
-		argv = append(argv, "--model", opts.Model)
-	}
-	if opts.Effort != "" {
-		argv = append(argv, "--reasoning-effort", opts.Effort)
-	}
-	return Command{WorkDir: opts.WorkDir, Argv: argv}, nil
+	argv = AppendProviderModelEffortArgs(argv, provider.TransportGrok, opts.Model, opts.Effort)
+	return proc.Command{WorkDir: opts.WorkDir, Argv: argv}, nil
 }
 
 func DecodeGrokEnvelope(data []byte) (GrokEnvelope, error) {

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 
-	"github.com/shinpr/galley/internal/daemonconfig"
 	"github.com/shinpr/galley/internal/provider"
 )
 
@@ -162,7 +161,7 @@ func executorEffortSchemas() []any {
 func supervisorSchema() map[string]any {
 	m := object(
 		properties(map[string]any{
-			"default_cli": enumSchema(append([]string{""}, daemonconfig.SupervisorCLIs()...)),
+			"default_cli": enumSchema(append([]string{""}, provider.SupervisorIDs()...)),
 			"model":       stringSchema("description", "Optional model name passed unchanged to the selected supervisor CLI. Omit or leave empty to use the CLI default; accepted values depend on the provider."),
 			"effort":      supervisorEffortBaseSchema(),
 		}),

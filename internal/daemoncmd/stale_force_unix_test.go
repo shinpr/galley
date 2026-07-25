@@ -1,4 +1,4 @@
-//go:build darwin || linux || freebsd || netbsd || openbsd
+//go:build darwin || linux
 
 package daemoncmd
 
@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"github.com/shinpr/galley/internal/daemonctl"
-	"github.com/shinpr/galley/internal/runner"
+	"github.com/shinpr/galley/internal/proc"
 )
 
 // startStaleDaemon writes a daemon PID file whose recorded PID has already
@@ -79,7 +79,7 @@ func TestStopForceWithStaleDaemonCleansRegisteredChildGroup(t *testing.T) {
 	if _, statErr := os.Stat(pidFile); !os.IsNotExist(statErr) {
 		t.Fatalf("PID file must be removed only after the stale-record child cleanup succeeds, stat err=%v", statErr)
 	}
-	if _, statErr := os.Stat(runner.ChildRegistryPath(root)); !os.IsNotExist(statErr) {
+	if _, statErr := os.Stat(proc.ChildRegistryPath(root)); !os.IsNotExist(statErr) {
 		t.Fatalf("child registry must be cleared after successful cleanup, stat err=%v", statErr)
 	}
 }

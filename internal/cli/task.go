@@ -332,7 +332,7 @@ func findTaskByID(root, id string) (string, error) {
 }
 
 func resolveTaskPathOrID(root, arg string) (string, error) {
-	if strings.Contains(arg, string(os.PathSeparator)) {
+	if strings.ContainsAny(arg, `/\`) {
 		return arg, nil
 	}
 	resolved, err := findTaskByID(root, arg)
@@ -340,7 +340,10 @@ func resolveTaskPathOrID(root, arg string) (string, error) {
 		return resolved, nil
 	}
 	if _, statErr := os.Stat(arg); statErr != nil {
-		return "", fmt.Errorf("resolve %q as task ID under %s failed: %w; as file path failed: %v", arg, root, err, statErr)
+		return "", errors.Join(
+			fmt.Errorf("resolve %q as task ID under %s failed: %w", arg, root, err),
+			fmt.Errorf("resolve %q as file path failed: %w", arg, statErr),
+		)
 	}
 	return arg, nil
 }

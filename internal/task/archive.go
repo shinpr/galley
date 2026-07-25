@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shinpr/galley/internal/strutil"
+	"github.com/shinpr/galley/internal/fileutil"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -75,14 +75,7 @@ func archiveCurrentSchema(path string, loaded Task, opts ArchiveOptions) (Archiv
 		return ArchiveResult{}, fmt.Errorf("task %s has an open PR; close or merge the PR before archiving", loaded.ID)
 	}
 	loaded.Status = StatusArchived
-	loaded.Attempts = append(loaded.Attempts, Attempt{
-		Number:            len(loaded.Attempts) + 1,
-		StartedAt:         time.Now().UTC().Format(time.RFC3339Nano),
-		CompletedAt:       time.Now().UTC().Format(time.RFC3339Nano),
-		ClaudeStatus:      "not_run",
-		SupervisorVerdict: "archived",
-		Summary:           strutil.FirstNonEmpty(opts.Reason, "Task archived."),
-	})
+	appendLifecycleAttempt(&loaded, "archived", opts.Reason, "Task archived.", time.Now())
 	nextPath := siblingTaskPath(path, WorkflowStateArchived)
 	if nextPath == path {
 		if err := Save(path, loaded); err != nil {
@@ -111,7 +104,7 @@ func archiveUnreadable(path string, opts ArchiveOptions, loadErr error) (Archive
 			// In-place lenient edit: overwrite the existing file. Lossy struct
 			// round-tripping is avoided because updated[] came from a YAML
 			// node mutation rather than yaml.Marshal(Task).
-			if err := writeFileAtomic(path, updated, 0o600); err != nil {
+			if err := fileutil.WriteFileAtomic(path, updated, 0o600); err != nil {
 				return ArchiveResult{}, err
 			}
 		} else {
@@ -234,7 +227,7 @@ func lenientHeader(data []byte) (Task, error) {
 // of WriteMovedTask for files that cannot be safely represented as the current
 // Task struct.
 func moveYAMLNoOverwrite(src, dst string, data []byte) error {
-	if err := writeFileNoOverwriteAtomic(dst, data, 0o600); err != nil {
+	if err := fileutil.WriteFileNoOverwriteAtomic(dst, data, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", dst, err)
 	}
 	if err := os.Remove(src); err != nil {

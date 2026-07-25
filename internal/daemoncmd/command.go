@@ -19,7 +19,8 @@ import (
 	"github.com/shinpr/galley/internal/daemonconfig"
 	"github.com/shinpr/galley/internal/daemonctl"
 	"github.com/shinpr/galley/internal/galleyhome"
-	"github.com/shinpr/galley/internal/runner"
+	"github.com/shinpr/galley/internal/proc"
+	"github.com/shinpr/galley/internal/provider"
 	"github.com/spf13/cobra"
 )
 
@@ -64,8 +65,8 @@ func NewCommand(use string) *cobra.Command {
 				}
 			}()
 			if supervisorProvider != "" {
-				if !daemonconfig.IsValidSupervisor(supervisorProvider) {
-					return fmt.Errorf("--supervisor must be one of: %s", strings.Join(daemonconfig.SupervisorCLIs(), ", "))
+				if !provider.IsSupervisor(supervisorProvider) {
+					return fmt.Errorf("--supervisor must be one of: %s", strings.Join(provider.SupervisorIDs(), ", "))
 				}
 				opts.Supervisor = supervisorProvider
 				opts.SupervisorSource = daemon.SupervisorSourceCLI
@@ -140,7 +141,7 @@ func NewCommand(use string) *cobra.Command {
 	flags.DurationVar(&opts.ClaimTTL, "claim-ttl", 30*time.Minute, "Recover running task and claim locks older than this duration; also sets heartbeat cadence to min(claim-ttl/4, 1m)")
 	flags.DurationVar(&opts.ShutdownTimeout, "shutdown-timeout", 5*time.Minute, "After SIGINT/SIGTERM, let active attempts finish for this duration before canceling them")
 	flags.DurationVar(&opts.IdleTimeout, "idle-timeout", 10*time.Minute, "Kill an executor or built-in supervisor subprocess that produces no stdout/stderr output for this duration")
-	flags.StringVar(&supervisorProvider, "supervisor", "", fmt.Sprintf("Built-in supervisor adapter: %s; defaults to %s", strings.Join(daemonconfig.SupervisorCLIs(), ", "), daemon.DefaultSupervisor))
+	flags.StringVar(&supervisorProvider, "supervisor", "", fmt.Sprintf("Built-in supervisor adapter: %s; defaults to %s", strings.Join(provider.SupervisorIDs(), ", "), daemon.DefaultSupervisor))
 	flags.StringVar(&pidFile, "pid-file", "", "PID file path for start, stop, and status; defaults to ROOT/galley-daemon.pid")
 	flags.StringVar(&logFile, "log-file", "", "Log file path for start; defaults to ROOT/galley-daemon.log")
 	flags.DurationVar(&stopTimeout, "stop-timeout", 30*time.Second, "How long stop waits after sending SIGTERM")
@@ -519,7 +520,7 @@ func cleanupOnForce(cmd *cobra.Command, force bool, root string, pid int, stopTi
 	if !force {
 		return nil
 	}
-	if _, err := daemonctl.CleanupRegisteredChildren(runner.ChildRegistryPath(root), stopTimeout); err != nil {
+	if _, err := daemonctl.CleanupRegisteredChildren(proc.ChildRegistryPath(root), stopTimeout); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "galley daemon force stop pid=%d incomplete: %v\n", pid, err)
 		return err
 	}
@@ -534,6 +535,9 @@ func newStatusCommand(opts *daemon.Options, pidFile *string) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if output != "text" && output != "json" {
+				return fmt.Errorf("unsupported output format %q", output)
+			}
 			paths := daemonctl.ResolvePaths(opts.Root, *pidFile, "")
 			exe, err := os.Executable()
 			if err != nil {
@@ -602,7 +606,7 @@ func writeStatusJSON(cmd *cobra.Command, opts *daemon.Options, paths daemonctl.P
 		payload.PID = status.Meta.PID
 	}
 	enc := json.NewEncoder(cmd.OutOrStdout())
-	enc.SetIndent("", " ")
+	enc.SetIndent("", "  ")
 	return enc.Encode(payload)
 }
 

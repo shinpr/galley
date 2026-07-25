@@ -1,4 +1,4 @@
-package task
+package fileutil
 
 import (
 	"bytes"
@@ -23,7 +23,7 @@ func TestWriteFileNoOverwriteAtomicCreatesAndRefuses(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "queued.yaml")
 
-	if err := writeFileNoOverwriteAtomic(path, []byte("first"), 0o600); err != nil {
+	if err := WriteFileNoOverwriteAtomic(path, []byte("first"), 0o600); err != nil {
 		t.Fatalf("first write failed: %v", err)
 	}
 	data, err := os.ReadFile(path)
@@ -34,12 +34,15 @@ func TestWriteFileNoOverwriteAtomicCreatesAndRefuses(t *testing.T) {
 		t.Fatalf("contents got %q, want %q", string(data), "first")
 	}
 
-	err = writeFileNoOverwriteAtomic(path, []byte("second"), 0o600)
+	err = WriteFileNoOverwriteAtomic(path, []byte("second"), 0o600)
 	if err == nil {
 		t.Fatalf("expected second write to refuse overwrite")
 	}
 	if !strings.Contains(err.Error(), "destination already exists") {
 		t.Fatalf("expected duplicate destination error, got %v", err)
+	}
+	if !errors.Is(err, os.ErrExist) {
+		t.Fatalf("duplicate error must wrap os.ErrExist: %v", err)
 	}
 	// The duplicate destination must not be clobbered.
 	data, err = os.ReadFile(path)
@@ -97,7 +100,7 @@ func TestWriteFileNoOverwriteAtomicPublicationIsAtomic(t *testing.T) {
 			}
 		}()
 
-		if err := writeFileNoOverwriteAtomic(path, payload, 0o600); err != nil {
+		if err := WriteFileNoOverwriteAtomic(path, payload, 0o600); err != nil {
 			t.Fatalf("iter %d write: %v", i, err)
 		}
 		wg.Wait()
@@ -115,6 +118,31 @@ func TestWriteFileNoOverwriteAtomicPublicationIsAtomic(t *testing.T) {
 		if _, err := os.Stat(path + ".lock"); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("iter %d: reservation lock leaked: stat err=%v", i, err)
 		}
+	}
+}
+
+func TestWriteFileAtomicReplacesContentsAndMode(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "state.json")
+	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteFileAtomic(path, []byte("new"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "new" {
+		t.Fatalf("contents got %q, want new", data)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("mode got %o, want 600", got)
 	}
 }
 

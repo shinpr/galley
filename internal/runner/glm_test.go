@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"github.com/shinpr/galley/internal/proc"
 	"strings"
 	"testing"
 )
@@ -8,7 +9,7 @@ import (
 func TestConfigureClaudeProviderGLMInjectsEndpointAndTokenViaEnvOnly(t *testing.T) {
 	t.Parallel()
 	const token = "zai-secret-token"
-	plan := Command{Argv: []string{"claude", "-p", "--model", "glm-4.6"}}
+	plan := proc.Command{Argv: []string{"claude", "-p", "--model", "glm-4.6"}}
 
 	if err := ConfigureClaudeProvider(&plan, ClaudeProviderOptions{
 		Provider:    "glm",

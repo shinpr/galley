@@ -1,4 +1,4 @@
-package runner
+package proc
 
 import (
 	"context"
@@ -249,9 +249,11 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 
 	var runErr error
 	waitTimedOut := false
+	canceled := false
 	select {
 	case runErr = <-done:
 	case <-runCtx.Done():
+		canceled = true
 		killProcessGroup(cmd)
 		select {
 		case runErr = <-done:
@@ -313,10 +315,7 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 		}, closeErr)
 	}
 	if runErr != nil {
-		kind := CommandErrorExitNonZero
-		if strings.Contains(runErr.Error(), "signal: killed") {
-			kind = CommandErrorKilled
-		}
+		kind := commandErrorKind(runErr, canceled)
 		return result, errors.Join(&CommandError{
 			Kind:   kind,
 			Result: result,
@@ -324,6 +323,13 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 		}, closeErr)
 	}
 	return result, closeErr
+}
+
+func commandErrorKind(runErr error, canceled bool) CommandErrorKind {
+	if canceled || strings.Contains(runErr.Error(), "signal: killed") {
+		return CommandErrorKilled
+	}
+	return CommandErrorExitNonZero
 }
 
 // activityWriter records the time of the most recent write so the idle-output

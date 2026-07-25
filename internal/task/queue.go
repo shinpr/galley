@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shinpr/galley/internal/strutil"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -55,14 +54,7 @@ func queue(path string, opts QueueOptions, readTaskID func(string) (string, erro
 	if err := rejectDuplicateTaskID(path, loaded.ID, opts.Root, readTaskID); err != nil {
 		return QueueResult{}, err
 	}
-	loaded.Attempts = append(loaded.Attempts, Attempt{
-		Number:            len(loaded.Attempts) + 1,
-		StartedAt:         time.Now().UTC().Format(time.RFC3339Nano),
-		CompletedAt:       time.Now().UTC().Format(time.RFC3339Nano),
-		ClaudeStatus:      "not_run",
-		SupervisorVerdict: "queued",
-		Summary:           strutil.FirstNonEmpty(opts.Reason, "Task queued for daemon execution."),
-	})
+	appendLifecycleAttempt(&loaded, "queued", opts.Reason, "Task queued for daemon execution.", time.Now())
 	nextPath := queuedPathFor(path, opts.Root)
 	if nextPath == path {
 		if err := Save(path, loaded); err != nil {

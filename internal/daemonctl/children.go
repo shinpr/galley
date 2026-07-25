@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shinpr/galley/internal/runner"
+	"github.com/shinpr/galley/internal/proc"
 )
 
 // ErrChildCleanupIncomplete signals that force stop could not confirm every
@@ -15,7 +15,7 @@ import (
 // process identifiers so the operator can act on them instead of receiving a
 // silent "clean stop" report.
 type ErrChildCleanupIncomplete struct {
-	Remaining []runner.ChildRecord
+	Remaining []proc.ChildRecord
 }
 
 func (e *ErrChildCleanupIncomplete) Error() string {
@@ -55,16 +55,16 @@ func defaultChildKiller() childKiller {
 //
 // An empty registryPath, a missing registry file, or an empty registry are
 // no-ops that return nil.
-func CleanupRegisteredChildren(registryPath string, timeout time.Duration) ([]runner.ChildRecord, error) {
+func CleanupRegisteredChildren(registryPath string, timeout time.Duration) ([]proc.ChildRecord, error) {
 	return cleanupRegisteredChildren(registryPath, timeout, defaultChildKiller())
 }
 
-func cleanupRegisteredChildren(registryPath string, timeout time.Duration, killer childKiller) ([]runner.ChildRecord, error) {
+func cleanupRegisteredChildren(registryPath string, timeout time.Duration, killer childKiller) ([]proc.ChildRecord, error) {
 	if registryPath == "" {
 		return nil, nil
 	}
-	reg := runner.NewChildRegistry(registryPath)
-	records, err := reg.List(func(rec runner.ChildRecord) (bool, error) {
+	reg := proc.NewChildRegistry(registryPath)
+	records, err := reg.List(func(rec proc.ChildRecord) (bool, error) {
 		// Probe the process group, not just the leader PID. A force-killed or
 		// already-reaped leader can leave surviving descendants in the same
 		// pgid; pruning the record on a dead leader PID alone would orphan
@@ -88,7 +88,7 @@ func cleanupRegisteredChildren(registryPath string, timeout time.Duration, kille
 	}
 	// Snapshot before mutating so the returned record list is stable. Sort
 	// by PID for deterministic output in error messages and tests.
-	snapshot := make([]runner.ChildRecord, len(records))
+	snapshot := make([]proc.ChildRecord, len(records))
 	copy(snapshot, records)
 	sort.Slice(snapshot, func(i, j int) bool { return snapshot[i].PID < snapshot[j].PID })
 
@@ -117,7 +117,7 @@ func cleanupRegisteredChildren(registryPath string, timeout time.Duration, kille
 			return nil, nil
 		}
 		if timeout <= 0 || time.Now().After(deadline) {
-			killed := make([]runner.ChildRecord, 0, len(snapshot))
+			killed := make([]proc.ChildRecord, 0, len(snapshot))
 			survivors := stillAlive
 			for _, rec := range snapshot {
 				dead := true
@@ -139,7 +139,7 @@ func cleanupRegisteredChildren(registryPath string, timeout time.Duration, kille
 	}
 }
 
-func pruneKilledFromRegistry(reg *runner.ChildRegistry, killed []runner.ChildRecord) error {
+func pruneKilledFromRegistry(reg *proc.ChildRegistry, killed []proc.ChildRecord) error {
 	for _, rec := range killed {
 		if err := reg.Unregister(rec.PID); err != nil {
 			return err

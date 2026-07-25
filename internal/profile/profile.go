@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/shinpr/galley/internal/daemonconfig"
+	"github.com/shinpr/galley/internal/fileutil"
 	"github.com/shinpr/galley/internal/provider"
 	"go.yaml.in/yaml/v3"
 )
@@ -247,7 +247,7 @@ func ValidateEnvironment(env Environment) ValidationResult {
 		}
 	}
 	if env.Supervisor != nil && env.Supervisor.DefaultCLI != "" {
-		require(&result, daemonconfig.IsValidSupervisor(env.Supervisor.DefaultCLI), "supervisor.default_cli must be one of: %s", strings.Join(daemonconfig.SupervisorCLIs(), ", "))
+		require(&result, provider.IsSupervisor(env.Supervisor.DefaultCLI), "supervisor.default_cli must be one of: %s", strings.Join(provider.SupervisorIDs(), ", "))
 	}
 	if env.Supervisor != nil && env.Supervisor.Effort != "" {
 		// Without default_cli, profile validation can enforce only the provider union; preflight narrows it later.
@@ -389,28 +389,9 @@ func UpdateEnvironmentSetup(path string, plan SetupPlan) (*SetupPlan, error) {
 	if vr := ValidateEnvironment(updated); !vr.Valid() {
 		return nil, fmt.Errorf("environment profile rewrite failed validation: %s", strings.Join(vr.Errors, "; "))
 	}
-	tmp, err := os.CreateTemp(filepathDir(path), ".environment-setup-*.yaml")
-	if err != nil {
-		return nil, fmt.Errorf("stage environment profile rewrite: %w", err)
+	if err := fileutil.WriteFileAtomic(path, buf.Bytes(), 0o600); err != nil {
+		return nil, fmt.Errorf("publish environment profile rewrite: %w", err)
 	}
-	tmpName := tmp.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmpName)
-		}
-	}()
-	if _, err := tmp.Write(buf.Bytes()); err != nil {
-		tmp.Close()
-		return nil, fmt.Errorf("write environment profile rewrite: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return nil, fmt.Errorf("close environment profile rewrite: %w", err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return nil, fmt.Errorf("rename environment profile rewrite: %w", err)
-	}
-	cleanup = false
 	return prior, nil
 }
 
@@ -466,15 +447,6 @@ func documentMapping(root *yaml.Node) *yaml.Node {
 		return node
 	}
 	return nil
-}
-
-func filepathDir(path string) string {
-	for i := len(path) - 1; i >= 0; i-- {
-		if path[i] == '/' || path[i] == '\\' {
-			return path[:i]
-		}
-	}
-	return "."
 }
 
 func loadYAML(path string, out any, schema map[string]any) error {

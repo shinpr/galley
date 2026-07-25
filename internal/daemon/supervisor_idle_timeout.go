@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/shinpr/galley/internal/runner"
+	"github.com/shinpr/galley/internal/proc"
 )
 
 // supervisorIdleTimeoutKind is the distinct attempt-error kind recorded when a
@@ -78,7 +78,7 @@ func (e *supervisorIdleTimeoutError) logLine(taskID string) string {
 // isIdleTimeoutError reports whether err originates from the idle-output
 // watchdog.
 func isIdleTimeoutError(err error) bool {
-	return errors.Is(err, runner.ErrIdleTimeout)
+	return errors.Is(err, proc.ErrIdleTimeout)
 }
 
 // asSupervisorIdleTimeout reports whether err is, or wraps, a supervisor idle

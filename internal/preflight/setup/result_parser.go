@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/shinpr/galley/internal/provider"
 	"github.com/shinpr/galley/internal/runartifact"
 	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/task"
@@ -17,7 +18,7 @@ import (
 // message through `--output-last-message`; Claude streams the JSON through
 // stdout JSONL.
 func ResolveExecutorResult(opts Options, stdoutTail string) (*Result, error) {
-	if task.ExecutorProvider(opts.Task) == "grok" {
+	if task.ExecutorTransport(opts.Task) == provider.TransportGrok {
 		data, readErr := os.ReadFile(runartifact.Path(opts.RunDir, runartifact.SetupExecutorStdoutFilename))
 		if readErr != nil {
 			data = []byte(stdoutTail)
@@ -39,7 +40,7 @@ func ResolveExecutorResult(opts Options, stdoutTail string) (*Result, error) {
 		normalizeResult(&result)
 		return &result, nil
 	}
-	if task.ExecutorProvider(opts.Task) == "codex" {
+	if task.ExecutorTransport(opts.Task) == provider.TransportCodex {
 		lastMessagePath := filepath.Join(opts.RunDir, runner.CodexLastMessageFilename)
 		if data, err := os.ReadFile(lastMessagePath); err == nil {
 			if res, ok := parseResultText(string(data)); ok {

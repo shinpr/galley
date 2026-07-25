@@ -55,25 +55,8 @@ func notifyTerminalPublication(_ context.Context, opts Options, runningPath stri
 	opts.notifyDispatcher.Start(opts, runningPath, runDir)
 }
 
-// deliverTerminalNotification performs one synchronous, best-effort notification
-// delivery: it reads back the published task, applies the on-filter, and runs
-// the configured command bounded by the notification timeout. notifyTerminalPublication
-// runs it on a detached goroutine; it is also the deterministic entry point for
-// payload, filtering, and failure-swallow unit tests.
-//
-// The published task is read back from tasks/done|failed using the running
-// task's base filename. This guarantees the hook only observes a task that
-// actually reached a published terminal state: if the terminal move failed and
-// the task is still under tasks/running, no published file exists and no
-// notification fires. The status used for the on-filter is therefore the
-// authoritative persisted status, not an in-memory guess.
-//
-// The context is the daemon lifecycle context, not the per-task graceful
-// execution context. A normal daemon shutdown cancels it so runner.RunCommand
-// kills any active notification process group before Run clears the child
-// registry. The notification timeout remains the wall-clock bound while the
-// daemon keeps running. Hook outcomes are logged and swallowed; this function
-// never mutates task state.
+// deliverTerminalNotification notifies from published state using the daemon
+// context; hook failures are logged and never mutate task state.
 func deliverTerminalNotification(ctx context.Context, opts Options, base, runDir string) {
 	cfg := opts.Notifications
 	if cfg == nil || !cfg.Enabled || cfg.Command == "" {

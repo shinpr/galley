@@ -14,7 +14,7 @@ import (
 	"strings"
 
 	"github.com/shinpr/galley/internal/jsonio"
-	"github.com/shinpr/galley/internal/runner"
+	"github.com/shinpr/galley/internal/proc"
 )
 
 // PRComment is the subset of a GitHub issue comment Galley consumes.
@@ -81,16 +81,16 @@ func addPathsForOS(ctx context.Context, bins Binaries, workDir, runDir string, p
 		return fmt.Errorf("git add paths is empty")
 	}
 	pathspecs := literalPathspecs(stagePaths)
-	cmd := runner.Command{WorkDir: workDir}
+	cmd := proc.Command{WorkDir: workDir}
 	if goos == "windows" {
 		// git add --pathspec-from-file=- --pathspec-file-nul reads pathspecs
 		// from stdin so a long list of changed files never reaches argv. The
 		// NUL separator avoids any ambiguity with paths that contain LF or
 		// other whitespace characters.
-		cmd.Argv = runner.GitArgs(bins.git(), "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul")
+		cmd.Argv = proc.GitArgs(bins.git(), "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul")
 		cmd.Stdin = strings.Join(pathspecs, "\x00") + "\x00"
 	} else {
-		cmd.Argv = runner.GitArgs(bins.git(), append([]string{"add", "-A", "--"}, pathspecs...)...)
+		cmd.Argv = proc.GitArgs(bins.git(), append([]string{"add", "-A", "--"}, pathspecs...)...)
 	}
 	_, err := runCommandWithEvidence(ctx, cmd, runDir, "git_add", "git add failed")
 	return err
@@ -112,54 +112,18 @@ func addPathsForOS(ctx context.Context, bins Binaries, workDir, runDir string, p
 // `all` mode emits one entry per untracked file, which is the resolution
 // the reviewable-path-set contract requires.
 func StatusPorcelainZ(ctx context.Context, bins Binaries, workDir string) (string, error) {
-	result, err := runner.RunCommand(ctx, runner.Command{
+	result, err := proc.RunCommand(ctx, proc.Command{
 		WorkDir: workDir,
-		Argv:    runner.GitArgs(bins.git(), "status", "--porcelain=v1", "-z", "--untracked-files=all"),
-	}, runner.RunOptions{})
+		Argv:    proc.GitArgs(bins.git(), "status", "--porcelain=v1", "-z", "--untracked-files=all"),
+	}, proc.RunOptions{})
 	if err != nil {
 		return "", fmt.Errorf("git status --porcelain -z (review staging discovery) failed: %w", err)
 	}
 	return result.Stdout, nil
 }
 
-// StagePathsForReview stages the supplied worktree-relative paths so the
-// supervisor diff snapshot captures the executor-produced change set Galley
-// computed from `git status --porcelain` after the executor attempt. The
-// caller is expected to have already:
-//
-// - discovered the change set with StatusPorcelainZ;
-// - normalized and deduplicated each entry to slash form;
-// - excluded task.files entries declared with commit:false so context-only
-// inputs Galley materializes for the executor do not enter the
-// submitted artifact.
-//
-// `paths` is therefore an explicit reviewable path set, not a wildcard or an
-// `-A` over the whole worktree. The function runs
-// `git add -A -- <path> [<path>...]` so paths that the executor added,
-// modified, or deleted are all reflected in the index. On Windows the
-// pathspecs are delivered via `--pathspec-from-file=- --pathspec-file-nul`
-// so a long list of changed files cannot push the CreateProcess command
-// line past the platform's argv limit; macOS and Linux continue to pass the
-// pathspecs on argv.
-//
-// When `paths` is empty (the no-executor-change context-only case) the
-// function records a "skipped" evidence payload at
-// `<runDir>/git_add_review_result.json` and returns nil. Falling through to
-// `git add -A` with no positional path would stage every dirty path in the
-// worktree, defeating the explicit reviewable-set contract; falling through
-// to `git add -A --` with no positional path would error on some git
-// versions. Recording the skipped evidence preserves the invariant that
-// the staging step is always observable in run evidence.
-//
-// On a non-skipped run the function writes:
-//
-// - git_add_review.stdout.log
-// - git_add_review.stderr.log
-// - git_add_review_result.json (runner.RunResult)
-//
-// A staging failure returns the original git error joined with any evidence
-// write error so the caller can record a clear attempt failure instead of
-// handing an empty or stale diff to the supervisor.
+// StagePathsForReview stages only literal executor-produced paths and records
+// skipped or completed staging evidence for the supervisor.
 func StagePathsForReview(ctx context.Context, bins Binaries, workDir, runDir string, paths []string) error {
 	return stagePathsForReviewForOS(ctx, bins, workDir, runDir, paths, runtime.GOOS)
 }
@@ -177,18 +141,18 @@ func stagePathsForReviewForOS(ctx context.Context, bins Binaries, workDir, runDi
 		return writeReviewStagingSkipped(runDir, "no executor-produced paths to stage")
 	}
 	pathspecs := literalPathspecs(stagePaths)
-	cmd := runner.Command{WorkDir: workDir}
+	cmd := proc.Command{WorkDir: workDir}
 	if goos == "windows" {
 		// On Windows the pathspec list is delivered through stdin so a
 		// long list of changed files cannot push the CreateProcess command
 		// line past the platform's argv limit. The NUL separator avoids
 		// any ambiguity with paths that contain LF or other whitespace.
-		cmd.Argv = runner.GitArgs(bins.git(), "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul")
+		cmd.Argv = proc.GitArgs(bins.git(), "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul")
 		cmd.Stdin = strings.Join(pathspecs, "\x00") + "\x00"
 	} else {
-		cmd.Argv = runner.GitArgs(bins.git(), append([]string{"add", "-A", "--"}, pathspecs...)...)
+		cmd.Argv = proc.GitArgs(bins.git(), append([]string{"add", "-A", "--"}, pathspecs...)...)
 	}
-	result, err := runner.RunCommand(ctx, cmd, runner.RunOptions{
+	result, err := proc.RunCommand(ctx, cmd, proc.RunOptions{
 		StdoutPath: filepath.Join(runDir, "git_add_review.stdout.log"),
 		StderrPath: filepath.Join(runDir, "git_add_review.stderr.log"),
 	})
@@ -202,12 +166,7 @@ func stagePathsForReviewForOS(ctx context.Context, bins Binaries, workDir, runDi
 	return nil
 }
 
-// writeReviewStagingSkipped records a sentinel evidence payload when the
-// review-staging step is intentionally skipped because there were no
-// executor-produced paths to stage. The payload mirrors the field shape of
-// the runner.RunResult-derived evidence used on the non-skipped path so
-// readers can detect "skipped" by checking the dedicated key without
-// pattern-matching command output.
+// writeReviewStagingSkipped records why no executor-produced path was staged.
 func writeReviewStagingSkipped(runDir, reason string) error {
 	return writeJSON(filepath.Join(runDir, "git_add_review_result.json"), map[string]any{
 		"skipped": true,
@@ -243,18 +202,18 @@ func literalPathspecs(paths []string) []string {
 
 // Commit creates a git commit and writes command evidence.
 func Commit(ctx context.Context, bins Binaries, workDir, runDir, message string) error {
-	_, err := runCommandWithEvidence(ctx, runner.Command{
+	_, err := runCommandWithEvidence(ctx, proc.Command{
 		WorkDir: workDir,
-		Argv:    runner.GitArgs(bins.git(), "commit", "-m", message),
+		Argv:    proc.GitArgs(bins.git(), "commit", "-m", message),
 	}, runDir, "git_commit", "git commit failed")
 	return err
 }
 
 // PushCurrentBranch pushes HEAD to origin and writes command evidence.
 func PushCurrentBranch(ctx context.Context, bins Binaries, workDir, runDir string) error {
-	_, err := runCommandWithEvidence(ctx, runner.Command{
+	_, err := runCommandWithEvidence(ctx, proc.Command{
 		WorkDir: workDir,
-		Argv:    runner.GitArgs(bins.git(), "push", "-u", "origin", "HEAD"),
+		Argv:    proc.GitArgs(bins.git(), "push", "-u", "origin", "HEAD"),
 	}, runDir, "git_push", "git push failed")
 	return err
 }
@@ -269,7 +228,7 @@ func CreatePullRequest(ctx context.Context, bins Binaries, workDir, runDir, body
 	if base != "" {
 		argv = append(argv, "--base", base)
 	}
-	result, err := runCommandWithEvidence(ctx, runner.Command{
+	result, err := runCommandWithEvidence(ctx, proc.Command{
 		WorkDir: workDir,
 		Argv:    argv,
 	}, runDir, "gh_pr_create", "gh pr create failed")
@@ -291,7 +250,7 @@ func CreatePullRequest(ctx context.Context, bins Binaries, workDir, runDir, body
 // returns "" with a nil error so the caller can surface the original
 // create-failure unchanged.
 func FetchPRURLForCurrentBranch(ctx context.Context, bins Binaries, workDir, runDir string) (string, error) {
-	cmd := runner.Command{
+	cmd := proc.Command{
 		WorkDir: workDir,
 		Argv:    []string{bins.gh(), "pr", "view", "--json", "url", "-q", ".url"},
 	}
@@ -317,7 +276,7 @@ func isGHPRViewNoPullRequest(stderr string) bool {
 	return ghPRViewNoPullRequestPattern.MatchString(stderr)
 }
 
-func runCommandWithEvidence(ctx context.Context, cmd runner.Command, runDir, label, failure string) (runner.RunResult, error) {
+func runCommandWithEvidence(ctx context.Context, cmd proc.Command, runDir, label, failure string) (proc.RunResult, error) {
 	result, runErr, writeErr := runCommandEvidence(ctx, cmd, runDir, label)
 	if runErr != nil {
 		return result, errors.Join(fmt.Errorf("%s: %w", failure, runErr), writeErr)
@@ -328,8 +287,8 @@ func runCommandWithEvidence(ctx context.Context, cmd runner.Command, runDir, lab
 	return result, nil
 }
 
-func runCommandEvidence(ctx context.Context, cmd runner.Command, runDir, label string) (runner.RunResult, error, error) {
-	result, runErr := runner.RunCommand(ctx, cmd, runner.RunOptions{
+func runCommandEvidence(ctx context.Context, cmd proc.Command, runDir, label string) (proc.RunResult, error, error) {
+	result, runErr := proc.RunCommand(ctx, cmd, proc.RunOptions{
 		StdoutPath: filepath.Join(runDir, label+".stdout.log"),
 		StderrPath: filepath.Join(runDir, label+".stderr.log"),
 	})
@@ -366,11 +325,11 @@ func PostPRComment(ctx context.Context, bins Binaries, root, prURL, body string)
 	if err != nil {
 		return fmt.Errorf("encode PR comment body: %w", err)
 	}
-	_, err = runner.RunCommand(ctx, runner.Command{
+	_, err = proc.RunCommand(ctx, proc.Command{
 		WorkDir: root,
 		Argv:    []string{bins.gh(), "api", "-X", "POST", apiPath, "--input", "-"},
 		Stdin:   string(payload),
-	}, runner.RunOptions{})
+	}, proc.RunOptions{})
 	if err != nil {
 		return fmt.Errorf("gh api post PR comment failed: %w", err)
 	}
@@ -438,10 +397,10 @@ func fetchGHAPIOutput(ctx context.Context, bins Binaries, root, apiPath, label s
 	}
 	defer os.Remove(stdoutPath)
 	argv := append([]string{bins.gh(), "api", apiPath}, extraArgs...)
-	_, err = runner.RunCommand(ctx, runner.Command{
+	_, err = proc.RunCommand(ctx, proc.Command{
 		WorkDir: root,
 		Argv:    argv,
-	}, runner.RunOptions{StdoutPath: stdoutPath})
+	}, proc.RunOptions{StdoutPath: stdoutPath})
 	if err != nil {
 		return nil, fmt.Errorf("gh api %s failed: %w", label, err)
 	}

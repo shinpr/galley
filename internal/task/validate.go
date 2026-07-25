@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/shinpr/galley/internal/pathutil"
 	"github.com/shinpr/galley/internal/provider"
 )
 
@@ -350,41 +351,11 @@ func validatePreflightOutputs(result *ValidationResult, t Task, cfg *AcceptanceS
 }
 
 func pathAllowedByScope(path string, allowed []string) bool {
-	if path == "" {
-		return false
-	}
-	// Compare in slash form so allowed entries authored as `internal/task` in
-	// YAML match descendants regardless of whether the input arrives with `/`
-	// or `\` separators. Containment uses a `/`-terminated boundary so
-	// same-root strings such as `internal-task` do not match `internal`.
-	cleanPath := normalizeLogicalPath(path)
-	for _, allowedPath := range allowed {
-		cleanAllowed := normalizeLogicalPath(allowedPath)
-		if cleanAllowed == "." {
-			return true
-		}
-		if cleanPath == cleanAllowed || strings.HasPrefix(cleanPath, cleanAllowed+"/") {
-			return true
-		}
-	}
-	return false
+	return pathutil.InsideAnyLogicalPath(path, allowed)
 }
 
 func pathForbiddenByScope(path string, forbidden []string) bool {
-	if path == "" {
-		return false
-	}
-	cleanPath := normalizeLogicalPath(path)
-	for _, forbiddenPath := range forbidden {
-		cleanForbidden := normalizeLogicalPath(forbiddenPath)
-		if cleanForbidden == "." {
-			return true
-		}
-		if cleanPath == cleanForbidden || strings.HasPrefix(cleanPath, cleanForbidden+"/") {
-			return true
-		}
-	}
-	return false
+	return pathutil.InsideAnyLogicalPath(path, forbidden)
 }
 
 func validateRelativePath(result *ValidationResult, field, p string) {

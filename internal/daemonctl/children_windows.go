@@ -1,4 +1,4 @@
-//go:build !darwin && !linux && !freebsd && !netbsd && !openbsd
+//go:build windows
 
 package daemonctl
 
@@ -8,10 +8,7 @@ import (
 	"syscall"
 )
 
-// killProcessGroupByID and processGroupAlive degrade to PID-level operations
-// on platforms without Unix process groups. The runner package only honors
-// Setpgid on Unix; on other platforms Galley does not actually create child
-// process groups, so PID-level reasoning is the most faithful fallback.
+// Windows tracks the child PID because it has no Unix process groups.
 func killProcessGroupByID(pgid int) error {
 	if pgid <= 0 {
 		return nil

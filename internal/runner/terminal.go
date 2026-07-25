@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"github.com/shinpr/galley/internal/proc"
 	"io"
 	"strings"
 )
@@ -60,15 +61,15 @@ const (
 func runnerInterruption(provider string, runErr error) ExecutorTerminal {
 	t := ExecutorTerminal{Provider: provider, RunError: runErr.Error()}
 	switch {
-	case errors.Is(runErr, ErrIdleTimeout):
+	case errors.Is(runErr, proc.ErrIdleTimeout):
 		t.Reason = TerminalReasonRunnerIdleTimeout
-	case errors.Is(runErr, ErrTimeout):
+	case errors.Is(runErr, proc.ErrTimeout):
 		t.Reason = TerminalReasonRunnerTimeout
-	case errors.Is(runErr, ErrKilled):
+	case errors.Is(runErr, proc.ErrKilled):
 		t.Reason = TerminalReasonRunnerKilled
 	default:
-		var cmdErr *CommandError
-		if errors.As(runErr, &cmdErr) && cmdErr.Kind == CommandErrorStart {
+		var cmdErr *proc.CommandError
+		if errors.As(runErr, &cmdErr) && cmdErr.Kind == proc.CommandErrorStart {
 			t.Reason = TerminalReasonRunnerStartFailed
 		} else {
 			t.Reason = TerminalReasonRunnerExitNonZero

@@ -1,4 +1,4 @@
-package runner
+package proc
 
 import (
 	"encoding/json"
@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/shinpr/galley/internal/jsonio"
 )
 
 // ChildRecord identifies a single Galley-started child subprocess so that
@@ -107,43 +109,10 @@ func (r *ChildRegistry) load() ([]ChildRecord, error) {
 }
 
 func (r *ChildRegistry) save(records []ChildRecord) error {
-	if err := os.MkdirAll(filepath.Dir(r.path), 0o700); err != nil {
-		return fmt.Errorf("create registry dir: %w", err)
-	}
 	if records == nil {
 		records = []ChildRecord{}
 	}
-	data, err := json.MarshalIndent(childRegistryFile{Children: records}, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(r.path), "."+filepath.Base(r.path)+".*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmpPath)
-		}
-	}()
-	if err := tmp.Chmod(0o600); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpPath, r.path); err != nil {
-		return err
-	}
-	cleanup = false
-	return nil
+	return jsonio.Write(r.path, childRegistryFile{Children: records})
 }
 
 // Register adds a child record to the registry, replacing any prior entry

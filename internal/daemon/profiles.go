@@ -6,9 +6,9 @@ import (
 
 	"github.com/shinpr/galley/internal/fileutil"
 	"github.com/shinpr/galley/internal/galleyhome"
+	"github.com/shinpr/galley/internal/proc"
 	"github.com/shinpr/galley/internal/profile"
 	"github.com/shinpr/galley/internal/retry"
-	"github.com/shinpr/galley/internal/runner"
 )
 
 type resolvedProfileFiles struct {
@@ -123,10 +123,10 @@ func resolveWorktreeStartPoint(ctx context.Context, opts Options, sourceCWD, bas
 // origin-less local repositories (smoke test, fresh clones without a remote)
 // keep using the refs/heads/<base> fallback path.
 func hasOriginRemote(ctx context.Context, opts Options, sourceCWD string) bool {
-	_, err := runner.RunCommand(ctx, runner.Command{
+	_, err := proc.RunCommand(ctx, proc.Command{
 		WorkDir: "",
-		Argv:    runner.GitArgs(opts.GitBin, "-C", sourceCWD, "remote", "get-url", "origin"),
-	}, runner.RunOptions{TailBytes: -1})
+		Argv:    proc.GitArgs(opts.GitBin, "-C", sourceCWD, "remote", "get-url", "origin"),
+	}, proc.RunOptions{TailBytes: -1})
 	return err == nil
 }
 
@@ -141,10 +141,10 @@ func fetchOriginRef(ctx context.Context, opts Options, sourceCWD, base string) e
 	// flake). The retry helper preserves the original error type so the
 	// fmt.Errorf wrap below surfaces the same value to callers.
 	err := retry.Do(ctx, func(ctx context.Context) error {
-		_, runErr := runner.RunCommand(ctx, runner.Command{
+		_, runErr := proc.RunCommand(ctx, proc.Command{
 			WorkDir: "",
-			Argv:    runner.GitArgs(opts.GitBin, "-C", sourceCWD, "fetch", "--no-tags", "--quiet", "origin", base),
-		}, runner.RunOptions{TailBytes: -1})
+			Argv:    proc.GitArgs(opts.GitBin, "-C", sourceCWD, "fetch", "--no-tags", "--quiet", "origin", base),
+		}, proc.RunOptions{TailBytes: -1})
 		return runErr
 	})
 	if err != nil {
@@ -154,10 +154,10 @@ func fetchOriginRef(ctx context.Context, opts Options, sourceCWD, base string) e
 }
 
 func refExists(ctx context.Context, opts Options, sourceCWD, ref string) (bool, error) {
-	result, err := runner.RunCommand(ctx, runner.Command{
+	result, err := proc.RunCommand(ctx, proc.Command{
 		WorkDir: "",
-		Argv:    runner.GitArgs(opts.GitBin, "-C", sourceCWD, "show-ref", "--verify", "--quiet", ref),
-	}, runner.RunOptions{TailBytes: -1})
+		Argv:    proc.GitArgs(opts.GitBin, "-C", sourceCWD, "show-ref", "--verify", "--quiet", ref),
+	}, proc.RunOptions{TailBytes: -1})
 	if err != nil {
 		if result.ExitCode == 1 {
 			return false, nil

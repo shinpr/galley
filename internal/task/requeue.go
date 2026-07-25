@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/shinpr/galley/internal/strutil"
+	"github.com/shinpr/galley/internal/fileutil"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -66,14 +66,7 @@ func Requeue(path string, opts RequeueOptions) (RequeueResult, error) {
 			Reversibility: "high",
 		})
 	}
-	loaded.Attempts = append(loaded.Attempts, Attempt{
-		Number:            len(loaded.Attempts) + 1,
-		StartedAt:         time.Now().UTC().Format(time.RFC3339Nano),
-		CompletedAt:       time.Now().UTC().Format(time.RFC3339Nano),
-		ClaudeStatus:      "not_run",
-		SupervisorVerdict: "requeued",
-		Summary:           strutil.FirstNonEmpty(opts.Reason, "Task requeued for another executor attempt."),
-	})
+	appendLifecycleAttempt(&loaded, "requeued", opts.Reason, "Task requeued for another executor attempt.", time.Now())
 
 	nextPath := queuedPathFor(path, opts.Root)
 	if nextPath == path {
@@ -107,7 +100,7 @@ func writeQueuedTask(src, dst string, loaded Task, removeSource bool) error {
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", dst, err)
 	}
-	if err := writeFileNoOverwriteAtomic(dst, data, 0o600); err != nil {
+	if err := fileutil.WriteFileNoOverwriteAtomic(dst, data, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", dst, err)
 	}
 	if removeSource {

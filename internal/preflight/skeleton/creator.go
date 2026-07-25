@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/shinpr/galley/internal/jsonio"
+	"github.com/shinpr/galley/internal/proc"
+	"github.com/shinpr/galley/internal/provider"
 	"github.com/shinpr/galley/internal/runartifact"
 	"github.com/shinpr/galley/internal/runner"
 	claudeguard "github.com/shinpr/galley/internal/runner/claude_guard_plugin"
@@ -93,16 +95,16 @@ func marshalBuiltinCreatorRequest(opts Options, allowed []string) ([]byte, *pref
 // provider selected from the task implementation executor backend. The
 // Codex path runs through the Codex command planner; the Claude path keeps the
 // existing Claude creator behavior including the JSON guard plugin.
-func buildBuiltinCreatorCommandPlan(opts Options, payload []byte) (runner.Command, *preflightErr) {
-	if task.ExecutorProvider(opts.Task) == "grok" {
+func buildBuiltinCreatorCommandPlan(opts Options, payload []byte) (proc.Command, *preflightErr) {
+	if task.ExecutorTransport(opts.Task) == provider.TransportGrok {
 		return buildGrokCreatorCommandPlan(opts, payload)
 	}
-	if task.ExecutorProvider(opts.Task) == "codex" {
+	if task.ExecutorTransport(opts.Task) == provider.TransportCodex {
 		return buildCodexCreatorCommandPlan(opts, payload)
 	}
 	cmd, perr := buildClaudeCreatorCommandPlan(opts, payload)
 	if perr != nil {
-		return runner.Command{}, perr
+		return proc.Command{}, perr
 	}
 	if err := runner.ConfigureClaudeProvider(&cmd, runner.ClaudeProviderOptions{
 		Provider: opts.Task.Executor.CLI,
@@ -111,7 +113,7 @@ func buildBuiltinCreatorCommandPlan(opts Options, payload []byte) (runner.Comman
 			KimiAPIKey:   opts.KimiAPIKey,
 		},
 	}); err != nil {
-		return runner.Command{}, creatorErr("%v", err)
+		return proc.Command{}, creatorErr("%v", err)
 	}
 	return cmd, nil
 }
@@ -119,18 +121,18 @@ func buildBuiltinCreatorCommandPlan(opts Options, payload []byte) (runner.Comman
 // buildClaudeCreatorCommandPlan builds the Claude provider creator command
 // plan. Task executor model and effort are propagated so the creator run uses
 // the same executor backend configuration as the implementation attempt.
-func buildClaudeCreatorCommandPlan(opts Options, payload []byte) (runner.Command, *preflightErr) {
+func buildClaudeCreatorCommandPlan(opts Options, payload []byte) (proc.Command, *preflightErr) {
 	bin := opts.ClaudeBin
 	if bin == "" {
 		bin = "claude"
 	}
 	guardDir, err := claudeguard.Ensure(filepath.Join(opts.RunDir, "claude-guard-plugin"))
 	if err != nil {
-		return runner.Command{}, creatorErr("prepare creator JSON guard: %v", err)
+		return proc.Command{}, creatorErr("prepare creator JSON guard: %v", err)
 	}
 	guardDir, err = filepath.Abs(guardDir)
 	if err != nil {
-		return runner.Command{}, creatorErr("resolve creator JSON guard: %v", err)
+		return proc.Command{}, creatorErr("resolve creator JSON guard: %v", err)
 	}
 	commandPlan, err := runner.ClaudeCommandPlan(runner.ClaudeOptions{
 		Bin:            bin,
@@ -145,13 +147,13 @@ func buildClaudeCreatorCommandPlan(opts Options, payload []byte) (runner.Command
 		AttemptDir:     opts.RunDir,
 	})
 	if err != nil {
-		return runner.Command{}, creatorErr("plan built-in creator: %v", err)
+		return proc.Command{}, creatorErr("plan built-in creator: %v", err)
 	}
 	commandPlan.EnvAppend = []string{"GALLEY_CLAUDE_GUARD_MODE=acceptance_skeleton_creator"}
 	return commandPlan, nil
 }
 
-func writeBuiltinCreatorCommandPlan(runDir string, commandPlan runner.Command) *preflightErr {
+func writeBuiltinCreatorCommandPlan(runDir string, commandPlan proc.Command) *preflightErr {
 	planPath := runartifact.Path(runDir, runartifact.PreflightCreatorPlanFilename)
 	auditPlan := commandPlan
 	if err := jsonio.Write(planPath, auditPlan); err != nil {
@@ -160,10 +162,10 @@ func writeBuiltinCreatorCommandPlan(runDir string, commandPlan runner.Command) *
 	return nil
 }
 
-func runBuiltinCreatorCommand(ctx context.Context, opts Options, commandPlan runner.Command) (creatorManifest, *preflightErr) {
+func runBuiltinCreatorCommand(ctx context.Context, opts Options, commandPlan proc.Command) (creatorManifest, *preflightErr) {
 	stdoutPath := filepath.Join(opts.RunDir, "preflight_creator.stdout.jsonl")
 	stderrPath := filepath.Join(opts.RunDir, "preflight_creator.stderr.log")
-	out, err := runner.RunCommand(ctx, commandPlan, runner.RunOptions{
+	out, err := proc.RunCommand(ctx, commandPlan, proc.RunOptions{
 		Timeout:    time.Duration(opts.Task.ExecutionPolicy.TimeoutMS) * time.Millisecond,
 		StdoutPath: stdoutPath,
 		StderrPath: stderrPath,
@@ -188,7 +190,7 @@ func runBuiltinCreatorCommand(ctx context.Context, opts Options, commandPlan run
 // that file first and only falls back to the JSON event stream. Claude streams
 // the manifest directly on stdout.
 func resolveCreatorManifest(opts Options, stdoutTail, stdoutPath string) (creatorManifest, error) {
-	if task.ExecutorProvider(opts.Task) == "grok" {
+	if task.ExecutorTransport(opts.Task) == provider.TransportGrok {
 		data, readErr := os.ReadFile(stdoutPath)
 		if readErr != nil {
 			data = []byte(stdoutTail)
@@ -209,7 +211,7 @@ func resolveCreatorManifest(opts Options, stdoutTail, stdoutPath string) (creato
 		}
 		return manifest, nil
 	}
-	if task.ExecutorProvider(opts.Task) == "codex" {
+	if task.ExecutorTransport(opts.Task) == provider.TransportCodex {
 		lastMessagePath := filepath.Join(opts.RunDir, runner.CodexLastMessageFilename)
 		return extractCodexCreatorManifest(lastMessagePath, stdoutTail, stdoutPath)
 	}

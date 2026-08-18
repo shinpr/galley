@@ -43,7 +43,7 @@ For `requirement_basis`, `execution_plan`, and `test_or_quality_basis` files, ve
 
 The review procedure exists to produce a complete, actionable verdict while making revision loops converge. Complete and record each phase before starting the next: establishing the active review set, reviewing acceptance, and reviewing quality separately prevents the first discovered defect from consuming the review, preserves coverage of every active item, and lets persisted passes narrow later attempts.
 
-Follow the common Review Algorithm. Before Step 1, register each `Step N` heading below with TaskCreate. Use TaskUpdate to set Step 1 `in_progress`, then mark each step `completed` only after its stated result or gate is complete and set the next step `in_progress`. Keep exactly one step `in_progress` until Step 7 is complete. After marking Step 7 `completed`, return the final verdict only when every registered step is `completed`.
+Follow the common Review Algorithm and treat Steps 1-7 below as an evidence-gated sequence. Start with Step 1 and advance only after the current step's stated result or gate is complete. Before returning, resume the earliest applicable step whose required evidence is missing. Return the final verdict only after Step 7 and every preceding gate are complete.
 
 ## Step 1. Map Evidence And Set Scope
 
@@ -102,8 +102,6 @@ Reason from the provided evidence when it is complete. Use tools before acceptin
 # Decision Model
 
 Use the common Status Policy. Return `accepted` only when the review procedure is complete, every acceptance criterion and pending revision request has persisted or current evidence, and no finding blocks acceptance.
-
-Accepted is allowed only when every plausible wrong-behavior scenario discovered during review has either concrete evidence showing it is handled, or a non-blocking explanation that does not require another executor attempt. When a plausible bug can be fixed by another executor attempt, return `needs_revision` even if tests pass.
 
 Treat executor `hard_stop` as a claim to review, not as an automatic final state. Return `hard_stop` only when the blocker is external or genuinely unrecoverable by another executor attempt, such as a missing credential, destructive requirement, requirement to change paths listed in `task.scope.forbidden_paths`, unavailable external system, or contradictory acceptance criteria. If the executor stopped because of uncertainty, reluctance, insufficient investigation, local tool confusion, or a solvable implementation/verification problem, return `needs_revision` with a finding that states the alternative path and verification needed to complete it. Use the executor's `hard_stop.reason`, `attempted`, and `needed_to_continue` as evidence for that finding.
 

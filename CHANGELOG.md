@@ -6,6 +6,16 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.12.3 - 2026-08-18
+
+### Changed
+
+- Claude executor and supervisor prompts now gate workflow phases on required evidence without depending on TaskCreate or TaskUpdate, and supervisor revisions are limited to evidence-backed findings in the active review scope.
+
+### Fixed
+
+- Windows daemon process identity checks now use native process APIs, avoiding PowerShell startup timeouts during verification and interrupted-task recovery.
+
 ## v0.12.2 - 2026-07-25
 
 ### Fixed

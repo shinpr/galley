@@ -62,15 +62,13 @@ Read the files that exist. Focus on the newest attempt first.
 
 ## Repair Actions
 
-For a failed task with a clear next step:
-
-1. Add or update `revision_requests` in the task YAML.
-2. Reset unresolved AC statuses to `pending` where needed.
-3. Requeue through Galley CLI.
+When a failed task needs a task-changing human instruction, requeue it with:
 
 ```bash
-galley task requeue <task-id-or-task-file> --reason "retry after fixing the blocker"
+galley task requeue <task-id-or-task-file> --revision-request "<concrete next work>"
 ```
+
+Use the operational recovery commands below when the task contract does not change.
 
 ### Executor interruption recovery
 

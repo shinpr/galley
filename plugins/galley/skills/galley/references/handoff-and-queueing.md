@@ -1,63 +1,48 @@
 # Handoff and Queueing
 
-Use this reference when validating, repairing, or queueing a Galley task file.
+Use this reference when validating, repairing, queueing, or requeueing a Galley task file.
+
+## Requeue
+
+For a direct task-changing human instruction, run:
+
+```bash
+galley task requeue <task-id-or-task-file> --revision-request "<instruction>"
+```
+
+Use `--reason` only for operational context; it does not amend the task contract. Edit the task YAML only when the user explicitly requests a task edit.
 
 ## Validation Flow
 
 1. Locate the task file.
 2. Confirm it is a draft task file.
-3. Run validation:
+3. When the user requested a validated draft or has not yet authorized queueing, run:
 
 ```bash
 galley task validate <task-file>
 ```
 
 4. Repair YAML or task fields until validation succeeds.
-5. Check daemon status and resolve the daemon plan.
-6. Present the task summary, user-confirmable decisions, validation result, daemon status, and queue plan using the detailed queue approval format in `references/task-authoring.md`.
-7. Ask for explicit approval to queue.
+5. Determine whether the user's request or an affirmative response to a concrete task summary already authorizes queueing and daemon startup.
+6. Ask once only when the next action crosses the authority boundary defined in `SKILL.md`.
 
 For new task YAML that fails with decode or unmarshal errors, preserve the user's goal and AC content, then restore the file shape from the skill-bundled script `scripts/create_task_skeleton.py`. Repair the generated skeleton against `references/task.schema.json` instead of reading Galley source code or inventing struct shapes.
 
 ## Queue Flow
 
-Queue only after the user approves the exact task file, user-confirmable decisions, and daemon plan.
-
-Use execution settings approved during task authoring. If the user chose an explicit supervisor, carry that choice into the daemon command rather than trying to encode it in the task YAML.
-
-Check daemon status before presenting the final queue approval prompt:
-
-```bash
-galley daemon status --output json
-```
-
-If the daemon is already running, compare it with the approved execution settings. Surface mismatches that affect the user-visible plan, such as supervisor provider or PR automation. If the daemon is not running, ask whether to start it after queueing or only queue the task. Explain the main choices:
-
-- supervisor: `claude` by default, or `codex`/`glm`/`grok`/`kimi` when the user chooses. Grok uses its logged-in CLI state. The supervisor is the acceptance gate; present it as the user's choice.
-- PR automation, PR comment handling, base branch, and worktree cleanup come from the repository `environment.yaml`.
-- execution mode: `galley daemon start` for background execution, or `galley daemon run --once` for one queue drain.
-- concurrency: use defaults for ordinary tasks; increase parallelism when the user explicitly asks for it.
-
-For daemon-only handoff where a detailed task-authoring summary was already approved, use this compact daemon plan format when no daemon is running:
-
-```markdown
-Daemon status:
-| Item | Current / planned |
-| --- | --- |
-| Current daemon | not running |
-| Planned supervisor | `<approved-supervisor>` |
-| Environment operations | <pr.enabled/pr.base/pr.comments.enabled/pr.comments.reply/worktree.cleanup from environment.yaml> |
-| Planned command | `galley daemon start ...` |
-| Effect | If approved, the task starts after queueing; otherwise it waits in the queue. |
-
-Queue the task and start this daemon afterward, queue only, or change daemon options?
-```
+When queueing is authorized, run:
 
 ```bash
 galley task queue <task-file>
 ```
 
-After queueing, start the daemon only when the user approved daemon startup. Report the queued path, daemon status, and the exact command used or recommended.
+`task queue` validates before publishing. Report its queue destination. Repair and retry only when it rejects the task.
+
+Use the existing daemon and repository profile settings unless the user selected a change. Check daemon status when startup was requested or an explicit supervisor choice may conflict with a running daemon. Ask only when resolving the conflict requires a restart or changes the requested execution condition.
+
+When background startup is authorized, run `galley daemon start` with the selected supervisor flag when applicable. A successful command has completed the handoff; report its PID and log path and return without polling the task.
+
+Use `galley daemon run --once` or monitor task state only when the user explicitly requested foreground execution or monitoring.
 
 Main path: `galley task queue` targets the running daemon queue, or the default queue when no daemon is running. Drafts outside the daemon root are copied, so the source remains useful for review. Pass `--move` only when the source draft should be removed after queueing.
 
@@ -109,9 +94,7 @@ Schema/decode errors such as `field text not found in type task.Decision` mean a
 
 ## Approval Prompt
 
-Use the detailed final approval format in `references/task-authoring.md` for new or repaired tasks. It is the canonical queue approval surface because it includes task content, user-confirmable decisions, validation result, daemon settings, and queue plan.
-
-For a task file that was already reviewed in the same conversation, summarize only the queue target and daemon delta, then ask for explicit queue approval. If the user approves, queue the task and report the exact command output.
+When queueing is not authorized, use the compact task summary from `references/task-authoring.md` and ask once whether to perform the stated queue and daemon actions. Do not ask again after an affirmative answer unless the next action crosses the authority boundary defined in `SKILL.md`.
 
 ## Daemon Next Step
 
@@ -119,7 +102,6 @@ For continuous background execution:
 
 ```bash
 galley daemon start
-galley daemon status --output json
 ```
 
 For a single drain:

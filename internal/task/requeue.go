@@ -57,15 +57,6 @@ func Requeue(path string, opts RequeueOptions) (RequeueResult, error) {
 			loaded.RevisionRequests = append(loaded.RevisionRequests, request)
 		}
 	}
-	if opts.Reason != "" {
-		loaded.Decisions = append(loaded.Decisions, Decision{
-			ID:            fmt.Sprintf("requeue-%d", len(loaded.Decisions)+1),
-			Question:      "Why was this task requeued?",
-			Chosen:        opts.Reason,
-			Rationale:     "A reviewer or PR comment requested another executor attempt.",
-			Reversibility: "high",
-		})
-	}
 	appendLifecycleAttempt(&loaded, "requeued", opts.Reason, "Task requeued for another executor attempt.", time.Now())
 
 	nextPath := queuedPathFor(path, opts.Root)

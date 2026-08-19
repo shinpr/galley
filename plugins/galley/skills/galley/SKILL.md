@@ -19,12 +19,12 @@ Use this table to choose the active flow. Load every required file for that flow
 
 | Flow | Use when | Required files | Core invariant |
 | --- | --- | --- | --- |
-| Task authoring | User wants a Galley task YAML, ACs, scope, queueing, or task repair. | `references/task-authoring.md`, `references/authoring-quality.md`, `references/task.schema.json`, `scripts/create_task_skeleton.py` | User approves task direction, execution settings, and queueing; task YAML is generated from the skill skeleton and validates before queueing. |
-| Profile authoring | User wants `quality.yaml` or `environment.yaml`, or setup finds missing profiles. | `references/profile-authoring.md`, `references/authoring-quality.md`, `references/quality.schema.json`, `references/environment.schema.json` | Review strictness is chosen before repository inspection; profiles come from schema defaults, repository evidence, and user policy; profiles validate before completion. |
+| Task authoring | User wants a Galley task YAML, ACs, scope, queueing, or task repair. | `references/task-authoring.md`, `references/authoring-quality.md`; use `scripts/create_task_skeleton.py`; read `references/task.schema.json` only for validation shape errors. | The task gives the executor one complete outcome contract, uses existing defaults, and stops at the stage requested by the user. |
+| Profile authoring | User wants `quality.yaml` or `environment.yaml`, or setup finds missing profiles. | `references/profile-authoring.md`; read the matching profile schema only for creation or structural repair. | Profiles come from repository evidence, schema defaults, and unresolved user policy; profiles validate before completion. |
 | Setup / daemon | User wants installation, repository setup, daemon start/status/stop, supervisor choice, or PR automation setup. | `references/setup.md`; when profile creation is needed, switch to Profile authoring files. | Setup makes Galley usable for the target repo without requiring manual task YAML or daemon option knowledge; profile-owned behavior stays in profiles. |
-| Handoff / queue | User wants validation, queueing, requeueing, archiving, or daemon handoff for an existing task. | `references/handoff-and-queueing.md` | Queue and requeue happen only after validation and explicit user approval; report task file, queue target, daemon state, and next action. |
+| Handoff / queue | User wants validation, queueing, requeueing, archiving, or daemon handoff for an existing task. | `references/handoff-and-queueing.md` | Queue, requeue, and daemon actions require authority for their actual effects; a direct request supplies that authority unless the next action crosses the authority boundary below. |
 | Troubleshooting | A Galley command fails, reports a warning or available update, or the user asks why a task or run failed, stalled, became stale, or looks confusing. | `references/troubleshooting.md` | Classify command output or diagnose from task state and run evidence before selecting a recovery action; distinguish advisory notices from failures. |
-| Codex daemon/eval | Galley is being run from Codex CLI, especially sandboxed daemon execution or evals. | `references/codex.md` plus the active flow files. | Account for Codex sandbox and writable-root limits when starting daemons or creating sibling worktrees. |
+| Codex daemon/eval | Galley is being run from Codex CLI, especially sandboxed daemon execution or evals. | `references/codex.md` plus the active flow files. | Account for Codex sandbox and writable-root limits; background daemon startup is a handoff, not a monitoring loop. |
 
 Supplemental references:
 
@@ -34,12 +34,13 @@ Supplemental references:
 
 ## Global Invariants
 
-- Prefer the skill-led path: keep ordinary authoring conversational and keep daemon options profile-owned.
-- Use existing profiles and repository evidence before inventing checks, ACs, or command text.
-- Keep task content, profile policy, daemon startup, and queue approval as separate user decisions.
-- Validate generated task/profile YAML before queueing or reporting setup complete.
-- Ask for user approval before writing profiles, queueing tasks, or starting/restarting daemon processes.
-- Use the output templates from the routed references.
+- Use existing profiles and repository evidence before adding task-specific checks, settings, or questions.
+- Ask only when missing information changes the task outcome, a protected boundary, a user-owned policy, or an external action that lacks authority.
+- An action crosses the authority boundary when it uses a different target repository or base branch than the request or resolved profile, changes reviewed task or profile content beyond an explicitly requested revision, adds a remote or destructive effect not authorized by the request or resolved profile, or changes an explicitly selected executor, supervisor, queue root, or run mode.
+- Treat a direct request to write a profile, queue a task, or start/restart a daemon as authority for that action. Ask again only when the next action crosses this boundary.
+- Use bundled scripts and Galley commands for deterministic defaults and validation.
+- Return after a successful background daemon start unless the user explicitly requested monitoring.
+- Use the output contract from the routed reference.
 
 ## References
 

@@ -16,12 +16,9 @@ Read-only commands such as `galley task validate`, `galley task show`, `galley t
 
 ## Daemon Execution
 
-When running the daemon from Codex, operate as a broker and carry one run to a terminal state.
+`galley daemon start` launches a background process and returns after its startup readiness check. Run it with the required sandbox authority, report the command result, and return control to the user.
 
-1. Confirm the task is queued with `galley task show <task-id-or-file>`.
-2. Start the daemon command with a tool timeout long enough for the task.
-3. Stay attached until the task reaches `done`, `failed`, or the command times out.
-4. Report the final task status from `galley task show <task-id>`.
+Stay attached only when the user explicitly requests monitoring or chooses a foreground command such as `galley daemon run --once`. Diagnose queue or run state only after an observed failure, stale state, or explicit status request.
 
 ## Common Errors
 

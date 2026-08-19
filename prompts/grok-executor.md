@@ -20,7 +20,7 @@ Execute the following steps in order. A step is complete when its gate is suppor
 
 ## Step 1. Map The Contract
 
-Identify the goal, every acceptance criterion, allowed and forbidden paths, input materials, required checks, environment constraints, and pending supervisor requests. Classify each supplied input file as requirement basis, execution plan, test/quality basis, or context evidence. Read every requirement, execution-plan, and test/quality input before planning; use context evidence when it affects a changed path or verification claim.
+Identify the goal, active task contract, allowed and forbidden paths, input materials, required checks, environment constraints, and pending supervisor requests. Classify each supplied input file as requirement basis, execution plan, test/quality basis, or context evidence. Read every requirement, execution-plan, and test/quality input before planning; use context evidence when it affects a changed path or verification claim.
 
 Gate: each required outcome and its evidence source are identified.
 
@@ -50,7 +50,7 @@ Gate: required checks have passed evidence or an explicit limitation, and focuse
 
 ## Step 6. Reconcile Evidence
 
-Compare the final diff, active tests, and command results with every acceptance criterion. Build `files_modified` from the final Git-visible changed-file set. Mark a criterion satisfied when current production behavior and evidence prove it; otherwise continue implementation or report the bounded limitation.
+Compare the final diff, active tests, and command results with every item in the active task contract. Build `files_modified` from the final Git-visible changed-file set. Mark an item satisfied when current production behavior and evidence prove it; otherwise continue implementation or report the bounded limitation.
 
 Gate: result claims match the current workspace without relying on planned behavior, placeholders, skipped assertions, or executor self-report alone.
 
@@ -58,7 +58,7 @@ Gate: result claims match the current workspace without relying on planned behav
 
 Return the schema-constrained result after the preceding gates complete. Use `completed` when implementation and required evidence satisfy the contract. Use `completed_with_risks` when the implementation is coherent and only bounded verification limitations or residual risks remain.
 
-When meaningful progress requires unavailable credentials or services, a destructive or forbidden action, contradictory acceptance criteria, unreadable required files, or required tooling with no permitted alternative, return `hard_stop` with the attempted paths and exact unblock requirement.
+When meaningful progress requires unavailable credentials or services, a destructive or forbidden action, an active task contract that remains contradictory after human amendments, unreadable required files, or required tooling with no permitted alternative, return `hard_stop` with the attempted paths and exact unblock requirement.
 
 # Evidence Rules
 

@@ -6,6 +6,19 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.12.4 - 2026-08-19
+
+### Fixed
+
+- `galley task requeue --revision-request` now persists a task-changing human instruction as a pending revision request.
+
+### Changed
+
+- Packaged Galley plugins are now versioned as `0.1.32`.
+- Galley skill guidance now builds task contracts and repository profiles from decision-relevant evidence, loads only flow-relevant references, reuses existing defaults, treats direct requests for profile writes, queue operations, and daemon starts or restarts as authority within a defined action boundary, and returns after background daemon handoff unless monitoring was requested.
+- `galley task requeue --reason` now records operational lifecycle context without creating a task decision.
+- Work orders and executor/supervisor prompts now apply pending human revision requests in task order as amendments to the affected acceptance or verification obligation while preserving unaffected task terms and quality gates.
+
 ## v0.12.3 - 2026-08-18
 
 ### Changed

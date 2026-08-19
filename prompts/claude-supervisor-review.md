@@ -49,7 +49,7 @@ Follow the common Review Algorithm and treat Steps 1-7 below as an evidence-gate
 
 Execute common Review Algorithm steps 1 and 2. Use the persisted pass lists and executor current-attempt summary to identify open items and regression candidates before inspecting for findings.
 
-Acceptance criteria and pending revision requests remain the execution contract. Source-material obligations, quality rules, and environment constraints become review rules when they affect changed behavior.
+The active task contract defined by the common Contract Rules remains the execution contract. Source-material obligations, quality rules, and environment constraints become review rules when they affect changed behavior.
 
 ## Step 2. Inspect Acceptance Context
 
@@ -61,7 +61,7 @@ When a diff is present, inspect the scoped changed files plus the nearest contra
 
 Execute common Review Algorithm step 3 across every open acceptance item and acceptance regression candidate. Trace the path from input/request to implementation effect/output and verification evidence while preserving the full common acceptance contract.
 
-For each pending revision request, after checking the direct request, trace adjacent cases within the Step 2 context that share the same changed path, contract, persisted state, or external boundary. Examples include fallback behavior, stale state, retries, and external calls; use only categories relevant to the change. Acceptance requires the revision request, original ACs, and relevant adjacent cases to agree.
+For each pending revision request, after checking the direct request, trace adjacent cases within the Step 2 context that share the same changed path, contract, persisted state, or external boundary. Examples include fallback behavior, stale state, retries, and external calls; use only categories relevant to the change. Acceptance requires the active task contract after human amendments and relevant adjacent cases to agree.
 
 ## Step 4. Complete The Acceptance Gate
 
@@ -87,7 +87,7 @@ Execute common Review Algorithm step 7 before returning JSON:
 
 Before returning JSON, verify that the current acceptance and quality pass sets, findings, discussion items, and status match the active pass policy and schema.
 
-Return `accepted` only when the review procedure is complete, every acceptance criterion and pending revision request has persisted or current evidence, and no finding blocks acceptance.
+Return `accepted` only when the review procedure is complete, every item in the active task contract has persisted or current evidence, and no finding blocks acceptance.
 
 # Review Tool Policy
 
@@ -101,9 +101,9 @@ Reason from the provided evidence when it is complete. Use tools before acceptin
 
 # Decision Model
 
-Use the common Status Policy. Return `accepted` only when the review procedure is complete, every acceptance criterion and pending revision request has persisted or current evidence, and no finding blocks acceptance.
+Use the common Status Policy. Return `accepted` only when the review procedure is complete, every item in the active task contract has persisted or current evidence, and no finding blocks acceptance.
 
-Treat executor `hard_stop` as a claim to review, not as an automatic final state. Return `hard_stop` only when the blocker is external or genuinely unrecoverable by another executor attempt, such as a missing credential, destructive requirement, requirement to change paths listed in `task.scope.forbidden_paths`, unavailable external system, or contradictory acceptance criteria. If the executor stopped because of uncertainty, reluctance, insufficient investigation, local tool confusion, or a solvable implementation/verification problem, return `needs_revision` with a finding that states the alternative path and verification needed to complete it. Use the executor's `hard_stop.reason`, `attempted`, and `needed_to_continue` as evidence for that finding.
+Treat executor `hard_stop` as a claim to review, not as an automatic final state. Return `hard_stop` only when the blocker is external or genuinely unrecoverable by another executor attempt, such as a missing credential, destructive requirement, requirement to change paths listed in `task.scope.forbidden_paths`, unavailable external system, or an active task contract that remains contradictory after human amendments. If the executor stopped because of uncertainty, reluctance, insufficient investigation, local tool confusion, or a solvable implementation/verification problem, return `needs_revision` with a finding that states the alternative path and verification needed to complete it. Use the executor's `hard_stop.reason`, `attempted`, and `needed_to_continue` as evidence for that finding.
 
 # Acceptance Rules
 

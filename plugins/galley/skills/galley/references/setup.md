@@ -4,7 +4,7 @@ Use this reference when installing Galley, configuring a repository, starting th
 
 ## Setup Intake
 
-Treat setup as a first-time Galley experience. Before asking the user to approve or choose a setup action, present the available options and explain the Galley-specific meaning of each option in plain terms. Use the detailed intake templates from the referenced flow when setup enters profile authoring, daemon startup, PR automation, or queueing decisions.
+Use existing installation, profile, and daemon state before asking a question. Ask only when the next action crosses the authority boundary defined in `SKILL.md`, and combine all unresolved choices into one prompt.
 
 ## Preflight
 
@@ -43,7 +43,7 @@ The installer installs the `galley` binary. By default it downloads a prebuilt G
 
 ## CLI Updates
 
-After approval:
+When the user requested or otherwise authorized an update:
 
 1. Run `<galley-bin> daemon status --output json` and retain its `running` and `verified` values. When it reports `running: true` and `verified: false`, report the status and wait for direction.
 2. Run the release installer for the current platform. Continue only when it exits 0 and `<galley-bin> --version` matches the latest version from the notice.
@@ -73,7 +73,7 @@ Galley uses `~/.galley` by default:
       environment.yaml
 ```
 
-Create directories through Galley commands when available. If creating them manually, keep task YAML files in `draft/` until validation and approval.
+Create directories through Galley commands when available. If creating them manually, keep task YAML files in `draft/` until validation and authorized queueing.
 
 Resolve the repository-specific profile paths with the same target repository path that task YAML will use as `scope.cwd`:
 
@@ -89,15 +89,14 @@ Advanced roots: use `--root <path>` only when the user intentionally runs a non-
 
 Setup includes repository profiles. After resolving the profile paths:
 
-- If `quality.yaml` or `environment.yaml` is missing, explain profiles and create them from this flow. Use `references/profile-authoring.md` and `references/authoring-quality.md` for deeper guidance when available.
-- Profile creation starts by reading `references/quality.schema.json` and `references/environment.schema.json`; use schema defaults as the proposed values unless repo evidence or user choices point elsewhere.
+- If `quality.yaml` or `environment.yaml` is missing, explain profiles and create them from this flow. Use `references/profile-authoring.md` for deeper guidance when needed.
+- Read the schema for each missing or structurally invalid profile; use schema defaults unless repository evidence or user choices supply a value.
 - `quality.yaml` proposal includes required checks, review dimensions, evidence requirements, and blocking severities.
 - `environment.yaml` proposal includes cwd, commands, optional setup commands for fresh worktree readiness, implementation executor default, optional required-check shell, network/secrets/destructive-command constraints, PR creation, PR comment handling, base branch, and worktree cleanup.
-- The profile intake order is schema review, review strictness, implementation executor choice, supervisor choice, then repository inspection approval. Store the implementation executor choice in `environment.yaml` as `executor.default_cli`. The supervisor has two save targets — ask which the user wants and do not mix them: a repository default in `environment.yaml` `supervisor.default_cli` (overrides per task for this repo), or a daemon-wide choice applied at daemon start (`--supervisor` / `daemon.yaml`). PR automation is a profile proposal decision.
-- Profile creation requires repository inspection approval and profile approval before writing files.
-- Inspect the repository after approval, then draft candidate profiles from discovered commands, CI, README, config, and existing local guidance.
+- Inspect the repository and draft candidate profiles from discovered commands, CI, README, config, local guidance, and schema defaults. Read-only inspection does not require approval.
+- Store an explicitly selected implementation executor in `environment.yaml` as `executor.default_cli`. Store a supervisor choice in the repository profile only when the user selected repository scope; otherwise keep it in daemon startup state. PR automation remains a profile policy decision.
 - Present one combined profile proposal after inspection. Include the evidence behind each required check and each environment setting.
-- Ask for approval and additional repository-specific standards before writing profiles.
+- A direct request to create profiles authorizes the proposed values that match that request. Otherwise ask once before writing the combined proposal.
 - Validate both profiles before reporting setup complete.
 
 When setup needs to ask for both backend choices, use this shape during profile intake:
@@ -122,7 +121,7 @@ Answer each separately:
 
 ## Daemon Commands
 
-Choose daemon settings before startup. Explain the defaults and ask for changes when the user has not already chosen:
+Use the current profile and daemon defaults for unspecified settings. Ask only when an explicit requested setting conflicts with a running daemon or a missing user-owned policy prevents startup:
 
 - implementation executor: store repository defaults in `environment.yaml`. A task that sets `executor.cli` runs with the task's model and effort exactly as authored, with empty values delegating to that provider CLI; environment model and effort apply only when the task omits `executor.cli`, resolving each field from the task, then `environment.yaml`. When neither layer sets CLI, Galley uses Claude. When the resolved model is empty, the selected provider CLI chooses the model; when the resolved effort is empty, it chooses its own reasoning-effort default.
 - supervisor: Claude is the daemon default when unset; a non-default review backend from the list above can be selected at daemon start.

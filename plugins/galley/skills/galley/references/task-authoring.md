@@ -1,317 +1,121 @@
 # Task Authoring
 
-Use this reference when creating or repairing a Galley task YAML file.
+Use this reference to create or repair a Galley task YAML file.
 
-Task authoring has three approvals: task direction, execution settings, then queueing after validation. Keep task questions separate from execution-environment questions. When presenting settings or approval decisions, optimize for referenceability so the user can easily name the item to change.
+## Completion Boundary
 
-Use `references/authoring-quality.md` for goal, AC, quality gate, reference file, and question strategy rules. Use `references/task.schema.json` as the machine-readable task YAML contract bundled with this skill.
+A task is ready when the executor can implement one observable outcome without choosing a new product requirement or an unapproved durable design decision.
 
-## Step 1: Ask For Reference Material, Destination, And Commit Policy First
+Determine the stopping point from the user's request:
 
-For a new implementation task, first ask one combined question about reference material and file handling. Reference files may contain the goal, requirements, target area, design decisions, boundaries, and verification plan, so complete reference-file intake before collecting additional task details. Ask this as a standalone question before repository investigation, profile resolution, design choices, execution settings, or payload-shape questions. Existing specs or work plans may already contain the goal, ACs, execution boundary, test plan, and design decisions.
+- acceptance criteria only: present the criteria and stop;
+- task authoring: create and validate a draft, then stop;
+- queueing: create and queue the task;
+- queueing with daemon startup: queue the task, start the requested background daemon, and return after startup succeeds.
 
-If the user already supplied planning/reference files or named an existing PRD, design, work plan, issue, review, log, screenshot, or docs path, treat that as reference-file intake. When path/content, execution-workspace destination, and commit policy are all present, read those files before asking task-design questions. When destination or commit policy is missing, ask for the missing file-handling details first.
+## Authoring Flow
 
-Use this standalone prompt:
+### 1. Gather Decision-Relevant Evidence
 
-```markdown
-Do you have any specs, work plans, issue links/exports, review notes, logs, screenshots, or other reference files I should use for this task?
+Resolve the target repository from the current git root or an explicit user path. Inspect:
 
-If yes, provide these three items for each file:
-1. Path or content
-2. Destination inside the execution workspace, such as `tmp/work-plan.md` or `doc/work-plan.md`
-3. Whether the file should be included in the final commit: `include` or `context-only`
+- supplied issues, specifications, plans, reviews, logs, or screenshots;
+- repository instructions and the responsibility that owns the changed behavior;
+- representative callers, consumers, and tests when they can change scope or verification;
+- resolved Galley profiles and repository-owned quality commands.
 
-If none, answer `none`.
-```
+Treat a supplied link or document as an evidence source. Add it to `files[]` only when the executor needs a local copy that cannot be replaced by the extracted task contract. Context-only is the default for copied evidence; commit it only when the user requested it as repository output.
 
-After the user answers:
+Stop investigating when more evidence cannot change the outcome, preserved boundary, expected edit scope, or verification method.
 
-- A complete reference-file answer contains path/content, destination inside the execution workspace, and commit policy.
-- If references are provided with all three items, read them before asking task-design questions.
-- If a reference answer only provides a path or content, ask for the missing destination and commit policy before continuing.
-- If the user says none, proceed with the request text and repository evidence.
-- If a provided path cannot be read, record the risk and ask for usable content or a different path before relying on that source.
-- Carry each completed reference file into task direction and YAML as `files[].source`, `files[].destination`, and `files[].commit`.
+### 2. Complete the Task Contract
 
-If the user's answer includes references but is missing destination or commit policy, ask this compact follow-up:
+Apply `references/authoring-quality.md` to determine:
 
-```markdown
-I have the reference file path/content. I still need these two items before continuing:
+- one observable goal;
+- binding acceptance criteria;
+- behavior and contracts that this change must preserve;
+- the responsibility and paths expected to change;
+- the narrowest verification that can falsify each criterion;
+- any product or durable design decision the executor must not invent.
 
-- Destination inside the execution workspace, for example `tmp/work-plan.md` or `doc/work-plan.md`
-- Commit policy: include in the final commit, or context-only
-```
+Ask one focused question only when missing information prevents this contract from being written. Resolve repository-local reversible choices from evidence and leave implementation details to the executor.
 
-## Step 2: Understand Request And Inputs
+### 3. Resolve Profiles and Explicit Overrides
 
-Identify the target repository and user intent. Extract from the request and available reference material:
-
-- task essence: fix, feature, refactor, docs, investigation, or mixed
-- goal
-- AC candidates
-- implementation boundaries and exclusions
-- constraints and risks
-- verification signals
-- reference files that should be copied into the execution worktree
-
-Use available files when they exist. Treat supplied work plans and design docs as implementation guidance for the single Galley task unless the user explicitly asks for decomposition. Galley executes the approved request as one task. Use the whole supplied work plan or design doc as implementation guidance for that single task. Use task decomposition only when the user explicitly requests it. When available request text or supplied references identify the target product area, carry that target into task direction and ask for approval there. Ask for missing documents only when the missing information blocks goal, AC, implementation boundary, or verification definition.
-
-## Step 3: Inspect Repository And Profiles
-
-Use the current git repository root as the target repository. Galley task authoring is normally run from inside the repository being automated.
-
-Use a user-provided repository path when the user explicitly gives one. When the current shell is outside a git repository and the user has not provided a path, ask for the target repository path before continuing.
-
-Keep the repository choice anchored to the current git root or explicit user path. Treat feature names, tool names, package names, and references to Galley itself as task context inside that repository. Always show the resolved repository path in Step 4 task direction as `Execution target repository` so the user can correct it before approval.
-
-Explore the resolved target repository with the goal of finding enough local guidance to draft a correct task:
-
-- repository root and clean/dirty status
-- local agent instructions, project skills, or contribution guidance that apply to the requested task
-- README/docs that explain the affected feature or workflow
-- CI, package scripts, Makefile/justfile targets, or existing tests that should inform verification
-- relevant source areas and tests for the requested change
-
-Stop repository exploration when you can name the repo root, relevant local guidance, affected paths, verification signals, and any dirty-worktree risk. Keep exploration inside the resolved target repository. User-supplied external reference files are handled through Step 1 destination and commit-policy approval.
-
-Resolve existing Galley profiles:
+Run:
 
 ```bash
 galley profile resolve --cwd <absolute-target-repo> --output json
 ```
 
-Use the same absolute target repository path for `galley profile resolve --cwd` and task `scope.cwd`. If the resolved `quality.yaml` or `environment.yaml` does not exist, create profiles with `references/profile-authoring.md` before task drafting continues.
+Use existing profile and skeleton defaults without presenting them as task decisions. Switch to profile authoring only when a required profile is missing or the user requested a profile change.
 
-Before Step 4, resolve the repository executor default:
+Resolve the effective executor before queueing. When task `executor.cli` is set, use its task model and effort as authored and let empty values fall through to that CLI; otherwise fill empty task fields from the environment profile, default an empty CLI to Claude, and leave any remaining model or effort to the selected CLI. For a resolved GLM or Kimi executor, verify the matching daemon API key; for Grok, verify the installed CLI is authenticated.
 
-When `environment_exists` is true, inspect the returned `environment_profile_file` before Step 5. Use the profile's `executor.default_cli` value as the repository executor default when present. If the current `galley` binary supports it, the focused lookup is:
+Write `executor.cli`, `executor.model`, or `executor.effort` only when the user explicitly selected the override. Preserve the exact model value supplied by the user. When compatibility is unknown and can make execution fail, verify it with the selected CLI or report the exact unresolved compatibility issue.
 
-```bash
-galley profile executor-default --output json <environment-profile-file>
-```
+### 4. Generate and Fill the Skeleton
 
-If that command is unavailable, read the profile YAML directly and use only the top-level `executor.default_cli` value. Treat an absent value as unset.
-
-## Step 4: Confirm Task Direction
-
-Before discussing Galley runtime settings or writing task YAML, present the proposed task direction and ask for approval. Include:
-
-- goal
-- task essence
-- AC direction
-- key design decisions to encode
-- verification proof strategy for behavior-changing ACs
-- execution target repository, implementation boundaries, allowed paths, and protected paths
-- reference files and commit policy
-- reference file execution-workspace destinations
-- quality/profile basis
-
-Use a direct approval question, not an open-ended label:
-
-```markdown
-Task direction:
-- Goal: <goal>
-- Acceptance criteria direction: <AC summary>
-- Verification proof strategy: <primary failure modes, boundaries, state, and residuals for behavior-changing ACs>
-- Execution target repository: <absolute repo path>
-- Implementation boundaries: <included behavior/areas>
-- Allowed paths: <paths needed for edits and reference-file destinations>
-- Protected paths: <paths>
-- Reference files: <files or none>
-- Reference file destination: <source -> destination>
-- Reference file commit policy: <context-only or committed files>
-- Quality basis: <profile or repo evidence>
-
-Approve this task direction before I choose execution settings and create the task YAML?
-```
-
-Ask targeted task questions here when they affect correctness, safety, implementation boundaries, allowed paths, or verification. Write YAML only after the user approves the task direction or provides adjustments.
-
-## Step 5: Confirm Execution Settings
-
-After task direction approval, check the current daemon state before proposing execution settings:
-
-```bash
-galley daemon status --output json
-```
-
-Interpret daemon-dependent settings before asking:
-
-- If a verified daemon is already running, use its current daemon settings as the execution condition. Present supervisor, concurrency, polling interval, claim TTL (which also sets heartbeat cadence to `min(claim_ttl/4, 1m)`), and shutdown timeout as current daemon state, not user-selectable task options.
-- Repository operation settings come from `environment.yaml`: PR creation, PR base branch, PR comment polling/replies, and worktree cleanup.
-- Galley-owned required-check execution settings also come from `environment.yaml`: `required_checks.shell` controls the shell Galley uses when it runs `quality.required_checks` after an executor attempt.
-- Resolve executor settings from the task and `environment.yaml`. When task `executor.cli` is non-empty, use its CLI, model, and effort as-is. Otherwise fill each empty task field from `environment.yaml`; default an empty CLI to `claude` and leave empty model or effort to the selected CLI.
-- Ask for the review supervisor (`claude`, `codex`, `glm`, `grok`, or `kimi`) only when no verified daemon is running or the user wants to restart it. A verified running daemon's supervisor is current state, not a task setting.
-- If no daemon is running, ask the user to approve the planned daemon startup settings because they will be applied when starting the daemon.
-- If daemon status is unclear, report that uncertainty and ask whether to inspect or start a fresh daemon before queueing.
-
-Then propose execution settings with user-facing explanations and choices. Treat `loop_budget: 10` as the ordinary-task baseline. For ordinary tasks, set `timeout_ms` to at least `3600000` (60 minutes) so a productive executor can complete the attempt without being interrupted.
-
-Execution-setting content requirements:
-
-- Task YAML settings: optional executor overrides, edit authority, retry budget, per-attempt timeout, and AC test skeleton preflight (`enabled` only). Galley owns fixed AFK and lifecycle values.
-- Environment profile settings: PR behavior, PR base branch, PR comments, worktree cleanup, and required-check shell from the current `environment.yaml`; create missing profiles through `references/profile-authoring.md` before queueing ordinary implementation work. Required-check shell controls Galley's own `quality.required_checks` execution, not executor/supervisor-internal commands or daemon startup flags.
-- Effective executor: present CLI, model, and effort with source `task`, `environment`, `built-in` (CLI only), or `CLI default`. When task `executor.cli` is non-empty, an empty task model or effort has source `CLI default` even if the environment provides a value. Validate non-empty effort for the effective CLI. GLM and Kimi require `glm_api_key` or `kimi_api_key`; Grok requires its authenticated CLI.
-- Executor model override (`executor.model`): omit it by default so the selected CLI uses its configured default model. If the user names a model, record that exact value. If the user is unsure or the model name was inferred, do not guess; offer a small runtime smoke check before queueing because available model names depend on the user's account, provider, CLI configuration, and CLI version.
-- Supervisor: present the current daemon supervisor when verified. Otherwise present `claude`, `codex`, `glm`, `grok`, or `kimi`; the default is Claude. The supervisor controls review only and is independent from `executor.cli`.
-- Daemon concurrency: present planned or current `max_concurrent_tasks` and `max_concurrent_per_repo`. Explain that default or low concurrency fits a single heavy task, while higher values are available for parallel execution.
-- AC test skeleton preflight (`preflight.acceptance_skeleton.enabled`): present one of these values:
-  - `enabled`: a pre-created integration, cross-layer, or E2E skeleton adds protection beyond executor-authored tests because the acceptance path is likely to be missed, weakened, or deferred.
-  - `disabled`: executor-authored focused unit or package tests, or existing required checks, already define the evidence path.
-- Preflight prerequisite and ownership: clarify unclear ACs with `references/authoring-quality.md` before choosing. When enabled, Galley derives the kind, path, and content on the effective executor backend.
-- For each user-changeable setting, include the recommended or current value, why it fits the current task, and practical alternatives.
-- For settings stored outside task YAML, name the change path, such as `environment.yaml` edits or daemon restart with different flags.
-
-Presentation guidance:
-
-Use a readable format appropriate to the amount of explanation. Prefer concise bullets when reasons are long. Use compact tables only when each entry stays short. The required part is the decision content above, not a specific visual format.
-
-Ask the user to approve the execution settings or name the item to change before generating task YAML.
-
-Record the approved task YAML settings, current quality profile blocking severities, environment profile operation settings, and the current or planned daemon startup settings for the queue/daemon step. The task YAML stores the task content; repository operation behavior is applied from `environment.yaml`; daemon startup behavior is applied by the running daemon or the command used when starting it.
-
-## Step 6: Generate Skeleton
-
-For new tasks, start from the skill-bundled skeleton script instead of writing YAML from scratch. Run the script at `<this-skill-directory>/scripts/create_task_skeleton.py`.
-
-Basic draft:
+Create new tasks with the bundled script:
 
 ```bash
 python3 <this-skill-directory>/scripts/create_task_skeleton.py "<short task title>" \
   --cwd <absolute-target-repo> \
   --output-dir <draft-dir> \
-  --allowed-path <relative-path> \
-  --permission sandbox-full-access \
-  --loop-budget 10
+  --allowed-path <relative-path>
 ```
 
-The skeleton writes `executor.cli` only when `--executor-cli` is supplied. Otherwise it omits the executor block so runtime environment defaults remain authoritative.
+Add only explicitly selected non-default flags. Edit the generated fields rather than recreating the schema by hand.
 
-With a context-only specification, work plan, log, screenshot note, issue export, or review note supplied by the user:
+Fill the task as follows:
 
-```bash
-python3 <this-skill-directory>/scripts/create_task_skeleton.py "<short task title>" \
-  --cwd <absolute-target-repo> \
-  --output-dir <draft-dir> \
-  --allowed-path src \
-  --allowed-path README.md \
-  --allowed-path tmp \
-  --reference-file /absolute/path/to/work-plan.md=tmp/work-plan.md
-```
+- `goal`: the single observable outcome;
+- `acceptance_criteria`: the smallest set that proves the outcome and material preserved boundaries;
+- `scope.allowed_paths`: the expected implementation responsibility and any verification file required for the same outcome;
+- `scope.forbidden_paths`: paths that need mechanical protection;
+- `decisions`: binding product, contract, or durable design choices the executor must preserve; otherwise `[]`;
+- `risks`: evidence-backed material risks that change implementation or verification; otherwise `[]`;
+- `files`: local evidence the executor must read, with a safe workspace destination and commit policy;
+- `executor`: explicit task overrides only.
 
-Use `--committed-file SOURCE=DESTINATION` only when the supplied file is intentionally part of the final branch.
+Use the generated execution policy and worktree values unless the user selected different values.
 
-## Step 7: Fill Skeleton With Schema
+### 5. Validate, Queue, and Report
 
-Edit the generated skeleton fields instead of replacing the whole file. Use `references/task.schema.json` as the field contract.
-
-New drafts contain author-owned fields. Galley resolves them as AFK drafts with worktree isolation and the fixed decision policy, then persists queued status and other lifecycle state during transitions. Common authoring shapes:
-
-```yaml
-acceptance_criteria:
-  - id: AC1
-    text: "Observable requirement."
-    verification: "Command, test, review evidence, or manual evidence source; include proof obligation when behavior changes."
-    status: pending
-
-decisions:
-  - id: D1
-    question: "What decision was made?"
-    chosen: "Selected option."
-    rationale: "Why this option was chosen."
-    reversibility: high
-    needs_human_review: false
-
-risks:
-  - id: R1
-    type: regression
-    detail: "What could go wrong."
-    mitigation: "How the executor should prevent or detect it."
-    human_review_suggested: false
-```
-
-Use `decisions: []` and `risks: []` when empty. Galley creates `attempts`, top-level `verification`, and `pr` after lifecycle transitions.
-
-## Field Guidance
-
-- `scope.permission`: prefer broad operations inside the isolated worktree (`sandbox-full-access`) for AFK implementation tasks; use investigation only (`read-only`) for review tasks; use normal edits (`edit`) when broad sandbox authority is unnecessary or unavailable.
-- `allowed_paths`: choose the narrowest expected implementation paths that cover approved edits and any reference-file destinations. This is the review baseline for scope expansion, not an absolute executor stop; `forbidden_paths` defines protected paths that must not be changed.
-- `executor.cli` / `model` / `effort`: write only values the user explicitly pins, preserve existing pins, and use exact model names. Task YAML contains no other executor fields.
-- `execution_policy.timeout_ms`: write the approved per-attempt value in milliseconds; ordinary tasks use at least `3600000` (60 minutes).
-- `preflight.acceptance_skeleton.enabled`: set the approved value. When enabled, write the initial preflight config only; runtime `outputs[]` are generated by the skeleton creator.
-- `files`: use it when the user attaches or names specs, work plans, logs, screenshots, issue exports, or other implementation references the executor should read in the worktree.
-- `files[].source`: use an absolute path or a path relative to the task YAML file. Galley resolves relative sources before queueing or requeueing.
-- `files[].destination`: use a relative path inside the execution workspace. It must stay within `scope.allowed_paths`, must not use parent traversal, and must not overwrite an existing file.
-- `files[].commit`: use `false` for context-only inputs; use `true` only when the supplied file is intentionally part of the final branch.
-- `execution_policy.loop_budget`: use `10` as the ordinary-task baseline for AFK implementation so Galley can complete corrective loops. Increase it for broader or more uncertain tasks. Use less than `5` only when the user explicitly wants a short, low-cost run; use `0` only when the user explicitly requests an unbounded loop.
-- Blocking severity is enforced by the resolved quality profile and supervisor policy, not by a top-level task schema field. Show the current profile threshold in execution settings and the final queue summary. Use profile authoring when the user wants to change repository-wide blocking severities. Record task-specific review preferences in `decisions` only as guidance.
-- `worktree.branch` / `worktree.path`: set the isolated branch and a sibling path outside the source repo, such as `../<repo-name>.worktrees/<short-name>`. Galley always enables AFK isolation.
-
-## Step 8: Validate And Repair
-
-Validate with the canonical command:
+When the requested stopping point is a validated draft, run:
 
 ```bash
 galley task validate <task-file>
 ```
 
-Use the positional form, as in `galley task validate path/to/task.yaml`.
+If validation reports a shape error, preserve the task contract, repair the generated skeleton against `references/task.schema.json`, and validate again.
 
-If validation reports decode or unmarshal errors:
+When queueing is authorized, run:
 
-1. Keep the user-approved goal, ACs, implementation boundaries, allowed/protected paths, and runtime choices.
-2. Restore file shape from the skill-bundled skeleton.
-3. Repair fields against `references/task.schema.json`.
-4. Empty optional arrays that are still failing validation.
-5. Run `galley task validate <task-file>` again.
-
-Inspect Galley implementation source only when the target repository is Galley itself.
-
-## Step 9: Summarize For Queue Approval
-
-After validation passes, summarize in two parts: task content, then user-confirmable decisions. This summary is the user's review surface; assume the user will not read the YAML directly.
-
-```markdown
-Validation passed for `<task-file>`.
-
-Task content:
-| Item | Current content |
-| --- | --- |
-| Goal | <goal> |
-| Acceptance criteria | <AC IDs and short summaries> |
-| Verification proof / residuals | <primary failure mode, boundary, state, and residual per behavior-changing AC, or none> |
-| Execution boundary | repo `<scope.cwd>`; allowed paths `<paths>`; protected paths `<paths>` |
-| Reference files | <none, or source -> destination with commit policy> |
-| Quality basis | <profile, CI command, repo doc, or inferred domain gate> |
-| Primary investigation targets | <paths and why they matter> |
-
-Please confirm these decisions before queueing:
-| Item | Current choice | Why it matters | Change options |
-| --- | --- | --- | --- |
-| Effective executor | <cli, model, effort and source for each; compatibility result> | <controls every executor role> | change task override or environment profile |
-| Public/API names | <field names, commands, routes, outputs, or N/A> | <compatibility impact> | <rename/change/no change> |
-| Behavioral bounds | <timeouts, limits, retries, accepted values, or N/A> | <runtime or product impact> | <change min/max/allowed values> |
-| State and persistence | <what is saved or intentionally not saved> | <side-effect impact> | <persist/change/keep isolated> |
-| Edit authority | <user-facing authority level> (`<scope.permission>`) | <why this task needs it> | `read-only`, `edit`, `sandbox-full-access` |
-| Retry budget | `<execution_policy.loop_budget>` | <why this budget fits the task> | smaller value, larger value, `0` unlimited |
-| Per-attempt timeout | <minutes> | <why this fits the repo checks> | shorter or longer timeout |
-| Blocking severity policy | <current quality profile blocking severities> | <which finding severities the profile treats as blocking> | change through quality profile authoring before queueing |
-| Required-check shell | <required_checks.shell from environment.yaml, or unset/default> | <shell Galley uses for its own quality.required_checks execution> | change through environment profile authoring before queueing |
-| Human-review items | <decisions/risks that need explicit confirmation, or none> | <why user confirmation is useful> | approve, change, move to follow-up |
-
-Daemon status:
-| Item | Current / planned |
-| --- | --- |
-| Current daemon | <running|not running|unknown> |
-| Supervisor | <current daemon value if running, planned value if not running> |
-| Environment operations | <pr.enabled/pr.base/pr.comments.enabled/pr.comments.reply/worktree.cleanup from environment.yaml> |
-| Concurrency | <max_concurrent_tasks/max_concurrent_per_repo current or planned values> |
-| Planned command | <exact daemon command if daemon is not running and user approved start, otherwise none> |
-| Change path | <daemon startup settings: stop/restart before queueing when running; environment operations: edit environment.yaml before queueing> |
-| Effect | <starts automatically after queueing, waits in queue, or uses existing daemon> |
-
-Approve queueing this task with the decisions and daemon plan above?
+```bash
+galley task queue <task-file>
 ```
 
-Then use `references/handoff-and-queueing.md` for queue and daemon approval.
+`task queue` validates before publishing the task. Repair and retry only when it rejects the draft.
+
+When queueing is not yet authorized, validate first and present only:
+
+- goal and acceptance criteria;
+- expected edit scope and preserved boundaries;
+- explicit executor or policy overrides;
+- copied input files and commit policy, when any;
+- external effects that differ from the existing approved profile.
+
+Ask once whether to queue that validated task. An affirmative reply to this concrete summary authorizes queueing and any daemon action included in the same summary.
+
+After queueing, use `references/handoff-and-queueing.md` for the requested daemon action. Do not continue into implementation or monitoring unless the user requested it.
+
+## Field Notes
+
+- `scope.permission`: use `sandbox-full-access` for normal isolated AFK implementation, `read-only` for investigation, and `edit` when broad worktree operations are unnecessary.
+- `scope.allowed_paths` is the expected write set reviewed by the supervisor, not a reason to omit an adjacent file required by the same accepted outcome.
+- `execution_policy.loop_budget`: use the skeleton default unless the user selected a different retry budget. `0` is unlimited.
+- `execution_policy.timeout_ms`: use the skeleton default unless repository evidence or the user requires another per-attempt limit.
+- `preflight.acceptance_skeleton.enabled`: enable only when the user selected it or an existing accepted verification contract requires a pre-created integration/E2E boundary. Otherwise retain the skeleton default.
+- `worktree.branch` and `worktree.path`: keep the generated isolated sibling-worktree values.

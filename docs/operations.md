@@ -89,12 +89,13 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 galley task list
 galley task show TASK_ID
 galley task requeue TASK_ID --reason "resolved the reported blocker"
+galley task requeue TASK_ID --revision-request "apply the requested task change"
 galley task archive ~/.galley/tasks/done/TASK.yaml
 ```
 
 `task queue` validates a draft, records the queue reason, and copies it into `tasks/queued` without overwriting an existing task. Pass `--move` when the original draft should be removed after queueing.
 
-`task requeue` moves a reviewed task from `failed`, `done`, or `running` back to `queued`. It preserves the existing worktree and applicable review progress. Successful setup and acceptance-skeleton phases are reused when their earlier evidence is still valid.
+`task requeue` moves a reviewed task from `failed`, `done`, or `running` back to `queued`. It preserves the existing worktree and applicable review progress. Use `--revision-request` for a task-changing human instruction and `--reason` only for operational lifecycle context. Successful setup and acceptance-skeleton phases are reused when their earlier evidence is still valid.
 
 `task archive` records the archived state, moves the task into `tasks/archived`, and attempts to remove its managed worktree. Archive only tasks that no longer need to resume.
 

@@ -185,7 +185,10 @@ Terminal state remains in the YAML. Use:
 galley task list
 galley task show TASK_ID
 galley task requeue TASK_ID --reason "retry after transient failure"
+galley task requeue TASK_ID --revision-request "apply the requested task change"
 ```
+
+`--revision-request` adds a pending human instruction to the task contract. `--reason` records lifecycle context and does not amend the task contract.
 
 See [Troubleshooting](troubleshooting.md) for the meaning of each terminal status and when to requeue instead of creating a new task.
 

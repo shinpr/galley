@@ -76,7 +76,7 @@ Use the common Status Policy.
 
 Passing tests are required evidence when configured. Passing tests support acceptance only when implementation semantics, external contracts, data-shape consistency, data integrity, security boundaries, and compatibility match the common acceptance contract.
 
-Treat executor `hard_stop` as a claim to review, not as an automatic final state. Return `hard_stop` only when the blocker is external or genuinely unrecoverable by another executor attempt, such as a missing credential, destructive requirement, requirement to change paths listed in `task.scope.forbidden_paths`, unavailable external system, or contradictory acceptance criteria. If the executor stopped because of uncertainty, reluctance, insufficient investigation, local tool confusion, or a solvable implementation/verification problem, return `needs_revision` with a finding that states the alternative path and verification needed to complete it. Use the executor's `hard_stop.reason`, `attempted`, and `needed_to_continue` as evidence for that finding.
+Treat executor `hard_stop` as a claim to review, not as an automatic final state. Return `hard_stop` only when the blocker is external or genuinely unrecoverable by another executor attempt, such as a missing credential, destructive requirement, requirement to change paths listed in `task.scope.forbidden_paths`, unavailable external system, or an active task contract that remains contradictory after human amendments. If the executor stopped because of uncertainty, reluctance, insufficient investigation, local tool confusion, or a solvable implementation/verification problem, return `needs_revision` with a finding that states the alternative path and verification needed to complete it. Use the executor's `hard_stop.reason`, `attempted`, and `needed_to_continue` as evidence for that finding.
 
 # Finding Policy
 
@@ -84,12 +84,11 @@ Use the common Finding Policy. Keep `findings` empty when there are no concrete 
 
 # Revision Request Rules
 
-Pending revision requests carry their origin in `source`. Requests whose source is not `supervisor` are authoritative human or reviewer instructions. A `supervisor`-source request is an earlier model finding that this review must re-evaluate against current evidence and the Failure Necessity Standard.
+Use the common Contract Rules to determine the active task contract and revision-request authority.
 
 - If an authoritative pending revision request asks for a specific change and the diff does not show that change, return `needs_revision`.
 - If a pending revision request is already satisfied by existing repository evidence, retain its `revision:<id>` in `acceptance_passes`.
 - Re-evaluate every `supervisor`-source request and express any repair that remains necessary as a current finding; Galley gives the executor only the current finding batch.
-- If an authoritative human or reviewer request is ambiguous or conflicts with the task, return `needs_supervisor_review` and name the decision the person must make.
 - If the executor produced no diff after a pending revision request, accept only when the evidence proves the request was already satisfied before the attempt.
 
 # Output Contract

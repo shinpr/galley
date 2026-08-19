@@ -468,6 +468,7 @@ func newTaskQueueCommand() *cobra.Command {
 func newTaskRequeueCommand() *cobra.Command {
 	var output string
 	var reason string
+	var revisionRequest string
 	var root string
 
 	cmd := &cobra.Command{
@@ -475,6 +476,14 @@ func newTaskRequeueCommand() *cobra.Command {
 		Short: "Move a reviewed task back to queued for another daemon run",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			var revisionRequests []task.RevisionRequest
+			if cmd.Flags().Changed("revision-request") {
+				text := strings.TrimSpace(revisionRequest)
+				if text == "" {
+					return errors.New("revision-request must not be empty")
+				}
+				revisionRequests = []task.RevisionRequest{{Text: text}}
+			}
 			resolvedRoot, err := resolveTaskRoot(root, cmd.Flags().Changed("root"))
 			if err != nil {
 				return err
@@ -483,7 +492,11 @@ func newTaskRequeueCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result, err := task.Requeue(path, task.RequeueOptions{Reason: reason, Root: resolvedRoot})
+			result, err := task.Requeue(path, task.RequeueOptions{
+				Reason:           reason,
+				Root:             resolvedRoot,
+				RevisionRequests: revisionRequests,
+			})
 			if err != nil {
 				return err
 			}
@@ -498,7 +511,8 @@ func newTaskRequeueCommand() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text or json")
-	cmd.Flags().StringVar(&reason, "reason", "", "Reason to record in the task YAML")
+	cmd.Flags().StringVar(&reason, "reason", "", "Operational lifecycle reason to record in the task YAML")
+	cmd.Flags().StringVar(&revisionRequest, "revision-request", "", "Human instruction to add as a pending revision request")
 	cmd.Flags().StringVar(&root, "root", galleyhome.DefaultRoot(), "Galley daemon root directory; defaults to the running daemon root when available")
 	return cmd
 }

@@ -9,7 +9,7 @@
     {
       "name": "galley",
       "description": "Create, validate, queue, set up, and troubleshoot Galley AFK task workflows.",
-      "version": "0.1.31",
+      "version": "0.1.32",
       "category": "development",
       "source": {
         "source": "local",

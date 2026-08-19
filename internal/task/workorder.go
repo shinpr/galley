@@ -72,7 +72,7 @@ func pendingRevisionRequests(requests []RevisionRequest) []RevisionRequest {
 
 func renderRevisionContext(b *strings.Builder, t Task, requests []RevisionRequest) {
 	fmt.Fprintf(b, "## Revision Objective\n\n")
-	fmt.Fprintf(b, "Resolve the active revision requests as a coherent repair batch while preserving the task contract and verified passes. This attempt is complete only when every pending request has concrete implementation and verification evidence.\n\n")
+	fmt.Fprintf(b, "Resolve every pending revision request as a coherent repair batch. Apply non-supervisor requests in displayed order as amendments only to the affected acceptance criterion or verification guidance; a later request supersedes an earlier request only where they conflict. Preserve every unaffected task term, gate, and verified pass. This attempt is complete only when every pending request has concrete implementation and verification evidence.\n\n")
 
 	fmt.Fprintf(b, "## Findings To Address This Attempt\n\n")
 	for _, risk := range t.Risks {

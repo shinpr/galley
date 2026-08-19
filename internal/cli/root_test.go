@@ -144,7 +144,13 @@ func TestSchemaGenerateAndCheck(t *testing.T) {
 func TestTaskRequeueText(t *testing.T) {
 	root := t.TempDir()
 	failedPath := setupTaskInState(t, root, "failed", "needs_supervisor_review", nil)
-	stdout, stderr, err := executeCommand("task", "requeue", "--root", root, "--reason", "review fixed", failedPath)
+	stdout, stderr, err := executeCommand(
+		"task", "requeue",
+		"--root", root,
+		"--reason", "human requested another attempt",
+		"--revision-request", "Remove the task-added test while preserving the label fix.",
+		failedPath,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,8 +160,32 @@ func TestTaskRequeueText(t *testing.T) {
 	if !strings.Contains(stdout, "requeued: task-cli-test") || !strings.Contains(stdout, "moved:") {
 		t.Fatalf("stdout got %q", stdout)
 	}
-	if _, err := os.Stat(filepath.Join(filepath.Dir(filepath.Dir(failedPath)), "queued", "task.yaml")); err != nil {
+	queuedPath := filepath.Join(filepath.Dir(filepath.Dir(failedPath)), "queued", "task.yaml")
+	if _, err := os.Stat(queuedPath); err != nil {
 		t.Fatalf("queued task missing: %v", err)
+	}
+	loaded, err := taskpkg.Load(queuedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(loaded.RevisionRequests), 1; got != want {
+		t.Fatalf("revision request count got %d, want %d: %#v", got, want, loaded.RevisionRequests)
+	}
+	request := loaded.RevisionRequests[0]
+	if request.Source != "manual" || request.Status != "pending" || request.Text != "Remove the task-added test while preserving the label fix." {
+		t.Fatalf("revision request got %#v", request)
+	}
+}
+
+func TestTaskRequeueRejectsEmptyRevisionRequest(t *testing.T) {
+	root := t.TempDir()
+	failedPath := setupTaskInState(t, root, "failed", "needs_supervisor_review", nil)
+	_, _, err := executeCommand("task", "requeue", "--root", root, "--revision-request", "   ", failedPath)
+	if err == nil || !strings.Contains(err.Error(), "revision-request must not be empty") {
+		t.Fatalf("error got %v", err)
+	}
+	if _, statErr := os.Stat(failedPath); statErr != nil {
+		t.Fatalf("failed task changed after rejected input: %v", statErr)
 	}
 }
 

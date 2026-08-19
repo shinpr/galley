@@ -3,7 +3,6 @@ package task
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -51,14 +50,17 @@ func TestRequeueMovesFailedTaskToQueued(t *testing.T) {
 	if requeued.Supervisor.ReviewIterations != 1 {
 		t.Fatalf("review iterations got %d", requeued.Supervisor.ReviewIterations)
 	}
-	if len(requeued.Decisions) != 1 || !strings.Contains(requeued.Decisions[0].Chosen, "address review") {
-		t.Fatalf("decisions got %#v", requeued.Decisions)
+	if len(requeued.Decisions) != 0 {
+		t.Fatalf("requeue reason must not become a task decision: %#v", requeued.Decisions)
 	}
 	if len(requeued.RevisionRequests) != 1 || requeued.RevisionRequests[0].Status != "pending" || requeued.RevisionRequests[0].Text != "address review" {
 		t.Fatalf("revision requests got %#v", requeued.RevisionRequests)
 	}
 	if len(requeued.PR.ProcessedCommentIDs) != 1 || requeued.PR.ProcessedCommentIDs[0] != "42" {
 		t.Fatalf("processed comments got %#v", requeued.PR.ProcessedCommentIDs)
+	}
+	if got := requeued.Attempts[len(requeued.Attempts)-1].Summary; got != "address review" {
+		t.Fatalf("requeue lifecycle summary got %q", got)
 	}
 	if _, err := os.Stat(failedPath); !os.IsNotExist(err) {
 		t.Fatalf("failed path should be moved, err=%v", err)

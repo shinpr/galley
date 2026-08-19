@@ -59,10 +59,22 @@ func TestRenderWorkOrderIncludesPRReviewInstructions(t *testing.T) {
 		Status:    "pending",
 	})
 	loaded.RevisionRequests = append(loaded.RevisionRequests, RevisionRequest{
+		ID:     "manual-43",
+		Source: "manual",
+		Text:   "Keep the label fix and remove only the task-added test.",
+		Status: "pending",
+	})
+	loaded.RevisionRequests = append(loaded.RevisionRequests, RevisionRequest{
 		ID:     "supervisor-attempt-1-finding-1",
 		Source: "supervisor",
 		Text:   "An earlier request that is already complete.",
 		Status: "addressed",
+	})
+	loaded.Decisions = append(loaded.Decisions, Decision{
+		ID:        "requeue-2",
+		Question:  "Why was this task requeued?",
+		Chosen:    "Remove the task-added focused test and keep the label fix.",
+		Rationale: "A human reviewer requested another executor attempt.",
 	})
 	loaded.ReviewProgress = &ReviewProgress{
 		Acceptance: []string{"AC1"},
@@ -79,6 +91,10 @@ func TestRenderWorkOrderIncludesPRReviewInstructions(t *testing.T) {
 		"`acceptance_criteria`",
 		"`revision:pr-comment-42`",
 		"Please rename the proof file and update the README.",
+		"`revision:manual-43`",
+		"Keep the label fix and remove only the task-added test.",
+		"Apply non-supervisor requests in displayed order",
+		"Remove the task-added focused test and keep the label fix.",
 	} {
 		if !strings.Contains(workOrder, want) {
 			t.Fatalf("work order missing %q:\n%s", want, workOrder)
@@ -87,10 +103,14 @@ func TestRenderWorkOrderIncludesPRReviewInstructions(t *testing.T) {
 	if strings.Contains(workOrder, "An earlier request that is already complete.") {
 		t.Fatalf("work order contains addressed revision request:\n%s", workOrder)
 	}
+	if first, second := strings.Index(workOrder, "`revision:pr-comment-42`"), strings.Index(workOrder, "`revision:manual-43`"); first < 0 || second <= first {
+		t.Fatalf("pending revision requests are not rendered in task order:\n%s", workOrder)
+	}
 	goalIndex := strings.Index(workOrder, loaded.Goal)
 	for _, active := range []string{
 		"Preserve the existing contract while closing the publication boundary.",
 		"Please rename the proof file and update the README.",
+		"Keep the label fix and remove only the task-added test.",
 		"acceptance: `AC1`",
 	} {
 		if strings.Index(workOrder, active) >= goalIndex {

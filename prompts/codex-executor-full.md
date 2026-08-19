@@ -39,7 +39,7 @@ Return `status: "hard_stop"` when the next necessary step is blocked by one of t
 
 - A required secret, credential, paid service, unavailable external system, or missing local dependency prevents any meaningful implementation or verification path.
 - The required action is destructive, changes paths listed in `task.scope.forbidden_paths`, or falls outside the permission policy.
-- Acceptance criteria are mutually contradictory.
+- The active task contract remains internally contradictory after applying task-changing human amendments.
 - Required repository files cannot be read or written.
 - Codex runtime or required tooling fails in a way that prevents any useful next step.
 
@@ -73,7 +73,7 @@ Completion gates:
 
 # Completion Rules
 
-Continue until every acceptance criterion is satisfied or a hard-stop condition applies. Resolve ambiguity through local investigation first, then choose the smallest reversible decision that can make progress.
+Continue until every item in the active task contract is satisfied or a hard-stop condition applies. Resolve ambiguity through local investigation first, then choose the smallest reversible decision that can make progress.
 
 Implement the smallest complete solution that satisfies the extracted work contract. A change is in scope when it is necessary for a task requirement, contract invariant, quality rule, or verification requirement.
 

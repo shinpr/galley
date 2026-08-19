@@ -2,9 +2,7 @@
 
 Use this reference when creating or repairing Galley quality and environment profiles.
 
-Profiles are repository-specific. Create them interactively because the right quality gates depend on the codebase, available tooling, runtime services, and user risk tolerance. Treat profile creation as quality-policy authoring, not a background setup detail.
-
-Use `references/authoring-quality.md` to decide when to use existing repo standards, when to ask questions, and how to choose domain-specific gates.
+Profiles are repository-specific. Derive repository-owned settings from the codebase and ask only for policy choices that evidence cannot determine.
 
 ## Profile Types
 
@@ -29,7 +27,7 @@ Use the bundled schemas as the profile field contract:
 - `references/quality.schema.json`
 - `references/environment.schema.json`
 
-Read both schema files before profile intake. Treat schema `default` values as the recommended defaults when presenting setup choices. User choices override schema defaults.
+Read the schema for each profile being created or structurally repaired. Treat schema `default` values as fallbacks when repository evidence and user choices do not supply a value. User choices override schema defaults.
 
 Validate profiles with:
 
@@ -42,22 +40,16 @@ Runtime loading ignores unknown profile keys while rejecting missing required ke
 
 ## Authoring Flow
 
-1. Explain the two profiles before reading or writing them:
-   - `quality.yaml` defines the checks, review dimensions, evidence, and severities that Galley uses to decide whether work is acceptable.
-   - `environment.yaml` defines the repository cwd, runnable commands, optional setup commands for fresh worktree readiness, implementation executor default, network/secrets policy, services, destructive-operation constraints, PR behavior, and worktree cleanup.
-2. Read `references/quality.schema.json` and `references/environment.schema.json` to establish fields, defaults, and valid shapes.
-3. Ask the user to choose review strictness before repository inspection. This is an operating policy, not repository evidence.
-4. Ask for the implementation executor choice before repository inspection. Ask for a review supervisor choice only when the repository should override daemon startup state. Use the backend default rule above for unset values.
-5. Ask to inspect the repository for profile candidates. Mention the concrete sources you plan to read, such as README, CI, package scripts, Makefiles, justfiles, test docs, and existing local guidance.
-6. Inspect the approved sources and draft candidate values from discovered evidence plus schema defaults and the chosen review strictness.
-7. Present the proposed profile before writing files: required checks, optional checks, review dimensions, blocking severities, implementation executor default, setup commands when known, supervisor default when chosen, environment constraints, PR/base/comment/cleanup settings, and the evidence behind each choice.
-8. Ask for approval and ask whether the user has additional repository-specific standards to enforce.
-9. Write the profile YAML only after approval.
-10. Validate the profile YAML and report the evidence used to choose each required check.
+1. Resolve and read existing profiles. For an explicit field update, preserve unrelated fields, apply the requested values, validate, and stop.
+2. For new or structurally invalid profiles, read the schemas and inspect README, CI, package scripts, setup documentation, and repository instructions.
+3. Derive commands, setup, and review dimensions from repository evidence. Use schema defaults for remaining implementation defaults.
+4. Ask one combined question only for unresolved user-owned policy that changes blocking severity, executor or supervisor choice, network/secret/destructive authority, or automatic PR behavior.
+5. If profile creation was not already authorized, present the proposed values and ask once before writing. Otherwise write the requested profile directly.
+6. Validate the changed profiles and report the evidence behind required checks and non-default policy.
 
 ## Repository Discovery
 
-After the user approves repository inspection, explore only enough to identify candidate profile content:
+Explore only enough to identify candidate profile content:
 
 - repository type, package/build system, and runtime
 - documented setup, test, lint, typecheck, build, e2e, or release commands
@@ -77,56 +69,6 @@ Stop discovery when you can explain where each proposed required check or enviro
 - Separate "available command" from "blocking quality gate"; mark a runnable command as blocking only when it enforces an acceptance requirement, a CI gate, or a documented quality dimension for the task domain.
 - Mark external resources as required only when the task domain needs them, such as Figma for UI work, DB services for persistence, or cloud/IaC tooling for infrastructure.
 - Use `N/A` or omit fields for irrelevant domains; ask only about tools that match the task domain.
-
-## Interactive Intake
-
-Ask only the questions needed for the profile being authored.
-
-Use this sequence:
-
-1. Read the profile schemas.
-2. Ask one question for review strictness.
-3. Ask the implementation executor choice. Ask the review supervisor choice only when the repository should override daemon startup state. Use the backend default rule above for unset values.
-4. Ask one question for repository inspection approval. Keep PR automation, base branch, and cleanup out of this question.
-5. After inspection, present a single profile proposal using schema defaults, chosen review strictness, executor choice, optional supervisor default, and discovered repo evidence.
-6. Ask for profile approval and additional repository-specific standards.
-7. Ask follow-up questions only for choices that affect acceptance, execution safety, unavailable services, or repository-specific policy.
-
-Review strictness question:
-
-```markdown
-Choose the review strictness for this repository profile before I inspect the repository:
-
-- Minimum: block only critical findings. Use when only work that cannot function as requested should stop acceptance.
-- Standard (recommended): block critical, high, and medium findings. Use for normal development where functional failures, user-visible regressions, contract mismatches, and major inconsistencies should block acceptance.
-- Strict: block critical, high, medium, and low findings. Use when small technical-quality issues should also prevent acceptance.
-
-Which strictness should this profile use?
-```
-
-Quality profile questions:
-
-1. What kind of repository is this: backend, frontend, fullstack, CLI, infra, library, mobile, game, or other?
-2. Which discovered checks are mandatory before acceptance, and which are optional: unit tests, integration tests, typecheck, lint, build, e2e, accessibility, visual regression, security scan, infra plan?
-3. Which command should Galley prefer for each mandatory check when repo evidence shows multiple options?
-4. Which review dimensions should block acceptance: correctness, regression, API contract, data integrity, security, performance, accessibility, UI/UX, maintainability, docs?
-5. Which review strictness should map to blocking severities: minimum, standard, or strict?
-6. What level of evidence is required: file/line references, command output excerpts, screenshots, PR links, logs?
-
-Environment profile questions:
-
-1. What is the target repo absolute path?
-2. Which discovered commands are available and safe to run repeatedly?
-3. Which implementation executor should runs use by default: `claude`, `codex`, `glm`, `grok`, `kimi`, or unset to use Galley's built-in Claude backend at run time?
-4. Should this repository set a review supervisor default: `claude`, `codex`, `glm`, `grok`, `kimi`, or unset so daemon startup state decides?
-5. Which discovered setup commands should prepare a fresh task worktree before implementation, if they are known?
-6. Does the repo require local services: DB, Docker, Redis, browser, dev server, Figma MCP, Playwright, cloud CLI?
-7. Is network access allowed, approval-gated, or unavailable?
-8. What is the secret policy: never read `.env`, allow named test env vars, use local dummy credentials, or require human setup?
-9. Which destructive operations are denied or approval-gated: DB reset, migrations, docker prune, file deletion, terraform apply?
-10. Should accepted AFK implementation tasks open PRs by default, and what base branch should they target?
-11. Should `/galley` PR comments be polled and acknowledged for reruns and revision requests?
-12. Should Galley clean up its managed clean worktrees after PRs are closed or merged?
 
 ## Quality Profile Template
 

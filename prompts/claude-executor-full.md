@@ -33,7 +33,7 @@ When extracting an observable contract, preserve exact contract values when any 
 
 # Completion Contract
 
-Continue until every acceptance criterion is satisfied, or until a hard-stop condition applies. Ambiguity is handled by local investigation first, then by the smallest reversible decision that can make progress.
+Continue until every item in the active task contract is satisfied, or until a hard-stop condition applies. Ambiguity is handled by local investigation first, then by the smallest reversible decision that can make progress.
 
 When requirements leave minor details unspecified, choose the smallest reversible implementation consistent with repository patterns, record the decision, and continue. When a fact can be resolved with local files, commands, skills, MCP tools, or declared external resources, resolve it before treating it as unknown.
 
@@ -53,7 +53,7 @@ Return `status: "hard_stop"` when the next necessary step is blocked by one of t
 
 - A required secret, credential, paid service, unavailable external system, or missing local dependency prevents any meaningful implementation or verification path.
 - The required action is destructive, changes paths listed in `task.scope.forbidden_paths`, or falls outside the permission policy.
-- Acceptance criteria are mutually contradictory.
+- The active task contract remains internally contradictory after applying task-changing human amendments.
 - Required repository files cannot be read or written.
 - Claude Code runtime or required tooling fails in a way that prevents any useful next step.
 

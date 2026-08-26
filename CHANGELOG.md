@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- Packaged Claude, Codex, and Grok Galley plugins are now versioned as `0.1.33`; task-authoring guidance now loads the bundled task schema before adding a field or collection item whose shape is absent from the generated skeleton.
+
 ## v0.12.4 - 2026-08-19
 
 ### Fixed

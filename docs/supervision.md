@@ -74,7 +74,7 @@ The supervisor is instructed to accept implementation work only when it has:
 - all required quality dimensions and the configured weighted score
 - no unresolved finding at a blocking severity
 
-Incomplete work can continue while the loop budget remains when the supervisor returns actionable findings. `needs_supervisor_review` is reserved for a named decision that only a person can make. Exhausted budgets, provider failures, finalization failures, hard stops, and executor interruptions end the run as `failed` with their evidence preserved.
+Incomplete work can continue while the loop budget remains when the supervisor returns actionable findings. A failed commit, push, or PR creation for accepted work is captured as a pending finalization revision request and spends the next attempt of the same loop. `needs_supervisor_review` is reserved for a named decision that only a person can make. Exhausted budgets, provider failures, hard stops, and executor interruptions end the run as `failed` with their evidence preserved.
 
 Galley does not turn an incomplete pass list or an accepted finding into a daemon failure. Accepted work can proceed to PR creation, where missing acceptance and quality passes and any accepted findings remain visible for human review.
 

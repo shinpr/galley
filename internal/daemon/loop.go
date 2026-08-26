@@ -183,6 +183,9 @@ func runSupervisorLoop(execCtx, daemonCtx context.Context, opts Options, running
 		if err != nil || done {
 			return err
 		}
+		// A finalization failure re-enters the loop as a pending revision
+		// request on the task; carry it into the next work order.
+		promptTask.RevisionRequests = loaded.RevisionRequests
 	}
 	*loaded = revision.applyToTask(*loaded)
 	loaded.Status = "failed"
@@ -313,7 +316,14 @@ func applySupervisorVerdict(execCtx, daemonCtx context.Context, req verdictAppli
 			fmt.Fprintf(os.Stderr, "galley: task %s accepted verdict rejected by acceptance gate: %s\n", req.Loaded.ID, reason)
 			return true, failVerdictApplication(req, "acceptance-gate", "Accepted verdict rejected by acceptance skeleton gate: "+reason, "Inspect preflight_result.json before re-finalizing.")
 		}
-		return true, acceptSupervisorVerdict(execCtx, req.Opts, req.RunningPath, req.Loaded, req.Prepared, req.Profiles, req.RunDir, req.Verdict)
+		err := acceptSupervisorVerdict(execCtx, req.Opts, req.RunningPath, req.Loaded, req.Prepared, req.Profiles, req.RunDir, req.Verdict)
+		// A finalization failure keeps the accepted work, worktree, and review
+		// progress and spends the next attempt of this loop repairing it.
+		if failure, ok := asFinalizeFailure(err); ok {
+			fmt.Fprintf(os.Stderr, "galley: task %s finalization failed after attempt %d; routing the failure into the revision loop: %v\n", req.Loaded.ID, req.Attempt, failure.Err)
+			return false, recordFinalizeRevision(req, failure)
+		}
+		return true, err
 	case "needs_revision":
 		return false, nil
 	case "hard_stop":
@@ -341,10 +351,16 @@ func acceptSupervisorVerdict(ctx context.Context, opts Options, runningPath stri
 	if opts.CommitOnAccept {
 		fmt.Fprintf(os.Stderr, "galley: task %s accepted; finalizing commit/pr\n", loaded.ID)
 		if err := finalizeAcceptedChange(ctx, opts, loaded, prepared.CWD, prepared.BaseSHA, runDir); err != nil {
+			// A failed commit, push, or PR creation goes back to the verdict
+			// path; every other finalization failure still fails the task.
+			if _, ok := asFinalizeFailure(err); ok {
+				return err
+			}
 			loaded.Status = "failed"
 			appendRisk(loaded, "finalize", "partial_verification", err.Error(), "The executor diff and run evidence were stored; a supervisor should inspect and finish commit or PR creation.", true)
 			return taskstate.FailMoveToStatus(opts.Root, runningPath, loaded, err)
 		}
+		markFinalizeRevisionsAddressed(loaded)
 	} else if err := inputfiles.CleanupNonCommitted(prepared.CWD, loaded.Files); err != nil {
 		loaded.Status = "failed"
 		appendRisk(loaded, "input-file-cleanup", "partial_verification", err.Error(), "Remove non-committed task input files from the execution workspace before archiving or reusing it.", true)
@@ -407,7 +423,9 @@ func mergeDiscussionItems(loaded *task.Task, profiles profile.Bundle, verdict su
 		appendDiscussionItem(loaded, "Supervisor discussion", item, false)
 	}
 	for _, request := range loaded.RevisionRequests {
-		if request.Status == "addressed" {
+		// A pending finalization request is decided by the finalize step that
+		// runs right after this merge, not by a human PR reader.
+		if request.Status == "addressed" || request.Source == finalizeRevisionSource {
 			continue
 		}
 		appendDiscussionItem(
@@ -439,6 +457,13 @@ func mergeDiscussionItems(loaded *task.Task, profiles profile.Bundle, verdict su
 func appendDiscussionItem(loaded *task.Task, topic, summary string, requiresHumanDecision bool) {
 	if strings.TrimSpace(summary) == "" {
 		return
+	}
+	// A second acceptance (for example after a recovered finalization) must not
+	// duplicate the items the first acceptance already recorded.
+	for _, item := range loaded.DiscussionItems {
+		if item.Topic == topic && item.Summary == summary {
+			return
+		}
 	}
 	loaded.DiscussionItems = append(loaded.DiscussionItems, task.DiscussionItem{
 		ID:                    fmt.Sprintf("discussion-%d", len(loaded.DiscussionItems)+1),

@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,7 +12,10 @@ import (
 
 	setuppreflight "github.com/shinpr/galley/internal/preflight/setup"
 	skeletonpreflight "github.com/shinpr/galley/internal/preflight/skeleton"
+	"github.com/shinpr/galley/internal/runartifact"
 	"github.com/shinpr/galley/internal/task"
+	"github.com/shinpr/galley/internal/vcs"
+	"github.com/shinpr/galley/internal/workspace"
 )
 
 func reuseReadySetup(root, taskID, runDir string, effective task.Executor) (*setuppreflight.Result, bool, error) {
@@ -100,4 +105,56 @@ func priorTaskRunDirs(root, taskID, currentRunDir string) ([]string, error) {
 
 func preflightReuseError(phase string, err error) error {
 	return fmt.Errorf("reuse completed %s evidence: %w", phase, err)
+}
+
+// retainPriorReviewBase keeps a prior run's review base while a finalization
+// failure is still pending, so its accepted commit stays inside the diff.
+func retainPriorReviewBase(ctx context.Context, opts Options, loaded task.Task, runDir string, prepared *workspace.Prepared) {
+	if prepared == nil || !prepared.WorktreeReused || prepared.BaseSHA == "" {
+		return
+	}
+	if !hasPendingFinalizeRevision(loaded) {
+		return
+	}
+	taskID := loaded.ID
+	prior, err := priorRunBaseSHA(opts.Root, taskID, runDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "galley: task %s could not read the prior review base: %v\n", taskID, err)
+		return
+	}
+	if prior == "" || prior == prepared.BaseSHA {
+		return
+	}
+	ancestor, err := vcs.IsAncestor(ctx, vcsBinaries(opts), prepared.CWD, prior, prepared.BaseSHA)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "galley: task %s could not verify the prior review base %s: %v\n", taskID, prior, err)
+		return
+	}
+	if !ancestor {
+		return
+	}
+	prepared.BaseSHA = prior
+}
+
+// priorRunBaseSHA returns the review base recorded by the most recent prior
+// run of this task, or "" when no prior run recorded one.
+func priorRunBaseSHA(root, taskID, currentRunDir string) (string, error) {
+	dirs, err := priorTaskRunDirs(root, taskID, currentRunDir)
+	if err != nil {
+		return "", err
+	}
+	for _, dir := range dirs {
+		data, err := os.ReadFile(runartifact.Path(dir, runartifact.WorkspaceFilename))
+		if err != nil {
+			continue
+		}
+		var prior workspace.Prepared
+		if err := json.Unmarshal(data, &prior); err != nil {
+			continue
+		}
+		if prior.BaseSHA != "" {
+			return prior.BaseSHA, nil
+		}
+	}
+	return "", nil
 }

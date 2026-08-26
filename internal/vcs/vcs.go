@@ -200,6 +200,22 @@ func literalPathspecs(paths []string) []string {
 	return out
 }
 
+// IsAncestor reports whether ancestor is reachable from descendant in workDir.
+// Exit code 0 is yes, 1 is no, and any other exit code is an error.
+func IsAncestor(ctx context.Context, bins Binaries, workDir, ancestor, descendant string) (bool, error) {
+	result, err := proc.RunCommand(ctx, proc.Command{
+		WorkDir: workDir,
+		Argv:    proc.GitArgs(bins.git(), "merge-base", "--is-ancestor", ancestor, descendant),
+	}, proc.RunOptions{})
+	if err == nil {
+		return true, nil
+	}
+	if result.ExitCode == 1 {
+		return false, nil
+	}
+	return false, fmt.Errorf("git merge-base --is-ancestor %s %s failed: %w: %s", ancestor, descendant, err, strings.TrimSpace(result.Stderr))
+}
+
 // Commit creates a git commit and writes command evidence.
 func Commit(ctx context.Context, bins Binaries, workDir, runDir, message string) error {
 	_, err := runCommandWithEvidence(ctx, proc.Command{

@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Fixed
+
+- A failed commit, push, or PR creation for a Supervisor-accepted task is now routed into the existing revision-request loop with the captured command output and run-artifact location, and a requeued run keeps the original review base so a branch whose accepted commit already exists still finalizes instead of reporting no diff. A finalization that fails again stays pending with the latest failure until Galley's own finalization succeeds.
+
 ### Changed
 
 - Packaged Claude, Codex, and Grok Galley plugins are now versioned as `0.1.33`; task-authoring guidance now loads the bundled task schema before adding a field or collection item whose shape is absent from the generated skeleton.

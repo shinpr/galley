@@ -183,9 +183,10 @@ func runSupervisorLoop(execCtx, daemonCtx context.Context, opts Options, running
 		if err != nil || done {
 			return err
 		}
-		// A finalization failure re-enters the loop as a pending revision
-		// request on the task; carry it into the next work order.
+		// The task file is the source of truth for the next attempt: it carries
+		// a finalization failure's new request and drops accepted ones.
 		promptTask.RevisionRequests = loaded.RevisionRequests
+		revision = supervisorRevisionFromTask(*loaded)
 	}
 	*loaded = revision.applyToTask(*loaded)
 	loaded.Status = "failed"

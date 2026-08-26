@@ -80,11 +80,13 @@ func finalizeCommandOutput(err error) string {
 // boundedFinalizeText keeps the tail of text, which holds the actionable end
 // of a hook or transport failure, within finalizeOutputBudget bytes.
 func boundedFinalizeText(text string) string {
-	text = strings.TrimSpace(text)
+	// Dropping invalid bytes keeps the persisted request text valid UTF-8 when
+	// the byte budget cuts through a multibyte character.
+	text = strings.ToValidUTF8(strings.TrimSpace(text), "")
 	if len(text) <= finalizeOutputBudget {
 		return text
 	}
-	return "[truncated]" + text[len(text)-finalizeOutputBudget:]
+	return "[truncated]" + strings.ToValidUTF8(text[len(text)-finalizeOutputBudget:], "")
 }
 
 // recordFinalizeRevision persists the pending finalization revision request so

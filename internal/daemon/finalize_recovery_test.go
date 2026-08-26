@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/shinpr/galley/internal/proc"
 	"github.com/shinpr/galley/internal/task"
@@ -722,4 +723,126 @@ func nthRunDir(t *testing.T, root string, n int) string {
 		t.Fatalf("want at least %d run dirs, got %#v", n, matches)
 	}
 	return matches[n-1]
+}
+
+// AC1/AC2: a resolved supervisor revision request must not reappear in the
+// work order after an accepted attempt's finalization fails.
+func TestFinalizeFailureAfterAcceptedRevisionKeepsResolvedRequestsClosed(t *testing.T) {
+	root, repo, remote, worktree, promptPath, schemaPath, taskPath := finalizeRecoveryRepo(t)
+	marker := filepath.Join(t.TempDir(), "block-push")
+	writeMarkerFile(t, marker)
+	writeBlockingGitHook(t, repo, "pre-push", marker, "pre-push hook rejected the accepted branch")
+	// Attempt 1 reports risks, which the shared fake supervisor turns into a
+	// needs_revision finding; attempt 2 addresses it and is accepted.
+	claudeBin := writeFakeClaude(t, `case "$*" in
+  *finalize-attempt-2*)
+    rm -f `+marker+`
+    echo '{"status":"completed","summary":"repaired finalization","files_modified":[],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"},{"id":"revision:finalize-attempt-2","status":"satisfied","evidence":["removed the blocking condition"],"notes":"finalization can rerun"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}'
+    ;;
+  *supervisor-attempt-1-finding-1*)
+    echo revised > daemon-revision.txt
+    echo '{"status":"completed","summary":"addressed the supervisor finding","files_modified":["daemon-revision.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"},{"id":"revision:supervisor-attempt-1-finding-1","status":"satisfied","evidence":["risk resolved"],"notes":"finding addressed"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}'
+    ;;
+  *)
+    echo change > daemon-output.txt
+    echo '{"status":"completed_with_risks","summary":"done with a risk","files_modified":["daemon-output.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[{"type":"other","detail":"one open risk","mitigation":"resolve it","needs_human_review":false}]}'
+    ;;
+esac
+`)
+	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
+  echo https://github.com/example/galley/pull/507
+else
+  printf '%s\n' '{"user":{"login":"pr-author"}}'
+fi
+`)
+	setLoopBudget(t, taskPath, 4)
+
+	if err := runTestDaemon(context.Background(), finalizeRecoveryOptions(root, promptPath, schemaPath, claudeBin, ghBin)); err != nil {
+		t.Fatal(err)
+	}
+
+	// The recovery attempt must carry only the still-pending finalization
+	// request, while the accepted supervisor finding stays a verified pass.
+	prompt := attemptPrompt(t, root, "attempt-3")
+	if strings.Contains(prompt, "`supervisor-attempt-1-finding-1` source=`supervisor`") {
+		t.Fatalf("attempt-3 work order reintroduced the resolved supervisor request:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "`finalize-attempt-2` source=`finalize`") {
+		t.Fatalf("attempt-3 work order missing the pending finalization request:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "- acceptance: `AC1`") {
+		t.Fatalf("attempt-3 work order lost the accepted review progress:\n%s", prompt)
+	}
+
+	doneTask, err := task.Load(filepath.Join(root, "tasks", "done", "task.yaml"))
+	if err != nil {
+		t.Fatalf("task did not reach done/: %v", err)
+	}
+	if doneTask.Status != "pr_opened" || doneTask.PR.URL != "https://github.com/example/galley/pull/507" {
+		t.Fatalf("recovered task got status=%q pr=%#v", doneTask.Status, doneTask.PR)
+	}
+	for _, request := range doneTask.RevisionRequests {
+		if request.Source == supervisorRevisionSource {
+			t.Fatalf("the accepted supervisor request was reintroduced on the task: %#v", request)
+		}
+	}
+	if request := findRevisionRequest(t, doneTask, "finalize-attempt-2"); request.Status != "addressed" {
+		t.Fatalf("finalization request got %#v", request)
+	}
+	if doneTask.ReviewProgress == nil || !containsString(doneTask.ReviewProgress.Acceptance, "AC1") {
+		t.Fatalf("prior review progress was lost: %#v", doneTask.ReviewProgress)
+	}
+	assertCommitsAheadOfBase(t, worktree, 1)
+	if got := gitOutputForTest(t, remote, "rev-parse", "refs/heads/agent/task"); got != gitOutputForTest(t, worktree, "rev-parse", "HEAD") {
+		t.Fatalf("remote branch %s does not point at the accepted HEAD", got)
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+// Truncation must not split a multibyte character, so the persisted request
+// text stays valid UTF-8 and readable text after task.Save.
+func TestFinalizeRevisionRequestTruncationIsUTF8Safe(t *testing.T) {
+	// Three-byte runes make the byte budget land inside a character.
+	stderr := strings.Repeat("日", finalizeOutputBudget) + "フックが拒否しました"
+	err := fmt.Errorf("git push failed: %w", &proc.CommandError{
+		Kind:   proc.CommandErrorExitNonZero,
+		Result: proc.RunResult{ExitCode: 1, Stderr: stderr},
+		Err:    errors.New("exit nonzero"),
+	})
+	request := finalizeRevisionRequest("finalize-attempt-1", "/runs/task-1", err)
+	if !utf8.ValidString(request.Text) {
+		t.Fatalf("truncated request text is not valid UTF-8: %q", request.Text)
+	}
+	if strings.ContainsRune(request.Text, utf8.RuneError) {
+		t.Fatalf("truncated request text contains a replacement character: %q", request.Text)
+	}
+	if !strings.Contains(request.Text, "フックが拒否しました") {
+		t.Fatalf("truncated request text lost the actionable output tail: %q", request.Text)
+	}
+
+	path := filepath.Join(t.TempDir(), "task.yaml")
+	writeDaemonTask(t, path, t.TempDir())
+	seedRevisionRequest(t, path, request)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "!!binary") {
+		t.Fatalf("task.Save persisted the request text as binary instead of text")
+	}
+	reloaded, loadErr := task.Load(path)
+	if loadErr != nil {
+		t.Fatalf("saved task did not reload: %v", loadErr)
+	}
+	if got := findRevisionRequest(t, reloaded, "finalize-attempt-1"); got.Text != request.Text {
+		t.Fatalf("persisted request text changed: got %q", got.Text)
+	}
 }

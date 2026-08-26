@@ -6,6 +6,8 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.12.5 - 2026-08-26
+
 ### Fixed
 
 - A failed commit, push, or PR creation for a Supervisor-accepted task is now routed into the existing revision-request loop with the captured command output and run-artifact location, and a requeued run keeps the original review base so a branch whose accepted commit already exists still finalizes instead of reporting no diff. A finalization that fails again stays pending with the latest failure until Galley's own finalization succeeds.

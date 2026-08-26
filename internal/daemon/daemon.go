@@ -887,6 +887,7 @@ func prepareClaimedWorkspace(ctx context.Context, opts Options, profiles profile
 		appendFailureAttempt(loaded, "workspace", "workspace_failed", err, runDir)
 		return claimedWorkspace{}, err
 	}
+	retainPriorReviewBase(ctx, opts, *loaded, runDir, &prepared)
 	if err := writeJSON(runartifact.Path(runDir, runartifact.WorkspaceFilename), prepared); err != nil {
 		appendFailureAttempt(loaded, "run_evidence", "run_evidence_failed", err, runDir)
 		return claimedWorkspace{}, err

@@ -69,7 +69,7 @@ The latest verdict summary names the decision the loop cannot make. Typical case
 - an authoritative human request is ambiguous
 - required authority or destructive approval is missing
 
-Update the task or authoritative source that owns the decision, then requeue with a reason that records what changed. Provider, timeout, exhausted-loop, and finalization failures use `failed`; follow the recorded error and risk instead of treating them as review decisions.
+Update the task or authoritative source that owns the decision, then requeue with a reason that records what changed. Provider, timeout, exhausted-loop, and unrecovered finalization failures use `failed`; follow the recorded error, pending revision request, and risk instead of treating them as review decisions. A task that failed with a pending finalization request resumes through a plain requeue in its retained worktree.
 
 ## A Running Task Outlives Its Daemon
 

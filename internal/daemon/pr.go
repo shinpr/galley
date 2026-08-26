@@ -62,7 +62,7 @@ func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task
 			}
 		}
 		if err := vcs.Commit(ctx, vcsBinaries(opts), workDir, runDir, commitMessage); err != nil {
-			return err
+			return &finalizeFailure{Err: err}
 		}
 	}
 	if !opts.OpenPR {
@@ -76,7 +76,7 @@ func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task
 	if err := retry.Do(ctx, func(ctx context.Context) error {
 		return vcs.PushCurrentBranch(ctx, vcsBinaries(opts), workDir, runDir)
 	}); err != nil {
-		return err
+		return &finalizeFailure{Err: err}
 	}
 	if loaded.PR.URL != "" {
 		loaded.PR.Status = "open"
@@ -101,7 +101,7 @@ func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task
 	if err != nil {
 		recovered, viewErr := vcs.FetchPRURLForCurrentBranch(ctx, vcsBinaries(opts), workDir, runDir)
 		if viewErr != nil || recovered == "" {
-			return err
+			return &finalizeFailure{Err: err}
 		}
 		prURL = recovered
 	}

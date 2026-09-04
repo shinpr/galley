@@ -6,6 +6,12 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.12.6 - 2026-09-04
+
+### Changed
+
+- Updated Go to `1.26.8`, `go.yaml.in/yaml/v3` to `v3.0.5`, and `github.com/spf13/pflag` to `v1.0.10`.
+
 ## v0.12.5 - 2026-08-26
 
 ### Fixed

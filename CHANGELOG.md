@@ -8,6 +8,7 @@ This project follows semantic versioning.
 
 ### Fixed
 
+- Fixed subprocess cancellation leaving children and capture files open on Windows, and concurrent daemon stops failing on transient PID-file sharing violations.
 - Improved unattended task continuity across Git change handling, input/worktree reuse, concurrent queue and daemon ownership, slot refilling, bounded Git/GitHub waits, maintenance, and fresh preflight/diagnostic evidence; installers now verify release checksums before stopping daemons or replacing binaries.
 
 ## v0.12.6 - 2026-09-04

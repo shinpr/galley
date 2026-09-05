@@ -154,6 +154,9 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 	}
 
 	cmd := exec.CommandContext(runCtx, command.Argv[0], command.Argv[1:]...)
+	// The cancellation branch below owns tree termination. CommandContext's
+	// default parent-only kill can orphan children before taskkill finds them.
+	cmd.Cancel = nil
 	cmd.SysProcAttr = processGroupAttr()
 	if command.WorkDir != "" {
 		cmd.Dir = command.WorkDir

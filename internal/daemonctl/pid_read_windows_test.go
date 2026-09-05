@@ -3,8 +3,13 @@
 package daemonctl
 
 import (
+	"bufio"
+	"bytes"
+	"context"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -23,31 +28,38 @@ func TestReadPIDFileSharingViolation(t *testing.T) {
 			if err := WritePID(path, PIDFile{PID: os.Getpid()}); err != nil {
 				t.Fatal(err)
 			}
-			ptr, err := windows.UTF16PtrFromString(path)
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestPIDReadLockHolder$")
+			cmd.Env = append(os.Environ(), "GALLEY_TEST_PID_LOCK="+path)
+			var stderr bytes.Buffer
+			cmd.Stderr = &stderr
+			input, err := cmd.StdinPipe()
 			if err != nil {
 				t.Fatal(err)
 			}
-			handle, err := windows.CreateFile(ptr, windows.GENERIC_READ, 0, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
+			output, err := cmd.StdoutPipe()
 			if err != nil {
 				t.Fatal(err)
 			}
-			var lockedInfo windows.ByHandleFileInformation
-			lockedInfoErr := windows.GetFileInformationByHandle(handle, &lockedInfo)
-			probe, probeErr := windows.CreateFile(ptr, windows.GENERIC_READ, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
-			if probeErr == nil {
-				_ = windows.CloseHandle(probe)
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
 			}
-			_, initialReadErr := os.ReadFile(path)
-			t.Logf("exclusive handle=%d info=%+v infoErr=%v directOpenErr=%v initialReadErr=%v", handle, lockedInfo, lockedInfoErr, probeErr, initialReadErr)
+			defer func() {
+				_ = input.Close()
+				if err := cmd.Wait(); err != nil {
+					t.Errorf("lock holder: %v: %s", err, stderr.String())
+				}
+			}()
+			if ready, err := bufio.NewReader(output).ReadString('\n'); err != nil || ready != "locked\n" {
+				t.Fatalf("lock holder not ready: %q, %v", ready, err)
+			}
+			if _, err := os.ReadFile(path); !errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
+				t.Fatalf("fixture must block PID reads before testing retries: %v", err)
+			}
 			if release {
-				closed := make(chan struct{})
-				time.AfterFunc(75*time.Millisecond, func() {
-					_ = windows.CloseHandle(handle)
-					close(closed)
-				})
-				t.Cleanup(func() { <-closed })
-			} else {
-				t.Cleanup(func() { _ = windows.CloseHandle(handle) })
+				timer := time.AfterFunc(75*time.Millisecond, func() { _ = input.Close() })
+				defer timer.Stop()
 			}
 			started := time.Now()
 			meta, err := ReadPIDFile(path)
@@ -56,9 +68,6 @@ func TestReadPIDFileSharingViolation(t *testing.T) {
 					t.Fatalf("read after sharing violation: %#v, %v", meta, err)
 				}
 			} else if !errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
-				var after windows.ByHandleFileInformation
-				afterErr := windows.GetFileInformationByHandle(handle, &after)
-				t.Logf("after PID read: handle=%d info=%+v infoErr=%v duration=%s", handle, after, afterErr, time.Since(started))
 				t.Fatalf("persistent sharing violation lost: %v", err)
 			}
 			if elapsed := time.Since(started); elapsed > 2*time.Second {
@@ -66,4 +75,27 @@ func TestReadPIDFileSharingViolation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPIDReadLockHolder(t *testing.T) {
+	path := os.Getenv("GALLEY_TEST_PID_LOCK")
+	if path == "" {
+		return
+	}
+	ptr, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle, err := windows.CreateFile(ptr, windows.GENERIC_READ, 0, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := windows.CloseHandle(handle); err != nil {
+			t.Error(err)
+		}
+	}()
+	fmt.Println("locked")
+	var release [1]byte
+	_, _ = os.Stdin.Read(release[:])
 }

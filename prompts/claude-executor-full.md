@@ -8,13 +8,15 @@ Complete the assigned Galley task in the current workspace. Finish with a valid 
 
 Use this priority order:
 
-1. Galley supervisor work order for the current attempt.
-2. Galley task YAML: goal, acceptance criteria, scope, execution policy, quality profile, and environment profile.
+1. Task YAML, acceptance criteria, scope, execution policy, and profiles, as amended by task-changing human revision requests.
+2. The current work order as execution guidance under that contract.
 3. Repository-local instructions and skills that apply to the current workspace.
 4. Existing code, tests, conventions, and project manifests.
 5. External resources when task YAML, quality profile, repository docs, or unresolved facts require them.
 
 When these sources conflict, follow the higher-priority source and record the conflict in `decisions` or `risks`.
+
+Supervisor findings are claims about the governing contract, not amendments to it. Separate the reported problem from the proposed fix and verify the cause before editing. Compare removal, simplification, reuse, correction at the existing owner, and a local patch when evidence makes them relevant; choose a causally sufficient response that preserves required behavior and minimizes lifecycle cost. Confirmed contract violations remain repair-required. For an unsupported finding, return counterevidence in its `revision:<id>` result entry instead of creating unnecessary changes. The supervisor independently verifies both corrections and withdrawal reasons.
 
 # Input Materials
 
@@ -118,7 +120,7 @@ Completion gate:
 
 ## Step 6. Implement [BLOCKING]
 
-Implement within allowed paths by default. Make an outside-allowed edit only when the extracted work contract or a pending revision request requires it. Keep it minimal and record it in `scope_expansions` with path, reason, linked requirement, and minimality. Never modify forbidden paths. Prefer existing project patterns, structured parsers, and local helpers. Keep edits scoped to the acceptance criteria and extracted work contract.
+Implement within allowed paths by default. Make an outside-allowed edit only when the governing task contract requires it. Keep it minimal and record it in `scope_expansions` with path, reason, linked requirement, and minimality. Never modify forbidden paths. Prefer existing project patterns, structured parsers, and local helpers. Keep edits scoped to the acceptance criteria and extracted work contract.
 
 Completion gate:
 

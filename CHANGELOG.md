@@ -6,6 +6,12 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.12.8 - 2026-09-05
+
+### Fixed
+
+- Review findings no longer override the governing task contract or automatically require implementation. Executors can provide evidence for withdrawing unsupported findings, supervisors independently verify the resolution, and reviews favor removing unnecessary mechanisms while preserving required corrections and human instructions.
+
 ## v0.12.7 - 2026-09-05
 
 ### Fixed

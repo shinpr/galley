@@ -10,13 +10,15 @@ Important inputs include the work order prompt, task YAML, quality profile, envi
 
 Use this priority order:
 
-1. Supervisor work order for the current attempt.
-2. Task YAML: goal, acceptance criteria, scope, execution policy, quality profile, and environment profile.
+1. Task YAML, acceptance criteria, scope, execution policy, and profiles, as amended by task-changing human revision requests.
+2. The current work order as execution guidance under that contract.
 3. Repository-local instructions and applicable skills.
 4. Existing code, tests, conventions, and project manifests.
 5. External resources when the task, profiles, repository docs, or unresolved facts require them.
 
 When sources conflict, follow the higher-priority source and record the conflict in `decisions` or `risks`.
+
+Supervisor findings are claims about the governing contract, not amendments to it. Separate the reported problem from the proposed fix and verify the cause before editing. Compare removal, simplification, reuse, correction at the existing owner, and a local patch when evidence makes them relevant; choose a causally sufficient response that preserves required behavior and minimizes lifecycle cost. Confirmed contract violations remain repair-required. For an unsupported finding, return counterevidence in its `revision:<id>` result entry instead of creating unnecessary changes. The supervisor independently verifies both corrections and withdrawal reasons.
 
 # Input File Rules
 
@@ -56,7 +58,7 @@ Follow this order for every task:
 3. Treat the quality profile as part of the acceptance contract. The supervisor independently evaluates the final diff against every configured review dimension and returns work for revision when the active pass policy is not satisfied. Use these conditions to shape the implementation and verification while preserving the requested core mechanism.
 4. Investigate repository context. Inspect relevant files, symbols, entry points, consumers, adapters, data shapes, tests, representative local patterns, and repository setup state: setup docs, environment/profile commands, package or build tool manifests, dependency manifests, lockfiles, local tool availability, and ignored dependency or build artifacts that a fresh worktree will not contain.
 5. Plan the smallest complete implementation. Map intended edits to acceptance criteria, source-material obligations, quality rules, AC-stated proof details, and verification.
-6. Implement within allowed paths by default. Make an outside-allowed edit only when the extracted work contract or a pending revision request requires it. Keep it minimal and record it in `scope_expansions` with path, reason, linked requirement, and minimality. Never modify forbidden paths. Prefer existing project patterns, structured parsers, and local helpers. Keep unrelated changes out of the diff.
+6. Implement within allowed paths by default. Make an outside-allowed edit only when the governing task contract requires it. Keep it minimal and record it in `scope_expansions` with path, reason, linked requirement, and minimality. Never modify forbidden paths. Prefer existing project patterns, structured parsers, and local helpers. Keep unrelated changes out of the diff.
 7. Verify with focused checks first, then broader checks when useful and affordable. Fix code-caused failures. When a verification tool or dependency is missing in the worktree, run the repository-declared setup/install command, or the manifest/lockfile-consistent setup/install path when no explicit command is declared, before recording the check as unavailable. Prefer workspace-local caches when they reduce sandbox or home-directory assumptions. Keep ignored dependency and build artifacts out of the final diff. If setup is blocked by task policy, sandbox, network, credentials, or repository constraints, try any allowed repository-consistent alternative that remains before recording the limitation. Record environment-caused limitations as risks with mitigation after setup has been attempted or ruled out.
 8. Run the self quality gate and return the final JSON object.
 

@@ -70,6 +70,10 @@ func TestRenderWorkOrderIncludesPRReviewInstructions(t *testing.T) {
 		Text:   "An earlier request that is already complete.",
 		Status: "addressed",
 	})
+	loaded.RevisionRequests = append(loaded.RevisionRequests,
+		RevisionRequest{ID: "model-44", Source: "supervisor", Text: "Add a policy registry.", Status: "pending"},
+		RevisionRequest{ID: "finalize-45", Source: "finalize", Text: "Repair the failing commit hook.", Status: "pending"},
+	)
 	loaded.Decisions = append(loaded.Decisions, Decision{
 		ID:        "requeue-2",
 		Question:  "Why was this task requeued?",
@@ -93,7 +97,14 @@ func TestRenderWorkOrderIncludesPRReviewInstructions(t *testing.T) {
 		"Please rename the proof file and update the README.",
 		"`revision:manual-43`",
 		"Keep the label fix and remove only the task-added test.",
-		"Apply non-supervisor requests in displayed order",
+		"Apply human requests in displayed order",
+		"Supervisor findings are claims to evaluate",
+		"supported correction or evidence-backed withdrawal",
+		"`model-44` source=`supervisor`",
+		"`revision:model-44`",
+		"`finalize-45` source=`finalize`",
+		"`revision:finalize-45`",
+		"Galley-owned finalization failures",
 		"Remove the task-added focused test and keep the label fix.",
 	} {
 		if !strings.Contains(workOrder, want) {

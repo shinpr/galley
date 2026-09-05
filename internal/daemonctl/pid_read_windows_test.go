@@ -31,6 +31,14 @@ func TestReadPIDFileSharingViolation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			var lockedInfo windows.ByHandleFileInformation
+			lockedInfoErr := windows.GetFileInformationByHandle(handle, &lockedInfo)
+			probe, probeErr := windows.CreateFile(ptr, windows.GENERIC_READ, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+			if probeErr == nil {
+				_ = windows.CloseHandle(probe)
+			}
+			_, initialReadErr := os.ReadFile(path)
+			t.Logf("exclusive handle=%d info=%+v infoErr=%v directOpenErr=%v initialReadErr=%v", handle, lockedInfo, lockedInfoErr, probeErr, initialReadErr)
 			if release {
 				closed := make(chan struct{})
 				time.AfterFunc(75*time.Millisecond, func() {
@@ -48,6 +56,9 @@ func TestReadPIDFileSharingViolation(t *testing.T) {
 					t.Fatalf("read after sharing violation: %#v, %v", meta, err)
 				}
 			} else if !errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
+				var after windows.ByHandleFileInformation
+				afterErr := windows.GetFileInformationByHandle(handle, &after)
+				t.Logf("after PID read: handle=%d info=%+v infoErr=%v duration=%s", handle, after, afterErr, time.Since(started))
 				t.Fatalf("persistent sharing violation lost: %v", err)
 			}
 			if elapsed := time.Since(started); elapsed > 2*time.Second {

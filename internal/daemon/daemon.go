@@ -424,9 +424,6 @@ func processAvailable(ctx context.Context, opts Options) (int, error) {
 	if err := queue.EnsureLayout(opts.Root); err != nil {
 		return 0, err
 	}
-	if err := queue.RecoverStaleClaims(opts.Root, opts.ClaimTTL, time.Now()); err != nil {
-		return 0, err
-	}
 	limit := max(1, opts.MaxConcurrentTasks)
 	completed := make(chan taskCompletion, limit)
 	active := make(map[string]bool)
@@ -438,9 +435,13 @@ func processAvailable(ctx context.Context, opts Options) (int, error) {
 	var firstErr error
 	stopped := ctx.Done()
 	for {
-		if ctx.Err() == nil && len(active) < limit {
-			queued, err := queue.QueuedTasks(opts.Root)
-			if err == nil {
+		if ctx.Err() == nil {
+			err := queue.RecoverStaleClaimsExcept(opts.Root, opts.ClaimTTL, time.Now(), active)
+			var queued []string
+			if err == nil && len(active) < limit {
+				queued, err = queue.QueuedTasks(opts.Root)
+			}
+			if err == nil && len(queued) > 0 {
 				var repoCounts map[string]int
 				repoCounts, err = queue.RunningRepoCounts(opts.Root)
 				if err == nil {

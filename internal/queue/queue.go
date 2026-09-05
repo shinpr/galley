@@ -110,11 +110,16 @@ func ClaimTask(root, queuedPath string) (string, error) {
 
 // RecoverStaleClaims requeues stale running tasks and removes stale claim locks.
 func RecoverStaleClaims(root string, ttl time.Duration, now time.Time) error {
+	return RecoverStaleClaimsExcept(root, ttl, now, nil)
+}
+
+// RecoverStaleClaimsExcept protects tasks still executing in the calling daemon.
+func RecoverStaleClaimsExcept(root string, ttl time.Duration, now time.Time, active map[string]bool) error {
 	for _, dir := range []string{
 		task.TaskStateDir(root, task.WorkflowStateQueued),
 		task.TaskStateDir(root, task.WorkflowStateRunning),
 	} {
-		if err := removeStaleLocks(dir, ttl, now); err != nil {
+		if err := removeStaleLocks(dir, ttl, now, active); err != nil {
 			return err
 		}
 	}
@@ -126,7 +131,13 @@ func RecoverStaleClaims(root string, ttl time.Duration, now time.Time) error {
 	}
 	for _, entry := range entries {
 		path := filepath.Join(runningDir, entry.Name())
+		if active[path] {
+			continue
+		}
 		info, err := entry.Info()
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
 		if err != nil {
 			return fmt.Errorf("stat %s: %w", path, err)
 		}
@@ -145,7 +156,7 @@ func RecoverStaleClaims(root string, ttl time.Duration, now time.Time) error {
 	return nil
 }
 
-func removeStaleLocks(dir string, ttl time.Duration, now time.Time) error {
+func removeStaleLocks(dir string, ttl time.Duration, now time.Time, active map[string]bool) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return fmt.Errorf("read task dir %s: %w", dir, err)
@@ -155,7 +166,13 @@ func removeStaleLocks(dir string, ttl time.Duration, now time.Time) error {
 			continue
 		}
 		path := filepath.Join(dir, entry.Name())
+		if active[strings.TrimSuffix(path, ".lock")] {
+			continue
+		}
 		info, err := entry.Info()
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
 		if err != nil {
 			return fmt.Errorf("stat %s: %w", path, err)
 		}

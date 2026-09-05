@@ -8,6 +8,7 @@ This project follows semantic versioning.
 
 ### Fixed
 
+- Recover stale claims during continuous task processing without requeuing the daemon's active tasks or removing their locks.
 - Fixed subprocess cancellation leaving children and capture files open on Windows, and concurrent daemon stops failing on transient PID-file sharing violations.
 - Improved unattended task continuity across Git change handling, input/worktree reuse, concurrent queue and daemon ownership, slot refilling, bounded Git/GitHub waits, maintenance, and fresh preflight/diagnostic evidence; installers now verify release checksums before stopping daemons or replacing binaries.
 

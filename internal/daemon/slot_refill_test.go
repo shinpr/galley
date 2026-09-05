@@ -12,6 +12,15 @@ import (
 )
 
 func TestFreedSlotStartsWaitingTaskBeforeLongTaskEnds(t *testing.T) {
+	testSlotRefill(t, false)
+}
+
+func TestActiveSlotRecoversStaleClaimsWithoutRequeuingOwnTask(t *testing.T) {
+	testSlotRefill(t, true)
+}
+
+func testSlotRefill(t *testing.T, recoverStale bool) {
+	t.Helper()
 	root := t.TempDir()
 	promptPath, schemaPath := writeDaemonPromptFiles(t)
 	if err := queue.EnsureLayout(root); err != nil {
@@ -25,6 +34,9 @@ func TestFreedSlotStartsWaitingTaskBeforeLongTaskEnds(t *testing.T) {
 		"echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
 	for i, name := range []string{"long", "short", "third"} {
 		path := filepath.Join(root, "tasks", "queued", string(rune('a'+i))+".yaml")
+		if recoverStale && name == "third" {
+			path = filepath.Join(root, "tasks", "running", "c.yaml")
+		}
 		writeDaemonTask(t, path, initDaemonGitRepo(t))
 		loaded, err := task.Load(path)
 		if err != nil {
@@ -45,12 +57,24 @@ func TestFreedSlotStartsWaitingTaskBeforeLongTaskEnds(t *testing.T) {
 	}()
 	defer func() { _ = os.WriteFile(release, nil, 0o600); cancel(); <-done }()
 	deadline := time.Now().Add(5 * time.Second)
+	madeStale := false
 	for time.Now().Before(deadline) {
 		select {
 		case err := <-done:
 			done <- err
 			t.Fatalf("daemon exited before refill: %v", err)
 		default:
+		}
+		if recoverStale && !madeStale {
+			if _, err := os.Stat(longStarted); err == nil {
+				old := time.Now().Add(-2 * time.Hour)
+				for _, name := range []string{"a.yaml", "c.yaml"} {
+					if err := os.Chtimes(filepath.Join(root, "tasks", "running", name), old, old); err != nil {
+						t.Fatal(err)
+					}
+				}
+				madeStale = true
+			}
 		}
 		if _, err := os.Stat(thirdStarted); err == nil {
 			if _, err := os.Stat(longStarted); err != nil {

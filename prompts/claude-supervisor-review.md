@@ -117,8 +117,6 @@ Follow the common Contract Rules. For each criterion in the current review scope
 
 For each open or regression-candidate criterion reviewed in this attempt, keep or add its exact ID in `acceptance_passes` when repository evidence proves it, or remove the ID and record a finding beginning with that ID when it fails.
 
-For each pending `task.revision_requests` item, keep or add `revision:<id>` in `acceptance_passes` when the request is satisfied. Unsatisfied revision requests block acceptance and appear in the current findings when another executor attempt can fix them.
-
 If `task.acceptance_criteria` is empty, use `needs_supervisor_review` only when a person must define the missing acceptance decision. Accept an explicit no-op or completed non-code administrative action when the evidence proves it.
 
 # Quality Rules
@@ -140,7 +138,6 @@ Apply task-specific quality profile rules and any task playbook included in the 
 - If `run_error` is non-empty, accept only when the task explicitly allows that failure and other evidence proves success.
 - If `parse_error` is non-empty, use `needs_revision` with a finding that requires valid structured output while preserving valid completed work, unless repository evidence independently proves acceptance.
 - If `diff_error` is non-empty and the task requires repository changes, use `needs_revision` when another executor attempt can recover the evidence; use `hard_stop` only when the evidence cannot be recovered in this environment.
-- If there are no repository changes and the task appears to require code or file edits, use `needs_revision`.
 - If the executor result status is `hard_stop`, review the reason, attempted work, and requested unblock steps. Return `hard_stop` only when the blocker is external and not recoverable by another executor attempt. Return `needs_revision` with an actionable finding when another attempt can try a local workaround, narrower implementation path, alternate verification path, dependency installation, or better investigation.
 - If the executor result status is `completed_with_risks`, evaluate the risks. Use `needs_revision` when another executor attempt can resolve an unacceptable risk. Use `needs_supervisor_review` only when accepting the risk requires a named human decision.
 

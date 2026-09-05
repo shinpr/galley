@@ -51,7 +51,7 @@ func RenderWorkOrderWithProfiles(t Task, profiles profile.Bundle) string {
 
 	fmt.Fprintf(&b, "\n## Required Behavior\n\n")
 	fmt.Fprintf(&b, "- Read relevant files before editing.\n")
-	fmt.Fprintf(&b, "- Treat allowed paths as the expected implementation scope. Make an outside-allowed edit only when the extracted work contract or a pending revision request requires it; keep it minimal and record it as a scope expansion.\n")
+	fmt.Fprintf(&b, "- Treat allowed paths as the expected implementation scope. Make an outside-allowed edit only when the governing task contract requires it; keep it minimal and record it as a scope expansion.\n")
 	fmt.Fprintf(&b, "- Treat forbidden paths as protected.\n")
 	fmt.Fprintf(&b, "- If requirements are ambiguous, choose the smallest reversible implementation, record the decision, and continue.\n")
 	fmt.Fprintf(&b, "- Run the highest-value verification available in this environment.\n")
@@ -72,7 +72,7 @@ func pendingRevisionRequests(requests []RevisionRequest) []RevisionRequest {
 
 func renderRevisionContext(b *strings.Builder, t Task, requests []RevisionRequest) {
 	fmt.Fprintf(b, "## Revision Objective\n\n")
-	fmt.Fprintf(b, "Resolve every pending revision request as a coherent repair batch. Apply non-supervisor requests in displayed order as amendments only to the affected acceptance criterion or verification guidance; a later request supersedes an earlier request only where they conflict. Preserve every unaffected task term, gate, and verified pass. This attempt is complete only when every pending request has concrete implementation and verification evidence.\n\n")
+	fmt.Fprintf(b, "Resolve pending requests against the governing task contract. Apply human requests in displayed order as amendments only to the affected acceptance criterion or verification guidance; a later request supersedes an earlier request only where they conflict. Preserve every unaffected task term, gate, and verified pass. Evaluate supervisor findings against that contract: establish the problem and its cause independently of the proposed fix. Requests with source `finalize` report Galley-owned finalization failures; preserve Galley's ownership of commit, push, and PR creation.\n\n")
 
 	fmt.Fprintf(b, "## Findings To Address This Attempt\n\n")
 	for _, risk := range t.Risks {
@@ -88,7 +88,7 @@ func renderRevisionContext(b *strings.Builder, t Task, requests []RevisionReques
 		fmt.Fprintf(b, ": %s\n", request.Text)
 		fmt.Fprintf(b, "  - executor result ID: `revision:%s`\n", request.ID)
 	}
-	fmt.Fprintf(b, "\nReturn each request as one `acceptance_criteria` entry with the displayed `revision:<id>`, status, and concrete evidence. When requests describe the same underlying defect, use one consistent repair while returning evidence for each request ID.\n\n")
+	fmt.Fprintf(b, "\nReturn each request as one `acceptance_criteria` entry with the displayed `revision:<id>`, status, evidence, and notes. A supervisor request is satisfied by a supported correction or evidence-backed withdrawal; explain which in notes for independent supervisor review. Human requests still require fulfillment of the amended contract, and finalize requests remain subject to Galley's finalization result. Group repairs by shared cause while preserving evidence for each request ID; report unresolved obligations accurately.\n\n")
 
 	if t.ReviewProgress != nil && (len(t.ReviewProgress.Acceptance) > 0 || len(t.ReviewProgress.Quality) > 0) {
 		fmt.Fprintf(b, "## Verified Passes To Preserve\n\n")

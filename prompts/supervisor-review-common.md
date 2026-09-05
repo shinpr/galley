@@ -44,8 +44,8 @@ Accept only evidence that proves the semantic acceptance contract at the require
 
 ## Contract Rules
 
-- The active task contract is the original acceptance criteria plus every pending `task.revision_requests` item, identified as `revision:<id>`.
-- A pending request whose source is not `supervisor` is a task-changing human instruction. Apply those requests in task order as amendments only to the affected acceptance criterion or verification guidance; a later request supersedes an earlier request only where they conflict. Every unaffected acceptance criterion, forbidden path, permission constraint, quality gate, and required check remains binding. A `supervisor`-source request is a model finding rather than a human amendment; re-evaluate it against current repository evidence and the active pass policy. Use `needs_supervisor_review` only when a human instruction is ambiguous about the obligation it changes.
+- The governing task contract is the task and profiles as amended by task-changing human requests. Evaluate pending requests as review items identified as `revision:<id>` against that contract.
+- Apply task-changing human requests as instructions. Requests with source `finalize` are Galley-owned failure evidence; Galley must still complete finalization itself. Apply human requests in task order as amendments only to the affected acceptance criterion or verification guidance; a later request supersedes an earlier request only where they conflict. Every unaffected acceptance criterion, forbidden path, permission constraint, quality gate, and required check remains binding. For a `supervisor`-source request, re-evaluate the reported problem separately from its proposed fix against the governing contract, repository evidence, and active pass policy. A supervisor request is resolved by a verified correction or by verified counterevidence that warrants withdrawing it; include its `revision:<id>` in `acceptance_passes` in either case and explain withdrawals in `summary`. Preserve a finding when evidence still establishes a required correction. Use `needs_supervisor_review` only when a human instruction is ambiguous about the obligation it changes.
 - Resolve every open or regression-candidate item in the active task contract through the current pass list or a finding.
 - `acceptance_passes` and `quality_passes` are the current pass sets after this review. Preserve unaffected persisted IDs, add newly verified IDs, and remove IDs that current repository evidence proves false.
 - A configured quality dimension absent from `quality_passes` is not passed. Compute the quality score as the integer percentage of total configured dimension weight whose IDs are in `quality_passes`; when total configured weight is zero, the score is 100. Accept only when the score meets `min_score` and every required dimension passes when `required_dimensions_must_pass` is enabled. Apply `blocking_severities` when deciding whether a candidate problem requires repair. When no quality pass policy is provided, treat critical, high, and medium problems as repair-required. Galley records the decision without recomputing it.
@@ -62,7 +62,7 @@ Accept only evidence that proves the semantic acceptance contract at the require
 - For changes that alter persisted state, shared state, or external interfaces, identify the publication boundary where new state becomes observable to another process, component, user, or later step. Partial, uninitialized, stale, or rollback-only state observed as complete is a finding.
 - When task ACs, pending revision requests, source materials, or executor summaries describe a bug fix, regression fix, or defect class, check adjacent reachable paths that touch the same state, invariant, external boundary, or replaced mechanism.
 - When preflight skeleton evidence is present, inspect implementation-required skeleton files in the worktree and require evidence that their tests are implemented rather than left as TODO, placeholder, skipped, or weakened assertions.
-- Inspect the changed artifacts and nearby contracts needed to decide the current acceptance and quality scope. Within that scope, check for unrelated work, overwritten existing work, incomplete or placeholder behavior, changes not connected to the claimed outcome, and verification that can succeed without exercising that outcome.
+- Inspect the changed artifacts and nearby contracts needed to decide the current acceptance and quality scope. For material added mechanisms, dependencies, state, defensive controls, and tests, establish a governing requirement or evidence-backed need in the reachable changed path. For a verified finding that requires correction, prefer removal, narrowing, or reuse at the existing owner when it preserves the required outcome and resolves the cause at lower lifecycle cost. Continue checking for overwritten work, incomplete behavior, and verification that can succeed without exercising the required outcome.
 - Apply each `task.files` commit policy: committed input files may remain in the final diff when relevant, while non-committed input files must stay out of it.
 - For each executor-reported decision that affects the implementation or requires human review, verify that its rationale supports the result, its stated reversibility matches the implementation, and it is applied consistently.
 - For infrastructure, deployment, or environment changes, verify the intended target, handling of sensitive values, behavior on repeated execution, rollout and recovery boundaries, and any preview or execution evidence available in that workflow.
@@ -73,15 +73,15 @@ Accept only evidence that proves the semantic acceptance contract at the require
 - Compare every path in the cumulative final changed-file set with `task.scope.allowed_paths` and executor-reported `scope_expansions`.
 - Reading a path for inspection does not constitute a scope expansion.
 - Each `scope_expansions[].path` must be a POSIX-style worktree-relative clean path that equals one outside-allowed changed file, or the smallest segment-aware directory prefix covering multiple outside-allowed changed files required by the same requirement.
-- Accept outside-allowed changes only when they are necessary for the task or a pending revision request, minimal, outside `task.scope.forbidden_paths`, and covered by evidence.
+- Accept outside-allowed changes only when they are necessary for the governing task contract, minimal, outside `task.scope.forbidden_paths`, and covered by evidence.
 - Record a blocking finding when outside-allowed diff paths are unreported, insufficiently justified, forbidden, broader than necessary, or not covered by evidence.
 - Treat `scope_expansions` entries whose paths are absent from the diff or already inside `task.scope.allowed_paths` as non-blocking discussion or residual risk unless they make the review evidence confusing or unreviewable.
 - When accepted work modifies paths outside `task.scope.allowed_paths`, record the scope expansion and affected paths in accepted-work `discussion_items`.
-- A pending revision request that names paths outside `task.scope.allowed_paths` remains an acceptance requirement unless the review classifies it as non-gating.
+- A human revision may require outside-allowed paths under the scope rules. A model finding justifies such edits only when they are necessary for the governing task contract.
 
 ## Finding Policy
 
-Use `findings` for concrete problems and unresolved concerns that name a code path, input condition, contract mismatch, value interpretation, reproducible behavior, or requirement boundary and can be verified or fixed by another executor attempt.
+Use `findings` for verified problems that require correction under the governing contract and active pass policy. Establish the governing basis and observable effect before selecting a fix; resolve uncertainty that changes acceptance by obtaining the missing evidence.
 
 Severity guide:
 
@@ -96,7 +96,7 @@ Name every affected quality criterion ID in the finding text.
 
 Use one finding per fix contract: the complete post-fix obligations and verification needed for the next executor to close one defect. Group problems when one repair contract closes them. Split findings when obligations can remain broken independently or need separate verification.
 
-Make each finding independently actionable because it becomes a revision request. Begin with the affected acceptance or quality IDs in brackets, then state the concrete failure and triggering condition or material-risk evidence, the required post-fix behavior across affected boundaries, and the verification that proves closure. Name exact paths and symbols when the evidence supports them. When the implementation is uncertain, specify observable obligations.
+Make each finding independently assessable because it becomes a revision request. Begin with the affected acceptance or quality IDs in brackets, then state the concrete failure and triggering condition or material-risk evidence, the required post-fix behavior across affected boundaries, and the verification that proves closure. Name exact paths and symbols when the evidence supports them. When the implementation is uncertain, specify observable obligations.
 
 When the same defect affects multiple quality criteria but requires one repair, name every affected criterion ID in one finding rather than duplicating the repair contract.
 
@@ -130,7 +130,7 @@ Required fields:
 
 Field shapes:
 
-- `acceptance_passes`: task AC IDs and satisfied `revision:<id>` request IDs.
+- `acceptance_passes`: task AC IDs and resolved `revision:<id>` request IDs, including supervisor findings withdrawn on verified evidence.
 - `quality_passes`: configured quality-dimension IDs.
 - `findings`: actionable repair-contract strings.
 - `discussion_items`: reviewer-facing strings included in the accepted pull request.

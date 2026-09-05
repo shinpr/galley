@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shinpr/galley/internal/runartifact"
 	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/task"
 )
@@ -34,7 +35,7 @@ func TestBuildCodexSetupExecutorCommandPlanMaterializesNormalizedSchema(t *testi
 	if !strings.Contains(joined, "--output-schema") {
 		t.Fatalf("codex setup argv missing --output-schema: %v", cmd.Argv)
 	}
-	body, err := os.ReadFile(filepath.Join(opts.RunDir, runner.CodexOutputSchemaFilename))
+	body, err := os.ReadFile(filepath.Join(opts.RunDir, runartifact.SetupCodexDirname, runner.CodexOutputSchemaFilename))
 	if err != nil {
 		t.Fatalf("read materialized setup schema: %v", err)
 	}

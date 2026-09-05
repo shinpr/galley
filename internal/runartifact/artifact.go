@@ -20,6 +20,7 @@ const (
 	InputFilesFilename            = "input_files.json"
 
 	// Setup preflight artifacts.
+	SetupCodexDirname              = "setup-codex"
 	SetupResultFilename            = "setup_result.json"
 	SetupEnvironmentUpdateFilename = "environment_update.json"
 	SetupExecutorPlanFilename      = "setup_executor_command_plan.json"

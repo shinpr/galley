@@ -156,6 +156,35 @@ sign_darwin_binary() {
   fi
 }
 
+verify_release_checksum() {
+  require_cmd awk
+  expected="$(awk -v asset="$asset" '$2 == asset || $2 == "*" asset {print $1}' "$tmp_dir/checksums.txt")"
+  if [ "${#expected}" -ne 64 ] || printf '%s' "$expected" | LC_ALL=C grep -q '[^0-9a-fA-F]'; then
+    echo "release checksum missing, invalid, or duplicated for $asset" >&2
+    exit 1
+  fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    if ! actual="$(sha256sum "$archive")"; then
+      echo "could not compute SHA-256 checksum for $asset" >&2
+      exit 1
+    fi
+  elif command -v shasum >/dev/null 2>&1; then
+    if ! actual="$(shasum -a 256 "$archive")"; then
+      echo "could not compute SHA-256 checksum for $asset" >&2
+      exit 1
+    fi
+  else
+    echo "release checksum verification requires sha256sum or shasum" >&2
+    exit 1
+  fi
+  actual="${actual%% *}"
+  expected="$(printf '%s' "$expected" | tr 'A-F' 'a-f')"
+  if [ "$actual" != "$expected" ]; then
+    echo "release checksum mismatch for $asset" >&2
+    exit 1
+  fi
+}
+
 install_release() {
   require_cmd curl
   require_cmd tar
@@ -183,6 +212,11 @@ install_release() {
 
   echo "Downloading $url"
   curl -fL "$url" -o "$archive"
+  if ! curl -fL "https://github.com/$OWNER/$REPO/releases/download/$version/checksums.txt" -o "$tmp_dir/checksums.txt"; then
+    echo "could not download release checksums for $version" >&2
+    exit 1
+  fi
+  verify_release_checksum
   tar -xzf "$archive" -C "$tmp_dir"
 
   bin_name="$(galley_bin_name)"

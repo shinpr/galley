@@ -48,15 +48,21 @@ func mergeSkeletonVerification(existing, acID string, outputs []Output) string {
 	if len(lines) == 0 {
 		return existing
 	}
+	base := VerificationWithoutSkeleton(existing)
+	block := acceptanceSkeletonVerificationMarker + "\n" + strings.Join(lines, "\n")
+	if base == "" {
+		return block
+	}
+	return base + "\n\n" + block
+}
+
+// VerificationWithoutSkeleton removes the daemon-generated block from authored guidance.
+func VerificationWithoutSkeleton(existing string) string {
 	base := strings.TrimSpace(existing)
 	if strings.HasPrefix(base, acceptanceSkeletonVerificationMarker+"\n") || base == acceptanceSkeletonVerificationMarker {
 		base = ""
 	} else if idx := strings.Index(base, "\n\n"+acceptanceSkeletonVerificationMarker); idx >= 0 {
 		base = strings.TrimSpace(base[:idx])
 	}
-	block := acceptanceSkeletonVerificationMarker + "\n" + strings.Join(lines, "\n")
-	if base == "" {
-		return block
-	}
-	return base + "\n\n" + block
+	return base
 }

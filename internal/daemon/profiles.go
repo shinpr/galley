@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/shinpr/galley/internal/fileutil"
 	"github.com/shinpr/galley/internal/galleyhome"
@@ -81,7 +82,11 @@ func resolveWorktreeStartPoint(ctx context.Context, opts Options, sourceCWD, bas
 	}
 	originRef := "refs/remotes/origin/" + base
 	headsRef := "refs/heads/" + base
-	if hasOriginRemote(ctx, opts, sourceCWD) {
+	hasOrigin, err := hasOriginRemote(ctx, opts, sourceCWD)
+	if err != nil {
+		return "", err
+	}
+	if hasOrigin {
 		// Refuse to fall back to a possibly stale refs/remotes/origin/<base>:
 		// surface the fetch failure through the workspace phase so
 		// `galley task show` exposes the reason in latest_error_*.
@@ -118,16 +123,19 @@ func resolveWorktreeStartPoint(ctx context.Context, opts Options, sourceCWD, bas
 	)
 }
 
-// hasOriginRemote reports whether the source repository has an "origin"
-// remote configured. Detection failures are reported as "no origin" so that
-// origin-less local repositories (smoke test, fresh clones without a remote)
-// keep using the refs/heads/<base> fallback path.
-func hasOriginRemote(ctx context.Context, opts Options, sourceCWD string) bool {
-	_, err := proc.RunCommand(ctx, proc.Command{
+// hasOriginRemote distinguishes a missing remote from a failed repository probe.
+func hasOriginRemote(ctx context.Context, opts Options, sourceCWD string) (bool, error) {
+	result, err := proc.RunVCSCommand(ctx, proc.Command{
 		WorkDir: "",
 		Argv:    proc.GitArgs(opts.GitBin, "-C", sourceCWD, "remote", "get-url", "origin"),
 	}, proc.RunOptions{TailBytes: -1})
-	return err == nil
+	if err == nil {
+		return true, nil
+	}
+	if result.ExitCode == 2 && strings.Contains(result.Stderr, "No such remote") {
+		return false, nil
+	}
+	return false, fmt.Errorf("inspect origin in %s: %w", sourceCWD, err)
 }
 
 // fetchOriginRef runs `git fetch --no-tags --quiet origin <base>` against the
@@ -141,7 +149,7 @@ func fetchOriginRef(ctx context.Context, opts Options, sourceCWD, base string) e
 	// flake). The retry helper preserves the original error type so the
 	// fmt.Errorf wrap below surfaces the same value to callers.
 	err := retry.Do(ctx, func(ctx context.Context) error {
-		_, runErr := proc.RunCommand(ctx, proc.Command{
+		_, runErr := proc.RunVCSCommand(ctx, proc.Command{
 			WorkDir: "",
 			Argv:    proc.GitArgs(opts.GitBin, "-C", sourceCWD, "fetch", "--no-tags", "--quiet", "origin", base),
 		}, proc.RunOptions{TailBytes: -1})
@@ -154,7 +162,7 @@ func fetchOriginRef(ctx context.Context, opts Options, sourceCWD, base string) e
 }
 
 func refExists(ctx context.Context, opts Options, sourceCWD, ref string) (bool, error) {
-	result, err := proc.RunCommand(ctx, proc.Command{
+	result, err := proc.RunVCSCommand(ctx, proc.Command{
 		WorkDir: "",
 		Argv:    proc.GitArgs(opts.GitBin, "-C", sourceCWD, "show-ref", "--verify", "--quiet", ref),
 	}, proc.RunOptions{TailBytes: -1})

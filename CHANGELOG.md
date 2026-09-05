@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Fixed
+
+- Improved unattended task continuity across Git change handling, input/worktree reuse, concurrent queue and daemon ownership, slot refilling, bounded Git/GitHub waits, maintenance, and fresh preflight/diagnostic evidence; installers now verify release checksums before stopping daemons or replacing binaries.
+
 ## v0.12.6 - 2026-09-04
 
 ### Changed

@@ -18,12 +18,15 @@ import (
 	"github.com/shinpr/galley/internal/workspace"
 )
 
-func reuseReadySetup(root, taskID, runDir string, effective task.Executor) (*setuppreflight.Result, bool, error) {
+func reuseReadySetup(root, taskID, runDir string, effective task.Executor, inputKey string) (*setuppreflight.Result, bool, error) {
 	dirs, err := priorTaskRunDirs(root, taskID, runDir)
 	if err != nil {
 		return nil, false, err
 	}
 	for _, dir := range dirs {
+		if !preflightInputsMatch(dir, "setup", inputKey) {
+			continue
+		}
 		res, err := setuppreflight.LoadResult(dir)
 		if err != nil {
 			continue
@@ -37,17 +40,23 @@ func reuseReadySetup(root, taskID, runDir string, effective task.Executor) (*set
 		if err := setuppreflight.WriteResult(runDir, res); err != nil {
 			return nil, false, err
 		}
+		if err := recordPreflightInputs(runDir, "setup", inputKey, dir); err != nil {
+			return nil, false, err
+		}
 		return res, true, nil
 	}
 	return nil, false, nil
 }
 
-func reuseCompletedAcceptanceSkeleton(root, taskID, runDir string, effective task.Executor) (*skeletonpreflight.Result, bool, error) {
+func reuseCompletedAcceptanceSkeleton(root, taskID, runDir string, effective task.Executor, inputKey, workDir string) (*skeletonpreflight.Result, bool, error) {
 	dirs, err := priorTaskRunDirs(root, taskID, runDir)
 	if err != nil {
 		return nil, false, err
 	}
 	for _, dir := range dirs {
+		if !preflightInputsMatch(dir, "skeleton", inputKey) {
+			continue
+		}
 		res, err := skeletonpreflight.LoadResult(dir)
 		if err != nil {
 			continue
@@ -58,7 +67,13 @@ func reuseCompletedAcceptanceSkeleton(root, taskID, runDir string, effective tas
 		if !res.MatchesExecutor(effective) {
 			continue
 		}
+		if !reusableSkeletonFiles(workDir, res) {
+			continue
+		}
 		if err := skeletonpreflight.WriteResult(runDir, res); err != nil {
+			return nil, false, err
+		}
+		if err := recordPreflightInputs(runDir, "skeleton", inputKey, dir); err != nil {
 			return nil, false, err
 		}
 		return res, true, nil
@@ -78,14 +93,14 @@ func priorTaskRunDirs(root, taskID, currentRunDir string) ([]string, error) {
 	prefix := taskID + "-"
 	type candidate struct {
 		path string
-		n    int64
+		n    uint64
 	}
 	var candidates []candidate
 	for _, entry := range entries {
 		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), prefix) {
 			continue
 		}
-		n, err := strconv.ParseInt(strings.TrimPrefix(entry.Name(), prefix), 10, 64)
+		n, err := strconv.ParseUint(strings.TrimPrefix(entry.Name(), prefix), 10, 63)
 		if err != nil {
 			continue
 		}

@@ -197,6 +197,9 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 	// Registration is best-effort: unregister always runs when Wait returns so
 	// transient registry write errors cannot leak entries.
 	registry := DefaultChildRegistry()
+	if scoped, ok := ctx.Value(childRegistryContextKey{}).(*ChildRegistry); ok {
+		registry = scoped
+	}
 	if registry != nil && cmd.Process != nil {
 		pgid := cmd.Process.Pid
 		if reportedPGID, perr := processGroupID(cmd); perr == nil && reportedPGID > 0 {

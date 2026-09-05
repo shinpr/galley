@@ -11,6 +11,7 @@ import (
 
 	setuppreflight "github.com/shinpr/galley/internal/preflight/setup"
 	"github.com/shinpr/galley/internal/profile"
+	"github.com/shinpr/galley/internal/runartifact"
 	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/task"
 )
@@ -414,9 +415,12 @@ func TestSetupExecutorResolveResultClaudeAndCodex(t *testing.T) {
 		t.Fatalf("claude parsed result: %+v", claude)
 	}
 
-	// Codex path: read from runner.CodexLastMessageFilename written in runDir.
+	// Codex setup keeps its raw message in the setup-specific artifact directory.
 	codexJSON := `Some preamble text\n` + claudeJSON
-	if err := os.WriteFile(filepath.Join(runDir, runner.CodexLastMessageFilename), []byte(codexJSON), 0o600); err != nil {
+	if err := os.MkdirAll(filepath.Join(runDir, runartifact.SetupCodexDirname), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, runartifact.SetupCodexDirname, runner.CodexLastMessageFilename), []byte(codexJSON), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	codexTask := setupTask()

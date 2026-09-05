@@ -188,18 +188,30 @@ On Windows, `stop --force` terminates the recorded daemon and direct child proce
 
 ## Timeouts
 
-Galley uses two independent timeout boundaries:
+Galley uses three independent timeout boundaries:
 
 - daemon `idle_timeout` or `--idle-timeout` stops an executor or supervisor that produces no output
 - task `execution_policy.timeout_ms` limits the total wall-clock duration of one executor attempt
+- each Galley-owned Git or `gh` command has a two-minute ceiling, preserving command, working-directory, and stderr evidence on failure; existing retryable operations retain their six attempts and backoff, so the ceiling is per invocation, not per task
 
 Executor idle timeouts are recorded as executor interruptions. A supervisor idle timeout preserves its supervisor artifacts and moves the task to `failed`. Use `task show` before changing a timeout; an authentication or provider failure should be fixed rather than hidden behind a longer limit.
+
+The Git/`gh` ceiling does not shorten LLM attempts or commands run by the agent. A free task slot is refilled as soon as an active task finishes, subject to global and repository concurrency limits.
+
+## Requeue Evidence
+
+Reused worktrees must belong to the original repository. Prior `input_files.json` evidence allows an existing input file to be retained with its edits; unrelated existing destinations still cause a placement error. Missing inputs are copied again, and repeated cleanup of already removed non-commit inputs succeeds.
+
+Successful preflight stages have `setup_reuse.json` or `skeleton_reuse.json` input fingerprints and source-run references. Reuse requires matching current task contracts, profiles, executor, worktree, and placed input bytes. Setup additionally checks repository setup signals. Missing fingerprints or unprovable inputs rerun the affected stage; compatible skeleton reuse retains edited output files. Codex setup raw artifacts live in `setup-codex/`, separate from skeleton artifacts at the run root. Supervisor stderr is stored in provider-named `*_supervisor_stderr.log` files.
 
 ## Filesystems and Concurrency
 
 - Use local filesystems for the daemon root and managed worktrees. Shared filesystems may not provide the rename and timestamp behavior queue claims expect.
 - Avoid very short claim TTLs. Filesystems with coarse timestamp resolution can make stale-claim recovery noisy.
 - Multiple daemons can share a root because queue claims reject conflicting ownership. Do not share one PID file across unrelated daemon processes.
+- Child registries are isolated as `runtime/children-<owner-hash>.json`, keyed by daemon PID and process start identity. Force stop only cleans the selected owner's registry. Stop older daemons with their existing binary before upgrading; legacy shared `runtime/children.json` evidence is not used to select another daemon's children.
+- Corrupt stale running tasks are preserved under `tasks/failed/` with an adjacent `.error.json` reason, allowing unrelated tasks to proceed. Task-ID registration locks are released by the OS after process exit; their persistent `.registration/` lock files are not active-task records.
+- PR-comment polling and cleanup accept both `.yaml` and `.yml`; unchanged completed cleanup does not rewrite task history on each poll.
 - Running tasks refresh their ownership record while the executor loop is active. On startup, Galley requeues tasks whose recorded daemon is dead or cannot be verified and leaves tasks owned by a live daemon untouched.
 - PR comment polling uses `gh api`. Choose a polling interval appropriate for the number of repositories and the account's GitHub API limits.
 

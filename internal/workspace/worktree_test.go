@@ -29,6 +29,28 @@ func TestPrepareCreatesGitWorktree(t *testing.T) {
 	}
 }
 
+func TestPrepareRejectsOtherRepository(t *testing.T) {
+	repo, other := initGitRepo(t), initGitRepo(t)
+	runGit(t, other, "checkout", "-b", "agent/same")
+	_, err := Prepare(t.Context(), repo, task.Worktree{Enabled: true, Branch: "agent/same", Path: other}, Options{})
+	if err == nil {
+		t.Fatal("accepted worktree from another repository")
+	}
+}
+
+func TestCommittedRenameReportsSource(t *testing.T) {
+	repo := initGitRepo(t)
+	runGit(t, repo, "mv", "README.md", "renamed.md")
+	runGit(t, repo, "commit", "-m", "rename")
+	snapshot, err := CaptureSnapshotFromBase(t.Context(), repo, "HEAD~1", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.BranchFiles) != 2 {
+		t.Fatalf("rename endpoints missing: %q", snapshot.BranchFiles)
+	}
+}
+
 func TestPrepareReusesExistingWorktree(t *testing.T) {
 	repo := initGitRepo(t)
 	spec := task.Worktree{

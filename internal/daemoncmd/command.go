@@ -445,7 +445,7 @@ func newStopCommand(opts *daemon.Options, pidFile *string, stopTimeout *time.Dur
 				// before discarding the record; on cleanup failure surface the
 				// surviving PIDs/PGIDs and keep the PID file so a follow-up
 				// action can target the same daemon record.
-				if err := cleanupOnForce(cmd, force, opts.Root, status.Meta.PID, *stopTimeout); err != nil {
+				if err := cleanupOnForce(cmd, force, opts.Root, status.Meta, *stopTimeout); err != nil {
 					return err
 				}
 				failedTasks := 0
@@ -493,7 +493,7 @@ func newStopCommand(opts *daemon.Options, pidFile *string, stopTimeout *time.Dur
 			// intentionally leave the PID file in place so a follow-up
 			// operator action can target the same daemon record instead of
 			// observing a falsely-clean stop.
-			if err := cleanupOnForce(cmd, force, opts.Root, status.Meta.PID, *stopTimeout); err != nil {
+			if err := cleanupOnForce(cmd, force, opts.Root, status.Meta, *stopTimeout); err != nil {
 				return err
 			}
 			if force {
@@ -516,12 +516,12 @@ func newStopCommand(opts *daemon.Options, pidFile *string, stopTimeout *time.Dur
 	return cmd
 }
 
-func cleanupOnForce(cmd *cobra.Command, force bool, root string, pid int, stopTimeout time.Duration) error {
+func cleanupOnForce(cmd *cobra.Command, force bool, root string, owner daemonctl.PIDFile, stopTimeout time.Duration) error {
 	if !force {
 		return nil
 	}
-	if _, err := daemonctl.CleanupRegisteredChildren(proc.ChildRegistryPath(root), stopTimeout); err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "galley daemon force stop pid=%d incomplete: %v\n", pid, err)
+	if _, err := daemonctl.CleanupRegisteredChildren(proc.OwnedChildRegistryPath(root, owner.PID, owner.ProcessStartedAt), stopTimeout); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "galley daemon force stop pid=%d incomplete: %v\n", owner.PID, err)
 		return err
 	}
 	return nil

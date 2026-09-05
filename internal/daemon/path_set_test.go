@@ -114,21 +114,15 @@ func TestReviewablePathsFromStatusDropsNonLocal(t *testing.T) {
 	}
 }
 
-// TestReviewablePathsFromStatusExcludesCommitFalseDestinations pins the
-// commit:false exclusion contract: task input file destinations declared
-// with commit:false are context-only Galley material and must be kept out
-// of the supervisor-submitted artifact even when they appear in the
-// porcelain output (they are physically present in the worktree). The
-// exclusion uses the same normalization rules as the include set so
-// trailing whitespace, redundant "./" prefixes, and slash form differences
-// do not let context inputs leak through.
+// Exclusion preserves actual filename whitespace while cleaning relative path segments.
 func TestReviewablePathsFromStatusExcludesCommitFalseDestinations(t *testing.T) {
 	statusZ := porcelainEntry("??", "daemon-output.txt") +
+		porcelainEntry("??", " docs/plan.md ") +
 		porcelainEntry("??", "docs/plan.md") +
 		porcelainEntry("??", "docs/other.md")
 
 	got := reviewablePathsFromStatus(statusZ, []string{" docs/plan.md ", "./docs/other.md"})
-	want := []string{"daemon-output.txt"}
+	want := []string{"daemon-output.txt", "docs/plan.md"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("reviewablePathsFromStatus = %v, want %v", got, want)
 	}

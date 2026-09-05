@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shinpr/galley/internal/queue"
 	"github.com/shinpr/galley/internal/task"
@@ -150,6 +151,21 @@ func TestCleanupWorktreesSkipsAlreadyFinalMissingWorktreeWithoutGitHubAPI(t *tes
 			}
 			if reloaded.PR.Status != prStatus {
 				t.Fatalf("pr status got %q want %q", reloaded.PR.Status, prStatus)
+			}
+			old := time.Now().Add(-time.Hour)
+			if err := os.Chtimes(taskPath, old, old); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.Stat(taskPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cleanupWorktrees(t.Context(), Options{Root: root, GHBin: ghBin}.withDefaults()); err != nil {
+				t.Fatal(err)
+			}
+			after, err := os.Stat(taskPath)
+			if err != nil || !before.ModTime().Equal(after.ModTime()) {
+				t.Fatalf("unchanged cleanup rewrote task: %v", err)
 			}
 		})
 	}

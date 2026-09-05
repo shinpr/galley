@@ -17,7 +17,7 @@ import (
 
 // spawnTrackedChild registers a real process group; reap controls whether a
 // killed child disappears or remains a zombie for incomplete-cleanup coverage.
-func spawnTrackedChild(t *testing.T, root string, reap bool) (pid, pgid int, reaped <-chan struct{}) {
+func spawnTrackedChild(t *testing.T, root string, reap bool, ownerOverride ...daemonctl.PIDFile) (pid, pgid int, reaped <-chan struct{}) {
 	t.Helper()
 	sleepPath, err := exec.LookPath("sleep")
 	if err != nil {
@@ -50,7 +50,14 @@ func spawnTrackedChild(t *testing.T, root string, reap bool) (pid, pgid int, rea
 	if err != nil {
 		pgid = child.Process.Pid
 	}
-	registryPath := proc.ChildRegistryPath(root)
+	owner, err := daemonctl.ReadPIDFile(filepath.Join(root, "galley-daemon.pid"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ownerOverride) > 0 {
+		owner = ownerOverride[0]
+	}
+	registryPath := proc.OwnedChildRegistryPath(root, owner.PID, owner.ProcessStartedAt)
 	if err := os.MkdirAll(filepath.Dir(registryPath), 0o700); err != nil {
 		t.Fatalf("create registry dir: %v", err)
 	}
@@ -70,6 +77,10 @@ func spawnTrackedChild(t *testing.T, root string, reap bool) (pid, pgid int, rea
 func TestStopForceCleansRegisteredChildProcessGroupBeforeRemovingPIDFile(t *testing.T) {
 	root, pidFile, _ := startUnresponsiveDaemon(t)
 	childPID, _, _ := spawnTrackedChild(t, root, true)
+	owner, err := daemonctl.ReadPIDFile(pidFile)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	cmd := NewCommand("daemon")
 	var out, errBuf bytes.Buffer
@@ -90,7 +101,31 @@ func TestStopForceCleansRegisteredChildProcessGroupBeforeRemovingPIDFile(t *test
 	if _, statErr := os.Stat(pidFile); !os.IsNotExist(statErr) {
 		t.Fatalf("PID file must be removed only after successful child cleanup, stat err=%v", statErr)
 	}
-	if _, statErr := os.Stat(proc.ChildRegistryPath(root)); !os.IsNotExist(statErr) {
+	if _, statErr := os.Stat(proc.OwnedChildRegistryPath(root, owner.PID, owner.ProcessStartedAt)); !os.IsNotExist(statErr) {
 		t.Fatalf("child registry must be cleared after successful cleanup, stat err=%v", statErr)
+	}
+}
+
+func TestForceStopLeavesOtherDaemonChildrenAndRegistryIntact(t *testing.T) {
+	root, _, _ := startUnresponsiveDaemon(t)
+	_, _, _ = spawnTrackedChild(t, root, true)
+	other := daemonctl.PIDFile{PID: os.Getpid(), ProcessStartedAt: "other-daemon"}
+	otherPID, _, _ := spawnTrackedChild(t, root, true, other)
+	registryPath := proc.OwnedChildRegistryPath(root, other.PID, other.ProcessStartedAt)
+	before, err := os.ReadFile(registryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := NewCommand("daemon")
+	cmd.SetArgs([]string{"--root", root, "--stop-timeout", "2s", "stop", "--force"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if alive, err := daemonctl.Alive(otherPID); err != nil || !alive {
+		t.Fatalf("other daemon child killed: %v", err)
+	}
+	after, err := os.ReadFile(registryPath)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("other daemon registry changed: %v", err)
 	}
 }

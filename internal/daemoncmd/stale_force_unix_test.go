@@ -64,6 +64,10 @@ func startStaleDaemon(t *testing.T) (root, pidFile string) {
 func TestStopForceWithStaleDaemonCleansRegisteredChildGroup(t *testing.T) {
 	root, pidFile := startStaleDaemon(t)
 	childPID, _, _ := spawnTrackedChild(t, root, true)
+	owner, err := daemonctl.ReadPIDFile(pidFile)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	cmd := NewCommand("daemon")
 	var out, errBuf bytes.Buffer
@@ -79,7 +83,7 @@ func TestStopForceWithStaleDaemonCleansRegisteredChildGroup(t *testing.T) {
 	if _, statErr := os.Stat(pidFile); !os.IsNotExist(statErr) {
 		t.Fatalf("PID file must be removed only after the stale-record child cleanup succeeds, stat err=%v", statErr)
 	}
-	if _, statErr := os.Stat(proc.ChildRegistryPath(root)); !os.IsNotExist(statErr) {
+	if _, statErr := os.Stat(proc.OwnedChildRegistryPath(root, owner.PID, owner.ProcessStartedAt)); !os.IsNotExist(statErr) {
 		t.Fatalf("child registry must be cleared after successful cleanup, stat err=%v", statErr)
 	}
 }

@@ -8,6 +8,67 @@ import (
 	"github.com/shinpr/galley/internal/task"
 )
 
+func TestCleanupNonCommittedCanRetryAfterParentPruned(t *testing.T) {
+	workDir := t.TempDir()
+	files := []task.InputFile{{Destination: "pruned/nested/context.md"}}
+	if err := CleanupNonCommitted(workDir, files); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReusePreservesEditsOnLaterPlacementFailure(t *testing.T) {
+	workDir := t.TempDir()
+	source := filepath.Join(t.TempDir(), "input.md")
+	if err := os.WriteFile(source, []byte("original"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	files := []task.InputFile{{Source: source, Destination: "input.md", Commit: true}}
+	prior, err := Prepare(workDir, files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(workDir, "input.md")
+	if err := os.WriteFile(destination, []byte("edited"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	files = append(files, task.InputFile{Source: source, Destination: "new.md"}, task.InputFile{Source: source + ".missing", Destination: "fail.md"})
+	if _, err := PrepareReusing(workDir, files, prior); err == nil {
+		t.Fatal("expected placement failure")
+	}
+	if data, err := os.ReadFile(destination); err != nil || string(data) != "edited" {
+		t.Fatalf("edited input removed: %q %v", data, err)
+	}
+	if _, err := os.Stat(filepath.Join(workDir, "new.md")); !os.IsNotExist(err) {
+		t.Fatalf("new copy not rolled back: %v", err)
+	}
+}
+
+func TestReuseRejectsReplacedSymlink(t *testing.T) {
+	workDir := t.TempDir()
+	source := filepath.Join(t.TempDir(), "input.md")
+	if err := os.WriteFile(source, []byte("original"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	files := []task.InputFile{{Source: source, Destination: "input.md"}}
+	prior, err := Prepare(workDir, files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(workDir, "input.md")
+	if err := os.Remove(destination); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(source, destination); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if _, err := PrepareReusing(workDir, files, prior); err == nil {
+		t.Fatal("reused symlink accepted")
+	}
+	if data, err := os.ReadFile(source); err != nil || string(data) != "original" {
+		t.Fatalf("symlink target changed: %q %v", data, err)
+	}
+}
+
 func TestPrepareRejectsExistingDestination(t *testing.T) {
 	t.Parallel()
 	workDir := t.TempDir()

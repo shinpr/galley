@@ -84,7 +84,7 @@ func Prepare(ctx context.Context, sourceCWD string, spec task.Worktree, opts Opt
 	}
 	worktreePath = filepath.Clean(worktreePath)
 	if _, err := os.Stat(worktreePath); err == nil {
-		return reuseExistingWorktree(ctx, worktreePath, spec.Branch, opts)
+		return reuseExistingWorktree(ctx, sourceCWD, worktreePath, spec.Branch, opts)
 	} else if !os.IsNotExist(err) {
 		return Prepared{}, fmt.Errorf("inspect worktree path %s: %w", worktreePath, err)
 	}
@@ -130,10 +130,29 @@ func Prepare(ctx context.Context, sourceCWD string, spec task.Worktree, opts Opt
 	}, nil
 }
 
-func reuseExistingWorktree(ctx context.Context, worktreePath, branch string, opts Options) (Prepared, error) {
+func reuseExistingWorktree(ctx context.Context, sourceCWD, worktreePath, branch string, opts Options) (Prepared, error) {
 	inside, err := gitOutput(ctx, opts, worktreePath, "rev-parse", "--is-inside-work-tree")
 	if err != nil || inside != "true" {
 		return Prepared{}, fmt.Errorf("worktree path already exists and is not a git worktree: %s", worktreePath)
+	}
+	sourceCommon, err := commonGitDir(ctx, sourceCWD, opts)
+	if err != nil {
+		return Prepared{}, err
+	}
+	worktreeCommon, err := commonGitDir(ctx, worktreePath, opts)
+	if err != nil {
+		return Prepared{}, err
+	}
+	sourceInfo, err := os.Stat(sourceCommon)
+	if err != nil {
+		return Prepared{}, err
+	}
+	worktreeInfo, err := os.Stat(worktreeCommon)
+	if err != nil {
+		return Prepared{}, err
+	}
+	if !os.SameFile(sourceInfo, worktreeInfo) {
+		return Prepared{}, fmt.Errorf("worktree path %s belongs to another repository (source %s)", worktreePath, sourceCWD)
 	}
 	currentBranch, err := gitOutput(ctx, opts, worktreePath, "branch", "--show-current")
 	if err != nil {
@@ -159,6 +178,17 @@ func reuseExistingWorktree(ctx context.Context, worktreePath, branch string, opt
 		Branch:          branch,
 		Path:            worktreePath,
 	}, nil
+}
+
+func commonGitDir(ctx context.Context, cwd string, opts Options) (string, error) {
+	dir, err := gitOutput(ctx, opts, cwd, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", fmt.Errorf("inspect repository identity %s: %w", cwd, err)
+	}
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(cwd, dir)
+	}
+	return canonicalExistingPath(dir)
 }
 
 func headSHA(ctx context.Context, cwd string, opts Options) (string, error) {
@@ -188,7 +218,7 @@ func gitOutput(ctx context.Context, opts Options, cwd string, args ...string) (s
 }
 
 func statusPorcelain(ctx context.Context, cwd string, opts Options) (string, bool, error) {
-	status, err := gitOutput(ctx, opts, cwd, "status", "--porcelain")
+	status, err := gitOutput(ctx, opts, cwd, "status", "--porcelain", "--untracked-files=all")
 	if err != nil {
 		return "", false, fmt.Errorf("git status porcelain %s: %w", cwd, err)
 	}
@@ -202,7 +232,7 @@ func CaptureSnapshot(ctx context.Context, cwd string, opts Options) (Snapshot, e
 
 // CaptureSnapshotFromBase captures committed, staged, and unstaged changes for supervisor review.
 func CaptureSnapshotFromBase(ctx context.Context, cwd, baseSHA string, opts Options) (Snapshot, error) {
-	status, err := gitOutput(ctx, opts, cwd, "status", "--porcelain")
+	status, err := gitOutput(ctx, opts, cwd, "status", "--porcelain", "--untracked-files=all")
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("git status: %w", err)
 	}
@@ -246,7 +276,7 @@ func CaptureSnapshotFromBase(ctx context.Context, cwd, baseSHA string, opts Opti
 }
 
 func gitChangedFiles(ctx context.Context, cwd, revision string, opts Options) ([]string, error) {
-	result, err := runGitCommand(ctx, opts, cwd, "diff", "--name-only", "-z", revision)
+	result, err := runGitCommand(ctx, opts, cwd, "diff", "--name-only", "--no-renames", "-z", revision)
 	if err != nil {
 		return nil, err
 	}
@@ -391,7 +421,7 @@ func isAncestor(ancestor, child string) bool {
 
 // runGitCommand routes workspace git calls through the shared longpaths prefix.
 func runGitCommand(ctx context.Context, opts Options, cwd string, args ...string) (proc.RunResult, error) {
-	return proc.RunCommand(ctx, proc.Command{
+	return proc.RunVCSCommand(ctx, proc.Command{
 		WorkDir: cwd,
 		Argv:    proc.GitArgs(opts.git(), args...),
 	}, proc.RunOptions{TailBytes: -1})

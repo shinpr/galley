@@ -119,9 +119,7 @@ func parseStatusPorcelainZ(s string) []statusEntry {
 		path := rest[:idx]
 		rest = rest[idx+1:]
 		if isRenameOrCopyStatus(x) || isRenameOrCopyStatus(y) {
-			// Rename/copy adds a second NUL-terminated token for the old
-			// path; we only care about the new path, so consume and discard
-			// the old one.
+			// Staging uses only the destination; the source is already staged by Git.
 			idx2 := strings.IndexByte(rest, 0)
 			if idx2 < 0 {
 				if path != "" {
@@ -170,7 +168,7 @@ func normalizedPathSet(paths []string) map[string]bool {
 // when the input collapses to an empty path or to "." so callers can use
 // the empty string as a sentinel for "drop this entry".
 func normalizeReviewablePath(p string) string {
-	clean := strings.TrimSpace(p)
+	clean := p
 	if clean == "" {
 		return ""
 	}
@@ -192,7 +190,7 @@ func nonCommittedInputDestinations(files []task.InputFile) []string {
 		if f.Commit {
 			continue
 		}
-		dest := strings.TrimSpace(f.Destination)
+		dest := f.Destination
 		if dest == "" {
 			continue
 		}

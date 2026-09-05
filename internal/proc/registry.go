@@ -1,6 +1,8 @@
 package proc
 
 import (
+	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -58,10 +60,7 @@ var (
 	defaultChildRegistry   *ChildRegistry
 )
 
-// SetDefaultChildRegistry configures the package-level registry used by
-// RunCommand. Pass nil (or an empty path) to disable. The daemon installs the
-// registry early in Run so executor and supervisor subprocesses are tracked
-// for the lifetime of the daemon process.
+// SetDefaultChildRegistry sets RunCommand's fallback registry; daemon contexts override it.
 func SetDefaultChildRegistry(reg *ChildRegistry) {
 	defaultChildRegistryMu.Lock()
 	defer defaultChildRegistryMu.Unlock()
@@ -76,14 +75,25 @@ func DefaultChildRegistry() *ChildRegistry {
 	return defaultChildRegistry
 }
 
-// ChildRegistryPath returns the conventional registry path under a daemon
-// root. Both the runner package (writer) and daemonctl (reader) use this
-// helper so the file location stays in sync without a new configuration knob.
+// ChildRegistryPath returns the legacy shared registry path for evidence compatibility.
 func ChildRegistryPath(root string) string {
 	if root == "" {
 		return ""
 	}
 	return filepath.Join(root, "runtime", "children.json")
+}
+
+// OwnedChildRegistryPath isolates tracking by daemon process identity, including restarts.
+func OwnedChildRegistryPath(root string, pid int, startedAt string) string {
+	identity := sha256.Sum256([]byte(fmt.Sprintf("%d:%s", pid, startedAt)))
+	return filepath.Join(root, "runtime", fmt.Sprintf("children-%x.json", identity[:16]))
+}
+
+type childRegistryContextKey struct{}
+
+// WithChildRegistry scopes subprocess ownership to one daemon invocation.
+func WithChildRegistry(ctx context.Context, registry *ChildRegistry) context.Context {
+	return context.WithValue(ctx, childRegistryContextKey{}, registry)
 }
 
 type childRegistryFile struct {

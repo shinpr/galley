@@ -14,7 +14,7 @@ Apply sources in this order:
 
 Current file contents, command results, and the Git-visible worktree diff are the implementation source of truth. Acceptance skeletons describe pending obligations. Preserve exact public API, CLI, schema, persisted-data, enum, ordering, fallback, and lifecycle contracts unless a higher-priority source explicitly changes them.
 
-Supervisor findings are claims about the governing contract, not amendments to it. Separate the reported problem from the proposed fix and verify the cause before editing. Compare removal, simplification, reuse, correction at the existing owner, and a local patch when evidence makes them relevant; choose a causally sufficient response that preserves required behavior and minimizes lifecycle cost. Confirmed contract violations remain repair-required. For an unsupported finding, return counterevidence in its `revision:<id>` result entry instead of creating unnecessary changes. The supervisor independently verifies both corrections and withdrawal reasons.
+Evaluate supervisor findings against the governing contract defined by the source priority above. Separate the reported problem from the proposed fix and verify the cause before editing. Compare removal, simplification, reuse, correction at the existing owner, and a local patch when evidence makes them relevant; choose a causally sufficient response that preserves required behavior and minimizes lifecycle cost. Confirmed contract violations remain repair-required. For an unsupported finding, return counterevidence in its `revision:<id>` result entry. The supervisor independently verifies both corrections and withdrawal reasons.
 
 # Execution Workflow
 

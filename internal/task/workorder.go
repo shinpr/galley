@@ -72,7 +72,7 @@ func pendingRevisionRequests(requests []RevisionRequest) []RevisionRequest {
 
 func renderRevisionContext(b *strings.Builder, t Task, requests []RevisionRequest) {
 	fmt.Fprintf(b, "## Revision Objective\n\n")
-	fmt.Fprintf(b, "Resolve pending requests against the governing task contract. Apply human requests in displayed order as amendments only to the affected acceptance criterion or verification guidance; a later request supersedes an earlier request only where they conflict. Preserve every unaffected task term, gate, and verified pass. Supervisor findings are claims to evaluate, not amendments: establish the problem and its cause independently of the proposed fix. Requests with source `finalize` report Galley-owned finalization failures; preserve Galley's ownership of commit, push, and PR creation.\n\n")
+	fmt.Fprintf(b, "Resolve pending requests against the governing task contract. Apply human requests in displayed order as amendments only to the affected acceptance criterion or verification guidance; a later request supersedes an earlier request only where they conflict. Preserve every unaffected task term, gate, and verified pass. Evaluate supervisor findings against that contract: establish the problem and its cause independently of the proposed fix. Requests with source `finalize` report Galley-owned finalization failures; preserve Galley's ownership of commit, push, and PR creation.\n\n")
 
 	fmt.Fprintf(b, "## Findings To Address This Attempt\n\n")
 	for _, risk := range t.Risks {

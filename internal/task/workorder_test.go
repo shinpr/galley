@@ -98,7 +98,7 @@ func TestRenderWorkOrderIncludesPRReviewInstructions(t *testing.T) {
 		"`revision:manual-43`",
 		"Keep the label fix and remove only the task-added test.",
 		"Apply human requests in displayed order",
-		"Supervisor findings are claims to evaluate",
+		"Evaluate supervisor findings against that contract",
 		"supported correction or evidence-backed withdrawal",
 		"`model-44` source=`supervisor`",
 		"`revision:model-44`",

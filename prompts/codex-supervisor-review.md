@@ -89,7 +89,6 @@ Use the common Contract Rules to determine the active task contract and revision
 - If an authoritative pending revision request asks for a specific change and the diff does not show that change, return `needs_revision`.
 - If a pending revision request is already satisfied by existing repository evidence, retain its `revision:<id>` in `acceptance_passes`.
 - Re-evaluate every `supervisor`-source request and express any repair that remains necessary as a current finding; Galley gives the executor only the current finding batch.
-- If the executor produced no diff after a pending revision request, accept only when the evidence proves the request was already satisfied before the attempt.
 
 # Output Contract
 

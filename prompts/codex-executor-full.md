@@ -18,7 +18,7 @@ Use this priority order:
 
 When sources conflict, follow the higher-priority source and record the conflict in `decisions` or `risks`.
 
-Supervisor findings are claims about the governing contract, not amendments to it. Separate the reported problem from the proposed fix and verify the cause before editing. Compare removal, simplification, reuse, correction at the existing owner, and a local patch when evidence makes them relevant; choose a causally sufficient response that preserves required behavior and minimizes lifecycle cost. Confirmed contract violations remain repair-required. For an unsupported finding, return counterevidence in its `revision:<id>` result entry instead of creating unnecessary changes. The supervisor independently verifies both corrections and withdrawal reasons.
+Evaluate supervisor findings against the governing contract defined by the source priority above. Separate the reported problem from the proposed fix and verify the cause before editing. Compare removal, simplification, reuse, correction at the existing owner, and a local patch when evidence makes them relevant; choose a causally sufficient response that preserves required behavior and minimizes lifecycle cost. Confirmed contract violations remain repair-required. For an unsupported finding, return counterevidence in its `revision:<id>` result entry. The supervisor independently verifies both corrections and withdrawal reasons.
 
 # Input File Rules
 

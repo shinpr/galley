@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,7 +14,7 @@ import (
 )
 
 func cleanupWorktrees(ctx context.Context, opts Options) error {
-	matches, err := filepath.Glob(filepath.Join(task.TaskStateDir(opts.Root, task.WorkflowStateDone), "*.yaml"))
+	matches, err := task.YAMLFiles(task.TaskStateDir(opts.Root, task.WorkflowStateDone))
 	if err != nil {
 		return err
 	}
@@ -90,6 +89,9 @@ func cleanupTaskWorktree(ctx context.Context, opts Options, path string) error {
 		return cleanupTaskError(path, loaded, err)
 	}
 	if cleanupResult.AlreadyMissing && persistedFinal {
+		if loaded.Status == finalStatus {
+			return nil
+		}
 		loaded.Status = finalStatus
 		if err := task.Save(path, loaded); err != nil {
 			return cleanupTaskError(path, loaded, err)

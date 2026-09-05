@@ -221,16 +221,15 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
-	// Install the active child registry so executor and supervisor subprocess
-	// process groups are tracked for the lifetime of this daemon process.
-	// galley daemon stop --force reads the same file from disk and SIGKILLs
-	// any pgids that are still alive after the daemon exits, so a daemon
-	// teardown does not orphan executor/supervisor children that were
-	// intentionally started in their own process groups.
-	registry := proc.NewChildRegistry(proc.ChildRegistryPath(opts.Root))
-	proc.SetDefaultChildRegistry(registry)
-	defer proc.SetDefaultChildRegistry(nil)
-	defer func() { _ = registry.Clear() }()
+	// Preserve outstanding children for force-stop recovery; never clear another daemon's registry.
+	owner := currentRunningOwner()
+	registry := proc.NewChildRegistry(proc.OwnedChildRegistryPath(opts.Root, owner.PID, owner.ProcessStartedAt))
+	ctx = proc.WithChildRegistry(ctx, registry)
+	defer func() {
+		if records, err := registry.List(nil); err == nil && len(records) == 0 {
+			_ = registry.Clear()
+		}
+	}()
 	opts.notifyDispatcher = newNotificationDispatcher(ctx)
 	defer opts.notifyDispatcher.Wait()
 	if err := recoverInterruptedRunningTasks(opts.Root); err != nil {
@@ -299,8 +298,7 @@ func runMaintenanceRunner(ctx context.Context, opts Options) {
 	}
 }
 
-// runExecutionRunner preserves the existing serialized execution pass: each
-// pass waits for claimed tasks to finish before the next execution tick.
+// runExecutionRunner polls when idle; processAvailable refills slots while work is active.
 func runExecutionRunner(ctx context.Context, opts Options) {
 	ticker := time.NewTicker(opts.PollInterval)
 	defer ticker.Stop()
@@ -426,52 +424,62 @@ func processAvailable(ctx context.Context, opts Options) (int, error) {
 	if err := queue.EnsureLayout(opts.Root); err != nil {
 		return 0, err
 	}
-	if err := queue.RecoverStaleClaims(opts.Root, opts.ClaimTTL, time.Now()); err != nil {
-		return 0, err
-	}
-	queued, err := queue.QueuedTasks(opts.Root)
-	if err != nil {
-		return 0, err
-	}
-	if len(queued) == 0 {
-		return 0, nil
-	}
-
-	limit := opts.MaxConcurrentTasks
-	if limit > len(queued) {
-		limit = len(queued)
-	}
-
-	var wg sync.WaitGroup
-	errs := make(chan error, limit)
+	limit := max(1, opts.MaxConcurrentTasks)
+	completed := make(chan taskCompletion, limit)
+	active := make(map[string]bool)
 	execCtx, stopExecCtx := gracefulTaskContext(ctx, opts.ShutdownTimeout)
 	defer stopExecCtx()
-	repoCounts, err := queue.RunningRepoCounts(opts.Root)
-	if err != nil {
-		return 0, err
-	}
-	claimedCount, firstClaimErr := claimAvailableTasks(ctx, execCtx, opts, queued, limit, repoCounts, &wg, errs)
-	// This wait is load-bearing: each daemon iteration completes its claimed
-	// task goroutines before the next stale-recovery pass can run. That prevents
-	// Galley from requeueing work it started in the same process.
-	wg.Wait()
-	close(errs)
-
-	firstErr := firstClaimErr
-	for err := range errs {
-		if firstErr == nil {
-			firstErr = err
+	ticker := time.NewTicker(opts.PollInterval)
+	defer ticker.Stop()
+	claimedCount := 0
+	var firstErr error
+	stopped := ctx.Done()
+	for {
+		if ctx.Err() == nil {
+			err := queue.RecoverStaleClaimsExcept(opts.Root, opts.ClaimTTL, time.Now(), active)
+			var queued []string
+			if err == nil && len(active) < limit {
+				queued, err = queue.QueuedTasks(opts.Root)
+			}
+			if err == nil && len(queued) > 0 {
+				var repoCounts map[string]int
+				repoCounts, err = queue.RunningRepoCounts(opts.Root)
+				if err == nil {
+					var count int
+					count, err = claimAvailableTasks(ctx, execCtx, opts, queued, limit-len(active), repoCounts, active, completed)
+					claimedCount += count
+				}
+			}
+			firstErr = firstNonNil(firstErr, err)
+		}
+		if len(active) == 0 {
+			return claimedCount, firstErr
+		}
+		select {
+		case completion := <-completed:
+			delete(active, completion.path)
+			firstErr = firstNonNil(firstErr, completion.err)
+		case <-ticker.C:
+		case <-stopped:
+			stopped = nil
 		}
 	}
-	return claimedCount, firstErr
 }
 
-func claimAvailableTasks(daemonCtx, execCtx context.Context, opts Options, queued []string, limit int, repoCounts map[string]int, wg *sync.WaitGroup, errs chan<- error) (int, error) {
+type taskCompletion struct {
+	path string
+	err  error
+}
+
+func claimAvailableTasks(daemonCtx, execCtx context.Context, opts Options, queued []string, limit int, repoCounts map[string]int, active map[string]bool, completed chan<- taskCompletion) (int, error) {
 	claimedCount := 0
 	var firstClaimErr error
 	for _, queuedPath := range queued {
 		if claimedCount >= limit {
 			break
+		}
+		if active[task.TaskStatePath(opts.Root, task.WorkflowStateRunning, filepath.Base(queuedPath))] {
+			continue
 		}
 		select {
 		case <-daemonCtx.Done():
@@ -507,13 +515,11 @@ func claimAvailableTasks(daemonCtx, execCtx context.Context, opts Options, queue
 		if repoKey != "" {
 			repoCounts[repoKey]++
 		}
-		wg.Add(1)
+		active[claimed] = true
 		go func(path string) {
-			defer wg.Done()
-			defer func() { _ = queue.RemoveOwner(path) }()
-			if err := processClaimedTask(execCtx, daemonCtx, opts, path); err != nil {
-				errs <- err
-			}
+			err := processClaimedTask(execCtx, daemonCtx, opts, path)
+			_ = queue.RemoveOwner(path)
+			completed <- taskCompletion{path: path, err: err}
 		}(claimed)
 	}
 	return claimedCount, firstClaimErr
@@ -662,7 +668,7 @@ func processClaimedTask(execCtx, daemonCtx context.Context, opts Options, runnin
 	var setupUpdate *setuppreflight.EnvironmentUpdate
 	setupReused := false
 	if prepared.WorktreeReused {
-		setupRes, setupReused, err = reuseReadySetup(opts.Root, loaded.ID, runDir, effectiveExecutor)
+		setupRes, setupReused, err = reuseReadySetup(opts.Root, loaded.ID, runDir, effectiveExecutor, preflightInputKey("setup", loaded, profiles, prepared, effectiveExecutor))
 		if err != nil {
 			return failClaimedStage(opts.Root, runningPath, &loaded, setuppreflight.Phase, setuppreflight.FailedKind, preflightReuseError(setuppreflight.Phase, err), runDir)
 		}
@@ -686,6 +692,14 @@ func processClaimedTask(execCtx, daemonCtx context.Context, opts Options, runnin
 	if setupErr != nil {
 		return failClaimedStage(opts.Root, runningPath, &loaded, setuppreflight.Phase, setuppreflight.FailedKind, setupErr, runDir)
 	}
+	if setupUpdate != nil && setupUpdate.Changed && profiles.Environment != nil {
+		profiles.Environment.Setup = &setupUpdate.After
+	}
+	if setupRes != nil && !setupReused {
+		if err := recordPreflightInputs(runDir, "setup", preflightInputKey("setup", loaded, profiles, prepared, effectiveExecutor), runDir); err != nil {
+			return failClaimedStage(opts.Root, runningPath, &loaded, setuppreflight.Phase, setuppreflight.FailedKind, err, runDir)
+		}
+	}
 	// Apply setup readiness evidence (and any persisted profile change) to the
 	// running task before the implementation work order is built so the
 	// supervisor and executor share the same readiness facts.
@@ -705,7 +719,7 @@ func processClaimedTask(execCtx, daemonCtx context.Context, opts Options, runnin
 		var res *skeletonpreflight.Result
 		preflightReused := false
 		if prepared.WorktreeReused {
-			res, preflightReused, err = reuseCompletedAcceptanceSkeleton(opts.Root, loaded.ID, runDir, effectiveExecutor)
+			res, preflightReused, err = reuseCompletedAcceptanceSkeleton(opts.Root, loaded.ID, runDir, effectiveExecutor, preflightInputKey("skeleton", loaded, profiles, prepared, effectiveExecutor), prepared.CWD)
 			if err != nil {
 				return failClaimedStage(opts.Root, runningPath, &loaded, "acceptance_skeleton_preflight", "acceptance_skeleton_preflight_failed", preflightReuseError("acceptance skeleton", err), runDir)
 			}
@@ -727,6 +741,11 @@ func processClaimedTask(execCtx, daemonCtx context.Context, opts Options, runnin
 		}
 		if perr != nil {
 			return failClaimedStage(opts.Root, runningPath, &loaded, "acceptance_skeleton_preflight", "acceptance_skeleton_preflight_failed", perr, runDir)
+		}
+		if res != nil && !preflightReused {
+			if err := recordPreflightInputs(runDir, "skeleton", preflightInputKey("skeleton", loaded, profiles, prepared, effectiveExecutor), runDir); err != nil {
+				return failClaimedStage(opts.Root, runningPath, &loaded, "acceptance_skeleton_preflight", "acceptance_skeleton_preflight_failed", err, runDir)
+			}
 		}
 		if res != nil && !preflightReused {
 			skeletonpreflight.ApplyToTask(&loaded, res)
@@ -892,13 +911,15 @@ func prepareClaimedWorkspace(ctx context.Context, opts Options, profiles profile
 		appendFailureAttempt(loaded, "run_evidence", "run_evidence_failed", err, runDir)
 		return claimedWorkspace{}, err
 	}
+	var priorInputs []inputfiles.Prepared
 	if prepared.WorktreeReused {
-		if err := reconcileReusedInputFiles(prepared.CWD, loaded.Files); err != nil {
+		priorInputs, err = priorPreparedInputs(opts.Root, loaded.ID, runDir, prepared.CWD)
+		if err != nil {
 			appendFailureAttempt(loaded, "input_files", "input_files_failed", err, runDir)
 			return claimedWorkspace{}, err
 		}
 	}
-	preparedFiles, err := inputfiles.Prepare(prepared.CWD, loaded.Files)
+	preparedFiles, err := inputfiles.PrepareReusing(prepared.CWD, loaded.Files, priorInputs)
 	if err != nil {
 		appendFailureAttempt(loaded, "input_files", "input_files_failed", err, runDir)
 		return claimedWorkspace{}, err

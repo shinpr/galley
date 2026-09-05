@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	skeletonpreflight "github.com/shinpr/galley/internal/preflight/skeleton"
@@ -76,8 +77,8 @@ func hasNonSkeletonProgress(snapshot workspace.Snapshot, workDir string, preflig
 func changedFilesFromSnapshot(snapshot workspace.Snapshot) map[string]struct{} {
 	out := make(map[string]struct{})
 	for _, p := range snapshot.BranchFiles {
-		if trimmed := strings.TrimSpace(p); trimmed != "" {
-			out[trimmed] = struct{}{}
+		if p != "" {
+			out[p] = struct{}{}
 		}
 	}
 	for _, p := range parsePorcelainPaths(snapshot.StatusPorcelain) {
@@ -86,69 +87,65 @@ func changedFilesFromSnapshot(snapshot workspace.Snapshot) map[string]struct{} {
 	return out
 }
 
-// parsePorcelainPaths parses `git status --porcelain` text output (no -z) and
-// returns the list of paths it reports as changed. Renames are encoded
-// as "old -> new"; only the new path is returned.
-//
-// This is the change-visibility parser: it is consumed by progress detection,
-// the finalize-time forbidden_paths gate, and scope-expansion reporting, so
-// it must keep reporting every changed path (including staged-only deletions).
-// Finalization uses addEligiblePorcelainPaths instead when it needs the subset
-// safe to pass to git add.
+// parsePorcelainPaths includes both rename endpoints for protection and progress checks.
 func parsePorcelainPaths(porcelain string) []string {
-	if porcelain == "" {
-		return nil
-	}
 	var paths []string
-	for _, raw := range strings.Split(porcelain, "\n") {
-		line := strings.TrimRight(raw, "\r")
-		if len(line) < 4 {
-			continue
-		}
-		// Porcelain format: XY<space>path[ -> renamed]
-		body := line[3:]
-		if idx := strings.Index(body, " -> "); idx >= 0 {
-			body = body[idx+4:]
-		}
-		body = strings.TrimSpace(body)
-		// Quoted paths may appear when filenames contain unusual characters.
-		body = strings.Trim(body, `"`)
-		if body == "" {
-			continue
-		}
-		paths = append(paths, body)
+	for _, line := range strings.Split(porcelain, "\n") {
+		paths = append(paths, porcelainLinePaths(line)...)
 	}
 	return paths
 }
 
-// addEligiblePorcelainPaths returns the changed paths finalization should pass
-// to `git add`, excluding staged-only deletions that are already in the index.
-// Unstaged deletions stay eligible so finalization still stages them.
+// addEligiblePorcelainPaths omits staged deletions and staged rename sources.
 func addEligiblePorcelainPaths(porcelain string) []string {
-	if porcelain == "" {
-		return nil
-	}
 	var paths []string
-	for _, raw := range strings.Split(porcelain, "\n") {
-		line := strings.TrimRight(raw, "\r")
-		if len(line) < 4 {
+	for _, line := range strings.Split(porcelain, "\n") {
+		if len(line) < 4 || isStagedOnlyDeletion(line[0], line[1]) {
 			continue
 		}
-		if isStagedOnlyDeletion(line[0], line[1]) {
-			continue
+		if changed := porcelainLinePaths(line); len(changed) > 0 {
+			paths = append(paths, changed[len(changed)-1])
 		}
-		// Porcelain format: XY<space>path[ -> renamed]
-		body := line[3:]
-		if idx := strings.Index(body, " -> "); idx >= 0 {
-			body = body[idx+4:]
-		}
-		body = strings.TrimSpace(body)
-		// Quoted paths may appear when filenames contain unusual characters.
-		body = strings.Trim(body, `"`)
-		if body == "" {
-			continue
-		}
-		paths = append(paths, body)
 	}
 	return paths
+}
+
+func porcelainLinePaths(line string) []string {
+	if len(line) < 4 {
+		return nil
+	}
+	body := line[3:]
+	var paths []string
+	if isRenameOrCopyStatus(line[0]) || isRenameOrCopyStatus(line[1]) {
+		separator := strings.Index(body, " -> ")
+		if strings.HasPrefix(body, `"`) {
+			for i := 1; i < len(body); i++ {
+				if body[i] == '\\' {
+					i++
+					continue
+				}
+				if body[i] == '"' {
+					separator = i + 1
+					break
+				}
+			}
+		}
+		if separator >= 0 && strings.HasPrefix(body[separator:], " -> ") {
+			paths = append(paths, unquoteGitPath(body[:separator]))
+			body = body[separator+4:]
+		}
+	}
+	if body != "" {
+		paths = append(paths, unquoteGitPath(body))
+	}
+	return paths
+}
+
+func unquoteGitPath(path string) string {
+	if strings.HasPrefix(path, `"`) {
+		if decoded, err := strconv.Unquote(path); err == nil {
+			return decoded
+		}
+	}
+	return path
 }

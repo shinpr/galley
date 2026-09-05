@@ -695,6 +695,23 @@ printf '%s\n' '`+executorResult+`'
 	if done.Executor.CLI != "" || done.Executor.Effort != "" || done.Executor.Model != "task-model" {
 		t.Fatalf("authored executor must stay partial after first run, got %#v", done.Executor)
 	}
+	retainedSkeleton := filepath.Join(taskWorktreePath(repo, done.Worktree.Path), "internal/foo/foo_test.go")
+	if err := os.WriteFile(retainedSkeleton, []byte("package foo_test\n// retained executor work\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := task.Requeue(donePath, task.RequeueOptions{Root: root}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runTestDaemon(t.Context(), opts); err != nil {
+		t.Fatalf("unchanged rerun: %v", err)
+	}
+	if len(setupCalls) != 1 {
+		t.Fatalf("unchanged setup reran: %d calls", len(setupCalls))
+	}
+	assertGlobCount(t, filepath.Join(root, "runs", "*", "preflight_creator_command_plan.json"), 1)
+	if data, err := os.ReadFile(retainedSkeleton); err != nil || !strings.Contains(string(data), "retained executor work") {
+		t.Fatalf("lost existing skeleton implementation: %q %v", data, err)
+	}
 
 	if err := os.WriteFile(envPath, []byte(envBody("claude", "env-model-v2", "xhigh")), 0o600); err != nil {
 		t.Fatal(err)

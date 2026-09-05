@@ -1,9 +1,9 @@
 package runlog
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -19,14 +19,14 @@ func LatestTaskRunDir(root, taskID string) (string, error) {
 		return "", err
 	}
 	best := ""
-	var bestN int64
+	var bestN uint64
 	prefix := taskID + "-"
 	for _, e := range entries {
 		if !e.IsDir() || !strings.HasPrefix(e.Name(), prefix) {
 			continue
 		}
-		var n int64
-		if _, err := fmt.Sscanf(strings.TrimPrefix(e.Name(), prefix), "%d", &n); err != nil {
+		n, err := strconv.ParseUint(strings.TrimPrefix(e.Name(), prefix), 10, 63)
+		if err != nil {
 			continue
 		}
 		if best == "" || n > bestN {
@@ -53,8 +53,8 @@ func LatestAttemptDir(runDir string) (string, int, error) {
 		if !e.IsDir() || !strings.HasPrefix(e.Name(), "attempt-") {
 			continue
 		}
-		var n int
-		if _, err := fmt.Sscanf(e.Name(), "attempt-%d", &n); err != nil {
+		n, err := strconv.Atoi(strings.TrimPrefix(e.Name(), "attempt-"))
+		if err != nil {
 			continue
 		}
 		if n > bestN {

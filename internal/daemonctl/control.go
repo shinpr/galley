@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -159,7 +160,18 @@ func ReadPID(path string) (int, error) {
 
 // ReadPIDFile reads PID metadata.
 func ReadPIDFile(path string) (PIDFile, error) {
-	data, err := os.ReadFile(path)
+	return readPIDFile(path, runtime.GOOS, os.ReadFile)
+}
+
+func readPIDFile(path, goos string, readFile func(string) ([]byte, error)) (PIDFile, error) {
+	data, err := readFile(path)
+	// Windows readers can race PID removal or heartbeat replacement.
+	// Retry only sharing/lock violations, preserving persistent errors.
+	deadline := time.Now().Add(250 * time.Millisecond)
+	for goos == "windows" && (errors.Is(err, syscall.Errno(32)) || errors.Is(err, syscall.Errno(33))) && time.Now().Before(deadline) {
+		time.Sleep(25 * time.Millisecond)
+		data, err = readFile(path)
+	}
 	if err != nil {
 		return PIDFile{}, err
 	}

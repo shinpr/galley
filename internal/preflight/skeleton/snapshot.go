@@ -47,7 +47,7 @@ func snapshotPreflightFiles(ctx context.Context, root, excludeRoot, gitBin strin
 		return files, fmt.Errorf("workdir is required for preflight snapshot")
 	}
 	excludeRel := cleanContainedRel(root, excludeRoot)
-	result, err := proc.RunCommand(ctx, proc.Command{
+	result, err := proc.RunVCSCommand(ctx, proc.Command{
 		WorkDir: root,
 		Argv:    proc.GitArgs(gitBin, "-C", root, "ls-files", "--cached", "--others", "--exclude-standard", "-z"),
 	}, proc.RunOptions{TailBytes: -1})

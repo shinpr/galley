@@ -25,10 +25,16 @@ type Prepared struct {
 	Description   string `json:"description,omitempty"`
 	Commit        bool   `json:"commit"`
 	ContentSHA256 string `json:"content_sha256"`
+	reused        bool
 }
 
 // Prepare copies task input files into a worktree without overwriting existing files.
 func Prepare(workDir string, files []task.InputFile) ([]Prepared, error) {
+	return PrepareReusing(workDir, files, nil)
+}
+
+// PrepareReusing preserves existing inputs only when prior run evidence proves placement.
+func PrepareReusing(workDir string, files []task.InputFile, prior []Prepared) ([]Prepared, error) {
 	prepared := make([]Prepared, 0, len(files))
 	for i, file := range files {
 		if file.Source == "" || file.Destination == "" {
@@ -54,7 +60,33 @@ func Prepare(workDir string, files []task.InputFile) ([]Prepared, error) {
 			_ = CleanupPrepared(prepared)
 			return nil, fmt.Errorf("files[%d].destination: %w", i, err)
 		}
-		contentSHA256, err := copyFileNoOverwrite(file.Source, dst)
+		reused := false
+		contentSHA256 := ""
+		for _, known := range prior {
+			if known.Source != file.Source || known.Destination != filepath.Clean(file.Destination) || known.Commit != file.Commit || filepath.Clean(known.Path) != filepath.Clean(dst) {
+				continue
+			}
+			info, statErr := os.Lstat(dst)
+			if os.IsNotExist(statErr) {
+				break
+			}
+			if statErr != nil || !info.Mode().IsRegular() {
+				_ = CleanupPrepared(prepared)
+				return nil, fmt.Errorf("reused input must be a regular file: %s (%v)", dst, statErr)
+			}
+			data, readErr := os.ReadFile(dst)
+			if readErr != nil {
+				_ = CleanupPrepared(prepared)
+				return nil, readErr
+			}
+			sum := sha256.Sum256(data)
+			contentSHA256 = hex.EncodeToString(sum[:])
+			reused = true
+			break
+		}
+		if !reused {
+			contentSHA256, err = copyFileNoOverwrite(file.Source, dst)
+		}
 		if err != nil {
 			_ = CleanupPrepared(prepared)
 			return nil, fmt.Errorf("copy input file %s to %s: %w", file.Source, dst, err)
@@ -66,6 +98,7 @@ func Prepare(workDir string, files []task.InputFile) ([]Prepared, error) {
 			Description:   file.Description,
 			Commit:        file.Commit,
 			ContentSHA256: contentSHA256,
+			reused:        reused,
 		})
 	}
 	return prepared, nil
@@ -86,6 +119,9 @@ func ContractDigest(files []Prepared) string {
 func CleanupPrepared(files []Prepared) error {
 	var errs []error
 	for _, file := range files {
+		if file.reused {
+			continue
+		}
 		if err := os.Remove(file.Path); err != nil && !os.IsNotExist(err) {
 			errs = append(errs, fmt.Errorf("remove prepared input file %s: %w", file.Path, err))
 		}
@@ -103,7 +139,7 @@ func CleanupNonCommitted(workDir string, files []task.InputFile) error {
 		if err != nil {
 			return fmt.Errorf("files[%d].destination: %w", i, err)
 		}
-		if err := ensureUnderRoot(workDir, filepath.Dir(dst)); err != nil {
+		if err := ensureExistingParentUnderRoot(workDir, filepath.Dir(dst)); err != nil {
 			return fmt.Errorf("files[%d].destination: %w", i, err)
 		}
 		if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {

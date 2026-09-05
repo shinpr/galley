@@ -261,7 +261,7 @@ func runCodexAdapter(ctx context.Context, opts AdapterOptions, request []byte) (
 		WorkDir: opts.WorkDir,
 		Argv:    args,
 		Stdin:   prompt,
-	}, proc.RunOptions{Timeout: opts.Timeout, IdleTimeout: opts.IdleTimeout, StdoutPath: eventsPath})
+	}, proc.RunOptions{Timeout: opts.Timeout, IdleTimeout: opts.IdleTimeout, StdoutPath: eventsPath, StderrPath: filepath.Join(dir, "codex_supervisor_stderr.log")})
 	if err != nil {
 		return nil, fmt.Errorf("codex supervisor failed: %w", err)
 	}
@@ -344,7 +344,7 @@ func runClaudeAdapterForOS(ctx context.Context, opts AdapterOptions, request []b
 	}); err != nil {
 		return nil, err
 	}
-	_, err = proc.RunCommand(ctx, commandPlan, proc.RunOptions{Timeout: opts.Timeout, IdleTimeout: opts.IdleTimeout, StdoutPath: stdoutPath})
+	_, err = proc.RunCommand(ctx, commandPlan, proc.RunOptions{Timeout: opts.Timeout, IdleTimeout: opts.IdleTimeout, StdoutPath: stdoutPath, StderrPath: filepath.Join(dir, "claude_supervisor_stderr.log")})
 	if err != nil {
 		return nil, fmt.Errorf("claude supervisor failed: %w", err)
 	}

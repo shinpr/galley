@@ -218,13 +218,13 @@ func TestRecoverUnreadableClaimToFailedPreservesPrimaryAndMoveErrors(t *testing.
 	if err := os.WriteFile(runningPath, []byte("broken"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(failedDir, "task.yaml"), []byte("existing"), 0o600); err != nil {
+	if err := os.WriteFile(runningPath+".lock", []byte("existing"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	primary := errors.New("decode failed")
 	err := RecoverUnreadableClaimToFailed(root, runningPath, primary)
 	if !errors.Is(err, primary) || !errors.Is(err, os.ErrExist) {
-		t.Fatalf("error = %v; want primary and destination conflict", err)
+		t.Fatalf("error = %v; want primary and source lock conflict", err)
 	}
 	if _, err := os.Stat(runningPath); err != nil {
 		t.Fatalf("source lost: %v", err)

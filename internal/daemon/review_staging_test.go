@@ -535,9 +535,7 @@ func TestRunOnceReviewStagingDoesNotPresentContextInputAsSubmittedDiff(t *testin
 	}
 }
 
-// TestNonCommittedInputDestinations documents the helper used by the daemon
-// loop to derive the review-time exclude list from a task's input files. The
-// helper trims, skips empty destinations, and ignores commit:true entries.
+// The exclude list preserves filename whitespace and ignores empty or committed inputs.
 func TestNonCommittedInputDestinations(t *testing.T) {
 	files := []task.InputFile{
 		{Source: "/tmp/a", Destination: "docs/a.md", Commit: false},
@@ -546,7 +544,7 @@ func TestNonCommittedInputDestinations(t *testing.T) {
 		{Source: "/tmp/d", Destination: "", Commit: false},
 	}
 	got := nonCommittedInputDestinations(files)
-	want := []string{"docs/a.md", "docs/b.md"}
+	want := []string{"docs/a.md", " docs/b.md "}
 	if len(got) != len(want) {
 		t.Fatalf("got %v want %v", got, want)
 	}

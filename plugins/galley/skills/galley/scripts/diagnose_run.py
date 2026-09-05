@@ -17,6 +17,18 @@ INTERESTING = {
     "claude_supervisor_request.json",
     "model_supervisor_verdict.json",
     "executor_result.json",
+    "executor_terminal.json",
+    "run_result.json",
+    "supervisor_error.json",
+    "setup_result.json",
+    "environment_update.json",
+    "preflight_result.json",
+    "setup_executor_command_plan.json",
+    "setup_executor.stderr.log",
+    "codex_supervisor_stderr.log",
+    "claude_supervisor_stderr.log",
+    "grok_supervisor_stderr.log",
+    "codex.last-message.txt",
 }
 
 
@@ -27,7 +39,7 @@ def summarize_json(path: pathlib.Path) -> str:
         return f"unreadable json: {exc}"
     if isinstance(data, dict):
         parts = []
-        for key in ("status", "summary", "verdict", "confidence"):
+        for key in ("status", "summary", "verdict", "confidence", "error", "exit_code", "timed_out", "idle_timed_out", "kind"):
             if key in data:
                 parts.append(f"{key}={data[key]!r}")
         return ", ".join(parts) if parts else f"keys={','.join(sorted(data.keys())[:8])}"

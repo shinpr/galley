@@ -29,6 +29,21 @@ func TestLatestTaskRunDir(t *testing.T) {
 	}
 }
 
+func TestLatestTaskRunDoesNotMatchNumericPrefixOfAnotherID(t *testing.T) {
+	for _, name := range []string{"task-123-extra-999", "task--123"} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(root, "runs", name), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			got, err := LatestTaskRunDir(root, "task")
+			if err != nil || got != "" {
+				t.Fatalf("got unrelated run %q: %v", got, err)
+			}
+		})
+	}
+}
+
 func TestLatestAttemptDir(t *testing.T) {
 	runDir := t.TempDir()
 	for _, name := range []string{"attempt-1", "attempt-11", "attempt-bad", "other"} {

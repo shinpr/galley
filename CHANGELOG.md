@@ -6,6 +6,18 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.12.7 - 2026-09-05
+
+### Fixed
+
+- Recover stale claims during continuous task processing without requeuing the daemon's active tasks or removing their locks.
+- Fixed subprocess cancellation leaving children and capture files open on Windows, and concurrent daemon stops failing on transient PID-file sharing violations.
+- Improved unattended task continuity across Git change handling, input/worktree reuse, concurrent queue and daemon ownership, slot refilling, bounded Git/GitHub waits, maintenance, and fresh preflight/diagnostic evidence; installers now verify release checksums before stopping daemons or replacing binaries.
+
+### Changed
+
+- Packaged Claude, Codex, and Grok Galley plugins are now versioned as `0.1.34`; the bundled run diagnostic script now includes executor termination, exit codes and timeouts, setup and preflight results, and supervisor error and stderr evidence.
+
 ## v0.12.6 - 2026-09-04
 
 ### Changed

@@ -13,6 +13,7 @@ import (
 	"github.com/shinpr/galley/internal/fileutil"
 	"github.com/shinpr/galley/internal/pathutil"
 	"github.com/shinpr/galley/internal/task"
+	"github.com/shinpr/galley/internal/taskstate"
 )
 
 // ErrClaimConflict indicates another daemon or stale running file owns the task.
@@ -45,24 +46,9 @@ func isTaskYAMLName(name string) bool {
 	}
 }
 
-// taskYAMLFiles returns the task file glob matches (.yaml and .yml) directly
-// under dir, preserving filepath.Glob semantics (missing dir yields no matches,
-// non-regular entries are included).
-func taskYAMLFiles(dir string) ([]string, error) {
-	var matches []string
-	for _, ext := range []string{"*.yaml", "*.yml"} {
-		m, err := filepath.Glob(filepath.Join(dir, ext))
-		if err != nil {
-			return nil, err
-		}
-		matches = append(matches, m...)
-	}
-	return matches, nil
-}
-
 // QueuedTasks returns queued task YAML files in deterministic order.
 func QueuedTasks(root string) ([]string, error) {
-	matches, err := taskYAMLFiles(task.TaskStateDir(root, task.WorkflowStateQueued))
+	matches, err := task.YAMLFiles(task.TaskStateDir(root, task.WorkflowStateQueued))
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +65,7 @@ func QueuedTasks(root string) ([]string, error) {
 // physical repo referenced by different path spellings counts once.
 func RunningRepoCounts(root string) (map[string]int, error) {
 	counts := map[string]int{}
-	matches, err := taskYAMLFiles(task.TaskStateDir(root, task.WorkflowStateRunning))
+	matches, err := task.YAMLFiles(task.TaskStateDir(root, task.WorkflowStateRunning))
 	if err != nil {
 		return nil, err
 	}
@@ -124,11 +110,16 @@ func ClaimTask(root, queuedPath string) (string, error) {
 
 // RecoverStaleClaims requeues stale running tasks and removes stale claim locks.
 func RecoverStaleClaims(root string, ttl time.Duration, now time.Time) error {
+	return RecoverStaleClaimsExcept(root, ttl, now, nil)
+}
+
+// RecoverStaleClaimsExcept protects tasks still executing in the calling daemon.
+func RecoverStaleClaimsExcept(root string, ttl time.Duration, now time.Time, active map[string]bool) error {
 	for _, dir := range []string{
 		task.TaskStateDir(root, task.WorkflowStateQueued),
 		task.TaskStateDir(root, task.WorkflowStateRunning),
 	} {
-		if err := removeStaleLocks(dir, ttl, now); err != nil {
+		if err := removeStaleLocks(dir, ttl, now, active); err != nil {
 			return err
 		}
 	}
@@ -140,7 +131,13 @@ func RecoverStaleClaims(root string, ttl time.Duration, now time.Time) error {
 	}
 	for _, entry := range entries {
 		path := filepath.Join(runningDir, entry.Name())
+		if active[path] {
+			continue
+		}
 		info, err := entry.Info()
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
 		if err != nil {
 			return fmt.Errorf("stat %s: %w", path, err)
 		}
@@ -159,7 +156,7 @@ func RecoverStaleClaims(root string, ttl time.Duration, now time.Time) error {
 	return nil
 }
 
-func removeStaleLocks(dir string, ttl time.Duration, now time.Time) error {
+func removeStaleLocks(dir string, ttl time.Duration, now time.Time, active map[string]bool) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return fmt.Errorf("read task dir %s: %w", dir, err)
@@ -169,7 +166,13 @@ func removeStaleLocks(dir string, ttl time.Duration, now time.Time) error {
 			continue
 		}
 		path := filepath.Join(dir, entry.Name())
+		if active[strings.TrimSuffix(path, ".lock")] {
+			continue
+		}
 		info, err := entry.Info()
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
 		if err != nil {
 			return fmt.Errorf("stat %s: %w", path, err)
 		}
@@ -186,7 +189,15 @@ func removeStaleLocks(dir string, ttl time.Duration, now time.Time) error {
 func requeueRunningTask(root, runningPath string) error {
 	loaded, err := task.Load(runningPath)
 	if err != nil {
-		return fmt.Errorf("load stale running task %s: %w", runningPath, err)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if moveErr := taskstate.QuarantineUnreadableClaim(root, runningPath, err); moveErr != nil {
+			return errors.Join(err, moveErr)
+		}
+		_ = RemoveOwner(runningPath)
+		fmt.Fprintf(os.Stderr, "galley: quarantined unreadable running task: %v\n", err)
+		return nil
 	}
 	loaded.Status = task.StatusQueued
 	if err := task.Save(runningPath, loaded); err != nil {

@@ -56,12 +56,7 @@ func (b Binaries) gh() string {
 	return "gh"
 }
 
-// AddPaths stages the provided worktree-relative paths.
-//
-// On Windows the pathspec list is delivered through stdin via
-// --pathspec-from-file=- so a long list of changed files cannot push the
-// CreateProcess command line past the Windows limit. macOS and Linux pass the
-// pathspecs on argv, matching git's common local invocation shape.
+// AddPaths stages literal worktree paths, using stdin on Windows and for large sets.
 func AddPaths(ctx context.Context, bins Binaries, workDir, runDir string, paths []string) error {
 	return addPathsForOS(ctx, bins, workDir, runDir, paths, runtime.GOOS)
 }
@@ -82,11 +77,8 @@ func addPathsForOS(ctx context.Context, bins Binaries, workDir, runDir string, p
 	}
 	pathspecs := literalPathspecs(stagePaths)
 	cmd := proc.Command{WorkDir: workDir}
-	if goos == "windows" {
-		// git add --pathspec-from-file=- --pathspec-file-nul reads pathspecs
-		// from stdin so a long list of changed files never reaches argv. The
-		// NUL separator avoids any ambiguity with paths that contain LF or
-		// other whitespace characters.
+	if goos == "windows" || len(strings.Join(pathspecs, "\x00")) > 32*1024 {
+		// Bound argv on every OS and preserve literal filename bytes via NUL separators.
 		cmd.Argv = proc.GitArgs(bins.git(), "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul")
 		cmd.Stdin = strings.Join(pathspecs, "\x00") + "\x00"
 	} else {
@@ -112,10 +104,10 @@ func addPathsForOS(ctx context.Context, bins Binaries, workDir, runDir string, p
 // `all` mode emits one entry per untracked file, which is the resolution
 // the reviewable-path-set contract requires.
 func StatusPorcelainZ(ctx context.Context, bins Binaries, workDir string) (string, error) {
-	result, err := proc.RunCommand(ctx, proc.Command{
+	result, err := proc.RunVCSCommand(ctx, proc.Command{
 		WorkDir: workDir,
 		Argv:    proc.GitArgs(bins.git(), "status", "--porcelain=v1", "-z", "--untracked-files=all"),
-	}, proc.RunOptions{})
+	}, proc.RunOptions{TailBytes: -1})
 	if err != nil {
 		return "", fmt.Errorf("git status --porcelain -z (review staging discovery) failed: %w", err)
 	}
@@ -142,17 +134,14 @@ func stagePathsForReviewForOS(ctx context.Context, bins Binaries, workDir, runDi
 	}
 	pathspecs := literalPathspecs(stagePaths)
 	cmd := proc.Command{WorkDir: workDir}
-	if goos == "windows" {
-		// On Windows the pathspec list is delivered through stdin so a
-		// long list of changed files cannot push the CreateProcess command
-		// line past the platform's argv limit. The NUL separator avoids
-		// any ambiguity with paths that contain LF or other whitespace.
+	if goos == "windows" || len(strings.Join(pathspecs, "\x00")) > 32*1024 {
+		// Large reviews use the same literal stdin pathspec protocol as finalization.
 		cmd.Argv = proc.GitArgs(bins.git(), "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul")
 		cmd.Stdin = strings.Join(pathspecs, "\x00") + "\x00"
 	} else {
 		cmd.Argv = proc.GitArgs(bins.git(), append([]string{"add", "-A", "--"}, pathspecs...)...)
 	}
-	result, err := proc.RunCommand(ctx, cmd, proc.RunOptions{
+	result, err := proc.RunVCSCommand(ctx, cmd, proc.RunOptions{
 		StdoutPath: filepath.Join(runDir, "git_add_review.stdout.log"),
 		StderrPath: filepath.Join(runDir, "git_add_review.stderr.log"),
 	})
@@ -203,7 +192,7 @@ func literalPathspecs(paths []string) []string {
 // IsAncestor reports whether ancestor is reachable from descendant in workDir.
 // Exit code 0 is yes, 1 is no, and any other exit code is an error.
 func IsAncestor(ctx context.Context, bins Binaries, workDir, ancestor, descendant string) (bool, error) {
-	result, err := proc.RunCommand(ctx, proc.Command{
+	result, err := proc.RunVCSCommand(ctx, proc.Command{
 		WorkDir: workDir,
 		Argv:    proc.GitArgs(bins.git(), "merge-base", "--is-ancestor", ancestor, descendant),
 	}, proc.RunOptions{})
@@ -304,7 +293,7 @@ func runCommandWithEvidence(ctx context.Context, cmd proc.Command, runDir, label
 }
 
 func runCommandEvidence(ctx context.Context, cmd proc.Command, runDir, label string) (proc.RunResult, error, error) {
-	result, runErr := proc.RunCommand(ctx, cmd, proc.RunOptions{
+	result, runErr := proc.RunVCSCommand(ctx, cmd, proc.RunOptions{
 		StdoutPath: filepath.Join(runDir, label+".stdout.log"),
 		StderrPath: filepath.Join(runDir, label+".stderr.log"),
 	})
@@ -341,7 +330,7 @@ func PostPRComment(ctx context.Context, bins Binaries, root, prURL, body string)
 	if err != nil {
 		return fmt.Errorf("encode PR comment body: %w", err)
 	}
-	_, err = proc.RunCommand(ctx, proc.Command{
+	_, err = proc.RunVCSCommand(ctx, proc.Command{
 		WorkDir: root,
 		Argv:    []string{bins.gh(), "api", "-X", "POST", apiPath, "--input", "-"},
 		Stdin:   string(payload),
@@ -413,7 +402,7 @@ func fetchGHAPIOutput(ctx context.Context, bins Binaries, root, apiPath, label s
 	}
 	defer os.Remove(stdoutPath)
 	argv := append([]string{bins.gh(), "api", apiPath}, extraArgs...)
-	_, err = proc.RunCommand(ctx, proc.Command{
+	_, err = proc.RunVCSCommand(ctx, proc.Command{
 		WorkDir: root,
 		Argv:    argv,
 	}, proc.RunOptions{StdoutPath: stdoutPath})

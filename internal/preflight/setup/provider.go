@@ -123,7 +123,7 @@ func buildCodexSetupExecutorCommandPlan(opts Options, payload []byte) (proc.Comm
 	codexOpts.Prompt = string(payload)
 	codexOpts.SystemPrompt = prompts.SetupExecutorCodex()
 	codexOpts.JSONSchema = schemas.SetupResult
-	codexOpts.AttemptDir = opts.RunDir
+	codexOpts.AttemptDir = filepath.Join(opts.RunDir, runartifact.SetupCodexDirname)
 
 	commandPlan, err := runner.CodexCommandPlan(codexOpts)
 	if err != nil {

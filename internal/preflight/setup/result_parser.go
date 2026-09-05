@@ -41,7 +41,7 @@ func ResolveExecutorResult(opts Options, stdoutTail string) (*Result, error) {
 		return &result, nil
 	}
 	if task.ExecutorTransport(opts.Task) == provider.TransportCodex {
-		lastMessagePath := filepath.Join(opts.RunDir, runner.CodexLastMessageFilename)
+		lastMessagePath := filepath.Join(opts.RunDir, runartifact.SetupCodexDirname, runner.CodexLastMessageFilename)
 		if data, err := os.ReadFile(lastMessagePath); err == nil {
 			if res, ok := parseResultText(string(data)); ok {
 				return res, nil

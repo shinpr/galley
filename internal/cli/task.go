@@ -378,16 +378,7 @@ func resolveTaskRoot(root string, explicit bool) (string, error) {
 }
 
 func taskFiles(dir string) ([]string, error) {
-	var paths []string
-	for _, pattern := range []string{"*.yaml", "*.yml"} {
-		matches, err := filepath.Glob(filepath.Join(dir, pattern))
-		if err != nil {
-			return nil, err
-		}
-		paths = append(paths, matches...)
-	}
-	sort.Strings(paths)
-	return paths, nil
+	return task.YAMLFiles(dir)
 }
 
 // isAcceptedTerminalStatus reports whether the task has reached a supervisor

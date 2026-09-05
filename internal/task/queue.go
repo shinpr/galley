@@ -1,6 +1,7 @@
 package task
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shinpr/galley/internal/fileutil"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -51,6 +53,13 @@ func queue(path string, opts QueueOptions, readTaskID func(string) (string, erro
 	if !validation.Valid() {
 		return QueueResult{}, fmt.Errorf("task validation failed: %v", validation.Errors)
 	}
+	registrationRoot := filepath.Dir(filepath.Dir(queuedPathFor(path, opts.Root)))
+	lockPath := filepath.Join(registrationRoot, ".registration", fmt.Sprintf("%x.lock", sha256.Sum256([]byte(loaded.ID))))
+	unlock, err := fileutil.TryLock(lockPath)
+	if err != nil {
+		return QueueResult{}, fmt.Errorf("task id %q registration in progress; retry: %w", loaded.ID, err)
+	}
+	defer unlock()
 	if err := rejectDuplicateTaskID(path, loaded.ID, opts.Root, readTaskID); err != nil {
 		return QueueResult{}, err
 	}
@@ -98,7 +107,7 @@ func rejectDuplicateTaskID(path, id, root string, readTaskID func(string) (strin
 func scanForDuplicateTaskID(root, current, id string, readTaskID func(string) (string, error)) (string, bool, error) {
 	var matches []string
 	for _, state := range AllWorkflowStates() {
-		stateMatches, err := filepath.Glob(filepath.Join(TaskStateDir(root, state), "*.y*ml"))
+		stateMatches, err := YAMLFiles(TaskStateDir(root, state))
 		if err != nil {
 			return "", false, err
 		}

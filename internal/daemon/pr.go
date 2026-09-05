@@ -366,7 +366,7 @@ func finalVerificationCommands(commands []task.VerificationCommand) []task.Verif
 	var reversed []task.VerificationCommand
 	for i := len(commands) - 1; i >= 0; i-- {
 		cmd := strings.TrimSpace(commands[i].Cmd)
-		if cmd == "" || seen[cmd] || commands[i].Status != "passed" || cmd == "claude -p" {
+		if cmd == "" || seen[cmd] || cmd == "claude -p" {
 			continue
 		}
 		seen[cmd] = true

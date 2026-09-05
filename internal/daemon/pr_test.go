@@ -13,6 +13,14 @@ import (
 	"github.com/shinpr/galley/internal/workspace"
 )
 
+func TestFinalVerificationShowsLatestFailure(t *testing.T) {
+	commands := []task.VerificationCommand{{Cmd: "go test ./...", Status: "passed"}, {Cmd: "go test ./...", Status: "failed"}}
+	got := finalVerificationCommands(commands)
+	if len(got) != 1 || got[0].Status != "failed" {
+		t.Fatalf("stale verification: %#v", got)
+	}
+}
+
 func TestScopePathCasePolicies(t *testing.T) {
 	t.Parallel()
 	paths := []string{"Secrets/key.go"}

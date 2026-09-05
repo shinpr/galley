@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -37,7 +36,7 @@ func pollPRComments(ctx context.Context, opts Options) error {
 func tasksWithPR(root string) ([]string, error) {
 	var paths []string
 	for _, state := range []task.WorkflowState{task.WorkflowStateDone, task.WorkflowStateFailed} {
-		matches, err := filepath.Glob(filepath.Join(task.TaskStateDir(root, state), "*.yaml"))
+		matches, err := task.YAMLFiles(task.TaskStateDir(root, state))
 		if err != nil {
 			return nil, err
 		}

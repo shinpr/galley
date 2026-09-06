@@ -57,17 +57,11 @@ func Requeue(path string, opts RequeueOptions) (RequeueResult, error) {
 			loaded.RevisionRequests = append(loaded.RevisionRequests, request)
 		}
 	}
-	appendLifecycleAttempt(&loaded, "requeued", opts.Reason, "Task requeued for another executor attempt.", time.Now())
+	appendLifecycleAttempt(&loaded, lifecycleAttempt{Verdict: "requeued", Reason: opts.Reason, Fallback: "Task requeued for another executor attempt."}, time.Now())
 
 	nextPath := queuedPathFor(path, opts.Root)
-	if nextPath == path {
-		if err := Save(path, loaded); err != nil {
-			return RequeueResult{}, err
-		}
-	} else {
-		if err := writeQueuedTask(path, nextPath, loaded, taskPathUnderRoot(path, opts.Root)); err != nil {
-			return RequeueResult{}, err
-		}
+	if err := saveOrMoveTask(path, nextPath, loaded, taskPathUnderRoot(path, opts.Root)); err != nil {
+		return RequeueResult{}, err
 	}
 	return RequeueResult{Task: loaded, From: path, To: nextPath}, nil
 }
@@ -86,6 +80,15 @@ func WriteMovedTask(src, dst string, loaded Task) error {
 	return writeQueuedTask(src, dst, loaded, true)
 }
 
+// saveOrMoveTask writes the task in place when the destination is unchanged
+// and otherwise moves it without overwriting an existing file.
+func saveOrMoveTask(src, dst string, loaded Task, removeSource bool) error {
+	if dst == src {
+		return Save(src, loaded)
+	}
+	return writeQueuedTask(src, dst, loaded, removeSource)
+}
+
 func writeQueuedTask(src, dst string, loaded Task, removeSource bool) error {
 	data, err := yaml.Marshal(loaded)
 	if err != nil {
@@ -94,19 +97,20 @@ func writeQueuedTask(src, dst string, loaded Task, removeSource bool) error {
 	if err := fileutil.WriteFileNoOverwriteAtomic(dst, data, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", dst, err)
 	}
-	if removeSource {
-		if err := os.Remove(src); err != nil {
-			rollbackErr := os.Remove(dst)
-			if rollbackErr != nil {
-				return errors.Join(
-					fmt.Errorf("remove moved task %s: %w", src, err),
-					fmt.Errorf("rollback queued task %s: %w", dst, rollbackErr),
-				)
-			}
-			return fmt.Errorf("remove moved task %s: %w", src, err)
-		}
+	if !removeSource {
+		return nil
 	}
-	return nil
+	err = os.Remove(src)
+	if err == nil {
+		return nil
+	}
+	if rollbackErr := os.Remove(dst); rollbackErr != nil {
+		return errors.Join(
+			fmt.Errorf("remove moved task %s: %w", src, err),
+			fmt.Errorf("rollback queued task %s: %w", dst, rollbackErr),
+		)
+	}
+	return fmt.Errorf("remove moved task %s: %w", src, err)
 }
 
 func containsString(values []string, want string) bool {

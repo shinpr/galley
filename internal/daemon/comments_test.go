@@ -87,7 +87,7 @@ func TestPollPRCommentsRequeuesTaskOnce(t *testing.T) {
 	if err := queue.EnsureLayout(root); err != nil {
 		t.Fatal(err)
 	}
-	writeDaemonEnvironmentProfile(t, root, repo, true, true)
+	writeDaemonEnvironmentProfile(t, commentProfileSpec{Root: root, Repo: repo, PollComments: true, ReplyComments: true})
 	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
 	writeDaemonTask(t, donePath, repo)
 	loaded, err := task.Load(donePath)
@@ -142,7 +142,7 @@ func TestPollPRCommentsRequeuesNeedsSupervisorReviewOpenPR(t *testing.T) {
 	if err := queue.EnsureLayout(root); err != nil {
 		t.Fatal(err)
 	}
-	writeDaemonEnvironmentProfile(t, root, repo, true, false)
+	writeDaemonEnvironmentProfile(t, commentProfileSpec{Root: root, Repo: repo, PollComments: true, ReplyComments: false})
 	failedPath := filepath.Join(root, "tasks", "failed", "task.yaml")
 	writeDaemonTask(t, failedPath, repo)
 	loaded, err := task.Load(failedPath)
@@ -192,7 +192,7 @@ func TestPollPRCommentsReplyOmitsReasonAndCommentID(t *testing.T) {
 	if err := queue.EnsureLayout(root); err != nil {
 		t.Fatal(err)
 	}
-	writeDaemonEnvironmentProfile(t, root, repo, true, true)
+	writeDaemonEnvironmentProfile(t, commentProfileSpec{Root: root, Repo: repo, PollComments: true, ReplyComments: true})
 	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
 	writeDaemonTask(t, donePath, repo)
 	loaded, err := task.Load(donePath)
@@ -263,7 +263,7 @@ func TestPollPRCommentsReplyForQueuedOrRunningTask(t *testing.T) {
 	if err := queue.EnsureLayout(root); err != nil {
 		t.Fatal(err)
 	}
-	writeDaemonEnvironmentProfile(t, root, repo, true, true)
+	writeDaemonEnvironmentProfile(t, commentProfileSpec{Root: root, Repo: repo, PollComments: true, ReplyComments: true})
 	queuedPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	writeDaemonTask(t, queuedPath, repo)
 	loaded, err := task.Load(queuedPath)
@@ -315,7 +315,7 @@ func TestPollPRCommentsContinuesAfterReplyFailure(t *testing.T) {
 	if err := queue.EnsureLayout(root); err != nil {
 		t.Fatal(err)
 	}
-	writeDaemonEnvironmentProfile(t, root, repo, true, true)
+	writeDaemonEnvironmentProfile(t, commentProfileSpec{Root: root, Repo: repo, PollComments: true, ReplyComments: true})
 	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
 	writeDaemonTask(t, donePath, repo)
 	loaded, err := task.Load(donePath)
@@ -368,7 +368,7 @@ func TestPollPRCommentsRecordsFailedRequeueForManualRecovery(t *testing.T) {
 	if err := queue.EnsureLayout(root); err != nil {
 		t.Fatal(err)
 	}
-	writeDaemonEnvironmentProfile(t, root, repo, true, false)
+	writeDaemonEnvironmentProfile(t, commentProfileSpec{Root: root, Repo: repo, PollComments: true, ReplyComments: false})
 	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
 	queuedPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	writeDaemonTask(t, donePath, repo)
@@ -425,7 +425,7 @@ func TestPollPRCommentsIgnoresNonPRAuthor(t *testing.T) {
 	if err := queue.EnsureLayout(root); err != nil {
 		t.Fatal(err)
 	}
-	writeDaemonEnvironmentProfile(t, root, repo, true, false)
+	writeDaemonEnvironmentProfile(t, commentProfileSpec{Root: root, Repo: repo, PollComments: true, ReplyComments: false})
 	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
 	writeDaemonTask(t, donePath, repo)
 	loaded, err := task.Load(donePath)
@@ -469,7 +469,7 @@ func TestPollPRCommentsRejectsNonAuthor(t *testing.T) {
 	if err := queue.EnsureLayout(root); err != nil {
 		t.Fatal(err)
 	}
-	writeDaemonEnvironmentProfile(t, root, repo, true, true)
+	writeDaemonEnvironmentProfile(t, commentProfileSpec{Root: root, Repo: repo, PollComments: true, ReplyComments: true})
 	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
 	writeDaemonTask(t, donePath, repo)
 	loaded, err := task.Load(donePath)
@@ -537,7 +537,7 @@ func TestPollPRCommentsRejectsWhenPRAuthorLoginEmpty(t *testing.T) {
 	if err := queue.EnsureLayout(root); err != nil {
 		t.Fatal(err)
 	}
-	writeDaemonEnvironmentProfile(t, root, repo, true, true)
+	writeDaemonEnvironmentProfile(t, commentProfileSpec{Root: root, Repo: repo, PollComments: true, ReplyComments: true})
 	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
 	writeDaemonTask(t, donePath, repo)
 	loaded, err := task.Load(donePath)
@@ -734,7 +734,7 @@ func TestPollPRCommentsSkipsHistoricalNonActionableTasks(t *testing.T) {
 	// these tasks first.
 	cases := []struct {
 		name     string
-		status   string
+		status   task.Status
 		prStatus string
 		prURL    string
 	}{
@@ -790,7 +790,7 @@ func TestPollPRCommentsActionableOnlyFetchesOpenPRTasks(t *testing.T) {
 	if err := queue.EnsureLayout(root); err != nil {
 		t.Fatal(err)
 	}
-	writeDaemonEnvironmentProfile(t, root, repo, true, false)
+	writeDaemonEnvironmentProfile(t, commentProfileSpec{Root: root, Repo: repo, PollComments: true, ReplyComments: false})
 
 	closedPath := filepath.Join(root, "tasks", "done", "task-closed.yaml")
 	writeDaemonTask(t, closedPath, repo)
@@ -854,7 +854,16 @@ fi
 	}
 }
 
-func writeDaemonEnvironmentProfile(t *testing.T, root, repo string, pollComments, replyComments bool) {
+type commentProfileSpec struct {
+	Root          string
+	Repo          string
+	PollComments  bool
+	ReplyComments bool
+}
+
+func writeDaemonEnvironmentProfile(t *testing.T, spec commentProfileSpec) {
+	root, repo := spec.Root, spec.Repo
+	pollComments, replyComments := spec.PollComments, spec.ReplyComments
 	t.Helper()
 	_, _, environmentPath, err := galleyhome.RepoProfilePaths(root, repo)
 	if err != nil {

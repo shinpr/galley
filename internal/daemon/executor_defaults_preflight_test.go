@@ -133,23 +133,11 @@ esac
   model: "env-model"
   effort: "minimal"
 `,
-			authored:  task.Executor{Model: "task-model"},
-			want:      task.Executor{CLI: "codex", Model: "task-model", Effort: "minimal"},
-			claudeBin: writeFakeClaude(t, "exit 1\n"),
-			codexBin:  codexBin,
-			checkPlans: func(t *testing.T, root string) {
-				argv := readSingleCommandPlan(t, root, "preflight_creator_command_plan.json")
-				joined := strings.Join(argv, " ")
-				if filepath.Base(argv[0]) != "codex" {
-					t.Fatalf("skeleton creator cli = %v, want codex", argv)
-				}
-				if !strings.Contains(joined, "task-model") {
-					t.Fatalf("skeleton creator missing effective model: %v", argv)
-				}
-				if !strings.Contains(joined, `model_reasoning_effort="minimal"`) && !strings.Contains(joined, "model_reasoning_effort=minimal") {
-					t.Fatalf("skeleton creator missing effective effort: %v", argv)
-				}
-			},
+			authored:   task.Executor{Model: "task-model"},
+			want:       task.Executor{CLI: "codex", Model: "task-model", Effort: "minimal"},
+			claudeBin:  writeFakeClaude(t, "exit 1\n"),
+			codexBin:   codexBin,
+			checkPlans: assertCodexCreatorUsesEffectiveExecutor,
 		})
 	})
 
@@ -174,28 +162,11 @@ printf '%s\n' '`+executorResult+`'
   model: "grok-model"
   effort: "none"
 `,
-			authored:  task.Executor{CLI: "claude"},
-			want:      task.Executor{CLI: "claude"},
-			claudeBin: claudeBin,
-			codexBin:  writeFakeCommand(t, "codex", "exit 1\n"),
-			checkPlans: func(t *testing.T, root string) {
-				matches, err := filepath.Glob(filepath.Join(root, "runs", "*", "*_command_plan.json"))
-				if err != nil || len(matches) == 0 {
-					t.Fatalf("command plan glob = %v (err %v)", matches, err)
-				}
-				for _, planPath := range matches {
-					argv := readCommandPlanArgv(t, planPath)
-					for _, arg := range argv {
-						if arg == "--model" || arg == "--effort" || arg == "grok-model" || arg == "none" {
-							t.Fatalf("plan %s carries environment model or effort override %q: %v", planPath, arg, argv)
-						}
-					}
-				}
-				creator := readSingleCommandPlan(t, root, "preflight_creator_command_plan.json")
-				if filepath.Base(creator[0]) != "claude" {
-					t.Fatalf("skeleton creator cli = %v, want claude", creator)
-				}
-			},
+			authored:   task.Executor{CLI: "claude"},
+			want:       task.Executor{CLI: "claude"},
+			claudeBin:  claudeBin,
+			codexBin:   writeFakeCommand(t, "codex", "exit 1\n"),
+			checkPlans: assertNoEnvironmentOverridesLeakIntoPlans,
 		})
 	})
 }
@@ -255,7 +226,8 @@ setup:
 		}, nil
 	})
 
-	supervisorRunner := func(_ context.Context, _ Options, evidence supervisor.Evidence, _, _ string) (supervisor.Verdict, error) {
+	supervisorRunner := func(_ context.Context, req supervisorRunRequest) (supervisor.Verdict, error) {
+		evidence := req.Evidence
 		supervisorExecutor = evidence.Task.Executor
 		return supervisor.Verdict{Status: "accepted", Summary: "effective executor observed"}, nil
 	}
@@ -437,7 +409,8 @@ case "$input" in
 esac
 `)
 	claudeBin := writeFakeClaude(t, "exit 1\n")
-	supervisorRunner := func(_ context.Context, _ Options, evidence supervisor.Evidence, _, _ string) (supervisor.Verdict, error) {
+	supervisorRunner := func(_ context.Context, req supervisorRunRequest) (supervisor.Verdict, error) {
+		evidence := req.Evidence
 		supervisorExecutor = evidence.Task.Executor
 		return supervisor.Verdict{Status: "accepted", Summary: "empty effort observed"}, nil
 	}
@@ -541,28 +514,7 @@ func TestDaemonRequeuePicksUpChangedEnvironmentExecutorDefaults(t *testing.T) {
 	var setupCalls []observed
 
 	envDir := t.TempDir()
-	envBody := func(cli, model, effort string) string {
-		return `id: "requeue-env"
-cwd: ` + workdirQuote(repo) + `
-commands:
-  test_unit: "true"
-executor:
-  default_cli: "` + cli + `"
-  model: "` + model + `"
-  effort: "` + effort + `"
-constraints:
-  network: "approval_required"
-  secrets_policy: "never_read_env_files"
-  destructive_commands: "deny"
-setup:
-  commands:
-    - run: "true"
-      why: "no-op setup"
-worktree:
-  cleanup: false
-`
-	}
-	envPath := writeSetupEnvironmentProfile(t, envDir, envBody("codex", "env-model-v1", "minimal"))
+	envPath := writeSetupEnvironmentProfile(t, envDir, requeueEnvBody(repo, "codex", "env-model-v1", "minimal"))
 
 	withSetupExecutorRunner(t, func(_ context.Context, opts setuppreflight.Options) (*setuppreflight.Result, error) {
 		setupCalls = append(setupCalls, observed{
@@ -591,48 +543,8 @@ worktree:
 	creatorManifest := `{"outputs":[{"ac_id":"AC1","path":"internal/foo/foo_test.go","kind":"go-test","purpose":"verify AC1","satisfies":"AC1 observable behavior","integration_point":"executor completes this skeleton before acceptance","implementation_required":true}],"no_skeletons":[]}`
 	executorResult := `{"status":"completed","summary":"done","files_modified":["daemon-output.txt","internal/foo/foo_test.go"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}`
 	// Both fake backends distinguish skeleton and implementation prompts.
-	codexBin := writeFakeCommand(t, "codex", `out=""
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    --output-last-message)
-      out="$2"
-      shift 2
-      ;;
-    *)
-      shift
-      ;;
-  esac
-done
-input="$(cat)"
-case "$input" in
-  *"acceptance skeleton creator"*)
-    mkdir -p internal/foo
-    printf 'package foo_test\n' > internal/foo/foo_test.go
-    printf '%s\n' '`+creatorManifest+`' > "$out"
-    ;;
-  *)
-    echo change > daemon-output.txt
-    printf '%s\n' '`+executorResult+`' > "$out"
-    printf '%s\n' '{"type":"turn.completed","usage":{}}'
-    ;;
-esac
-`)
-	claudeBin := writeFakeClaude(t, `creator=0
-for arg in "$@"; do
-  case "$arg" in
-    *"Galley Acceptance Skeleton Manifest"*) creator=1 ;;
-  esac
-done
-if [ "$creator" = "1" ]; then
-  mkdir -p internal/foo
-  # Always rewrite so reused worktrees still record a creator workspace change.
-  printf 'package foo_test\n// requeue-creator-%s\n' "$(date +%s%N)" > internal/foo/foo_test.go
-  printf '%s\n' '{"type":"result","result":"{\"outputs\":[{\"ac_id\":\"AC1\",\"path\":\"internal/foo/foo_test.go\",\"kind\":\"go-test\",\"purpose\":\"verify AC1\",\"satisfies\":\"AC1 observable behavior\",\"integration_point\":\"executor completes this skeleton before acceptance\",\"implementation_required\":true}],\"no_skeletons\":[]}"}'
-  exit 0
-fi
-echo change > daemon-output.txt
-printf '%s\n' '`+executorResult+`'
-`)
+	codexBin := writeRequeueCodexBackend(t, creatorManifest, executorResult)
+	claudeBin := writeRequeueClaudeBackend(t, executorResult)
 
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
@@ -671,30 +583,14 @@ printf '%s\n' '`+executorResult+`'
 		t.Fatalf("first setup effective = %#v, want %#v", setupCalls[0], wantFirst)
 	}
 
-	firstSetupMatches, err := filepath.Glob(filepath.Join(root, "runs", "*", "setup_result.json"))
-	if err != nil || len(firstSetupMatches) != 1 {
-		t.Fatalf("first setup_result.json glob = %v err %v", firstSetupMatches, err)
-	}
-	firstSetupData, err := os.ReadFile(firstSetupMatches[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	var firstSetup setuppreflight.Result
-	if err := json.Unmarshal(firstSetupData, &firstSetup); err != nil {
-		t.Fatal(err)
-	}
-	if firstSetup.ExecutorCLI != "codex" || firstSetup.ExecutorModel != "task-model" || firstSetup.ExecutorEffort != "minimal" {
-		t.Fatalf("first setup identity = cli=%q model=%q effort=%q", firstSetup.ExecutorCLI, firstSetup.ExecutorModel, firstSetup.ExecutorEffort)
-	}
+	assertSetupIdentity(t, loadSingleSetupResult(t, root), executorIdentity{CLI: "codex", Model: "task-model", Effort: "minimal"})
 
 	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
 	done, err := task.Load(donePath)
 	if err != nil {
 		t.Fatalf("first done task: %v", err)
 	}
-	if done.Executor.CLI != "" || done.Executor.Effort != "" || done.Executor.Model != "task-model" {
-		t.Fatalf("authored executor must stay partial after first run, got %#v", done.Executor)
-	}
+	assertAuthoredExecutorStaysPartial(t, done.Executor, "first run")
 	retainedSkeleton := filepath.Join(taskWorktreePath(repo, done.Worktree.Path), "internal/foo/foo_test.go")
 	if err := os.WriteFile(retainedSkeleton, []byte("package foo_test\n// retained executor work\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -713,16 +609,14 @@ printf '%s\n' '`+executorResult+`'
 		t.Fatalf("lost existing skeleton implementation: %q %v", data, err)
 	}
 
-	if err := os.WriteFile(envPath, []byte(envBody("claude", "env-model-v2", "xhigh")), 0o600); err != nil {
+	if err := os.WriteFile(envPath, []byte(requeueEnvBody(repo, "claude", "env-model-v2", "xhigh")), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	requeued, err := task.Requeue(donePath, task.RequeueOptions{Root: root, Reason: "env defaults changed"})
 	if err != nil {
 		t.Fatalf("requeue: %v", err)
 	}
-	if requeued.Task.Executor.CLI != "" || requeued.Task.Executor.Effort != "" || requeued.Task.Executor.Model != "task-model" {
-		t.Fatalf("requeued authored executor must stay partial, got %#v", requeued.Task.Executor)
-	}
+	assertAuthoredExecutorStaysPartial(t, requeued.Task.Executor, "requeue")
 
 	if err := runTestDaemon(context.Background(), opts); err != nil {
 		t.Fatalf("second run: %v", err)
@@ -735,32 +629,7 @@ printf '%s\n' '`+executorResult+`'
 		t.Fatalf("second setup effective = %#v, want %#v", setupCalls[1], wantSecond)
 	}
 
-	plans, err := filepath.Glob(filepath.Join(root, "runs", "*", "preflight_creator_command_plan.json"))
-	if err != nil || len(plans) == 0 {
-		t.Fatalf("preflight_creator_command_plan.json glob = %v err %v", plans, err)
-	}
-	newestPlan := plans[0]
-	newestMod := int64(0)
-	for _, p := range plans {
-		st, err := os.Stat(p)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if st.ModTime().UnixNano() >= newestMod {
-			newestMod = st.ModTime().UnixNano()
-			newestPlan = p
-		}
-	}
-	planData, err := os.ReadFile(newestPlan)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var plan struct {
-		Argv []string `json:"argv"`
-	}
-	if err := json.Unmarshal(planData, &plan); err != nil {
-		t.Fatal(err)
-	}
+	plan := readNewestCreatorPlan(t, root)
 	joined := strings.Join(plan.Argv, " ")
 	if filepath.Base(plan.Argv[0]) != "claude" {
 		t.Fatalf("second skeleton creator cli = %v, want claude", plan.Argv)
@@ -772,28 +641,225 @@ printf '%s\n' '`+executorResult+`'
 		t.Fatalf("second skeleton creator missing new effort: %v", plan.Argv)
 	}
 
-	done2, err := task.Load(filepath.Join(root, "tasks", "done", filepath.Base(requeued.To)))
+	done2 := loadDoneTaskByNameOrScan(t, filepath.Join(root, "tasks", "done"), filepath.Base(requeued.To))
+	assertAuthoredExecutorStaysPartial(t, done2.Executor, "second run")
+	assertVerificationContainsCommand(t, done2.Verification.Commands, "claude")
+}
+
+// loadDoneTaskByNameOrScan loads the requeued task from tasks/done. Requeue may
+// rename the file, so the directory is scanned when the expected name is gone.
+func loadDoneTaskByNameOrScan(t *testing.T, doneDir, name string) task.Task {
+	t.Helper()
+	loaded, err := task.Load(filepath.Join(doneDir, name))
+	if err == nil {
+		return loaded
+	}
+	entries, readErr := os.ReadDir(doneDir)
+	if readErr != nil || len(entries) == 0 {
+		t.Fatalf("second done task: %v (scan err %v)", err, readErr)
+	}
+	loaded, err = task.Load(filepath.Join(doneDir, entries[0].Name()))
 	if err != nil {
-		entries, readErr := os.ReadDir(filepath.Join(root, "tasks", "done"))
-		if readErr != nil || len(entries) == 0 {
-			t.Fatalf("second done task: %v (scan err %v)", err, readErr)
+		t.Fatalf("second done task load: %v", err)
+	}
+	return loaded
+}
+
+func assertVerificationContainsCommand(t *testing.T, commands []task.VerificationCommand, want string) {
+	t.Helper()
+	for _, vc := range commands {
+		if strings.Contains(vc.Cmd, want) {
+			return
 		}
-		done2, err = task.Load(filepath.Join(root, "tasks", "done", entries[0].Name()))
+	}
+	t.Fatalf("verification history missing %q command: %#v", want, commands)
+}
+
+func assertCodexCreatorUsesEffectiveExecutor(t *testing.T, root string) {
+	t.Helper()
+	argv := readSingleCommandPlan(t, root, "preflight_creator_command_plan.json")
+	joined := strings.Join(argv, " ")
+	if filepath.Base(argv[0]) != "codex" {
+		t.Fatalf("skeleton creator cli = %v, want codex", argv)
+	}
+	if !strings.Contains(joined, "task-model") {
+		t.Fatalf("skeleton creator missing effective model: %v", argv)
+	}
+	if !strings.Contains(joined, `model_reasoning_effort="minimal"`) && !strings.Contains(joined, "model_reasoning_effort=minimal") {
+		t.Fatalf("skeleton creator missing effective effort: %v", argv)
+	}
+}
+
+// assertNoEnvironmentOverridesLeakIntoPlans pins that a task-selected cli keeps
+// the environment profile's model and effort out of every command plan.
+func assertNoEnvironmentOverridesLeakIntoPlans(t *testing.T, root string) {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(root, "runs", "*", "*_command_plan.json"))
+	if err != nil || len(matches) == 0 {
+		t.Fatalf("command plan glob = %v (err %v)", matches, err)
+	}
+	for _, planPath := range matches {
+		argv := readCommandPlanArgv(t, planPath)
+		for _, arg := range argv {
+			if arg == "--model" || arg == "--effort" || arg == "grok-model" || arg == "none" {
+				t.Fatalf("plan %s carries environment model or effort override %q: %v", planPath, arg, argv)
+			}
+		}
+	}
+	creator := readSingleCommandPlan(t, root, "preflight_creator_command_plan.json")
+	if filepath.Base(creator[0]) != "claude" {
+		t.Fatalf("skeleton creator cli = %v, want claude", creator)
+	}
+}
+
+// creatorPlan is the persisted skeleton-creator command plan.
+type creatorPlan struct {
+	Argv []string `json:"argv"`
+}
+
+// readNewestCreatorPlan returns the most recently written skeleton-creator
+// plan, which belongs to the latest run.
+func readNewestCreatorPlan(t *testing.T, root string) creatorPlan {
+	t.Helper()
+	plans, err := filepath.Glob(filepath.Join(root, "runs", "*", "preflight_creator_command_plan.json"))
+	if err != nil || len(plans) == 0 {
+		t.Fatalf("preflight_creator_command_plan.json glob = %v err %v", plans, err)
+	}
+	newestPath := plans[0]
+	newestMod := int64(0)
+	for _, path := range plans {
+		st, err := os.Stat(path)
 		if err != nil {
-			t.Fatalf("second done task load: %v", err)
+			t.Fatal(err)
+		}
+		if st.ModTime().UnixNano() >= newestMod {
+			newestMod = st.ModTime().UnixNano()
+			newestPath = path
 		}
 	}
-	if done2.Executor.CLI != "" || done2.Executor.Effort != "" || done2.Executor.Model != "task-model" {
-		t.Fatalf("authored executor must stay partial after second run, got %#v", done2.Executor)
+	data, err := os.ReadFile(newestPath)
+	if err != nil {
+		t.Fatal(err)
 	}
-	foundClaude := false
-	for _, vc := range done2.Verification.Commands {
-		if strings.Contains(vc.Cmd, "claude") {
-			foundClaude = true
-			break
-		}
+	var plan creatorPlan
+	if err := json.Unmarshal(data, &plan); err != nil {
+		t.Fatal(err)
 	}
-	if !foundClaude {
-		t.Fatalf("second implementation verification missing claude command: %#v", done2.Verification.Commands)
+	return plan
+}
+
+// loadSingleSetupResult reads the one setup_result.json the run produced.
+func loadSingleSetupResult(t *testing.T, root string) setuppreflight.Result {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(root, "runs", "*", "setup_result.json"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("setup_result.json glob = %v (err %v)", matches, err)
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result setuppreflight.Result
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+// requeueEnvBody renders an environment profile whose executor defaults the
+// requeue test changes between runs.
+func requeueEnvBody(repo, cli, model, effort string) string {
+	return `id: "requeue-env"
+cwd: ` + workdirQuote(repo) + `
+commands:
+  test_unit: "true"
+executor:
+  default_cli: "` + cli + `"
+  model: "` + model + `"
+  effort: "` + effort + `"
+constraints:
+  network: "approval_required"
+  secrets_policy: "never_read_env_files"
+  destructive_commands: "deny"
+setup:
+  commands:
+    - run: "true"
+      why: "no-op setup"
+worktree:
+  cleanup: false
+`
+}
+
+func writeRequeueCodexBackend(t *testing.T, creatorManifest, executorResult string) string {
+	t.Helper()
+	return writeFakeCommand(t, "codex", `out=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output-last-message)
+      out="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+input="$(cat)"
+case "$input" in
+  *"acceptance skeleton creator"*)
+    mkdir -p internal/foo
+    printf 'package foo_test\n' > internal/foo/foo_test.go
+    printf '%s\n' '`+creatorManifest+`' > "$out"
+    ;;
+  *)
+    echo change > daemon-output.txt
+    printf '%s\n' '`+executorResult+`' > "$out"
+    printf '%s\n' '{"type":"turn.completed","usage":{}}'
+    ;;
+esac
+`)
+}
+
+func writeRequeueClaudeBackend(t *testing.T, executorResult string) string {
+	t.Helper()
+	return writeFakeClaude(t, `creator=0
+for arg in "$@"; do
+  case "$arg" in
+    *"Galley Acceptance Skeleton Manifest"*) creator=1 ;;
+  esac
+done
+if [ "$creator" = "1" ]; then
+  mkdir -p internal/foo
+  # Always rewrite so reused worktrees still record a creator workspace change.
+  printf 'package foo_test\n// requeue-creator-%s\n' "$(date +%s%N)" > internal/foo/foo_test.go
+  printf '%s\n' '{"type":"result","result":"{\"outputs\":[{\"ac_id\":\"AC1\",\"path\":\"internal/foo/foo_test.go\",\"kind\":\"go-test\",\"purpose\":\"verify AC1\",\"satisfies\":\"AC1 observable behavior\",\"integration_point\":\"executor completes this skeleton before acceptance\",\"implementation_required\":true}],\"no_skeletons\":[]}"}'
+  exit 0
+fi
+echo change > daemon-output.txt
+printf '%s\n' '`+executorResult+`'
+`)
+}
+
+// executorIdentity is the resolved executor a stage must have used.
+type executorIdentity struct {
+	CLI    string
+	Model  string
+	Effort string
+}
+
+func assertSetupIdentity(t *testing.T, result setuppreflight.Result, want executorIdentity) {
+	t.Helper()
+	got := executorIdentity{CLI: result.ExecutorCLI, Model: result.ExecutorModel, Effort: result.ExecutorEffort}
+	if got != want {
+		t.Fatalf("setup identity = %#v, want %#v", got, want)
+	}
+}
+
+// assertAuthoredExecutorStaysPartial pins that resolving an effective executor
+// never writes the resolved cli or effort back onto the authored task.
+func assertAuthoredExecutorStaysPartial(t *testing.T, executor task.Executor, stage string) {
+	t.Helper()
+	if executor.CLI != "" || executor.Effort != "" || executor.Model != "task-model" {
+		t.Fatalf("authored executor must stay partial after %s, got %#v", stage, executor)
 	}
 }

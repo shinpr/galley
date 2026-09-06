@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -95,13 +96,13 @@ func newTaskArchiveCommand() *cobra.Command {
 }
 
 type taskListItem struct {
-	ID            string `json:"id"`
-	Status        string `json:"status"`
-	State         string `json:"state"`
-	File          string `json:"file"`
-	PRURL         string `json:"pr_url,omitempty"`
-	LatestVerdict string `json:"latest_verdict,omitempty"`
-	LatestSummary string `json:"latest_summary,omitempty"`
+	ID            string      `json:"id"`
+	Status        task.Status `json:"status"`
+	State         string      `json:"state"`
+	File          string      `json:"file"`
+	PRURL         string      `json:"pr_url,omitempty"`
+	LatestVerdict string      `json:"latest_verdict,omitempty"`
+	LatestSummary string      `json:"latest_summary,omitempty"`
 	// DecodeError is set on entries whose known fields could not be decoded.
 	// Unknown fields are ignored by task.Load; malformed known fields or
 	// invalid top-level YAML still surface as non-fatal entries in scans.
@@ -116,7 +117,7 @@ func newTaskListCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List tasks under a Galley workflow root",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			resolvedRoot, err := resolveTaskRoot(root, cmd.Flags().Changed("root"))
 			if err != nil {
 				return err
@@ -198,63 +199,13 @@ func newTaskShowCommand() *cobra.Command {
 				if loaded.PR.URL != "" {
 					fmt.Fprintf(cmd.OutOrStdout(), "pr: %s (%s)\n", loaded.PR.URL, loaded.PR.Status)
 				}
-				if len(loaded.Attempts) > 0 {
-					last := loaded.Attempts[len(loaded.Attempts)-1]
-					// Once the supervisor has accepted the task, the last attempt's
-					// raw claude status and error fields are auditable history rather
-					// than the active runtime state. Relabel them under a
-					// prior_attempt_* prefix so accepted/pr_opened tasks no longer
-					// surface "failed" framing as if it were the current state.
-					prefix := "latest"
-					if isAcceptedTerminalStatus(loaded.Status) {
-						prefix = "prior_attempt"
-					}
-					fmt.Fprintf(cmd.OutOrStdout(), "%s_attempt: %d\n", prefix, last.Number)
-					fmt.Fprintf(cmd.OutOrStdout(), "%s_claude_status: %s\n", prefix, last.ClaudeStatus)
-					fmt.Fprintf(cmd.OutOrStdout(), "%s_supervisor_verdict: %s\n", prefix, last.SupervisorVerdict)
-					fmt.Fprintf(cmd.OutOrStdout(), "%s_summary: %s\n", prefix, last.Summary)
-					if last.Error != nil {
-						fmt.Fprintf(cmd.OutOrStdout(), "%s_error_phase: %s\n", prefix, last.Error.Phase)
-						fmt.Fprintf(cmd.OutOrStdout(), "%s_error_kind: %s\n", prefix, last.Error.Kind)
-						fmt.Fprintf(cmd.OutOrStdout(), "%s_error_message: %s\n", prefix, last.Error.Message)
-						if last.Error.ArtifactDir != "" {
-							fmt.Fprintf(cmd.OutOrStdout(), "%s_error_artifact_dir: %s\n", prefix, last.Error.ArtifactDir)
-						}
-						// An executor interruption stops before Supervisor and
-						// keeps the worktree, so surface the resume path instead
-						// of implying a review verdict is pending.
-						if isExecutorInterruption(last) {
-							fmt.Fprintf(cmd.OutOrStdout(), "%s_executor_interruption: true\n", prefix)
-							fmt.Fprintf(cmd.OutOrStdout(), "%s_recovery: resolve the interruption cause, then run: galley task requeue %s\n", prefix, loaded.ID)
-						}
-					}
-				}
+				printLatestAttempt(cmd.OutOrStdout(), loaded)
 				if len(loaded.Risks) > 0 {
 					last := loaded.Risks[len(loaded.Risks)-1]
 					fmt.Fprintf(cmd.OutOrStdout(), "latest_risk: %s %s: %s\n", last.ID, last.Type, last.Detail)
 				}
-				for _, command := range loaded.Verification.Commands {
-					if command.Status == "failed" {
-						fmt.Fprintf(cmd.OutOrStdout(), "failed_verification: %s\n", command.Cmd)
-						if command.OutputExcerpt != "" {
-							fmt.Fprintf(cmd.OutOrStdout(), "failed_output: %s\n", command.OutputExcerpt)
-						}
-					}
-				}
-				if preflight != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "preflight_enabled: %t\n", preflight.Enabled)
-					fmt.Fprintf(cmd.OutOrStdout(), "preflight_required: %t\n", preflight.Required)
-					fmt.Fprintf(cmd.OutOrStdout(), "preflight_declared_outputs: %d\n", preflight.DeclaredOutputs)
-					if preflight.RuntimeStatus != "" {
-						fmt.Fprintf(cmd.OutOrStdout(), "preflight_runtime_status: %s\n", preflight.RuntimeStatus)
-					}
-					for _, o := range preflight.RuntimeOutputs {
-						fmt.Fprintf(cmd.OutOrStdout(), "preflight_output: ac=%s path=%s kind=%s implementation_required=%t\n", o.ACID, o.Path, o.Kind, o.ImplementationRequired)
-					}
-					if preflight.FailureSummary != "" {
-						fmt.Fprintf(cmd.OutOrStdout(), "preflight_failure: %s\n", preflight.FailureSummary)
-					}
-				}
+				printFailedVerifications(cmd.OutOrStdout(), loaded)
+				printPreflightSummary(cmd.OutOrStdout(), preflight)
 				return nil
 			})
 		},
@@ -356,7 +307,7 @@ func resolveTaskRoot(root string, explicit bool) (string, error) {
 	paths := daemonctl.ResolvePaths(defaultRoot, "", "")
 	exe, err := os.Executable()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolve galley executable: %w", err)
 	}
 	status, err := daemonctl.Inspect(paths.PIDFile, "", exe)
 	if errors.Is(err, daemonctl.ErrNotRunning) {
@@ -390,7 +341,7 @@ func taskFiles(dir string) ([]string, error) {
 // PR is closed or merged. Without those tail states a previously accepted
 // task would regress to "active failure" framing once cleanup ran, even
 // though the supervisor already approved the work.
-func isAcceptedTerminalStatus(status string) bool {
+func isAcceptedTerminalStatus(status task.Status) bool {
 	return task.IsAcceptedTerminal(status)
 }
 
@@ -590,19 +541,24 @@ func applyRuntimePreflight(view *preflightSummaryView, root, taskID string) {
 	if runDir == "" {
 		return
 	}
-	if pf, err := runartifact.Read[skeletonpreflight.Result](runDir, runartifact.PreflightResultFilename); err == nil && pf != nil {
-		view.RuntimeStatus = pf.Status
-		for _, o := range pf.Outputs {
-			view.RuntimeOutputs = append(view.RuntimeOutputs, preflightOutputView{ACID: o.ACID, Path: o.Path, Kind: o.Kind, ImplementationRequired: o.ImplementationRequired})
-		}
-		if pf.Error != nil {
-			if pf.Error.Phase != "" {
-				view.FailureSummary = pf.Error.Phase + ": " + pf.Error.Message
-			} else {
-				view.FailureSummary = pf.Error.Message
-			}
-		}
+	pf, err := runartifact.Read[skeletonpreflight.Result](runDir, runartifact.PreflightResultFilename)
+	if err != nil || pf == nil {
+		return
 	}
+	view.RuntimeStatus = pf.Status
+	for _, o := range pf.Outputs {
+		view.RuntimeOutputs = append(view.RuntimeOutputs, preflightOutputView{ACID: o.ACID, Path: o.Path, Kind: o.Kind, ImplementationRequired: o.ImplementationRequired})
+	}
+	if pf.Error != nil {
+		view.FailureSummary = preflightFailureSummary(*pf.Error)
+	}
+}
+
+func preflightFailureSummary(e skeletonpreflight.PreflightError) string {
+	if e.Phase != "" {
+		return e.Phase + ": " + e.Message
+	}
+	return e.Message
 }
 
 func newTaskWorkOrderCommand() *cobra.Command {
@@ -624,4 +580,70 @@ func newTaskWorkOrderCommand() *cobra.Command {
 	}
 
 	return cmd
+}
+
+// printLatestAttempt renders the last attempt. After acceptance those fields
+// are history, so a prior_attempt_* prefix replaces the active "failed" framing.
+//
+//nolint:errcheck // every caller passes cmd.OutOrStdout(); that stream cannot report its own write failure
+func printLatestAttempt(stdout io.Writer, loaded task.Task) {
+	if len(loaded.Attempts) == 0 {
+		return
+	}
+	last := loaded.Attempts[len(loaded.Attempts)-1]
+	prefix := "latest"
+	if isAcceptedTerminalStatus(loaded.Status) {
+		prefix = "prior_attempt"
+	}
+	fmt.Fprintf(stdout, "%s_attempt: %d\n", prefix, last.Number)
+	fmt.Fprintf(stdout, "%s_claude_status: %s\n", prefix, last.ClaudeStatus)
+	fmt.Fprintf(stdout, "%s_supervisor_verdict: %s\n", prefix, last.SupervisorVerdict)
+	fmt.Fprintf(stdout, "%s_summary: %s\n", prefix, last.Summary)
+	if last.Error == nil {
+		return
+	}
+	fmt.Fprintf(stdout, "%s_error_phase: %s\n", prefix, last.Error.Phase)
+	fmt.Fprintf(stdout, "%s_error_kind: %s\n", prefix, last.Error.Kind)
+	fmt.Fprintf(stdout, "%s_error_message: %s\n", prefix, last.Error.Message)
+	if last.Error.ArtifactDir != "" {
+		fmt.Fprintf(stdout, "%s_error_artifact_dir: %s\n", prefix, last.Error.ArtifactDir)
+	}
+	// An executor interruption stops before Supervisor and keeps the worktree,
+	// so surface the resume path instead of implying a review verdict is pending.
+	if isExecutorInterruption(last) {
+		fmt.Fprintf(stdout, "%s_executor_interruption: true\n", prefix)
+		fmt.Fprintf(stdout, "%s_recovery: resolve the interruption cause, then run: galley task requeue %s\n", prefix, loaded.ID)
+	}
+}
+
+//nolint:errcheck // every caller passes cmd.OutOrStdout(); that stream cannot report its own write failure
+func printFailedVerifications(stdout io.Writer, loaded task.Task) {
+	for _, command := range loaded.Verification.Commands {
+		if command.Status != "failed" {
+			continue
+		}
+		fmt.Fprintf(stdout, "failed_verification: %s\n", command.Cmd)
+		if command.OutputExcerpt != "" {
+			fmt.Fprintf(stdout, "failed_output: %s\n", command.OutputExcerpt)
+		}
+	}
+}
+
+//nolint:errcheck // every caller passes cmd.OutOrStdout(); that stream cannot report its own write failure
+func printPreflightSummary(stdout io.Writer, preflight *preflightSummaryView) {
+	if preflight == nil {
+		return
+	}
+	fmt.Fprintf(stdout, "preflight_enabled: %t\n", preflight.Enabled)
+	fmt.Fprintf(stdout, "preflight_required: %t\n", preflight.Required)
+	fmt.Fprintf(stdout, "preflight_declared_outputs: %d\n", preflight.DeclaredOutputs)
+	if preflight.RuntimeStatus != "" {
+		fmt.Fprintf(stdout, "preflight_runtime_status: %s\n", preflight.RuntimeStatus)
+	}
+	for _, o := range preflight.RuntimeOutputs {
+		fmt.Fprintf(stdout, "preflight_output: ac=%s path=%s kind=%s implementation_required=%t\n", o.ACID, o.Path, o.Kind, o.ImplementationRequired)
+	}
+	if preflight.FailureSummary != "" {
+		fmt.Fprintf(stdout, "preflight_failure: %s\n", preflight.FailureSummary)
+	}
 }

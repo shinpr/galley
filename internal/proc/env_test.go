@@ -96,7 +96,7 @@ func envHelperCommand(t *testing.T, keys ...string) Command {
 	return Command{Argv: argv}
 }
 
-func TestGalleyEnvHelperProcess(t *testing.T) {
+func TestGalleyEnvHelperProcess(_ *testing.T) {
 	if os.Getenv("GO_WANT_GALLEY_ENV_HELPER") != "1" {
 		return
 	}

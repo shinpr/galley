@@ -9,7 +9,7 @@ import (
 )
 
 // writeTaskFileWithID writes a valid task file at path with the given ID and status.
-func writeTaskFileWithID(t *testing.T, path, id, status string) {
+func writeTaskFileWithID(t *testing.T, path, id string, status Status) {
 	t.Helper()
 	base := writeTaskYAML(t, "loop_budget: 3")
 	loaded, err := Load(base)

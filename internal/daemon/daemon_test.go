@@ -686,7 +686,7 @@ func TestRunOnceCopiesInputFileAndRemovesBeforeCommit(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(worktreePath, "docs", "plan.md")); !os.IsNotExist(err) {
 		t.Fatalf("expected non-committed input file removed before commit, stat err=%v", err)
 	}
-	commitOutput, err := exec.Command("git", "-C", worktreePath, "show", "--name-only", "--format=", "HEAD").Output()
+	commitOutput, err := exec.CommandContext(t.Context(), "git", "-C", worktreePath, "show", "--name-only", "--format=", "HEAD").Output()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1020,7 +1020,7 @@ func initDaemonGitRepo(t *testing.T) string {
 
 func runDaemonGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := exec.CommandContext(t.Context(), "git", args...)
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -1030,7 +1030,7 @@ func runDaemonGit(t *testing.T, dir string, args ...string) {
 
 func mustCommandOutput(t *testing.T, name string, args ...string) []byte {
 	t.Helper()
-	output, err := exec.Command(name, args...).CombinedOutput()
+	output, err := exec.CommandContext(t.Context(), name, args...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("%s %v failed: %v\n%s", name, args, err, output)
 	}

@@ -31,7 +31,7 @@ func Ensure(dst string) (string, error) {
 	dst = filepath.Join(dst, version)
 	if _, err := os.Stat(filepath.Join(dst, ".complete")); err == nil {
 		return dst, nil
-	} else if err != nil && !os.IsNotExist(err) {
+	} else if !os.IsNotExist(err) {
 		return "", fmt.Errorf("inspect guard plugin dir %s: %w", dst, err)
 	}
 	parent := filepath.Dir(dst)

@@ -106,7 +106,7 @@ func (r *ChildRegistry) load() ([]ChildRecord, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
-		return nil, err
+		return nil, fmt.Errorf("read child registry %s: %w", r.path, err)
 	}
 	if len(data) == 0 {
 		return nil, nil
@@ -243,7 +243,7 @@ func (r *ChildRegistry) Clear() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := os.Remove(r.path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+		return fmt.Errorf("remove child registry %s: %w", r.path, err)
 	}
 	return nil
 }

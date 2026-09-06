@@ -12,8 +12,10 @@ import (
 
 // LookupFunc and StatFunc let tests exercise shell discovery without relying
 // on the host machine's PATH or filesystem.
-type LookupFunc func(string) (string, error)
-type StatFunc func(string) (os.FileInfo, error)
+type (
+	LookupFunc func(string) (string, error)
+	StatFunc   func(string) (os.FileInfo, error)
+)
 
 // Resolver controls the host interactions used by ShellArgvForOS.
 type Resolver struct {
@@ -36,11 +38,20 @@ func (r Resolver) withDefaults() Resolver {
 // resolved shell kind. It is shared by required checks and environment.setup so
 // both surfaces honor required_checks.shell and required_checks.shell_path.
 func ShellArgvForOS(goos, command, scratchDir string, shell profile.RequiredCheckEnvironment) ([]string, func(), string, error) {
-	return ShellArgvForOSWithResolver(goos, command, scratchDir, shell, Resolver{})
+	return ShellArgvForOSWithResolver(ShellRequest{GOOS: goos, Command: command, ScratchDir: scratchDir, Shell: shell}, Resolver{})
 }
 
 // ShellArgvForOSWithResolver is ShellArgvForOS with injectable host lookups.
-func ShellArgvForOSWithResolver(goos, command, scratchDir string, shell profile.RequiredCheckEnvironment, resolver Resolver) ([]string, func(), string, error) {
+// ShellRequest is one required-check command and the shell it runs under.
+type ShellRequest struct {
+	GOOS       string
+	Command    string
+	ScratchDir string
+	Shell      profile.RequiredCheckEnvironment
+}
+
+func ShellArgvForOSWithResolver(req ShellRequest, resolver Resolver) ([]string, func(), string, error) {
+	goos, command, scratchDir, shell := req.GOOS, req.Command, req.ScratchDir, req.Shell
 	resolver = resolver.withDefaults()
 	resolved, err := resolveShellForOS(goos, shell.Shell, shell.ShellPath, resolver)
 	if err != nil {
@@ -49,30 +60,11 @@ func ShellArgvForOSWithResolver(goos, command, scratchDir string, shell profile.
 	if goos != "windows" {
 		return shellArgv(resolved, command), nil, resolved.Kind, nil
 	}
-	dir := scratchDir
-	cleanup := func() {}
-	if dir == "" {
-		tmp, err := os.MkdirTemp("", "galley-windows-check-*")
-		if err != nil {
-			return nil, nil, "", fmt.Errorf("create windows verification script dir: %w", err)
-		}
-		dir = tmp
-		cleanup = func() { _ = os.RemoveAll(tmp) }
-	} else if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, nil, "", fmt.Errorf("create windows verification script dir %s: %w", dir, err)
+	dir, cleanup, err := windowsScriptDir(scratchDir)
+	if err != nil {
+		return nil, nil, "", err
 	}
-	ext := ".cmd"
-	body := []byte("@echo off\r\n" + command + "\r\n")
-	if resolved.Kind == "bash" {
-		ext = ".sh"
-		body = []byte("#!/usr/bin/env bash\nset -e\n" + command + "\n")
-	} else if resolved.Kind == "sh" {
-		ext = ".sh"
-		body = []byte("set -e\n" + command + "\n")
-	} else if resolved.Kind == "powershell" || resolved.Kind == "pwsh" {
-		ext = ".ps1"
-		body = []byte("$ErrorActionPreference = 'Stop'\r\n" + command + "\r\n")
-	}
+	ext, body := windowsScriptBody(resolved.Kind, command)
 	scriptPath := filepath.Join(dir, "galley-verification"+ext)
 	if err := os.WriteFile(scriptPath, body, 0o600); err != nil {
 		cleanup()
@@ -228,5 +220,36 @@ func shellScriptArgv(shell resolvedShell, scriptPath string) []string {
 		return []string{shell.Bin, "-NoProfile", "-File", scriptPath}
 	default:
 		return []string{shell.Bin, "/C", scriptPath}
+	}
+}
+
+// windowsScriptDir returns the directory the generated verification script is
+// written to, plus the cleanup for a directory this call created.
+func windowsScriptDir(scratchDir string) (string, func(), error) {
+	if scratchDir == "" {
+		tmp, err := os.MkdirTemp("", "galley-windows-check-*")
+		if err != nil {
+			return "", nil, fmt.Errorf("create windows verification script dir: %w", err)
+		}
+		return tmp, func() { _ = os.RemoveAll(tmp) }, nil
+	}
+	if err := os.MkdirAll(scratchDir, 0o700); err != nil {
+		return "", nil, fmt.Errorf("create windows verification script dir %s: %w", scratchDir, err)
+	}
+	return scratchDir, func() {}, nil
+}
+
+// windowsScriptBody returns the script extension and contents for the resolved
+// shell kind; an unrecognized kind falls back to a cmd batch file.
+func windowsScriptBody(kind, command string) (string, []byte) {
+	switch kind {
+	case "bash":
+		return ".sh", []byte("#!/usr/bin/env bash\nset -e\n" + command + "\n")
+	case "sh":
+		return ".sh", []byte("set -e\n" + command + "\n")
+	case "powershell", "pwsh":
+		return ".ps1", []byte("$ErrorActionPreference = 'Stop'\r\n" + command + "\r\n")
+	default:
+		return ".cmd", []byte("@echo off\r\n" + command + "\r\n")
 	}
 }

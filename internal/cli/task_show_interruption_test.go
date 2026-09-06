@@ -56,48 +56,69 @@ func TestTaskShowExecutorInterruptionRendering(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			taskPath := writeCLITaskYAML(t)
-			loaded, err := taskpkg.Load(taskPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			loaded.Status = "failed"
-			loaded.Attempts = []taskpkg.Attempt{tc.attempt}
-			dst := filepath.Join(root, "tasks", "failed", "task.yaml")
-			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			if err := taskpkg.Save(dst, loaded); err != nil {
-				t.Fatal(err)
-			}
-
+			writeFailedTaskWithAttempt(t, root, tc.attempt)
 			stdout, _, err := executeCommand("task", "show", "--root", root, "task-cli-test", "-o", "text")
 			if err != nil {
 				t.Fatalf("task show: %v", err)
 			}
-			interruptionMarkers := []string{
-				"latest_executor_interruption: true",
-				"latest_recovery: resolve the interruption cause, then run: galley task requeue task-cli-test",
-			}
-			if tc.wantInterruption {
-				want := append([]string{
-					"latest_error_phase: executor",
-					"latest_error_kind: executor_interrupted",
-					artifactDir,
-				}, interruptionMarkers...)
-				want = append(want, tc.wantDetail...)
-				for _, w := range want {
-					if !strings.Contains(stdout, w) {
-						t.Fatalf("task show output missing %q\n%s", w, stdout)
-					}
-				}
-			} else {
-				for _, marker := range interruptionMarkers {
-					if strings.Contains(stdout, marker) {
-						t.Fatalf("ordinary failure must not render %q\n%s", marker, stdout)
-					}
-				}
-			}
+			assertInterruptionRendering(t, stdout, interruptionRendering{
+				WantInterruption: tc.wantInterruption,
+				ArtifactDir:      artifactDir,
+				WantDetail:       tc.wantDetail,
+			})
 		})
+	}
+}
+
+func writeFailedTaskWithAttempt(t *testing.T, root string, attempt taskpkg.Attempt) {
+	t.Helper()
+	taskPath := writeCLITaskYAML(t)
+	loaded, err := taskpkg.Load(taskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Status = "failed"
+	loaded.Attempts = []taskpkg.Attempt{attempt}
+	dst := filepath.Join(root, "tasks", "failed", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := taskpkg.Save(dst, loaded); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// interruptionRendering is what `task show` must (or must not) render for one
+// failed attempt.
+type interruptionRendering struct {
+	WantInterruption bool
+	ArtifactDir      string
+	WantDetail       []string
+}
+
+func assertInterruptionRendering(t *testing.T, stdout string, want interruptionRendering) {
+	t.Helper()
+	markers := []string{
+		"latest_executor_interruption: true",
+		"latest_recovery: resolve the interruption cause, then run: galley task requeue task-cli-test",
+	}
+	if !want.WantInterruption {
+		for _, marker := range markers {
+			if strings.Contains(stdout, marker) {
+				t.Fatalf("ordinary failure must not render %q\n%s", marker, stdout)
+			}
+		}
+		return
+	}
+	expected := append([]string{
+		"latest_error_phase: executor",
+		"latest_error_kind: executor_interrupted",
+		want.ArtifactDir,
+	}, markers...)
+	expected = append(expected, want.WantDetail...)
+	for _, w := range expected {
+		if !strings.Contains(stdout, w) {
+			t.Fatalf("task show output missing %q\n%s", w, stdout)
+		}
 	}
 }

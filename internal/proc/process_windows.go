@@ -21,6 +21,7 @@ func killProcessGroup(cmd *exec.Cmd) {
 	// so an idle/timeout/cancel does not leave orphaned children holding worktree
 	// locks. If taskkill cannot terminate the tree, fall back to killing the
 	// direct child so the call never becomes a no-op.
+	//nolint:noctx // termination runs after the command's context is already cancelled
 	if err := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(cmd.Process.Pid)).Run(); err != nil {
 		_ = cmd.Process.Kill()
 	}

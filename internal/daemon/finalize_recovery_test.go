@@ -37,7 +37,15 @@ func finalizeRecoveryRepo(t *testing.T) (root, repo, remote, worktree, promptPat
 
 // writeBlockingGitHook installs a real git hook that rejects the operation
 // while marker exists, so finalization runs through hooks rather than around.
-func writeBlockingGitHook(t *testing.T, repo, hook, marker, message string) {
+type blockingHook struct {
+	Repo    string
+	Hook    string
+	Marker  string
+	Message string
+}
+
+func writeBlockingGitHook(t *testing.T, spec blockingHook) {
+	repo, hook, marker, message := spec.Repo, spec.Hook, spec.Marker, spec.Message
 	t.Helper()
 	path := filepath.Join(repo, ".git", "hooks", hook)
 	body := fmt.Sprintf("#!/bin/sh\nif [ -f %q ]; then\n  echo %q >&2\n  exit 1\nfi\nexit 0\n", marker, message)
@@ -70,7 +78,16 @@ esac
 `)
 }
 
-func finalizeRecoveryOptions(root, promptPath, schemaPath, claudeBin, ghBin string) Options {
+type recoveryPaths struct {
+	Root       string
+	PromptPath string
+	SchemaPath string
+	ClaudeBin  string
+	GHBin      string
+}
+
+func finalizeRecoveryOptions(p recoveryPaths) Options {
+	root, promptPath, schemaPath, claudeBin, ghBin := p.Root, p.PromptPath, p.SchemaPath, p.ClaudeBin, p.GHBin
 	return Options{
 		Root:               root,
 		SystemPromptFile:   promptPath,
@@ -87,7 +104,7 @@ func finalizeRecoveryOptions(root, promptPath, schemaPath, claudeBin, ghBin stri
 
 func gitOutputForTest(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := exec.CommandContext(t.Context(), "git", args...)
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -138,7 +155,7 @@ func TestFinalizeCommitFailureRecoversThroughRevisionLoop(t *testing.T) {
 	root, repo, remote, worktree, promptPath, schemaPath, taskPath := finalizeRecoveryRepo(t)
 	marker := filepath.Join(t.TempDir(), "block-commit")
 	writeMarkerFile(t, marker)
-	writeBlockingGitHook(t, repo, "pre-commit", marker, "pre-commit hook rejected the accepted change")
+	writeBlockingGitHook(t, blockingHook{Repo: repo, Hook: "pre-commit", Marker: marker, Message: "pre-commit hook rejected the accepted change"})
 	claudeBin := finalizeRepairExecutor(t, marker)
 	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
   echo https://github.com/example/galley/pull/501
@@ -148,7 +165,7 @@ fi
 `)
 	setLoopBudget(t, taskPath, 3)
 
-	if err := runTestDaemon(context.Background(), finalizeRecoveryOptions(root, promptPath, schemaPath, claudeBin, ghBin)); err != nil {
+	if err := runTestDaemon(context.Background(), finalizeRecoveryOptions(recoveryPaths{Root: root, PromptPath: promptPath, SchemaPath: schemaPath, ClaudeBin: claudeBin, GHBin: ghBin})); err != nil {
 		t.Fatal(err)
 	}
 
@@ -222,7 +239,7 @@ func TestFinalizePushFailureRecoversThroughRevisionLoop(t *testing.T) {
 	root, repo, remote, worktree, promptPath, schemaPath, taskPath := finalizeRecoveryRepo(t)
 	marker := filepath.Join(t.TempDir(), "block-push")
 	writeMarkerFile(t, marker)
-	writeBlockingGitHook(t, repo, "pre-push", marker, "pre-push hook rejected the accepted branch")
+	writeBlockingGitHook(t, blockingHook{Repo: repo, Hook: "pre-push", Marker: marker, Message: "pre-push hook rejected the accepted branch"})
 	claudeBin := finalizeRepairExecutor(t, marker)
 	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
   echo https://github.com/example/galley/pull/502
@@ -232,7 +249,7 @@ fi
 `)
 	setLoopBudget(t, taskPath, 3)
 
-	if err := runTestDaemon(context.Background(), finalizeRecoveryOptions(root, promptPath, schemaPath, claudeBin, ghBin)); err != nil {
+	if err := runTestDaemon(context.Background(), finalizeRecoveryOptions(recoveryPaths{Root: root, PromptPath: promptPath, SchemaPath: schemaPath, ClaudeBin: claudeBin, GHBin: ghBin})); err != nil {
 		t.Fatal(err)
 	}
 
@@ -276,7 +293,7 @@ fi
 `)
 	setLoopBudget(t, taskPath, 3)
 
-	if err := runTestDaemon(context.Background(), finalizeRecoveryOptions(root, promptPath, schemaPath, claudeBin, ghBin)); err != nil {
+	if err := runTestDaemon(context.Background(), finalizeRecoveryOptions(recoveryPaths{Root: root, PromptPath: promptPath, SchemaPath: schemaPath, ClaudeBin: claudeBin, GHBin: ghBin})); err != nil {
 		t.Fatal(err)
 	}
 
@@ -300,7 +317,7 @@ func TestFinalizeFailureSurvivesRequeueAndFinalizesRetainedCommit(t *testing.T) 
 	root, repo, remote, worktree, promptPath, schemaPath, taskPath := finalizeRecoveryRepo(t)
 	marker := filepath.Join(t.TempDir(), "block-push")
 	writeMarkerFile(t, marker)
-	writeBlockingGitHook(t, repo, "pre-push", marker, "pre-push hook rejected the accepted branch")
+	writeBlockingGitHook(t, blockingHook{Repo: repo, Hook: "pre-push", Marker: marker, Message: "pre-push hook rejected the accepted branch"})
 	firstClaude := writeFakeClaude(t, `echo change > daemon-output.txt
 echo '{"status":"completed","summary":"done","files_modified":["daemon-output.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}'
 `)
@@ -312,7 +329,7 @@ fi
 `)
 	setLoopBudget(t, taskPath, 1)
 
-	if err := runTestDaemon(context.Background(), finalizeRecoveryOptions(root, promptPath, schemaPath, firstClaude, ghBin)); err != nil {
+	if err := runTestDaemon(context.Background(), finalizeRecoveryOptions(recoveryPaths{Root: root, PromptPath: promptPath, SchemaPath: schemaPath, ClaudeBin: firstClaude, GHBin: ghBin})); err != nil {
 		t.Fatal(err)
 	}
 
@@ -344,7 +361,7 @@ fi
 	// retained worktree, retained review base, and the pending request.
 	secondClaude := writeFakeClaude(t, `echo '{"status":"completed","summary":"finalization blocker cleared","files_modified":[],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["retained commit"],"notes":"done"},{"id":"revision:finalize-attempt-1","status":"satisfied","evidence":["blocking condition resolved"],"notes":"finalization can rerun"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}'
 `)
-	if err := runTestDaemon(context.Background(), finalizeRecoveryOptions(root, promptPath, schemaPath, secondClaude, ghBin)); err != nil {
+	if err := runTestDaemon(context.Background(), finalizeRecoveryOptions(recoveryPaths{Root: root, PromptPath: promptPath, SchemaPath: schemaPath, ClaudeBin: secondClaude, GHBin: ghBin})); err != nil {
 		t.Fatal(err)
 	}
 
@@ -501,7 +518,7 @@ fi
 	firstClaude := finalizeRevisionProjectingClaude(t, `echo change > daemon-output.txt
 echo '{"status":"completed","summary":"done","files_modified":["daemon-output.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}'
 `)
-	if err := runTestDaemon(context.Background(), finalizeRecoveryOptions(root, promptPath, schemaPath, firstClaude, ghBin)); err != nil {
+	if err := runTestDaemon(context.Background(), finalizeRecoveryOptions(recoveryPaths{Root: root, PromptPath: promptPath, SchemaPath: schemaPath, ClaudeBin: firstClaude, GHBin: ghBin})); err != nil {
 		t.Fatal(err)
 	}
 
@@ -524,7 +541,7 @@ echo '{"status":"completed","summary":"done","files_modified":["daemon-output.tx
 	writeHookMessage(t, marker, "pre-push hook rejected the accepted branch (run 2)")
 	retainedClaude := finalizeRevisionProjectingClaude(t, `echo '{"status":"completed","summary":"finalization blocker addressed","files_modified":[],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["retained commit"],"notes":"done"},{"id":"revision:finalize-attempt-1","status":"satisfied","evidence":["blocking condition resolved"],"notes":"finalization can rerun"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}'
 `)
-	if err := runTestDaemon(context.Background(), finalizeRecoveryOptions(root, promptPath, schemaPath, retainedClaude, ghBin)); err != nil {
+	if err := runTestDaemon(context.Background(), finalizeRecoveryOptions(recoveryPaths{Root: root, PromptPath: promptPath, SchemaPath: schemaPath, ClaudeBin: retainedClaude, GHBin: ghBin})); err != nil {
 		t.Fatal(err)
 	}
 
@@ -533,21 +550,7 @@ echo '{"status":"completed","summary":"done","files_modified":["daemon-output.tx
 		t.Fatalf("second run did not publish a failed task: %v", err)
 	}
 	pending := findRevisionRequest(t, secondFailed, "finalize-attempt-1")
-	if pending.Status != "pending" {
-		t.Fatalf("second finalization failure left request status %q, want pending: %#v", pending.Status, pending)
-	}
-	if !strings.Contains(pending.Text, "git push failed") {
-		t.Fatalf("pending request lost the failed operation: %q", pending.Text)
-	}
-	if !strings.Contains(pending.Text, "(run 2)") || strings.Contains(pending.Text, "(run 1)") {
-		t.Fatalf("pending request does not describe the latest failure: %q", pending.Text)
-	}
-	if !strings.Contains(pending.Text, nthRunDir(t, root, 2)) {
-		t.Fatalf("pending request lost the second run's artifact location: %q", pending.Text)
-	}
-	if pending.Evidence != "" {
-		t.Fatalf("pending request kept stale addressed evidence: %q", pending.Evidence)
-	}
+	assertPendingDescribesLatestFailure(t, pending, nthRunDir(t, root, 2))
 	if secondFailed.ReviewProgress == nil || len(secondFailed.ReviewProgress.Acceptance) == 0 {
 		t.Fatalf("second run lost prior review passes: %#v", secondFailed.ReviewProgress)
 	}
@@ -566,7 +569,7 @@ echo '{"status":"completed","summary":"done","files_modified":["daemon-output.tx
 	if err := os.Remove(marker); err != nil {
 		t.Fatal(err)
 	}
-	if err := runTestDaemon(context.Background(), finalizeRecoveryOptions(root, promptPath, schemaPath, retainedClaude, ghBin)); err != nil {
+	if err := runTestDaemon(context.Background(), finalizeRecoveryOptions(recoveryPaths{Root: root, PromptPath: promptPath, SchemaPath: schemaPath, ClaudeBin: retainedClaude, GHBin: ghBin})); err != nil {
 		t.Fatal(err)
 	}
 
@@ -622,7 +625,7 @@ func TestFinalizeFailurePreservesForeignRequestHoldingItsID(t *testing.T) {
 	seedRevisionRequest(t, taskPath, foreign)
 	marker := filepath.Join(t.TempDir(), "block-push")
 	writeMarkerFile(t, marker)
-	writeBlockingGitHook(t, repo, "pre-push", marker, "pre-push hook rejected the accepted branch")
+	writeBlockingGitHook(t, blockingHook{Repo: repo, Hook: "pre-push", Marker: marker, Message: "pre-push hook rejected the accepted branch"})
 	claudeBin := writeFakeClaude(t, `case "$*" in
   *finalize-attempt-1-2*)
     rm -f `+marker+`
@@ -642,7 +645,7 @@ fi
 `)
 	setLoopBudget(t, taskPath, 3)
 
-	if err := runTestDaemon(context.Background(), finalizeRecoveryOptions(root, promptPath, schemaPath, claudeBin, ghBin)); err != nil {
+	if err := runTestDaemon(context.Background(), finalizeRecoveryOptions(recoveryPaths{Root: root, PromptPath: promptPath, SchemaPath: schemaPath, ClaudeBin: claudeBin, GHBin: ghBin})); err != nil {
 		t.Fatal(err)
 	}
 
@@ -731,7 +734,7 @@ func TestFinalizeFailureAfterAcceptedRevisionKeepsResolvedRequestsClosed(t *test
 	root, repo, remote, worktree, promptPath, schemaPath, taskPath := finalizeRecoveryRepo(t)
 	marker := filepath.Join(t.TempDir(), "block-push")
 	writeMarkerFile(t, marker)
-	writeBlockingGitHook(t, repo, "pre-push", marker, "pre-push hook rejected the accepted branch")
+	writeBlockingGitHook(t, blockingHook{Repo: repo, Hook: "pre-push", Marker: marker, Message: "pre-push hook rejected the accepted branch"})
 	// Attempt 1 reports risks, which the shared fake supervisor turns into a
 	// needs_revision finding; attempt 2 addresses it and is accepted.
 	claudeBin := writeFakeClaude(t, `case "$*" in
@@ -757,7 +760,7 @@ fi
 `)
 	setLoopBudget(t, taskPath, 4)
 
-	if err := runTestDaemon(context.Background(), finalizeRecoveryOptions(root, promptPath, schemaPath, claudeBin, ghBin)); err != nil {
+	if err := runTestDaemon(context.Background(), finalizeRecoveryOptions(recoveryPaths{Root: root, PromptPath: promptPath, SchemaPath: schemaPath, ClaudeBin: claudeBin, GHBin: ghBin})); err != nil {
 		t.Fatal(err)
 	}
 
@@ -844,5 +847,26 @@ func TestFinalizeRevisionRequestTruncationIsUTF8Safe(t *testing.T) {
 	}
 	if got := findRevisionRequest(t, reloaded, "finalize-attempt-1"); got.Text != request.Text {
 		t.Fatalf("persisted request text changed: got %q", got.Text)
+	}
+}
+
+// assertPendingDescribesLatestFailure pins that a repeated failure rewrites the
+// pending request to the newest run and drops stale addressed evidence.
+func assertPendingDescribesLatestFailure(t *testing.T, pending task.RevisionRequest, wantRunDir string) {
+	t.Helper()
+	if pending.Status != "pending" {
+		t.Fatalf("second finalization failure left request status %q, want pending: %#v", pending.Status, pending)
+	}
+	if !strings.Contains(pending.Text, "git push failed") {
+		t.Fatalf("pending request lost the failed operation: %q", pending.Text)
+	}
+	if !strings.Contains(pending.Text, "(run 2)") || strings.Contains(pending.Text, "(run 1)") {
+		t.Fatalf("pending request does not describe the latest failure: %q", pending.Text)
+	}
+	if !strings.Contains(pending.Text, wantRunDir) {
+		t.Fatalf("pending request lost the second run's artifact location: %q", pending.Text)
+	}
+	if pending.Evidence != "" {
+		t.Fatalf("pending request kept stale addressed evidence: %q", pending.Evidence)
 	}
 }

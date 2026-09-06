@@ -122,16 +122,11 @@ func parseStatusPorcelainZ(s string) []statusEntry {
 			// Staging uses only the destination; the source is already staged by Git.
 			idx2 := strings.IndexByte(rest, 0)
 			if idx2 < 0 {
-				if path != "" {
-					entries = append(entries, statusEntry{X: x, Y: y, Path: path})
-				}
-				return entries
+				return appendStatusEntry(entries, x, y, path)
 			}
 			rest = rest[idx2+1:]
 		}
-		if path != "" {
-			entries = append(entries, statusEntry{X: x, Y: y, Path: path})
-		}
+		entries = appendStatusEntry(entries, x, y, path)
 	}
 	return entries
 }
@@ -197,4 +192,11 @@ func nonCommittedInputDestinations(files []task.InputFile) []string {
 		paths = append(paths, dest)
 	}
 	return paths
+}
+
+func appendStatusEntry(entries []statusEntry, x, y byte, path string) []statusEntry {
+	if path == "" {
+		return entries
+	}
+	return append(entries, statusEntry{X: x, Y: y, Path: path})
 }

@@ -30,12 +30,12 @@ func TestCleanupRegisteredChildrenSurfacesSurvivingPIDs(t *testing.T) {
 
 	var killCalls int32
 	killer := childKiller{
-		KillPGID: func(pgid int) error {
+		KillPGID: func(_ int) error {
 			atomic.AddInt32(&killCalls, 1)
 			return nil
 		},
-		AlivePID:  func(pid int) (bool, error) { return true, nil },
-		AlivePGID: func(pgid int) (bool, error) { return true, nil },
+		AlivePID:  func(_ int) (bool, error) { return true, nil },
+		AlivePGID: func(_ int) (bool, error) { return true, nil },
 	}
 
 	survivors, err := cleanupRegisteredChildren(registryPath, 100*time.Millisecond, killer)
@@ -80,15 +80,15 @@ func TestCleanupRegisteredChildrenPrunesRecordWhenProcessGroupDead(t *testing.T)
 
 	var killCalls, alivePIDCalls int32
 	killer := childKiller{
-		KillPGID: func(pgid int) error {
+		KillPGID: func(_ int) error {
 			atomic.AddInt32(&killCalls, 1)
 			return nil
 		},
-		AlivePID: func(pid int) (bool, error) {
+		AlivePID: func(_ int) (bool, error) {
 			atomic.AddInt32(&alivePIDCalls, 1)
 			return true, nil
 		},
-		AlivePGID: func(pgid int) (bool, error) { return false, nil },
+		AlivePGID: func(_ int) (bool, error) { return false, nil },
 	}
 
 	survivors, err := cleanupRegisteredChildren(registryPath, 100*time.Millisecond, killer)

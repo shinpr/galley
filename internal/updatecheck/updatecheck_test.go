@@ -65,13 +65,13 @@ func readAttemptTime(t *testing.T, root string) time.Time {
 func TestNonTTYSkipsRequestAndState(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	transport := &fakeTransport{handler: func(req *http.Request) (*http.Response, error) {
+	transport := &fakeTransport{handler: func(_ *http.Request) (*http.Response, error) {
 		return releaseResponse(t, "v0.13.0"), nil
 	}}
 	opts := baseOptions(root, transport)
 	opts.IsTTY = func() bool { return false }
 
-	Run(opts)
+	Run(t.Context(), opts)
 
 	if transport.calls != 0 {
 		t.Fatalf("non-TTY run made %d requests", transport.calls)
@@ -84,12 +84,12 @@ func TestNonTTYSkipsRequestAndState(t *testing.T) {
 func TestStaleOrAbsentRecordChecksOnceThenSuppresses(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	transport := &fakeTransport{handler: func(req *http.Request) (*http.Response, error) {
+	transport := &fakeTransport{handler: func(_ *http.Request) (*http.Response, error) {
 		return releaseResponse(t, "v0.13.0"), nil
 	}}
 	opts := baseOptions(root, transport)
 
-	Run(opts)
+	Run(t.Context(), opts)
 	if transport.calls != 1 {
 		t.Fatalf("first start made %d requests, want 1", transport.calls)
 	}
@@ -103,7 +103,7 @@ func TestStaleOrAbsentRecordChecksOnceThenSuppresses(t *testing.T) {
 		}
 	}
 
-	Run(opts)
+	Run(t.Context(), opts)
 	if transport.calls != 1 {
 		t.Fatalf("fresh record start made %d requests, want 1 total", transport.calls)
 	}
@@ -119,11 +119,11 @@ func TestStaleRecordTriggersNewAttempt(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, stateFileName), stale, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	transport := &fakeTransport{handler: func(req *http.Request) (*http.Response, error) {
+	transport := &fakeTransport{handler: func(_ *http.Request) (*http.Response, error) {
 		return releaseResponse(t, "v0.13.0"), nil
 	}}
 
-	Run(baseOptions(root, transport))
+	Run(t.Context(), baseOptions(root, transport))
 
 	if transport.calls != 1 {
 		t.Fatalf("stale record start made %d requests, want 1", transport.calls)
@@ -158,11 +158,11 @@ func TestRecordAgeBoundaries(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(root, stateFileName), data, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			transport := &fakeTransport{handler: func(req *http.Request) (*http.Response, error) {
+			transport := &fakeTransport{handler: func(_ *http.Request) (*http.Response, error) {
 				return releaseResponse(t, "v0.13.0"), nil
 			}}
 
-			Run(baseOptions(root, transport))
+			Run(t.Context(), baseOptions(root, transport))
 
 			if transport.calls != tc.wantCalls {
 				t.Fatalf("age %v: made %d requests, want %d", tc.age, transport.calls, tc.wantCalls)
@@ -177,12 +177,12 @@ func TestRecordAgeBoundaries(t *testing.T) {
 func TestFailedRequestStillRecordsAttempt(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	transport := &fakeTransport{handler: func(req *http.Request) (*http.Response, error) {
+	transport := &fakeTransport{handler: func(_ *http.Request) (*http.Response, error) {
 		return nil, errors.New("network down")
 	}}
 	opts := baseOptions(root, transport)
 
-	Run(opts)
+	Run(t.Context(), opts)
 
 	if transport.calls != 1 {
 		t.Fatalf("failing start made %d requests, want 1", transport.calls)
@@ -194,7 +194,7 @@ func TestFailedRequestStillRecordsAttempt(t *testing.T) {
 		t.Fatalf("failed request leaked stderr output: %q", stderr)
 	}
 
-	Run(opts)
+	Run(t.Context(), opts)
 	if transport.calls != 1 {
 		t.Fatalf("failed attempt did not rate-limit: %d requests", transport.calls)
 	}
@@ -206,12 +206,12 @@ func TestUnpersistableStateSkipsRequest(t *testing.T) {
 	if err := os.WriteFile(blockingFile, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	transport := &fakeTransport{handler: func(req *http.Request) (*http.Response, error) {
+	transport := &fakeTransport{handler: func(_ *http.Request) (*http.Response, error) {
 		return releaseResponse(t, "v0.13.0"), nil
 	}}
 	opts := baseOptions(filepath.Join(blockingFile, "root"), transport)
 
-	Run(opts)
+	Run(t.Context(), opts)
 
 	if transport.calls != 0 {
 		t.Fatalf("unpersistable state still made %d requests", transport.calls)
@@ -221,13 +221,13 @@ func TestUnpersistableStateSkipsRequest(t *testing.T) {
 func TestHTTPAndResponseFailuresStaySilent(t *testing.T) {
 	t.Parallel()
 	cases := map[string]func(*http.Request) (*http.Response, error){
-		"request error": func(req *http.Request) (*http.Response, error) {
+		"request error": func(_ *http.Request) (*http.Response, error) {
 			return nil, errors.New("timeout")
 		},
-		"non-200 status": func(req *http.Request) (*http.Response, error) {
+		"non-200 status": func(_ *http.Request) (*http.Response, error) {
 			return &http.Response{StatusCode: http.StatusForbidden, Body: io.NopCloser(strings.NewReader("")), Header: make(http.Header)}, nil
 		},
-		"invalid JSON": func(req *http.Request) (*http.Response, error) {
+		"invalid JSON": func(_ *http.Request) (*http.Response, error) {
 			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("not json")), Header: make(http.Header)}, nil
 		},
 	}
@@ -239,7 +239,7 @@ func TestHTTPAndResponseFailuresStaySilent(t *testing.T) {
 			transport := &fakeTransport{handler: handler}
 			opts := baseOptions(root, transport)
 
-			Run(opts)
+			Run(t.Context(), opts)
 
 			if transport.calls != 1 {
 				t.Fatalf("made %d requests, want 1", transport.calls)
@@ -281,13 +281,13 @@ func TestVersionMatrixNoticeOnlyForNewerStable(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			root := t.TempDir()
-			transport := &fakeTransport{handler: func(req *http.Request) (*http.Response, error) {
+			transport := &fakeTransport{handler: func(_ *http.Request) (*http.Response, error) {
 				return releaseResponse(t, tc.latest), nil
 			}}
 			opts := baseOptions(root, transport)
 			opts.CurrentVersion = tc.current
 
-			Run(opts)
+			Run(t.Context(), opts)
 
 			stderr := opts.Stderr.(*bytes.Buffer).String()
 			if tc.notice && stderr == "" {
@@ -303,14 +303,14 @@ func TestVersionMatrixNoticeOnlyForNewerStable(t *testing.T) {
 func TestNoticeIsConciseAndMachineRecognizable(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	transport := &fakeTransport{handler: func(req *http.Request) (*http.Response, error) {
+	transport := &fakeTransport{handler: func(_ *http.Request) (*http.Response, error) {
 		return releaseResponse(t, "v0.13.0"), nil
 	}}
 	var stderr bytes.Buffer
 	opts := baseOptions(root, transport)
 	opts.Stderr = &stderr
 
-	Run(opts)
+	Run(t.Context(), opts)
 
 	if got, want := stderr.String(), "galley update available: 0.12.0 -> v0.13.0\n"; got != want {
 		t.Fatalf("notice got %q, want %q", got, want)

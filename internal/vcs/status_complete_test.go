@@ -11,7 +11,7 @@ import (
 
 func TestStatusPorcelainZRetainsAllPaths(t *testing.T) {
 	repo := t.TempDir()
-	if out, err := exec.Command("git", "init", repo).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(t.Context(), "git", "init", repo).CombinedOutput(); err != nil {
 		t.Fatalf("%s: %v", out, err)
 	}
 	const count = 16000
@@ -23,20 +23,20 @@ func TestStatusPorcelainZRetainsAllPaths(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	status, err := StatusPorcelainZ(t.Context(), Binaries{}, repo)
+	status, err := StatusPorcelainZ(t.Context(), Repo{WorkDir: repo})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if n := strings.Count(status, "\x00"); n != count {
 		t.Fatalf("got %d of %d paths", n, count)
 	}
-	if err := StagePathsForReview(t.Context(), Binaries{}, repo, t.TempDir(), paths); err != nil {
+	if err := StagePathsForReview(t.Context(), Repo{WorkDir: repo, RunDir: t.TempDir()}, paths); err != nil {
 		t.Fatal(err)
 	}
-	if err := AddPaths(t.Context(), Binaries{}, repo, t.TempDir(), paths); err != nil {
+	if err := AddPaths(t.Context(), Repo{WorkDir: repo, RunDir: t.TempDir()}, paths); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("git", "diff", "--cached", "--name-only", "-z")
+	cmd := exec.CommandContext(t.Context(), "git", "diff", "--cached", "--name-only", "-z")
 	cmd.Dir = repo
 	staged, err := cmd.Output()
 	if err != nil {

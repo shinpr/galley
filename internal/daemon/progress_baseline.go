@@ -61,6 +61,7 @@ func hasNonSkeletonProgress(snapshot workspace.Snapshot, workDir string, preflig
 			// Skeleton was deleted or otherwise unreadable: that is an
 			// executor-visible change relative to the baseline, count it as
 			// progress.
+			//nolint:nilerr // unreadable skeleton is progress, not a failure
 			return true, nil
 		}
 		sum := sha256.Sum256(data)
@@ -117,20 +118,7 @@ func porcelainLinePaths(line string) []string {
 	body := line[3:]
 	var paths []string
 	if isRenameOrCopyStatus(line[0]) || isRenameOrCopyStatus(line[1]) {
-		separator := strings.Index(body, " -> ")
-		if strings.HasPrefix(body, `"`) {
-			for i := 1; i < len(body); i++ {
-				if body[i] == '\\' {
-					i++
-					continue
-				}
-				if body[i] == '"' {
-					separator = i + 1
-					break
-				}
-			}
-		}
-		if separator >= 0 && strings.HasPrefix(body[separator:], " -> ") {
+		if separator := renameSeparator(body); separator >= 0 {
 			paths = append(paths, unquoteGitPath(body[:separator]))
 			body = body[separator+4:]
 		}
@@ -141,6 +129,19 @@ func porcelainLinePaths(line string) []string {
 	return paths
 }
 
+// renameSeparator returns where a rename entry's source path ends, or -1 with
+// no " -> ". A quoted path ends at its closing quote, so an embedded " -> " is safe.
+func renameSeparator(body string) int {
+	separator := strings.Index(body, " -> ")
+	if strings.HasPrefix(body, `"`) {
+		separator = closingQuoteIndex(body)
+	}
+	if separator < 0 || !strings.HasPrefix(body[separator:], " -> ") {
+		return -1
+	}
+	return separator
+}
+
 func unquoteGitPath(path string) string {
 	if strings.HasPrefix(path, `"`) {
 		if decoded, err := strconv.Unquote(path); err == nil {
@@ -148,4 +149,19 @@ func unquoteGitPath(path string) string {
 		}
 	}
 	return path
+}
+
+// closingQuoteIndex returns the index just past a quoted path's closing quote,
+// or -1 when the quote is unterminated. Backslash escapes are skipped.
+func closingQuoteIndex(body string) int {
+	for i := 1; i < len(body); i++ {
+		if body[i] == '\\' {
+			i++
+			continue
+		}
+		if body[i] == '"' {
+			return i + 1
+		}
+	}
+	return -1
 }

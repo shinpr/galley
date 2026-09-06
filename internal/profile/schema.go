@@ -3,6 +3,7 @@ package profile
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 
 	"github.com/shinpr/galley/internal/provider"
 )
@@ -206,7 +207,7 @@ func marshalSchema(schema map[string]any) ([]byte, error) {
 	enc.SetEscapeHTML(false)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(schema); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("encode profile schema: %w", err)
 	}
 	return buf.Bytes(), nil
 }

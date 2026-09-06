@@ -38,7 +38,7 @@ func startUnresponsiveDaemon(t *testing.T) (root, pidFile string, pid int) {
 	if err != nil {
 		t.Skip("sh not available")
 	}
-	cmd := exec.Command(shPath, "-c", `trap "" TERM; printf ready; exec sleep 30`)
+	cmd := exec.CommandContext(t.Context(), shPath, "-c", `trap "" TERM; printf ready; exec sleep 30`)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)

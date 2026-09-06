@@ -143,7 +143,7 @@ func TestSchemaGenerateAndCheck(t *testing.T) {
 
 func TestTaskRequeueText(t *testing.T) {
 	root := t.TempDir()
-	failedPath := setupTaskInState(t, root, "failed", "needs_supervisor_review", nil)
+	failedPath := setupTaskInState(t, taskInState{Root: root, State: "failed", Status: "needs_supervisor_review"}, nil)
 	stdout, stderr, err := executeCommand(
 		"task", "requeue",
 		"--root", root,
@@ -179,7 +179,7 @@ func TestTaskRequeueText(t *testing.T) {
 
 func TestTaskRequeueRejectsEmptyRevisionRequest(t *testing.T) {
 	root := t.TempDir()
-	failedPath := setupTaskInState(t, root, "failed", "needs_supervisor_review", nil)
+	failedPath := setupTaskInState(t, taskInState{Root: root, State: "failed", Status: "needs_supervisor_review"}, nil)
 	_, _, err := executeCommand("task", "requeue", "--root", root, "--revision-request", "   ", failedPath)
 	if err == nil || !strings.Contains(err.Error(), "revision-request must not be empty") {
 		t.Fatalf("error got %v", err)
@@ -191,7 +191,7 @@ func TestTaskRequeueRejectsEmptyRevisionRequest(t *testing.T) {
 
 func TestTaskQueueText(t *testing.T) {
 	root := t.TempDir()
-	draftPath := setupTaskInState(t, root, "draft", "draft", nil)
+	draftPath := setupTaskInState(t, taskInState{Root: root, State: "draft", Status: "draft"}, nil)
 	stdout, stderr, err := executeCommand("task", "queue", "--root", root, "--reason", "draft approved for daemon", draftPath)
 	if err != nil {
 		t.Fatal(err)
@@ -209,7 +209,7 @@ func TestTaskQueueText(t *testing.T) {
 
 func TestTaskListText(t *testing.T) {
 	root := t.TempDir()
-	setupTaskInState(t, root, "failed", "needs_supervisor_review", func(loaded *taskpkg.Task) {
+	setupTaskInState(t, taskInState{Root: root, State: "failed", Status: "needs_supervisor_review"}, func(loaded *taskpkg.Task) {
 		loaded.Attempts = []taskpkg.Attempt{{
 			Number:            1,
 			ClaudeStatus:      "completed",
@@ -235,7 +235,7 @@ func TestTaskListText(t *testing.T) {
 
 func TestTaskShowByIDText(t *testing.T) {
 	root := t.TempDir()
-	setupTaskInState(t, root, "failed", "failed", func(loaded *taskpkg.Task) {
+	setupTaskInState(t, taskInState{Root: root, State: "failed", Status: "failed"}, func(loaded *taskpkg.Task) {
 		loaded.Attempts = []taskpkg.Attempt{{
 			Number:            2,
 			ClaudeStatus:      "hard_stop",
@@ -276,7 +276,7 @@ func TestTaskShowByIDText(t *testing.T) {
 
 func TestTaskShowByIDWithDots(t *testing.T) {
 	root := t.TempDir()
-	setupTaskInState(t, root, "done", "accepted", func(loaded *taskpkg.Task) {
+	setupTaskInState(t, taskInState{Root: root, State: "done", Status: "accepted"}, func(loaded *taskpkg.Task) {
 		loaded.ID = "task.release.1"
 	})
 
@@ -294,7 +294,7 @@ func TestTaskShowByIDWithDots(t *testing.T) {
 
 func TestTaskShowAcceptedTerminalSuppressesPriorFailure(t *testing.T) {
 	root := t.TempDir()
-	setupTaskInState(t, root, "done", "pr_opened", func(loaded *taskpkg.Task) {
+	setupTaskInState(t, taskInState{Root: root, State: "done", Status: "pr_opened"}, func(loaded *taskpkg.Task) {
 		loaded.PR.URL = "https://example.test/pr/1"
 		loaded.PR.Status = "open"
 		loaded.Attempts = []taskpkg.Attempt{{
@@ -361,13 +361,12 @@ func TestTaskShowAcceptedTerminalSuppressesPriorFailure(t *testing.T) {
 // or merged: prior failed attempts must remain under the prior_attempt_* prefix
 // instead of regressing to the active "failed" framing.
 func TestTaskShowAcceptedTerminalCoversPRLifecycleStatuses(t *testing.T) {
-	for _, terminalStatus := range []string{"closed", "merged"} {
-		terminalStatus := terminalStatus
-		t.Run(terminalStatus, func(t *testing.T) {
+	for _, terminalStatus := range []taskpkg.Status{"closed", "merged"} {
+		t.Run(string(terminalStatus), func(t *testing.T) {
 			root := t.TempDir()
-			setupTaskInState(t, root, "done", terminalStatus, func(loaded *taskpkg.Task) {
+			setupTaskInState(t, taskInState{Root: root, State: "done", Status: terminalStatus}, func(loaded *taskpkg.Task) {
 				loaded.PR.URL = "https://example.test/pr/2"
-				loaded.PR.Status = terminalStatus
+				loaded.PR.Status = string(terminalStatus)
 				loaded.Attempts = []taskpkg.Attempt{{
 					Number:            2,
 					ClaudeStatus:      "failed",
@@ -397,7 +396,7 @@ func TestTaskShowAcceptedTerminalCoversPRLifecycleStatuses(t *testing.T) {
 				}
 			}
 			for _, want := range []string{
-				"status: " + terminalStatus,
+				"status: " + string(terminalStatus),
 				"prior_attempt_claude_status: failed",
 				"prior_attempt_error_phase: executor",
 			} {
@@ -411,7 +410,7 @@ func TestTaskShowAcceptedTerminalCoversPRLifecycleStatuses(t *testing.T) {
 
 func TestTaskArchiveText(t *testing.T) {
 	root := t.TempDir()
-	donePath := setupTaskInState(t, root, "done", "accepted", nil)
+	donePath := setupTaskInState(t, taskInState{Root: root, State: "done", Status: "accepted"}, nil)
 
 	stdout, stderr, err := executeCommand("task", "archive", "--reason", "done", donePath)
 	if err != nil {
@@ -443,7 +442,7 @@ func TestTaskArchiveRemovesManagedWorktree(t *testing.T) {
 	if !prepared.WorktreeCreated {
 		t.Fatalf("expected worktree to be created: %+v", prepared)
 	}
-	donePath := setupTaskInState(t, root, "done", "accepted", func(loaded *taskpkg.Task) {
+	donePath := setupTaskInState(t, taskInState{Root: root, State: "done", Status: "accepted"}, func(loaded *taskpkg.Task) {
 		loaded.Scope.CWD = repo
 		loaded.Worktree.Enabled = true
 		loaded.Worktree.Branch = "agent/task-cli-test"
@@ -482,7 +481,14 @@ func TestTaskArchiveRemovesManagedWorktree(t *testing.T) {
 	}
 }
 
-func setupTaskInState(t *testing.T, root, state, status string, modify func(*taskpkg.Task)) string {
+type taskInState struct {
+	Root   string
+	State  string
+	Status taskpkg.Status
+}
+
+func setupTaskInState(t *testing.T, spec taskInState, modify func(*taskpkg.Task)) string {
+	root, state, status := spec.Root, spec.State, spec.Status
 	t.Helper()
 	path := filepath.Join(root, "tasks", state, "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -793,7 +799,7 @@ func initCLIGitRepo(t *testing.T) string {
 
 func runCLIGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := exec.CommandContext(t.Context(), "git", args...)
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	if err != nil {

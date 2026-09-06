@@ -76,11 +76,11 @@ func ReservePID(path string) (func(), error) {
 		if errors.Is(err, os.ErrExist) {
 			return nil, fmt.Errorf("pid file is locked: %s", lockPath)
 		}
-		return nil, err
+		return nil, fmt.Errorf("open pid lock %s: %w", lockPath, err)
 	}
 	if err := file.Close(); err != nil {
 		_ = os.Remove(lockPath)
-		return nil, err
+		return nil, fmt.Errorf("close pid lock %s: %w", lockPath, err)
 	}
 	return func() {
 		_ = os.Remove(lockPath)
@@ -144,7 +144,7 @@ func RemovePID(path string, pid int) error {
 		return nil
 	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+		return fmt.Errorf("remove pid file %s: %w", path, err)
 	}
 	return nil
 }
@@ -295,23 +295,22 @@ func ForceStop(meta PIDFile, timeout time.Duration) (bool, error) {
 	if err == nil || errors.Is(err, ErrNotRunning) {
 		return false, nil
 	}
-	if !errors.Is(err, ErrUnverifiedProcess) {
-		// Graceful stop timed out (or another transient failure): fall through to
-		// the verified force kill below. Unverified-process errors are returned as
-		// is so callers do not escalate to SIGKILL against an unknown process.
-		alive, aliveErr := Alive(meta.PID)
-		if aliveErr != nil {
-			return false, aliveErr
-		}
-		if !alive {
-			return false, nil
-		}
-		if killErr := KillVerified(meta, timeout); killErr != nil && !errors.Is(killErr, ErrNotRunning) {
-			return false, killErr
-		}
-		return true, nil
+	// An unverified process is returned as is so no SIGKILL reaches an unknown
+	// process; every other failure falls through to the verified force kill.
+	if errors.Is(err, ErrUnverifiedProcess) {
+		return false, err
 	}
-	return false, err
+	alive, aliveErr := Alive(meta.PID)
+	if aliveErr != nil {
+		return false, aliveErr
+	}
+	if !alive {
+		return false, nil
+	}
+	if killErr := KillVerified(meta, timeout); killErr != nil && !errors.Is(killErr, ErrNotRunning) {
+		return false, killErr
+	}
+	return true, nil
 }
 
 // KillVerified sends SIGKILL only to a process verified against its PID metadata.
@@ -326,13 +325,13 @@ func KillVerified(meta PIDFile, timeout time.Duration) error {
 func Kill(pid int, timeout time.Duration) error {
 	process, err := os.FindProcess(pid)
 	if err != nil {
-		return err
+		return fmt.Errorf("find process %d: %w", pid, err)
 	}
 	if err := process.Kill(); err != nil {
 		if errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ESRCH) {
 			return ErrNotRunning
 		}
-		return err
+		return fmt.Errorf("kill process %d: %w", pid, err)
 	}
 	return waitExit(pid, timeout, "exit after SIGKILL")
 }

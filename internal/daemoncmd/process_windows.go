@@ -4,5 +4,5 @@ package daemoncmd
 
 import "os/exec"
 
-func configureBackgroundProcess(cmd *exec.Cmd) {
+func configureBackgroundProcess(_ *exec.Cmd) {
 }

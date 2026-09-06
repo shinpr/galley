@@ -2,8 +2,9 @@ package runner
 
 import (
 	"fmt"
-	"github.com/shinpr/galley/internal/proc"
 	"strings"
+
+	"github.com/shinpr/galley/internal/proc"
 )
 
 const (

@@ -39,7 +39,16 @@ func recordPreflightInputs(runDir, phase, key, source string) error {
 }
 
 // preflightInputKey excludes runtime results and binds reuse to the stage's current inputs.
-func preflightInputKey(phase string, loaded task.Task, profiles profile.Bundle, prepared claimedWorkspace, executor task.Executor) string {
+// preflightInputSources are the current inputs a preflight stage is keyed on.
+type preflightInputSources struct {
+	Loaded   task.Task
+	Profiles profile.Bundle
+	Prepared claimedWorkspace
+	Executor task.Executor
+}
+
+func preflightInputKey(phase string, sources preflightInputSources) string {
+	loaded, profiles, prepared, executor := sources.Loaded, sources.Profiles, sources.Prepared, sources.Executor
 	acceptance := append([]task.AcceptanceCriterion(nil), loaded.AcceptanceCriteria...)
 	for i := range acceptance {
 		acceptance[i].Status = ""
@@ -63,31 +72,8 @@ func preflightInputKey(phase string, loaded task.Task, profiles profile.Bundle, 
 		}
 	}
 	inputs["amendments"] = amendments
-	if phase == "setup" {
-		signals := make(map[string]string)
-		for _, path := range setuppreflight.DiscoverRepositorySignals(prepared.CWD) {
-			full := filepath.Join(prepared.CWD, path)
-			info, err := os.Lstat(full)
-			var data []byte
-			if err == nil && info.Mode()&os.ModeSymlink != 0 {
-				err = fmt.Errorf("symlinked setup input cannot establish freshness: %s", full)
-			} else if err == nil && info.Mode().IsRegular() {
-				data, err = os.ReadFile(full)
-			} else if err == nil {
-				err = fmt.Errorf("not a regular setup input: %s", full)
-			}
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "galley: setup reuse disabled: %v\n", err)
-				return ""
-			}
-			signals[path] = fmt.Sprintf("%s:%x", info.Mode(), sha256.Sum256(data))
-		}
-		inputs["repository_signals"] = signals
-		inputs["schema"] = schemas.SetupResult
-		inputs["prompts"] = []string{prompts.SetupExecutorCodex(), prompts.SetupExecutorClaude(), prompts.SetupExecutorGrok()}
-	} else {
-		inputs["schema"] = schemas.AcceptanceSkeletonManifest
-		inputs["prompts"] = []string{prompts.AcceptanceSkeletonCreatorCodex(), prompts.AcceptanceSkeletonCreator(), prompts.AcceptanceSkeletonCreatorGrok()}
+	if !addPhaseInputs(inputs, phase, prepared.CWD) {
+		return ""
 	}
 	data, err := json.Marshal(inputs)
 	if err != nil {
@@ -113,5 +99,59 @@ func reusableSkeletonFiles(workDir string, result *skeletonpreflight.Result) boo
 			return false
 		}
 	}
+	return true
+}
+
+// repositorySignals hashes the setup stage's repository inputs. It reports
+// false when any signal cannot establish freshness, which disables setup reuse.
+func repositorySignals(workDir string) (map[string]string, bool) {
+	signals := make(map[string]string)
+	for _, path := range setuppreflight.DiscoverRepositorySignals(workDir) {
+		full := filepath.Join(workDir, path)
+		info, err := os.Lstat(full)
+		data, err := readSetupSignal(full, info, err)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "galley: setup reuse disabled: %v\n", err)
+			return nil, false
+		}
+		signals[path] = fmt.Sprintf("%s:%x", info.Mode(), sha256.Sum256(data))
+	}
+	return signals, true
+}
+
+// readSetupSignal reads a regular setup input; a symlink or any other file kind
+// cannot establish freshness.
+func readSetupSignal(full string, info os.FileInfo, statErr error) ([]byte, error) {
+	if statErr != nil {
+		return nil, statErr
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("symlinked setup input cannot establish freshness: %s", full)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("not a regular setup input: %s", full)
+	}
+	data, err := os.ReadFile(full)
+	if err != nil {
+		return nil, fmt.Errorf("read setup input %s: %w", full, err)
+	}
+	return data, nil
+}
+
+// addPhaseInputs adds the phase-specific reuse key inputs. It reports false when
+// the setup phase cannot establish repository freshness, which disables reuse.
+func addPhaseInputs(inputs map[string]any, phase, workDir string) bool {
+	if phase != "setup" {
+		inputs["schema"] = schemas.AcceptanceSkeletonManifest
+		inputs["prompts"] = []string{prompts.AcceptanceSkeletonCreatorCodex(), prompts.AcceptanceSkeletonCreator(), prompts.AcceptanceSkeletonCreatorGrok()}
+		return true
+	}
+	signals, ok := repositorySignals(workDir)
+	if !ok {
+		return false
+	}
+	inputs["repository_signals"] = signals
+	inputs["schema"] = schemas.SetupResult
+	inputs["prompts"] = []string{prompts.SetupExecutorCodex(), prompts.SetupExecutorClaude(), prompts.SetupExecutorGrok()}
 	return true
 }

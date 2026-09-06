@@ -31,7 +31,7 @@ func TestDaemonSupervisorStallFailsAfterSingleInvocation(t *testing.T) {
 	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
 	setLoopBudget(t, taskPath, 3)
 	calls := 0
-	stallingSupervisor := func(_ context.Context, _ Options, _ supervisor.Evidence, _, _ string) (supervisor.Verdict, error) {
+	stallingSupervisor := func(_ context.Context, _ supervisorRunRequest) (supervisor.Verdict, error) {
 		calls++
 		return supervisor.Verdict{}, &proc.CommandError{Kind: proc.CommandErrorIdleTimeout, Err: errors.New("no output")}
 	}

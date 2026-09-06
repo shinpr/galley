@@ -188,7 +188,7 @@ func TestRecoverStaleClaimsIgnoresQueuedDestinationConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := running.Status, "queued"; got != want {
+	if got, want := running.Status, task.Status("queued"); got != want {
 		t.Fatalf("running status got %q, want %q", got, want)
 	}
 	queued, err := task.Load(queuedPath)

@@ -70,7 +70,7 @@ func TestNormalDaemonPollsPRCommentsWhileExecutorAttemptIsRunning(t *testing.T) 
 
 	// Arrange: an actionable open-PR task in tasks/done whose PR comments must be
 	// polled while the executor above is still blocked.
-	writeDaemonEnvironmentProfile(t, root, repo, true, false)
+	writeDaemonEnvironmentProfile(t, commentProfileSpec{Root: root, Repo: repo, PollComments: true, ReplyComments: false})
 	donePath := filepath.Join(root, "tasks", "done", "open-pr.yaml")
 	writeDaemonTask(t, donePath, repo)
 	doneTask, err := task.Load(donePath)

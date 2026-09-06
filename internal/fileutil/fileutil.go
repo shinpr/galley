@@ -40,7 +40,7 @@ func WriteFileNoOverwriteAtomic(path string, data []byte, perm os.FileMode) erro
 		return err
 	}
 	err = WithExclusiveMarker(path+".lock", func() error {
-		return stageAndMove(dir, path, data, perm, publishNoReplace)
+		return stageAndMove(stagedWrite{Dir: dir, Path: path, Data: data, Perm: perm}, publishNoReplace)
 	})
 	var markerErr *markerExistsError
 	if errors.As(err, &markerErr) {
@@ -96,7 +96,7 @@ func prepareWriteDir(path string) (string, error) {
 }
 
 func stageAndRename(dir, path string, data []byte, perm os.FileMode) error {
-	return stageAndMove(dir, path, data, perm, func(src, dst string) error {
+	return stageAndMove(stagedWrite{Dir: dir, Path: path, Data: data, Perm: perm}, func(src, dst string) error {
 		if err := os.Rename(src, dst); err != nil {
 			return fmt.Errorf("rename temp file %s to %s: %w", src, dst, err)
 		}
@@ -104,7 +104,16 @@ func stageAndRename(dir, path string, data []byte, perm os.FileMode) error {
 	})
 }
 
-func stageAndMove(dir, path string, data []byte, perm os.FileMode, move func(string, string) error) error {
+// stagedWrite is one file staged in dir and then moved into place.
+type stagedWrite struct {
+	Dir  string
+	Path string
+	Data []byte
+	Perm os.FileMode
+}
+
+func stageAndMove(w stagedWrite, move func(string, string) error) error {
+	dir, path, data, perm := w.Dir, w.Path, w.Data, w.Perm
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
 	if err != nil {
 		return fmt.Errorf("create temp file for %s: %w", path, err)

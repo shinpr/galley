@@ -7,17 +7,21 @@ import (
 	"github.com/shinpr/galley/internal/provider"
 )
 
+// Status is a Galley-owned task status, distinct from the status an executor
+// reports, so the two vocabularies cannot be assigned to each other.
+type Status string
+
 const (
-	StatusDraft                 = "draft"
-	StatusQueued                = "queued"
-	StatusRunning               = "running"
-	StatusFailed                = "failed"
-	StatusNeedsSupervisorReview = "needs_supervisor_review"
-	StatusAccepted              = "accepted"
-	StatusPROpened              = "pr_opened"
-	StatusMerged                = "merged"
-	StatusClosed                = "closed"
-	StatusArchived              = "archived"
+	StatusDraft                 Status = "draft"
+	StatusQueued                Status = "queued"
+	StatusRunning               Status = "running"
+	StatusFailed                Status = "failed"
+	StatusNeedsSupervisorReview Status = "needs_supervisor_review"
+	StatusAccepted              Status = "accepted"
+	StatusPROpened              Status = "pr_opened"
+	StatusMerged                Status = "merged"
+	StatusClosed                Status = "closed"
+	StatusArchived              Status = "archived"
 )
 
 type WorkflowState string
@@ -31,7 +35,7 @@ const (
 	WorkflowStateArchived WorkflowState = "archived"
 )
 
-var allStatuses = []string{
+var allStatuses = []Status{
 	StatusDraft, StatusQueued, StatusRunning, StatusNeedsSupervisorReview,
 	StatusAccepted, StatusPROpened, StatusFailed, StatusClosed, StatusMerged, StatusArchived,
 }
@@ -41,15 +45,15 @@ var allWorkflowStates = []WorkflowState{
 	WorkflowStateDone, WorkflowStateFailed, WorkflowStateArchived,
 }
 
-func AllStatuses() []string {
-	return append([]string(nil), allStatuses...)
+func AllStatuses() []Status {
+	return append([]Status(nil), allStatuses...)
 }
 
 func AllWorkflowStates() []WorkflowState {
 	return append([]WorkflowState(nil), allWorkflowStates...)
 }
 
-func WorkflowStateForStatus(status string) (WorkflowState, error) {
+func WorkflowStateForStatus(status Status) (WorkflowState, error) {
 	switch status {
 	case StatusDraft:
 		return WorkflowStateDraft, nil
@@ -70,7 +74,7 @@ func WorkflowStateForStatus(status string) (WorkflowState, error) {
 
 // WorkflowStateForTransition resolves directory-ahead transitions whose file
 // move intentionally precedes the persisted status update.
-func WorkflowStateForTransition(from, to string) (WorkflowState, error) {
+func WorkflowStateForTransition(from, to Status) (WorkflowState, error) {
 	if from != StatusQueued || to != StatusRunning {
 		return "", fmt.Errorf("unsupported directory-ahead task transition %q -> %q", from, to)
 	}
@@ -85,23 +89,31 @@ func TaskStatePath(root string, state WorkflowState, name string) string {
 	return filepath.Join(TaskStateDir(root, state), name)
 }
 
-func CanQueue(status string) bool {
+func CanQueue(status Status) bool {
 	return status == StatusDraft
 }
 
-func CanArchive(status string) bool {
+// CanArchive reports whether a task has settled enough to archive; draft,
+// queued, and running are still live and archived is already there.
+func CanArchive(status Status) bool {
 	switch status {
 	case StatusAccepted, StatusPROpened, StatusFailed, StatusNeedsSupervisorReview, StatusMerged, StatusClosed:
 		return true
+	case StatusDraft, StatusQueued, StatusRunning, StatusArchived:
+		return false
 	default:
 		return false
 	}
 }
 
-func IsAcceptedTerminal(status string) bool {
+// IsAcceptedTerminal reports whether the supervisor accepted the work, so a
+// prior failed attempt is history rather than the active state.
+func IsAcceptedTerminal(status Status) bool {
 	switch status {
 	case StatusAccepted, StatusPROpened, StatusClosed, StatusMerged:
 		return true
+	case StatusDraft, StatusQueued, StatusRunning, StatusFailed, StatusNeedsSupervisorReview, StatusArchived:
+		return false
 	default:
 		return false
 	}

@@ -95,30 +95,9 @@ func TestEnvironmentExecutorDefaultCLIRuntimeAndSchemaParity(t *testing.T) {
 	}
 	executor := schema["properties"].(map[string]any)["executor"].(map[string]any)
 	execProps := executor["properties"].(map[string]any)
-	cliEnum := enumStrings(execProps["default_cli"].(map[string]any)["enum"].([]any))
-	if !containsString(cliEnum, "") {
-		t.Fatalf("executor.default_cli schema must accept empty string, got %#v", cliEnum)
-	}
-	for _, id := range provider.ExecutorIDs() {
-		if !containsString(cliEnum, id) {
-			t.Fatalf("executor.default_cli schema missing %q in %#v", id, cliEnum)
-		}
-	}
-
-	baseEnv := func() Environment {
-		return Environment{
-			ID:  "local",
-			CWD: "/tmp/repo",
-			Constraints: Constraints{
-				Network:             "approval_required",
-				SecretsPolicy:       "never_read_env_files",
-				DestructiveCommands: "deny",
-			},
-		}
-	}
+	assertDefaultCLIEnumCoversProviders(t, enumStrings(execProps["default_cli"].(map[string]any)["enum"].([]any)))
 
 	for _, tc := range executorDefaultCLIMatrix {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			doc := map[string]any{}
@@ -126,18 +105,7 @@ func TestEnvironmentExecutorDefaultCLIRuntimeAndSchemaParity(t *testing.T) {
 				doc["default_cli"] = tc.value
 			}
 			schemaValid := len(validateExecutorDefaultCLIDoc(executor, doc)) == 0
-
-			env := baseEnv()
-			if tc.set {
-				env.Executor = &ExecutorDefault{DefaultCLI: tc.value}
-			}
-			runtimeValid := true
-			for _, e := range ValidateEnvironment(env).Errors {
-				if strings.Contains(e, "executor.default_cli") {
-					runtimeValid = false
-					break
-				}
-			}
+			runtimeValid := runtimeAcceptsDefaultCLI(tc.set, tc.value)
 
 			if schemaValid != runtimeValid {
 				t.Fatalf("drift for %v: schema valid=%v runtime valid=%v schema_errs=%v",
@@ -148,6 +116,43 @@ func TestEnvironmentExecutorDefaultCLIRuntimeAndSchemaParity(t *testing.T) {
 			}
 		})
 	}
+}
+
+// assertDefaultCLIEnumCoversProviders pins that the schema enum accepts every
+// executor provider plus the empty string (default_cli omitted).
+func assertDefaultCLIEnumCoversProviders(t *testing.T, cliEnum []string) {
+	t.Helper()
+	if !containsString(cliEnum, "") {
+		t.Fatalf("executor.default_cli schema must accept empty string, got %#v", cliEnum)
+	}
+	for _, id := range provider.ExecutorIDs() {
+		if !containsString(cliEnum, id) {
+			t.Fatalf("executor.default_cli schema missing %q in %#v", id, cliEnum)
+		}
+	}
+}
+
+// runtimeAcceptsDefaultCLI reports whether ValidateEnvironment accepts the
+// value, ignoring errors from unrelated fields.
+func runtimeAcceptsDefaultCLI(set bool, value string) bool {
+	env := Environment{
+		ID:  "local",
+		CWD: "/tmp/repo",
+		Constraints: Constraints{
+			Network:             "approval_required",
+			SecretsPolicy:       "never_read_env_files",
+			DestructiveCommands: "deny",
+		},
+	}
+	if set {
+		env.Executor = &ExecutorDefault{DefaultCLI: value}
+	}
+	for _, e := range ValidateEnvironment(env).Errors {
+		if strings.Contains(e, "executor.default_cli") {
+			return false
+		}
+	}
+	return true
 }
 
 func validateExecutorDefaultCLIDoc(executor, doc map[string]any) []string {

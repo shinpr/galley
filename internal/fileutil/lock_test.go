@@ -39,7 +39,7 @@ func TestFileLockReleasesAfterProcessDeath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer stdin.Close()
+	defer func() { _ = stdin.Close() }()
 	if err := child.Start(); err != nil {
 		t.Fatal(err)
 	}

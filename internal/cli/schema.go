@@ -29,7 +29,7 @@ func newSchemaGenerateCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "generate",
 		Short: "Generate plugin schema references",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			targets, err := schemaTargets(output)
 			if err != nil {
 				return err
@@ -39,9 +39,11 @@ func newSchemaGenerateCommand() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				//nolint:gosec // G301: generated schemas are committed repository artifacts
 				if err := os.MkdirAll(filepath.Dir(target.Path), 0o755); err != nil {
 					return fmt.Errorf("create schema directory: %w", err)
 				}
+				//nolint:gosec // G306: generated schemas are committed repository artifacts
 				if err := os.WriteFile(target.Path, data, 0o644); err != nil {
 					return fmt.Errorf("write schema: %w", err)
 				}
@@ -59,7 +61,7 @@ func newSchemaCheckCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "check",
 		Short: "Check that plugin schema references match the Go contracts",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			targets, err := schemaTargets(path)
 			if err != nil {
 				return err
@@ -131,7 +133,7 @@ func schemaTargets(dir string) ([]schemaTarget, error) {
 func findGalleyRepoRoot() (string, error) {
 	dir, err := os.Getwd()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolve working directory: %w", err)
 	}
 	for {
 		goMod := filepath.Join(dir, "go.mod")

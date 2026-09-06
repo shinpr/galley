@@ -133,9 +133,9 @@ type Options struct {
 }
 
 type daemonDependencies struct {
-	stageExecutorOutput  func(context.Context, Options, string, string, []string) error
-	captureDiffArtifacts func(context.Context, string, string, string, workspace.Options) (executorflow.DiffArtifacts, error)
-	supervisorRunner     func(context.Context, Options, supervisor.Evidence, string, string) (supervisor.Verdict, error)
+	stageExecutorOutput  func(context.Context, stageOutputRequest) error
+	captureDiffArtifacts func(context.Context, executorflow.DiffCapture) (executorflow.DiffArtifacts, error)
+	supervisorRunner     func(context.Context, supervisorRunRequest) (supervisor.Verdict, error)
 	setupExecutorRunner  func(context.Context, setuppreflight.Options) (*setuppreflight.Result, error)
 }
 
@@ -222,6 +222,7 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 	// Preserve outstanding children for force-stop recovery; never clear another daemon's registry.
+	//nolint:contextcheck,nolintlint // ProcessInfo probes liveness on its own 2s budget (unix only), so a cancelled daemon context cannot corrupt owner metadata
 	owner := currentRunningOwner()
 	registry := proc.NewChildRegistry(proc.OwnedChildRegistryPath(opts.Root, owner.PID, owner.ProcessStartedAt))
 	ctx = proc.WithChildRegistry(ctx, registry)
@@ -277,7 +278,7 @@ func runNormalDaemon(ctx context.Context, opts Options) error {
 	// context.Canceled as an error makes `galley daemon run` exit non-zero on a
 	// clean shutdown and read as a failed unit under systemd.
 	if err := ctx.Err(); err != nil && !errors.Is(err, context.Canceled) {
-		return err
+		return fmt.Errorf("daemon stopped: %w", err)
 	}
 	return nil
 }
@@ -418,7 +419,7 @@ func (opts Options) withDefaults() Options {
 func processAvailable(ctx context.Context, opts Options) (int, error) {
 	select {
 	case <-ctx.Done():
-		return 0, ctx.Err()
+		return 0, fmt.Errorf("daemon poll interrupted: %w", ctx.Err())
 	default:
 	}
 	if err := queue.EnsureLayout(opts.Root); err != nil {
@@ -436,20 +437,8 @@ func processAvailable(ctx context.Context, opts Options) (int, error) {
 	stopped := ctx.Done()
 	for {
 		if ctx.Err() == nil {
-			err := queue.RecoverStaleClaimsExcept(opts.Root, opts.ClaimTTL, time.Now(), active)
-			var queued []string
-			if err == nil && len(active) < limit {
-				queued, err = queue.QueuedTasks(opts.Root)
-			}
-			if err == nil && len(queued) > 0 {
-				var repoCounts map[string]int
-				repoCounts, err = queue.RunningRepoCounts(opts.Root)
-				if err == nil {
-					var count int
-					count, err = claimAvailableTasks(ctx, execCtx, opts, queued, limit-len(active), repoCounts, active, completed)
-					claimedCount += count
-				}
-			}
+			count, err := pollOnce(ctx, execCtx, claimBatch{Opts: opts, Limit: limit, Active: active, Completed: completed})
+			claimedCount += count
 			firstErr = firstNonNil(firstErr, err)
 		}
 		if len(active) == 0 {
@@ -466,19 +455,56 @@ func processAvailable(ctx context.Context, opts Options) (int, error) {
 	}
 }
 
+// pollOnce recovers stale claims and claims what the limits allow.
+// batch.Limit is daemon-wide; this cycle takes what the active tasks leave.
+func pollOnce(ctx, execCtx context.Context, batch claimBatch) (int, error) {
+	opts, active := batch.Opts, batch.Active
+	if err := queue.RecoverStaleClaimsExcept(opts.Root, opts.ClaimTTL, time.Now(), active); err != nil {
+		return 0, err
+	}
+	if len(active) >= batch.Limit {
+		return 0, nil
+	}
+	queued, err := queue.QueuedTasks(opts.Root)
+	if err != nil {
+		return 0, err
+	}
+	if len(queued) == 0 {
+		return 0, nil
+	}
+	repoCounts, err := queue.RunningRepoCounts(opts.Root)
+	if err != nil {
+		return 0, err
+	}
+	batch.Queued = queued
+	batch.Limit -= len(active)
+	batch.RepoCounts = repoCounts
+	return claimAvailableTasks(ctx, execCtx, batch)
+}
+
 type taskCompletion struct {
 	path string
 	err  error
 }
 
-func claimAvailableTasks(daemonCtx, execCtx context.Context, opts Options, queued []string, limit int, repoCounts map[string]int, active map[string]bool, completed chan<- taskCompletion) (int, error) {
+// claimBatch is one poll cycle's claim capacity and shared bookkeeping.
+type claimBatch struct {
+	Opts       Options
+	Queued     []string
+	Limit      int
+	RepoCounts map[string]int
+	Active     map[string]bool
+	Completed  chan<- taskCompletion
+}
+
+func claimAvailableTasks(daemonCtx, execCtx context.Context, batch claimBatch) (int, error) {
 	claimedCount := 0
 	var firstClaimErr error
-	for _, queuedPath := range queued {
-		if claimedCount >= limit {
+	for _, queuedPath := range batch.Queued {
+		if claimedCount >= batch.Limit {
 			break
 		}
-		if active[task.TaskStatePath(opts.Root, task.WorkflowStateRunning, filepath.Base(queuedPath))] {
+		if batch.Active[task.TaskStatePath(batch.Opts.Root, task.WorkflowStateRunning, filepath.Base(queuedPath))] {
 			continue
 		}
 		select {
@@ -486,43 +512,52 @@ func claimAvailableTasks(daemonCtx, execCtx context.Context, opts Options, queue
 			return claimedCount, firstNonNil(firstClaimErr, daemonCtx.Err())
 		default:
 		}
-		repoKey, skip, err := repoKeyForClaim(opts, queuedPath, repoCounts)
+		//nolint:contextcheck,nolintlint // ProcessInfo probes liveness on its own 2s budget (unix only), so a cancelled daemon context cannot corrupt owner metadata
+		claimed, err := batch.claimOne(queuedPath)
 		if err != nil {
-			if firstClaimErr == nil {
-				firstClaimErr = err
-			}
+			firstClaimErr = firstNonNil(firstClaimErr, err)
 			continue
 		}
-		if skip {
-			continue
-		}
-		claimed, err := queue.ClaimTask(opts.Root, queuedPath)
-		if err != nil {
-			if errors.Is(err, queue.ErrClaimConflict) {
-				continue
-			}
-			if firstClaimErr == nil {
-				firstClaimErr = err
-			}
+		if claimed == "" {
 			continue
 		}
 		claimedCount++
-		if err := queue.WriteOwner(claimed, currentRunningOwner()); err != nil {
-			// Owner metadata is a best-effort recovery aid; if it cannot be written
-			// the task still proceeds and falls back to TTL-based recovery.
-			fmt.Fprintf(os.Stderr, "galley: record task owner failed for %s: %v\n", claimed, err)
-		}
-		if repoKey != "" {
-			repoCounts[repoKey]++
-		}
-		active[claimed] = true
+		batch.Active[claimed] = true
 		go func(path string) {
-			err := processClaimedTask(execCtx, daemonCtx, opts, path)
+			err := processClaimedTask(execCtx, daemonCtx, batch.Opts, path)
 			_ = queue.RemoveOwner(path)
-			completed <- taskCompletion{path: path, err: err}
+			batch.Completed <- taskCompletion{path: path, err: err}
 		}(claimed)
 	}
 	return claimedCount, firstClaimErr
+}
+
+// claimOne claims queuedPath and records its owner. An empty path means
+// skipped (repo limit reached or another daemon won), which is not an error.
+func (batch claimBatch) claimOne(queuedPath string) (string, error) {
+	repoKey, skip, err := repoKeyForClaim(batch.Opts, queuedPath, batch.RepoCounts)
+	if err != nil {
+		return "", err
+	}
+	if skip {
+		return "", nil
+	}
+	claimed, err := queue.ClaimTask(batch.Opts.Root, queuedPath)
+	if err != nil {
+		if errors.Is(err, queue.ErrClaimConflict) {
+			return "", nil
+		}
+		return "", err
+	}
+	if err := queue.WriteOwner(claimed, currentRunningOwner()); err != nil {
+		// Owner metadata is a best-effort recovery aid; if it cannot be written
+		// the task still proceeds and falls back to TTL-based recovery.
+		fmt.Fprintf(os.Stderr, "galley: record task owner failed for %s: %v\n", claimed, err)
+	}
+	if repoKey != "" {
+		batch.RepoCounts[repoKey]++
+	}
+	return claimed, nil
 }
 
 func repoKeyForClaim(opts Options, queuedPath string, repoCounts map[string]int) (string, bool, error) {
@@ -576,13 +611,14 @@ func queuedHasClaimConflict(root, queuedPath string) (bool, error) {
 }
 
 func pathExistsForClaim(path string) (bool, error) {
-	if _, err := os.Stat(path); err == nil {
+	_, err := os.Stat(path)
+	if err == nil {
 		return true, nil
-	} else if errors.Is(err, fs.ErrNotExist) {
-		return false, nil
-	} else {
-		return false, fmt.Errorf("inspect claim conflict path %s: %w", path, err)
 	}
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	return false, fmt.Errorf("inspect claim conflict path %s: %w", path, err)
 }
 
 func gracefulTaskContext(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
@@ -627,7 +663,7 @@ func processClaimedTask(execCtx, daemonCtx context.Context, opts Options, runnin
 	}
 	runID, runDir, err := initializeRunEvidence(opts.Root, runningPath, loaded, validation)
 	if err != nil {
-		return failClaimedStage(opts.Root, runningPath, &loaded, "run_evidence", "run_evidence_failed", err, "")
+		return failClaimedStage(opts.Root, runningPath, &loaded, attemptFailure{Phase: "run_evidence", Kind: "run_evidence_failed", Err: err, ArtifactDir: ""})
 	}
 
 	// Profile resolution must happen before workspace.Prepare so that the
@@ -637,7 +673,7 @@ func processClaimedTask(execCtx, daemonCtx context.Context, opts Options, runnin
 	// into runSupervisorLoop so the supervisor loop never re-loads it.
 	profiles, resolvedProfiles, err := loadAndPersistTaskProfiles(opts, &loaded, runDir)
 	if err != nil {
-		return failClaimedStage(opts.Root, runningPath, &loaded, "run_evidence", "run_evidence_failed", err, runDir)
+		return failClaimedStage(opts.Root, runningPath, &loaded, attemptFailure{Phase: "run_evidence", Kind: "run_evidence_failed", Err: err, ArtifactDir: runDir})
 	}
 	effectiveOpts := resolveEffectiveTaskOptions(opts, profiles).apply(opts)
 
@@ -648,121 +684,214 @@ func processClaimedTask(execCtx, daemonCtx context.Context, opts Options, runnin
 	}
 	effectiveExecutor := task.ResolveEffectiveExecutor(loaded.Executor, envExecutor)
 	if err := task.ValidateEffectiveExecutor(effectiveExecutor); err != nil {
-		return failClaimedStage(opts.Root, runningPath, &loaded, "executor_preflight", "executor_config_failed", err, runDir)
+		return failClaimedStage(opts.Root, runningPath, &loaded, attemptFailure{Phase: "executor_preflight", Kind: "executor_config_failed", Err: err, ArtifactDir: runDir})
 	}
 
 	// Per-task provider overrides bypass startup Preflight, so validate before setup and execution.
 	if credentialErr := validateProviderCredential(effectiveOpts.Supervisor, opts); credentialErr != nil {
-		return failClaimedStage(opts.Root, runningPath, &loaded, "supervisor_preflight", "supervisor_config_failed", fmt.Errorf("supervisor is %q: %w", effectiveOpts.Supervisor, credentialErr), runDir)
+		return failClaimedStage(opts.Root, runningPath, &loaded, attemptFailure{Phase: "supervisor_preflight", Kind: "supervisor_config_failed", Err: fmt.Errorf("supervisor is %q: %w", effectiveOpts.Supervisor, credentialErr), ArtifactDir: runDir})
 	}
 	if credentialErr := validateProviderCredential(effectiveExecutor.CLI, opts); credentialErr != nil {
-		return failClaimedStage(opts.Root, runningPath, &loaded, "executor_preflight", "executor_config_failed", fmt.Errorf("executor is %q: %w", effectiveExecutor.CLI, credentialErr), runDir)
+		return failClaimedStage(opts.Root, runningPath, &loaded, attemptFailure{Phase: "executor_preflight", Kind: "executor_config_failed", Err: fmt.Errorf("executor is %q: %w", effectiveExecutor.CLI, credentialErr), ArtifactDir: runDir})
 	}
 
-	prepared, err := prepareClaimedWorkspace(execCtx, opts, profiles, runningPath, runDir, &loaded, effectiveExecutor)
+	prepared, err := prepareClaimedWorkspace(execCtx, opts, claimedWorkspaceRequest{Profiles: profiles, RunningPath: runningPath, RunDir: runDir, Loaded: &loaded, EffectiveExecutor: effectiveExecutor})
 	if err != nil {
 		return taskstate.FailMoveToStatus(opts.Root, runningPath, &loaded, err)
 	}
-	// Setup runs after workspace preparation and before skeleton or implementation roles.
-	var setupRes *setuppreflight.Result
-	var setupUpdate *setuppreflight.EnvironmentUpdate
-	setupReused := false
-	if prepared.WorktreeReused {
-		setupRes, setupReused, err = reuseReadySetup(opts.Root, loaded.ID, runDir, effectiveExecutor, preflightInputKey("setup", loaded, profiles, prepared, effectiveExecutor))
-		if err != nil {
-			return failClaimedStage(opts.Root, runningPath, &loaded, setuppreflight.Phase, setuppreflight.FailedKind, preflightReuseError(setuppreflight.Phase, err), runDir)
-		}
+	if err := runSetupStage(execCtx, setupStage{
+		Opts:              opts,
+		RunningPath:       runningPath,
+		RunDir:            runDir,
+		Loaded:            &loaded,
+		Prepared:          prepared,
+		Profiles:          profiles,
+		Resolved:          resolvedProfiles,
+		EffectiveExecutor: effectiveExecutor,
+	}); err != nil {
+		return err
 	}
-	var setupErr error
-	if !setupReused {
-		setupRes, setupUpdate, setupErr = setuppreflight.Run(execCtx, setuppreflight.Options{
-			Task:                   task.WithExecutor(loaded, effectiveExecutor),
-			WorkDir:                prepared.CWD,
-			RunDir:                 runDir,
-			Profiles:               profiles,
-			ClaudeBin:              opts.ClaudeBin,
-			CodexBin:               opts.CodexBin,
-			GrokBin:                opts.GrokBin,
-			GLMAuthToken:           opts.GLMAuthToken,
-			KimiAPIKey:             opts.KimiAPIKey,
-			EnvironmentProfilePath: resolvedProfiles.EnvironmentProfileFile,
-			ExecutorRunner:         opts.daemonDependencies().setupExecutorRunner,
-		})
+	if err := runAcceptanceSkeletonStage(execCtx, skeletonPreflightStage{
+		Opts:              opts,
+		RunningPath:       runningPath,
+		RunDir:            runDir,
+		Loaded:            &loaded,
+		Prepared:          prepared,
+		Profiles:          profiles,
+		EffectiveExecutor: effectiveExecutor,
+	}); err != nil {
+		return err
 	}
-	if setupErr != nil {
-		return failClaimedStage(opts.Root, runningPath, &loaded, setuppreflight.Phase, setuppreflight.FailedKind, setupErr, runDir)
-	}
-	if setupUpdate != nil && setupUpdate.Changed && profiles.Environment != nil {
-		profiles.Environment.Setup = &setupUpdate.After
-	}
-	if setupRes != nil && !setupReused {
-		if err := recordPreflightInputs(runDir, "setup", preflightInputKey("setup", loaded, profiles, prepared, effectiveExecutor), runDir); err != nil {
-			return failClaimedStage(opts.Root, runningPath, &loaded, setuppreflight.Phase, setuppreflight.FailedKind, err, runDir)
-		}
-	}
-	// Apply setup readiness evidence (and any persisted profile change) to the
-	// running task before the implementation work order is built so the
-	// supervisor and executor share the same readiness facts.
-	if !setupReused {
-		applySetupResultToTask(&loaded, setupRes, setupUpdate)
-	}
-	if setupRes != nil && !setupReused {
-		if err := task.Save(runningPath, loaded); err != nil {
-			return failClaimedStage(opts.Root, runningPath, &loaded, setuppreflight.Phase, setuppreflight.FailedKind, err, runDir)
-		}
-	}
-	// Optional acceptance skeleton preflight runs after inputfiles.Prepare and
-	// before the first executor attempt. The stage is a no-op when the task
-	// omits preflight.acceptance_skeleton.enabled or sets it to false. When the stage fails the daemon does not run the executor and
-	// surfaces the failure through task status and run evidence.
-	if cfg := loaded.Preflight; cfg != nil && cfg.AcceptanceSkeleton.IsEnabled() {
-		var res *skeletonpreflight.Result
-		preflightReused := false
-		if prepared.WorktreeReused {
-			res, preflightReused, err = reuseCompletedAcceptanceSkeleton(opts.Root, loaded.ID, runDir, effectiveExecutor, preflightInputKey("skeleton", loaded, profiles, prepared, effectiveExecutor), prepared.CWD)
-			if err != nil {
-				return failClaimedStage(opts.Root, runningPath, &loaded, "acceptance_skeleton_preflight", "acceptance_skeleton_preflight_failed", preflightReuseError("acceptance skeleton", err), runDir)
-			}
-		}
-		var perr error
-		if !preflightReused {
-			res, perr = skeletonpreflight.Run(execCtx, skeletonpreflight.Options{
-				Task:         task.WithExecutor(loaded, effectiveExecutor),
-				WorkDir:      prepared.CWD,
-				RunDir:       runDir,
-				Profiles:     profiles,
-				GitBin:       opts.GitBin,
-				ClaudeBin:    opts.ClaudeBin,
-				CodexBin:     opts.CodexBin,
-				GrokBin:      opts.GrokBin,
-				GLMAuthToken: opts.GLMAuthToken,
-				KimiAPIKey:   opts.KimiAPIKey,
-			})
-		}
-		if perr != nil {
-			return failClaimedStage(opts.Root, runningPath, &loaded, "acceptance_skeleton_preflight", "acceptance_skeleton_preflight_failed", perr, runDir)
-		}
-		if res != nil && !preflightReused {
-			if err := recordPreflightInputs(runDir, "skeleton", preflightInputKey("skeleton", loaded, profiles, prepared, effectiveExecutor), runDir); err != nil {
-				return failClaimedStage(opts.Root, runningPath, &loaded, "acceptance_skeleton_preflight", "acceptance_skeleton_preflight_failed", err, runDir)
-			}
-		}
-		if res != nil && !preflightReused {
-			skeletonpreflight.ApplyToTask(&loaded, res)
-			if err := task.Save(runningPath, loaded); err != nil {
-				return failClaimedStage(opts.Root, runningPath, &loaded, "acceptance_skeleton_preflight", "acceptance_skeleton_preflight_failed", err, runDir)
-			}
-			if err := task.Save(runartifact.Path(runDir, runartifact.EffectiveTaskSnapshotFilename), executionTask(loaded, prepared.CWD, effectiveExecutor)); err != nil {
-				return failClaimedStage(opts.Root, runningPath, &loaded, "run_evidence", "run_evidence_failed", err, runDir)
-			}
-		}
-	}
-	return runSupervisorLoop(execCtx, daemonCtx, effectiveOpts, runningPath, &loaded, prepared, profiles, runDir, runID, effectiveExecutor)
+	return runSupervisorLoop(execCtx, daemonCtx, supervisorLoopRequest{Opts: effectiveOpts, RunningPath: runningPath, Loaded: &loaded, Prepared: prepared, Profiles: profiles, RunDir: runDir, RunID: runID, EffectiveExecutor: effectiveExecutor})
 }
 
-func failClaimedStage(root, runningPath string, loaded *task.Task, phase, kind string, err error, runDir string) error {
-	appendFailureAttempt(loaded, phase, kind, err, runDir)
-	return taskstate.FailMoveToStatus(root, runningPath, loaded, err)
+// skeletonPreflightStage is one task's optional acceptance-skeleton preflight,
+// run after inputfiles.Prepare and before the first executor attempt.
+type skeletonPreflightStage struct {
+	Opts              Options
+	RunningPath       string
+	RunDir            string
+	Loaded            *task.Task
+	Prepared          claimedWorkspace
+	Profiles          profile.Bundle
+	EffectiveExecutor task.Executor
+}
+
+// runAcceptanceSkeletonStage is a no-op unless preflight.acceptance_skeleton
+// is enabled. A failure skips the executor and lands in status and run evidence.
+func runAcceptanceSkeletonStage(ctx context.Context, st skeletonPreflightStage) error {
+	cfg := st.Loaded.Preflight
+	if cfg == nil || !cfg.AcceptanceSkeleton.IsEnabled() {
+		return nil
+	}
+	res, reused, err := st.resolveSkeletonResult(ctx)
+	if err != nil {
+		return err
+	}
+	if res == nil || reused {
+		return nil
+	}
+	return st.applySkeletonResult(res)
+}
+
+func (st skeletonPreflightStage) inputKey() string {
+	return preflightInputKey("skeleton", preflightInputSources{
+		Loaded:   *st.Loaded,
+		Profiles: st.Profiles,
+		Prepared: st.Prepared,
+		Executor: st.EffectiveExecutor,
+	})
+}
+
+func (st skeletonPreflightStage) fail(err error) error {
+	return failClaimedStage(st.Opts.Root, st.RunningPath, st.Loaded, attemptFailure{
+		Phase:       "acceptance_skeleton_preflight",
+		Kind:        "acceptance_skeleton_preflight_failed",
+		Err:         err,
+		ArtifactDir: st.RunDir,
+	})
+}
+
+// resolveSkeletonResult reuses a prior run's completed skeleton when the
+// worktree was reused and its inputs still match; otherwise it runs the stage.
+func (st skeletonPreflightStage) resolveSkeletonResult(ctx context.Context) (*skeletonpreflight.Result, bool, error) {
+	res, reused, err := st.reusePriorSkeleton()
+	if err != nil {
+		return nil, false, err
+	}
+	if reused {
+		return res, true, nil
+	}
+	res, err = skeletonpreflight.Run(ctx, skeletonpreflight.Options{
+		Task:         task.WithExecutor(*st.Loaded, st.EffectiveExecutor),
+		WorkDir:      st.Prepared.CWD,
+		RunDir:       st.RunDir,
+		Profiles:     st.Profiles,
+		GitBin:       st.Opts.GitBin,
+		ClaudeBin:    st.Opts.ClaudeBin,
+		CodexBin:     st.Opts.CodexBin,
+		GrokBin:      st.Opts.GrokBin,
+		GLMAuthToken: st.Opts.GLMAuthToken,
+		KimiAPIKey:   st.Opts.KimiAPIKey,
+	})
+	if err != nil {
+		return nil, false, st.fail(err)
+	}
+	return res, false, nil
+}
+
+func (st skeletonPreflightStage) applySkeletonResult(res *skeletonpreflight.Result) error {
+	if err := recordPreflightInputs(st.RunDir, "skeleton", st.inputKey(), st.RunDir); err != nil {
+		return st.fail(err)
+	}
+	skeletonpreflight.ApplyToTask(st.Loaded, res)
+	if err := task.Save(st.RunningPath, *st.Loaded); err != nil {
+		return st.fail(err)
+	}
+	snapshot := executionTask(*st.Loaded, st.Prepared.CWD, st.EffectiveExecutor)
+	if err := task.Save(runartifact.Path(st.RunDir, runartifact.EffectiveTaskSnapshotFilename), snapshot); err != nil {
+		return failClaimedStage(st.Opts.Root, st.RunningPath, st.Loaded, attemptFailure{
+			Phase: "run_evidence", Kind: "run_evidence_failed", Err: err, ArtifactDir: st.RunDir,
+		})
+	}
+	return nil
+}
+
+// setupStage is one claimed task's setup preflight, which runs after workspace
+// preparation and before the skeleton or implementation roles.
+type setupStage struct {
+	Opts              Options
+	RunningPath       string
+	RunDir            string
+	Loaded            *task.Task
+	Prepared          claimedWorkspace
+	Profiles          profile.Bundle
+	Resolved          resolvedProfileFiles
+	EffectiveExecutor task.Executor
+}
+
+func (st setupStage) inputKey() string {
+	return preflightInputKey("setup", preflightInputSources{
+		Loaded:   *st.Loaded,
+		Profiles: st.Profiles,
+		Prepared: st.Prepared,
+		Executor: st.EffectiveExecutor,
+	})
+}
+
+func (st setupStage) fail(err error) error {
+	return failClaimedStage(st.Opts.Root, st.RunningPath, st.Loaded, attemptFailure{
+		Phase: setuppreflight.Phase, Kind: setuppreflight.FailedKind, Err: err, ArtifactDir: st.RunDir,
+	})
+}
+
+// runSetupStage reuses a prior ready setup when the worktree and inputs match;
+// otherwise it discovers one and applies it for supervisor and executor alike.
+func runSetupStage(ctx context.Context, st setupStage) error {
+	reused, err := st.reusePriorSetup()
+	if err != nil {
+		return err
+	}
+	if reused {
+		return nil
+	}
+	res, update, err := setuppreflight.Run(ctx, setuppreflight.Options{
+		Task:                   task.WithExecutor(*st.Loaded, st.EffectiveExecutor),
+		WorkDir:                st.Prepared.CWD,
+		RunDir:                 st.RunDir,
+		Profiles:               st.Profiles,
+		ClaudeBin:              st.Opts.ClaudeBin,
+		CodexBin:               st.Opts.CodexBin,
+		GrokBin:                st.Opts.GrokBin,
+		GLMAuthToken:           st.Opts.GLMAuthToken,
+		KimiAPIKey:             st.Opts.KimiAPIKey,
+		EnvironmentProfilePath: st.Resolved.EnvironmentProfileFile,
+		ExecutorRunner:         st.Opts.daemonDependencies().setupExecutorRunner,
+	})
+	if err != nil {
+		return st.fail(err)
+	}
+	if update != nil && update.Changed && st.Profiles.Environment != nil {
+		st.Profiles.Environment.Setup = &update.After
+	}
+	if res != nil {
+		if err := recordPreflightInputs(st.RunDir, "setup", st.inputKey(), st.RunDir); err != nil {
+			return st.fail(err)
+		}
+	}
+	applySetupResultToTask(st.Loaded, res, update)
+	if res == nil {
+		return nil
+	}
+	if err := task.Save(st.RunningPath, *st.Loaded); err != nil {
+		return st.fail(err)
+	}
+	return nil
+}
+
+func failClaimedStage(root, runningPath string, loaded *task.Task, failure attemptFailure) error {
+	appendFailureAttempt(loaded, failure)
+	return taskstate.FailMoveToStatus(root, runningPath, loaded, failure.Err)
 }
 
 // loadAndPersistTaskProfiles resolves the quality and environment profiles for
@@ -822,7 +951,7 @@ func applySetupResultToTask(loaded *task.Task, res *setuppreflight.Result, updat
 	if update != nil && update.Changed {
 		// Surface profile changes as a Risk-style entry so task/PR output
 		// records that environment.yaml setup was rewritten.
-		appendRisk(loaded, "setup-profile-updated", "technical_debt", fmt.Sprintf("Setup executor persisted a learned plan to %s (%s). %s", update.ProfilePath, update.Reason, note), "", false)
+		appendRisk(loaded, "setup-profile-updated", riskSpec{Type: "technical_debt", Detail: fmt.Sprintf("Setup executor persisted a learned plan to %s (%s). %s", update.ProfilePath, update.Reason, note), Mitigation: "", HumanReview: false})
 	}
 }
 
@@ -859,7 +988,7 @@ func validateClaimedTask(loaded *task.Task) (task.ValidationResult, error) {
 		return validation, nil
 	}
 	err := fmt.Errorf("task validation failed: %v", validation.Errors)
-	appendFailureAttempt(loaded, "validation", "validation_failed", err, "")
+	appendFailureAttempt(loaded, attemptFailure{Phase: "validation", Kind: "validation_failed", Err: err, ArtifactDir: ""})
 	return validation, err
 }
 
@@ -884,7 +1013,18 @@ type claimedWorkspace struct {
 	ReviewContractContext supervisor.ReviewContractContext
 }
 
-func prepareClaimedWorkspace(ctx context.Context, opts Options, profiles profile.Bundle, runningPath, runDir string, loaded *task.Task, effectiveExecutor task.Executor) (claimedWorkspace, error) {
+// claimedWorkspaceRequest is the claimed task a workspace is prepared for.
+type claimedWorkspaceRequest struct {
+	Profiles          profile.Bundle
+	RunningPath       string
+	RunDir            string
+	Loaded            *task.Task
+	EffectiveExecutor task.Executor
+}
+
+func prepareClaimedWorkspace(ctx context.Context, opts Options, req claimedWorkspaceRequest) (claimedWorkspace, error) {
+	profiles, runningPath, runDir := req.Profiles, req.RunningPath, req.RunDir
+	loaded, effectiveExecutor := req.Loaded, req.EffectiveExecutor
 	wsOpts := workspaceOptions(opts)
 	// Resolve the environment profile pr.base into a concrete git ref name and
 	// pass it through workspace.Options.StartPoint so the new task branch is
@@ -897,31 +1037,31 @@ func prepareClaimedWorkspace(ctx context.Context, opts Options, profiles profile
 	}
 	startPoint, err := resolveWorktreeStartPoint(ctx, opts, loaded.Scope.CWD, prBase)
 	if err != nil {
-		appendFailureAttempt(loaded, "workspace", "workspace_failed", err, runDir)
+		appendFailureAttempt(loaded, attemptFailure{Phase: "workspace", Kind: "workspace_failed", Err: err, ArtifactDir: runDir})
 		return claimedWorkspace{}, err
 	}
 	wsOpts.StartPoint = startPoint
 	prepared, err := workspace.Prepare(ctx, loaded.Scope.CWD, loaded.Worktree, wsOpts)
 	if err != nil {
-		appendFailureAttempt(loaded, "workspace", "workspace_failed", err, runDir)
+		appendFailureAttempt(loaded, attemptFailure{Phase: "workspace", Kind: "workspace_failed", Err: err, ArtifactDir: runDir})
 		return claimedWorkspace{}, err
 	}
-	retainPriorReviewBase(ctx, opts, *loaded, runDir, &prepared)
+	retainPriorReviewBase(ctx, opts, reviewBaseRetention{Loaded: *loaded, RunDir: runDir, Prepared: &prepared})
 	if err := writeJSON(runartifact.Path(runDir, runartifact.WorkspaceFilename), prepared); err != nil {
-		appendFailureAttempt(loaded, "run_evidence", "run_evidence_failed", err, runDir)
+		appendFailureAttempt(loaded, attemptFailure{Phase: "run_evidence", Kind: "run_evidence_failed", Err: err, ArtifactDir: runDir})
 		return claimedWorkspace{}, err
 	}
 	var priorInputs []inputfiles.Prepared
 	if prepared.WorktreeReused {
 		priorInputs, err = priorPreparedInputs(opts.Root, loaded.ID, runDir, prepared.CWD)
 		if err != nil {
-			appendFailureAttempt(loaded, "input_files", "input_files_failed", err, runDir)
+			appendFailureAttempt(loaded, attemptFailure{Phase: "input_files", Kind: "input_files_failed", Err: err, ArtifactDir: runDir})
 			return claimedWorkspace{}, err
 		}
 	}
 	preparedFiles, err := inputfiles.PrepareReusing(prepared.CWD, loaded.Files, priorInputs)
 	if err != nil {
-		appendFailureAttempt(loaded, "input_files", "input_files_failed", err, runDir)
+		appendFailureAttempt(loaded, attemptFailure{Phase: "input_files", Kind: "input_files_failed", Err: err, ArtifactDir: runDir})
 		return claimedWorkspace{}, err
 	}
 	cleanupPrepared := true
@@ -931,11 +1071,11 @@ func prepareClaimedWorkspace(ctx context.Context, opts Options, profiles profile
 		}
 	}()
 	if err := writeJSON(runartifact.Path(runDir, runartifact.InputFilesFilename), preparedFiles); err != nil {
-		appendFailureAttempt(loaded, "run_evidence", "run_evidence_failed", err, runDir)
+		appendFailureAttempt(loaded, attemptFailure{Phase: "run_evidence", Kind: "run_evidence_failed", Err: err, ArtifactDir: runDir})
 		return claimedWorkspace{}, err
 	}
 	if prepared.WorktreeReused && prepared.Dirty {
-		appendRisk(loaded, "workspace-dirty", "technical_debt", "Reused worktree had uncommitted changes before executor run.", "Preserved existing worktree state and recorded git status porcelain in workspace.json.", true)
+		appendRisk(loaded, "workspace-dirty", riskSpec{Type: "technical_debt", Detail: "Reused worktree had uncommitted changes before executor run.", Mitigation: "Preserved existing worktree state and recorded git status porcelain in workspace.json.", HumanReview: true})
 		if err := task.Save(runningPath, *loaded); err != nil {
 			return claimedWorkspace{}, err
 		}
@@ -1011,8 +1151,44 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return fmt.Errorf("read %s: %w", src, err)
 	}
+	//nolint:gosec // G703: the only caller passes runDir plus a constant filename
 	if err := os.WriteFile(dst, data, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", dst, err)
 	}
 	return nil
+}
+
+// reusePriorSkeleton reports a prior run's completed skeleton when the worktree
+// was reused and its inputs still match.
+func (st skeletonPreflightStage) reusePriorSkeleton() (*skeletonpreflight.Result, bool, error) {
+	if !st.Prepared.WorktreeReused {
+		return nil, false, nil
+	}
+	res, reused, err := reuseCompletedAcceptanceSkeleton(preflightReuseQuery{
+		Root:      st.Opts.Root,
+		TaskID:    st.Loaded.ID,
+		RunDir:    st.RunDir,
+		Effective: st.EffectiveExecutor,
+		InputKey:  st.inputKey(),
+		WorkDir:   st.Prepared.CWD,
+	})
+	if err != nil {
+		return nil, false, st.fail(preflightReuseError("acceptance skeleton", err))
+	}
+	return res, reused, nil
+}
+
+// reusePriorSetup reports whether a prior run's ready setup still applies.
+func (st setupStage) reusePriorSetup() (bool, error) {
+	if !st.Prepared.WorktreeReused {
+		return false, nil
+	}
+	_, reused, err := reuseReadySetup(preflightReuseQuery{
+		Root: st.Opts.Root, TaskID: st.Loaded.ID, RunDir: st.RunDir,
+		Effective: st.EffectiveExecutor, InputKey: st.inputKey(),
+	})
+	if err != nil {
+		return false, st.fail(preflightReuseError(setuppreflight.Phase, err))
+	}
+	return reused, nil
 }

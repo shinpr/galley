@@ -102,6 +102,12 @@ func cleanupRegisteredChildren(registryPath string, timeout time.Duration, kille
 			fmt.Fprintf(os.Stderr, "galley: SIGKILL pgid %d failed: %v\n", rec.PGID, err)
 		}
 	}
+	return awaitChildGroupExit(reg, killer, snapshot, timeout)
+}
+
+// awaitChildGroupExit polls killed process groups until gone or timed out;
+// on expiry it returns the survivors and prunes the confirmed-dead records.
+func awaitChildGroupExit(reg *proc.ChildRegistry, killer childKiller, snapshot []proc.ChildRecord, timeout time.Duration) ([]proc.ChildRecord, error) {
 	deadline := time.Now().Add(timeout)
 	remaining := snapshot
 	for {
@@ -117,26 +123,27 @@ func cleanupRegisteredChildren(registryPath string, timeout time.Duration, kille
 			return nil, nil
 		}
 		if timeout <= 0 || time.Now().After(deadline) {
-			killed := make([]proc.ChildRecord, 0, len(snapshot))
-			survivors := stillAlive
-			for _, rec := range snapshot {
-				dead := true
-				for _, alive := range survivors {
-					if alive.PID == rec.PID {
-						dead = false
-						break
-					}
-				}
-				if dead {
-					killed = append(killed, rec)
-				}
-			}
-			_ = pruneKilledFromRegistry(reg, killed)
-			return survivors, &ErrChildCleanupIncomplete{Remaining: survivors}
+			_ = pruneKilledFromRegistry(reg, deadRecords(snapshot, stillAlive))
+			return stillAlive, &ErrChildCleanupIncomplete{Remaining: stillAlive}
 		}
 		time.Sleep(50 * time.Millisecond)
 		remaining = stillAlive
 	}
+}
+
+// deadRecords returns the snapshot entries that are no longer among survivors.
+func deadRecords(snapshot, survivors []proc.ChildRecord) []proc.ChildRecord {
+	alive := make(map[int]bool, len(survivors))
+	for _, rec := range survivors {
+		alive[rec.PID] = true
+	}
+	dead := make([]proc.ChildRecord, 0, len(snapshot))
+	for _, rec := range snapshot {
+		if !alive[rec.PID] {
+			dead = append(dead, rec)
+		}
+	}
+	return dead
 }
 
 func pruneKilledFromRegistry(reg *proc.ChildRegistry, killed []proc.ChildRecord) error {

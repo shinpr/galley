@@ -35,7 +35,7 @@ func (r acceptanceSkeletonPreflightRun) validateNoSkeletonDeclarations(declarati
 				message: fmt.Sprintf("no_skeletons entry %d for ac_id %q must have a reason", i, ns.ACID),
 			}
 		}
-		noSkeletons = append(noSkeletons, NoOutput{ACID: ns.ACID, Reason: ns.Reason})
+		noSkeletons = append(noSkeletons, NoOutput(ns))
 	}
 	return noSkeletons, nil
 }

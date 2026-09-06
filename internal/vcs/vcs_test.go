@@ -32,7 +32,7 @@ printf '%s' '[[{"id":1,"body":"`+longBody+`","html_url":"https://github.com/exam
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	comments, err := FetchPRComments(t.Context(), Binaries{}, t.TempDir(), "https://github.com/example/galley/pull/1")
+	comments, err := FetchPRComments(t.Context(), Repo{WorkDir: t.TempDir()}, "https://github.com/example/galley/pull/1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ cat > `+bodyPath+`
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	if err := PostPRComment(t.Context(), Binaries{}, t.TempDir(), "https://github.com/example/galley/pull/1", "@owner please check"); err != nil {
+	if err := PostPRComment(t.Context(), Repo{WorkDir: t.TempDir()}, "https://github.com/example/galley/pull/1", "@owner please check"); err != nil {
 		t.Fatal(err)
 	}
 	body, err := os.ReadFile(bodyPath)
@@ -76,7 +76,7 @@ printf '%s\n' 'https://github.com/example/galley/pull/42'
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	url, err := FetchPRURLForCurrentBranch(t.Context(), Binaries{}, t.TempDir(), t.TempDir())
+	url, err := FetchPRURLForCurrentBranch(t.Context(), Repo{WorkDir: t.TempDir(), RunDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ exit 1
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	url, err := FetchPRURLForCurrentBranch(t.Context(), Binaries{}, t.TempDir(), t.TempDir())
+	url, err := FetchPRURLForCurrentBranch(t.Context(), Repo{WorkDir: t.TempDir(), RunDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("expected nil error for missing PR, got %v", err)
 	}
@@ -133,7 +133,7 @@ exit 1
 			}
 			t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-			if _, err := FetchPRURLForCurrentBranch(t.Context(), Binaries{}, t.TempDir(), t.TempDir()); err == nil {
+			if _, err := FetchPRURLForCurrentBranch(t.Context(), Repo{WorkDir: t.TempDir(), RunDir: t.TempDir()}); err == nil {
 				t.Fatal("expected error for non-missing-PR failure")
 			}
 		})
@@ -152,7 +152,7 @@ printf '%s' '{"state":"open","merged":false,"padding":"`+padding+`"}'
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	state, err := FetchPRState(t.Context(), Binaries{}, t.TempDir(), "https://github.com/example/galley/pull/1")
+	state, err := FetchPRState(t.Context(), Repo{WorkDir: t.TempDir()}, "https://github.com/example/galley/pull/1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ printf '%s' '{"user":{"login":"pr-author"}}'
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	login, err := FetchPRAuthorLogin(t.Context(), Binaries{}, t.TempDir(), "https://github.com/example/galley/pull/1")
+	login, err := FetchPRAuthorLogin(t.Context(), Repo{WorkDir: t.TempDir()}, "https://github.com/example/galley/pull/1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ printf '%s' '`+tc.payload+`'
 			}
 			t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-			login, err := FetchPRAuthorLogin(t.Context(), Binaries{}, t.TempDir(), "https://github.com/example/galley/pull/1")
+			login, err := FetchPRAuthorLogin(t.Context(), Repo{WorkDir: t.TempDir()}, "https://github.com/example/galley/pull/1")
 			if err == nil {
 				t.Fatalf("expected error for empty login payload %q, got login=%q", tc.payload, login)
 			}
@@ -252,7 +252,7 @@ func TestStagePathsForReviewTreatsPathspecMagicAsLiteral(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := StagePathsForReview(t.Context(), Binaries{}, repo, runDir, []string{":(glob)*"}); err != nil {
+	if err := StagePathsForReview(t.Context(), Repo{WorkDir: repo, RunDir: runDir}, []string{":(glob)*"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -283,7 +283,7 @@ func TestAddPathsTreatsPathspecMagicAsLiteral(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := AddPaths(t.Context(), Binaries{}, repo, runDir, []string{":(glob)*"}); err != nil {
+	if err := AddPaths(t.Context(), Repo{WorkDir: repo, RunDir: runDir}, []string{":(glob)*"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -295,7 +295,7 @@ func TestAddPathsTreatsPathspecMagicAsLiteral(t *testing.T) {
 
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd := exec.CommandContext(t.Context(), "git", append([]string{"-C", dir}, args...)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v failed: %v\n%s", args, err, out)
@@ -304,7 +304,7 @@ func runGit(t *testing.T, dir string, args ...string) {
 
 func runGitOutput(t *testing.T, dir string, args ...string) []byte {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd := exec.CommandContext(t.Context(), "git", append([]string{"-C", dir}, args...)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v failed: %v\n%s", args, err, out)

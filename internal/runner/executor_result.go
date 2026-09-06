@@ -89,20 +89,18 @@ func ExtractExecutorResultFile(path string) (ExecutorResult, error) {
 	if err != nil {
 		return ExecutorResult{}, fmt.Errorf("open executor output %s: %w", path, err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	reader := bufio.NewReader(file)
 	var firstErr error
 	for {
 		line, readErr := reader.ReadString('\n')
-		if line != "" {
-			result, found, err := extractExecutorResultLine(strings.TrimSpace(line))
-			if found && err == nil {
-				return result, nil
-			}
-			if found && firstErr == nil && err != nil {
-				firstErr = err
-			}
+		result, found, err := extractExecutorResultLine(strings.TrimSpace(line))
+		if found && err == nil {
+			return result, nil
+		}
+		if found && err != nil && firstErr == nil {
+			firstErr = err
 		}
 		if readErr != nil {
 			break
@@ -115,7 +113,28 @@ func ExtractExecutorResultFile(path string) (ExecutorResult, error) {
 }
 
 // Validate requires explicit arrays so persisted evidence has a stable shape.
+// Validate checks the executor result against the output contract; each
+// collection has its own function so a failure names the section it came from.
 func (r ExecutorResult) Validate() error {
+	for _, check := range []func() error{
+		r.validateShape,
+		r.validateAcceptanceCriteria,
+		r.validateVerification,
+		r.validateScopeExpansions,
+		r.validateDecisions,
+		r.validateRisks,
+		r.validateHardStop,
+	} {
+		if err := check(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateShape checks the status and required collections. A nil collection
+// means an omitted field, which the contract requires even when empty.
+func (r ExecutorResult) validateShape() error {
 	switch r.Status {
 	case "completed", "completed_with_risks", "hard_stop":
 	default:
@@ -124,23 +143,21 @@ func (r ExecutorResult) Validate() error {
 	if r.Summary == "" {
 		return fmt.Errorf("executor result summary is required")
 	}
-	if r.FilesModified == nil {
-		return fmt.Errorf("executor result files_modified is required")
+	required := []struct {
+		present bool
+		field   string
+	}{
+		{r.FilesModified != nil, "files_modified"},
+		{r.AcceptanceCriteria != nil, "acceptance_criteria"},
+		{r.Verification != nil, "verification"},
+		{r.ScopeExpansions != nil, "scope_expansions"},
+		{r.Decisions != nil, "decisions"},
+		{r.Risks != nil, "risks"},
 	}
-	if r.AcceptanceCriteria == nil {
-		return fmt.Errorf("executor result acceptance_criteria is required")
-	}
-	if r.Verification == nil {
-		return fmt.Errorf("executor result verification is required")
-	}
-	if r.ScopeExpansions == nil {
-		return fmt.Errorf("executor result scope_expansions is required")
-	}
-	if r.Decisions == nil {
-		return fmt.Errorf("executor result decisions is required")
-	}
-	if r.Risks == nil {
-		return fmt.Errorf("executor result risks is required")
+	for _, field := range required {
+		if !field.present {
+			return fmt.Errorf("executor result %s is required", field.field)
+		}
 	}
 	if r.Status == "hard_stop" && r.HardStop == nil {
 		return fmt.Errorf("executor hard_stop result requires hard_stop details")
@@ -148,6 +165,10 @@ func (r ExecutorResult) Validate() error {
 	if r.Status != "hard_stop" && r.HardStop != nil {
 		return fmt.Errorf("executor non-hard-stop result must not include hard_stop details")
 	}
+	return nil
+}
+
+func (r ExecutorResult) validateAcceptanceCriteria() error {
 	for i, ac := range r.AcceptanceCriteria {
 		if ac.ID == "" {
 			return fmt.Errorf("executor acceptance_criteria[%d].id is required", i)
@@ -161,6 +182,10 @@ func (r ExecutorResult) Validate() error {
 			return fmt.Errorf("executor acceptance_criteria[%d].evidence is required", i)
 		}
 	}
+	return nil
+}
+
+func (r ExecutorResult) validateVerification() error {
 	for i, verification := range r.Verification {
 		if verification.Command == "" {
 			return fmt.Errorf("executor verification[%d].command is required", i)
@@ -174,6 +199,10 @@ func (r ExecutorResult) Validate() error {
 			return fmt.Errorf("executor verification[%d].reason is required", i)
 		}
 	}
+	return nil
+}
+
+func (r ExecutorResult) validateScopeExpansions() error {
 	for i, expansion := range r.ScopeExpansions {
 		if expansion.Path == "" {
 			return fmt.Errorf("executor scope_expansions[%d].path is required", i)
@@ -191,6 +220,10 @@ func (r ExecutorResult) Validate() error {
 			return fmt.Errorf("executor scope_expansions[%d].minimality is required", i)
 		}
 	}
+	return nil
+}
+
+func (r ExecutorResult) validateDecisions() error {
 	for i, decision := range r.Decisions {
 		if decision.Question == "" {
 			return fmt.Errorf("executor decisions[%d].question is required", i)
@@ -207,6 +240,10 @@ func (r ExecutorResult) Validate() error {
 			return fmt.Errorf("invalid executor decisions[%d].reversibility %q", i, decision.Reversibility)
 		}
 	}
+	return nil
+}
+
+func (r ExecutorResult) validateRisks() error {
 	for i, risk := range r.Risks {
 		switch risk.Type {
 		case "ambiguous_requirement", "partial_verification", "external_dependency", "technical_debt", "other":
@@ -220,16 +257,21 @@ func (r ExecutorResult) Validate() error {
 			return fmt.Errorf("executor risks[%d].mitigation is required", i)
 		}
 	}
-	if r.HardStop != nil {
-		if r.HardStop.Reason == "" {
-			return fmt.Errorf("executor hard_stop.reason is required")
-		}
-		if r.HardStop.Attempted == nil {
-			return fmt.Errorf("executor hard_stop.attempted is required")
-		}
-		if r.HardStop.NeededToContinue == nil {
-			return fmt.Errorf("executor hard_stop.needed_to_continue is required")
-		}
+	return nil
+}
+
+func (r ExecutorResult) validateHardStop() error {
+	if r.HardStop == nil {
+		return nil
+	}
+	if r.HardStop.Reason == "" {
+		return fmt.Errorf("executor hard_stop.reason is required")
+	}
+	if r.HardStop.Attempted == nil {
+		return fmt.Errorf("executor hard_stop.attempted is required")
+	}
+	if r.HardStop.NeededToContinue == nil {
+		return fmt.Errorf("executor hard_stop.needed_to_continue is required")
 	}
 	return nil
 }
@@ -274,6 +316,7 @@ func extractExecutorResultLine(line string) (ExecutorResult, bool, error) {
 	}
 	var event map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(line), &event); err != nil {
+		//nolint:nilerr // a non-JSON line simply is not a result
 		return ExecutorResult{}, false, nil
 	}
 	for _, key := range []string{"result", "response", "message"} {

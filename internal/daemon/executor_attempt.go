@@ -45,17 +45,38 @@ type attemptOutcome struct {
 // process from blocking shutdown.
 const evidenceCaptureTimeout = 2 * time.Minute
 
-func defaultStageExecutorOutput(ctx context.Context, opts Options, workDir, attemptDir string, excludePaths []string) error {
-	bins := vcsBinaries(opts)
-	statusZ, err := vcs.StatusPorcelainZ(ctx, bins, workDir)
+// stageOutputRequest is one attempt's executor output staging.
+type stageOutputRequest struct {
+	Opts         Options
+	WorkDir      string
+	AttemptDir   string
+	ExcludePaths []string
+}
+
+func defaultStageExecutorOutput(ctx context.Context, req stageOutputRequest) error {
+	excludePaths := req.ExcludePaths
+	repo := vcsRepo(req.Opts, req.WorkDir, req.AttemptDir)
+	statusZ, err := vcs.StatusPorcelainZ(ctx, repo)
 	if err != nil {
 		return err
 	}
 	reviewable := reviewablePathsFromStatus(statusZ, excludePaths)
-	return vcs.StagePathsForReview(ctx, bins, workDir, attemptDir, reviewable)
+	return vcs.StagePathsForReview(ctx, repo, reviewable)
 }
 
-func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, workDir, baseSHA, attemptDir, prompt string) (attemptOutcome, error) {
+// executorAttemptRequest is one executor attempt in a prepared workspace.
+type executorAttemptRequest struct {
+	Opts       Options
+	Loaded     task.Task
+	WorkDir    string
+	BaseSHA    string
+	AttemptDir string
+	Prompt     string
+}
+
+func runExecutorAttempt(ctx context.Context, req executorAttemptRequest) (attemptOutcome, error) {
+	opts, loaded := req.Opts, req.Loaded
+	workDir, baseSHA, attemptDir, prompt := req.WorkDir, req.BaseSHA, req.AttemptDir, req.Prompt
 	attemptCtx := ctx
 	var cancel context.CancelFunc
 	attemptTimeout := time.Duration(loaded.ExecutionPolicy.TimeoutMS) * time.Millisecond
@@ -81,14 +102,14 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, wor
 	}
 	switch transport {
 	case provider.TransportClaude:
-		commandPlan, stdoutPath, stderrPath, err = prepareClaudeExecutorPlan(opts, loaded, workDir, prompt, attemptDir)
+		commandPlan, stdoutPath, stderrPath, err = prepareClaudeExecutorPlan(executorPlanRequest{Opts: opts, Loaded: loaded, WorkDir: workDir, Prompt: prompt, AttemptDir: attemptDir})
 		if err == nil {
 			err = runner.ConfigureClaudeProvider(&commandPlan, claudeProviderOptions(cli, opts))
 		}
 	case provider.TransportCodex:
-		commandPlan, stdoutPath, stderrPath, err = prepareCodexExecutorPlan(opts, loaded, workDir, prompt, attemptDir)
+		commandPlan, stdoutPath, stderrPath, err = prepareCodexExecutorPlan(executorPlanRequest{Opts: opts, Loaded: loaded, WorkDir: workDir, Prompt: prompt, AttemptDir: attemptDir})
 	case provider.TransportGrok:
-		commandPlan, stdoutPath, stderrPath, err = prepareGrokExecutorPlan(opts, loaded, workDir, prompt, attemptDir)
+		commandPlan, stdoutPath, stderrPath, err = prepareGrokExecutorPlan(executorPlanRequest{Opts: opts, Loaded: loaded, WorkDir: workDir, Prompt: prompt, AttemptDir: attemptDir})
 	}
 	if err != nil {
 		return attemptOutcome{}, err
@@ -105,12 +126,8 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, wor
 		return attemptOutcome{}, err
 	}
 	if transport == provider.TransportGrok {
-		data, readErr := os.ReadFile(stdoutPath)
-		if readErr != nil {
-			data = []byte(run.RunResult.Stdout)
-		}
-		if metaErr := runner.WriteGrokCompletionMetadata(runartifact.Path(attemptDir, runartifact.GrokCompletionMetadataFilename), data); metaErr != nil {
-			return attemptOutcome{}, metaErr
+		if err := writeGrokCompletionEvidence(attemptDir, stdoutPath, run.RunResult.Stdout); err != nil {
+			return attemptOutcome{}, err
 		}
 	}
 
@@ -146,7 +163,7 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, wor
 	defer evidenceCancel()
 
 	excludePaths := nonCommittedInputDestinations(loaded.Files)
-	stageErr := opts.daemonDependencies().stageExecutorOutput(evidenceCtx, opts, workDir, attemptDir, excludePaths)
+	stageErr := opts.daemonDependencies().stageExecutorOutput(evidenceCtx, stageOutputRequest{Opts: opts, WorkDir: workDir, AttemptDir: attemptDir, ExcludePaths: excludePaths})
 	if stageErr != nil && !terminal.Interrupted() {
 		// For a normally completed attempt a staging failure is terminal: the
 		// supervisor would otherwise review a stale or empty diff.
@@ -158,7 +175,7 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, wor
 		outcome.EvidenceErr = stageErr
 	}
 
-	diffArtifacts, err := opts.daemonDependencies().captureDiffArtifacts(evidenceCtx, workDir, baseSHA, attemptDir, workspaceOptions(opts))
+	diffArtifacts, err := opts.daemonDependencies().captureDiffArtifacts(evidenceCtx, executorflow.DiffCapture{WorkDir: workDir, BaseSHA: baseSHA, AttemptDir: attemptDir, Opts: workspaceOptions(opts)})
 	if err != nil {
 		if !terminal.Interrupted() {
 			return attemptOutcome{}, err
@@ -173,7 +190,15 @@ func runExecutorAttempt(ctx context.Context, opts Options, loaded task.Task, wor
 	return outcome, nil
 }
 
-func mergeAttemptEvidence(loaded *task.Task, outcome attemptOutcome, runID, workDir, attemptDir string) {
+// attemptEvidencePaths locate one attempt's evidence.
+type attemptEvidencePaths struct {
+	RunID      string
+	WorkDir    string
+	AttemptDir string
+}
+
+func mergeAttemptEvidence(loaded *task.Task, outcome attemptOutcome, paths attemptEvidencePaths) {
+	runID, workDir, attemptDir := paths.RunID, paths.WorkDir, paths.AttemptDir
 	loaded.Attempts = append(loaded.Attempts, task.Attempt{
 		Number:            len(loaded.Attempts) + 1,
 		StartedAt:         outcome.Started.Format(time.RFC3339Nano),
@@ -189,14 +214,14 @@ func mergeAttemptEvidence(loaded *task.Task, outcome attemptOutcome, runID, work
 		OutputExcerpt: fmt.Sprintf("executor stdout/stderr captured under %s; run_result.json contains bounded tails", attemptDir),
 	})
 	if outcome.DiffErr != nil {
-		appendRisk(loaded, "git-diff", "partial_verification", outcome.DiffErr.Error(), "Stored other run evidence; git diff evidence is unavailable.", true)
+		appendRisk(loaded, "git-diff", riskSpec{Type: "partial_verification", Detail: outcome.DiffErr.Error(), Mitigation: "Stored other run evidence; git diff evidence is unavailable.", HumanReview: true})
 	}
 	if outcome.ParseErr != nil {
-		appendRisk(loaded, "executor-result-parse", "partial_verification", outcome.ParseErr.Error(), fmt.Sprintf("Stored raw %s stdout and stderr for supervisor review.", executorArtifactLabel(loaded.Executor.CLI)), true)
+		appendRisk(loaded, "executor-result-parse", riskSpec{Type: "partial_verification", Detail: outcome.ParseErr.Error(), Mitigation: fmt.Sprintf("Stored raw %s stdout and stderr for supervisor review.", executorArtifactLabel(loaded.Executor.CLI)), HumanReview: true})
 		return
 	}
 	if outcome.ExecutorResult.Status == "completed" && outcome.DiffErr == nil && !outcome.DiffDirty {
-		appendRisk(loaded, "git-diff-empty", "partial_verification", "Executor completed but produced no git diff in the execution workspace.", fmt.Sprintf("Stored %s result and raw logs for supervisor review.", executorArtifactLabel(loaded.Executor.CLI)), true)
+		appendRisk(loaded, "git-diff-empty", riskSpec{Type: "partial_verification", Detail: "Executor completed but produced no git diff in the execution workspace.", Mitigation: fmt.Sprintf("Stored %s result and raw logs for supervisor review.", executorArtifactLabel(loaded.Executor.CLI)), HumanReview: true})
 	}
 	for _, verification := range outcome.ExecutorResult.Verification {
 		loaded.Verification.Commands = append(loaded.Verification.Commands, task.VerificationCommand{
@@ -216,10 +241,10 @@ func mergeAttemptEvidence(loaded *task.Task, outcome attemptOutcome, runID, work
 		})
 	}
 	for _, executorRisk := range outcome.ExecutorResult.Risks {
-		appendRisk(loaded, "executor-risk", executorRisk.Type, executorRisk.Detail, executorRisk.Mitigation, executorRisk.NeedsHumanReview)
+		appendRisk(loaded, "executor-risk", riskSpec{Type: executorRisk.Type, Detail: executorRisk.Detail, Mitigation: executorRisk.Mitigation, HumanReview: executorRisk.NeedsHumanReview})
 	}
 	if outcome.ExecutorResult.Status == "hard_stop" && outcome.ExecutorResult.HardStop != nil {
-		appendRisk(loaded, "executor-hard-stop", "other", outcome.ExecutorResult.HardStop.Reason, strings.Join(outcome.ExecutorResult.HardStop.NeededToContinue, "; "), true)
+		appendRisk(loaded, "executor-hard-stop", riskSpec{Type: "other", Detail: outcome.ExecutorResult.HardStop.Reason, Mitigation: strings.Join(outcome.ExecutorResult.HardStop.NeededToContinue, "; "), HumanReview: true})
 	}
 }
 
@@ -253,7 +278,7 @@ func executorAttemptError(outcome attemptOutcome, attemptDir string) *task.Attem
 	if outcome.RunErr == nil {
 		return nil
 	}
-	return attemptError("executor", classifyFailureKind("executor_failed", outcome.RunErr), outcome.RunErr, attemptDir)
+	return attemptError(attemptFailure{Phase: "executor", Kind: classifyFailureKind("executor_failed", outcome.RunErr), Err: outcome.RunErr, ArtifactDir: attemptDir})
 }
 
 // executorInterruptionError signals that an executor attempt did not reach a
@@ -315,15 +340,13 @@ func appendExecutorInterruptionAttempt(loaded *task.Task, outcome attemptOutcome
 		Status:        "failed",
 		OutputExcerpt: fmt.Sprintf("executor interrupted (%s); terminal decision and raw logs captured under %s", outcome.Terminal.Reason, attemptDir),
 	})
-	appendRisk(loaded, "executor-interruption", "external_dependency", message,
-		"Resolve the interruption cause, then run `galley task requeue` to resume from the preserved worktree.", true)
+	appendRisk(loaded, "executor-interruption", riskSpec{Type: "external_dependency", Detail: message, Mitigation: "Resolve the interruption cause, then run `galley task requeue` to resume from the preserved worktree.", HumanReview: true})
 	// CaptureDiffArtifacts reports a snapshot/diff failure in-band as DiffErr (nil
 	// function error), so it is joined with any staging failure. Both surface as
 	// secondary evidence; the interruption stays primary and the worktree keeps
 	// partial changes for requeue.
 	if evidenceErr := errors.Join(outcome.EvidenceErr, outcome.DiffErr); evidenceErr != nil {
-		appendRisk(loaded, "executor-interruption-evidence", "partial_verification", evidenceErr.Error(),
-			"Evidence capture failed after the interruption; the preserved worktree still holds the partial changes for requeue.", true)
+		appendRisk(loaded, "executor-interruption-evidence", riskSpec{Type: "partial_verification", Detail: evidenceErr.Error(), Mitigation: "Evidence capture failed after the interruption; the preserved worktree still holds the partial changes for requeue.", HumanReview: true})
 	}
 }
 
@@ -366,16 +389,16 @@ func appendSupervisorFailureAttempt(loaded *task.Task, outcome attemptOutcome, e
 		ClaudeStatus:      executorStatus(outcome.RunResult, outcome.RunErr),
 		SupervisorVerdict: kind,
 		Summary:           err.Error(),
-		Error:             attemptError("supervisor", kind, err, attemptDir),
+		Error:             attemptError(attemptFailure{Phase: "supervisor", Kind: kind, Err: err, ArtifactDir: attemptDir}),
 	})
 	// A supervisor failure is not a human review decision. Preserve the
 	// evidence as an operational failure so the task can be requeued.
 	loaded.Status = "failed"
 	if supervisor.IsVerdictContractError(err) {
-		appendRisk(loaded, "supervisor-invalid-verdict", "partial_verification", fmt.Sprintf("Supervisor evaluation failed (%s): %s", kind, err.Error()), "Inspect the supervisor-try-1 validation evidence and requeue with the same or another supervisor after correcting the output-contract issue.", true)
+		appendRisk(loaded, "supervisor-invalid-verdict", riskSpec{Type: "partial_verification", Detail: fmt.Sprintf("Supervisor evaluation failed (%s): %s", kind, err.Error()), Mitigation: "Inspect the supervisor-try-1 validation evidence and requeue with the same or another supervisor after correcting the output-contract issue.", HumanReview: true})
 		return
 	}
-	appendRisk(loaded, "supervisor-stall", "partial_verification", fmt.Sprintf("Supervisor evaluation failed (%s): %s", kind, err.Error()), "Inspect the supervisor-try-1 evidence under the attempt directory and requeue the task once the supervisor backend is healthy.", true)
+	appendRisk(loaded, "supervisor-stall", riskSpec{Type: "partial_verification", Detail: fmt.Sprintf("Supervisor evaluation failed (%s): %s", kind, err.Error()), Mitigation: "Inspect the supervisor-try-1 evidence under the attempt directory and requeue the task once the supervisor backend is healthy.", HumanReview: true})
 }
 
 func appendSupervisorIdleTimeoutAttempt(loaded *task.Task, outcome attemptOutcome, idle *supervisorIdleTimeoutError, attemptDir string) {
@@ -395,10 +418,21 @@ func appendSupervisorIdleTimeoutAttempt(loaded *task.Task, outcome attemptOutcom
 		},
 	})
 	loaded.Status = "failed"
-	appendRisk(loaded, "supervisor-idle-timeout", "partial_verification", message, "Inspect the supervisor-try-1 evidence under the attempt directory, then requeue the task or adjust the daemon --idle-timeout or --supervisor settings.", true)
+	appendRisk(loaded, "supervisor-idle-timeout", riskSpec{Type: "partial_verification", Detail: message, Mitigation: "Inspect the supervisor-try-1 evidence under the attempt directory, then requeue the task or adjust the daemon --idle-timeout or --supervisor settings.", HumanReview: true})
 }
 
-func prepareClaudeExecutorPlan(opts Options, loaded task.Task, workDir, prompt, attemptDir string) (proc.Command, string, string, error) {
+// executorPlanRequest is the input to one executor's command plan.
+type executorPlanRequest struct {
+	Opts       Options
+	Loaded     task.Task
+	WorkDir    string
+	Prompt     string
+	AttemptDir string
+}
+
+func prepareClaudeExecutorPlan(req executorPlanRequest) (proc.Command, string, string, error) {
+	opts, loaded := req.Opts, req.Loaded
+	workDir, prompt, attemptDir := req.WorkDir, req.Prompt, req.AttemptDir
 	claudeOpts := runner.FromTask(loaded)
 	claudeOpts.Bin = opts.ClaudeBin
 	claudeOpts.WorkDir = workDir
@@ -407,17 +441,9 @@ func prepareClaudeExecutorPlan(opts Options, loaded task.Task, workDir, prompt, 
 	claudeOpts.AttemptDir = attemptDir
 	claudeOpts.Prompt = prompt
 	if !opts.DisableClaudeGuard {
-		guardDir := opts.ClaudeGuardPluginDir
-		if guardDir == "" {
-			guardDir = filepath.Join(opts.Root, "runtime", "claude-guard-plugin")
-		}
-		guardDir, err := claudeguard.Ensure(guardDir)
+		guardDir, err := resolveClaudeGuardDir(opts)
 		if err != nil {
 			return proc.Command{}, "", "", err
-		}
-		guardDir, err = filepath.Abs(guardDir)
-		if err != nil {
-			return proc.Command{}, "", "", fmt.Errorf("resolve Claude guard plugin dir: %w", err)
 		}
 		claudeOpts.PluginDirs = append(claudeOpts.PluginDirs, guardDir)
 	}
@@ -428,7 +454,9 @@ func prepareClaudeExecutorPlan(opts Options, loaded task.Task, workDir, prompt, 
 	return plan, filepath.Join(attemptDir, "claude.stdout.jsonl"), filepath.Join(attemptDir, "claude.stderr.log"), nil
 }
 
-func prepareCodexExecutorPlan(opts Options, loaded task.Task, workDir, prompt, attemptDir string) (proc.Command, string, string, error) {
+func prepareCodexExecutorPlan(req executorPlanRequest) (proc.Command, string, string, error) {
+	opts, loaded := req.Opts, req.Loaded
+	workDir, prompt, attemptDir := req.WorkDir, req.Prompt, req.AttemptDir
 	codexOpts := runner.CodexFromTask(loaded)
 	codexOpts.Bin = opts.CodexBin
 	codexOpts.WorkDir = workDir
@@ -443,7 +471,9 @@ func prepareCodexExecutorPlan(opts Options, loaded task.Task, workDir, prompt, a
 	return plan, filepath.Join(attemptDir, "codex.stdout.jsonl"), filepath.Join(attemptDir, "codex.stderr.log"), nil
 }
 
-func prepareGrokExecutorPlan(opts Options, loaded task.Task, workDir, prompt, attemptDir string) (proc.Command, string, string, error) {
+func prepareGrokExecutorPlan(req executorPlanRequest) (proc.Command, string, string, error) {
+	opts, loaded := req.Opts, req.Loaded
+	workDir, prompt, attemptDir := req.WorkDir, req.Prompt, req.AttemptDir
 	grokOpts := runner.GrokFromTask(loaded)
 	grokOpts.Bin = opts.GrokBin
 	grokOpts.WorkDir = workDir
@@ -456,4 +486,32 @@ func prepareGrokExecutorPlan(opts Options, loaded task.Task, workDir, prompt, at
 		return proc.Command{}, "", "", err
 	}
 	return plan, filepath.Join(attemptDir, "grok.stdout.json"), filepath.Join(attemptDir, "grok.stderr.log"), nil
+}
+
+// writeGrokCompletionEvidence records Grok's completion metadata, falling back
+// to the captured stdout tail when the stdout file cannot be read.
+func writeGrokCompletionEvidence(attemptDir, stdoutPath, stdoutTail string) error {
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		data = []byte(stdoutTail)
+	}
+	return runner.WriteGrokCompletionMetadata(runartifact.Path(attemptDir, runartifact.GrokCompletionMetadataFilename), data)
+}
+
+// resolveClaudeGuardDir materializes the Claude guard plugin and returns its
+// absolute path.
+func resolveClaudeGuardDir(opts Options) (string, error) {
+	guardDir := opts.ClaudeGuardPluginDir
+	if guardDir == "" {
+		guardDir = filepath.Join(opts.Root, "runtime", "claude-guard-plugin")
+	}
+	guardDir, err := claudeguard.Ensure(guardDir)
+	if err != nil {
+		return "", err
+	}
+	guardDir, err = filepath.Abs(guardDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve Claude guard plugin dir: %w", err)
+	}
+	return guardDir, nil
 }

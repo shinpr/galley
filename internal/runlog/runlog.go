@@ -1,6 +1,7 @@
 package runlog
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -16,7 +17,7 @@ func LatestTaskRunDir(root, taskID string) (string, error) {
 		if os.IsNotExist(err) {
 			return "", nil
 		}
-		return "", err
+		return "", fmt.Errorf("read runs dir %s: %w", runsDir, err)
 	}
 	best := ""
 	var bestN uint64
@@ -45,7 +46,7 @@ func LatestAttemptDir(runDir string) (string, int, error) {
 		if os.IsNotExist(err) {
 			return "", -1, nil
 		}
-		return "", -1, err
+		return "", -1, fmt.Errorf("read run dir %s: %w", runDir, err)
 	}
 	best := ""
 	bestN := -1

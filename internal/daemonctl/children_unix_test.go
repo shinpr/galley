@@ -20,7 +20,7 @@ func TestCleanupRegisteredChildrenKillsLiveChildProcessGroup(t *testing.T) {
 	if err != nil {
 		t.Skip("sleep not available")
 	}
-	cmd := exec.Command(sleepPath, "60")
+	cmd := exec.CommandContext(t.Context(), sleepPath, "60")
 	// Match how proc.RunCommand puts subprocesses in their own pgid so the
 	// pgid-targeted SIGKILL path is the one under test.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -88,7 +88,7 @@ func TestCleanupRegisteredChildrenKeepsGroupWithDeadLeaderButLiveDescendant(t *t
 
 	// The leader establishes a fresh process group; the descendant joins that
 	// same pgid (setpgid(0, leaderPID)) so the group outlives the leader.
-	leader := exec.Command(sleepPath, "60")
+	leader := exec.CommandContext(t.Context(), sleepPath, "60")
 	leader.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := leader.Start(); err != nil {
 		t.Fatalf("start leader: %v", err)
@@ -99,7 +99,7 @@ func TestCleanupRegisteredChildrenKeepsGroupWithDeadLeaderButLiveDescendant(t *t
 	}
 	leaderPID := leader.Process.Pid
 
-	descendant := exec.Command(sleepPath, "60")
+	descendant := exec.CommandContext(t.Context(), sleepPath, "60")
 	descendant.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pgid: pgid}
 	if err := descendant.Start(); err != nil {
 		_ = leader.Process.Kill()

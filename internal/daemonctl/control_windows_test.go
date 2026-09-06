@@ -54,7 +54,7 @@ func TestAliveReportsCurrentProcessAlive(t *testing.T) {
 // comparison and must report not-alive once a child has exited.
 func TestAliveReportsExitedProcessNotAlive(t *testing.T) {
 	t.Parallel()
-	cmd := exec.Command("cmd.exe", "/C", "exit 0")
+	cmd := exec.CommandContext(t.Context(), "cmd.exe", "/C", "exit 0")
 	if err := cmd.Start(); err != nil {
 		t.Skipf("cmd.exe not available: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestAliveReportsExitedProcessNotAlive(t *testing.T) {
 // state instead of surfacing a raw "process already finished" error.
 func TestStopReturnsNotRunningForExitedPID(t *testing.T) {
 	t.Parallel()
-	cmd := exec.Command("cmd.exe", "/C", "exit 0")
+	cmd := exec.CommandContext(t.Context(), "cmd.exe", "/C", "exit 0")
 	if err := cmd.Start(); err != nil {
 		t.Skipf("cmd.exe not available: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestStopReturnsNotRunningForExitedPID(t *testing.T) {
 // TerminateProcess path is still required to leave the process gone.
 func TestStopTerminatesLivingProcess(t *testing.T) {
 	t.Parallel()
-	cmd := exec.Command("cmd.exe", "/C", "ping -n 30 127.0.0.1 > NUL")
+	cmd := exec.CommandContext(t.Context(), "cmd.exe", "/C", "ping -n 30 127.0.0.1 > NUL")
 	if err := cmd.Start(); err != nil {
 		t.Skipf("cmd.exe not available: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestForceStopOnLiveProcessKills(t *testing.T) {
 	if err != nil {
 		t.Skipf("cmd.exe not available: %v", err)
 	}
-	cmd := exec.Command(cmdPath, "/C", "ping -n 30 127.0.0.1 > NUL")
+	cmd := exec.CommandContext(t.Context(), cmdPath, "/C", "ping -n 30 127.0.0.1 > NUL")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestForceStopOnLiveProcessKills(t *testing.T) {
 // or skipping cleanup entirely.
 func TestChildProcessGroupCleanupFallsBackToPID(t *testing.T) {
 	t.Parallel()
-	cmd := exec.Command("cmd.exe", "/C", "ping -n 30 127.0.0.1 > NUL")
+	cmd := exec.CommandContext(t.Context(), "cmd.exe", "/C", "ping -n 30 127.0.0.1 > NUL")
 	if err := cmd.Start(); err != nil {
 		t.Skipf("cmd.exe not available: %v", err)
 	}

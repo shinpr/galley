@@ -27,10 +27,12 @@ func ownerDaemonIsLive(owner queue.Owner) (bool, error) {
 	alive, err := daemonctl.Alive(owner.PID)
 	if err != nil || !alive {
 		// An inconclusive liveness probe is treated as not live; recovery is safe.
+		//nolint:nilerr // inconclusive probe means not live
 		return false, nil
 	}
 	info, err := daemonctl.ProcessInfo(owner.PID)
 	if err != nil {
+		//nolint:nilerr // inconclusive probe means not live
 		return false, nil
 	}
 	if owner.ProcessStartedAt != "" && info.StartedAt != "" && owner.ProcessStartedAt != info.StartedAt {

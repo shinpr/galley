@@ -85,23 +85,9 @@ func TestMaintenanceRequeueAndExecutionClaimStayRaceFree(t *testing.T) {
 	doneGlob := filepath.Join(root, "tasks", "done", "*.yaml")
 
 	resetRound := func() {
-		// Clear any prior round's queued/running copies and stale claim locks,
-		// then restore the source done task so publication has something to move.
-		for _, pattern := range []string{
-			queuedGlob, runningGlob,
+		removeMatching(t, queuedGlob, runningGlob,
 			filepath.Join(root, "tasks", "queued", "*.lock"),
-			filepath.Join(root, "tasks", "running", "*.lock"),
-		} {
-			matches, globErr := filepath.Glob(pattern)
-			if globErr != nil {
-				t.Fatal(globErr)
-			}
-			for _, m := range matches {
-				if rmErr := os.Remove(m); rmErr != nil && !os.IsNotExist(rmErr) {
-					t.Fatal(rmErr)
-				}
-			}
-		}
+			filepath.Join(root, "tasks", "running", "*.lock"))
 		if writeErr := os.WriteFile(donePath, doneBytes, 0o600); writeErr != nil {
 			t.Fatal(writeErr)
 		}
@@ -137,25 +123,7 @@ func TestMaintenanceRequeueAndExecutionClaimStayRaceFree(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			deadline := time.Now().Add(500 * time.Millisecond)
-			for {
-				queued, qErr := queue.QueuedTasks(root)
-				if qErr != nil {
-					errs <- fmt.Errorf("QueuedTasks failed: %w", qErr)
-					return
-				}
-				claimed := false
-				for _, qPath := range queued {
-					if _, claimErr := queue.ClaimTask(root, qPath); claimErr == nil {
-						claimed = true
-					}
-					// ErrClaimConflict or a missing-source rename error means the
-					// task was not claimed this pass; keep scanning/retrying.
-				}
-				if claimed || time.Now().After(deadline) {
-					return
-				}
-			}
+			claimUntilClaimedOrDeadline(root, errs)
 		}()
 
 		close(start)
@@ -170,48 +138,14 @@ func TestMaintenanceRequeueAndExecutionClaimStayRaceFree(t *testing.T) {
 		// Assert exactly-once placement: the requeued task lives in exactly one of
 		// queued or running, is never double-claimed (never in both), and is never
 		// lost. The source done task is removed exactly once when publication wins.
-		queuedMatches, gErr := filepath.Glob(queuedGlob)
-		if gErr != nil {
-			t.Fatal(gErr)
-		}
-		runningMatches, gErr := filepath.Glob(runningGlob)
-		if gErr != nil {
-			t.Fatal(gErr)
-		}
-		doneMatches, gErr := filepath.Glob(doneGlob)
-		if gErr != nil {
-			t.Fatal(gErr)
-		}
-		live := len(queuedMatches) + len(runningMatches) + len(doneMatches)
-		if live != 1 {
-			t.Fatalf("round %d: expected exactly one live copy of the task, got %d (queued=%v running=%v done=%v)",
-				round, live, queuedMatches, runningMatches, doneMatches)
-		}
-		if len(doneMatches) != 0 {
-			t.Fatalf("round %d: requeued task source remained in done after publication: %v", round, doneMatches)
-		}
-		if len(runningMatches) > 1 {
-			t.Fatalf("round %d: task was double-claimed into running: %v", round, runningMatches)
-		}
-		if len(queuedMatches) == 1 && len(runningMatches) == 1 {
-			t.Fatalf("round %d: task present in both queued and running (lost no-overwrite boundary)", round)
-		}
+		assertExactlyOneLiveCopy(t, round, taskGlobs{Queued: queuedGlob, Running: runningGlob, Done: doneGlob})
 	}
 
 	// Final state assertions over the canonical no-overwrite boundary: after the
 	// last round the task sits in exactly one terminal queue location.
-	finalQueued, err := filepath.Glob(queuedGlob)
-	if err != nil {
-		t.Fatal(err)
-	}
-	finalRunning, err := filepath.Glob(runningGlob)
-	if err != nil {
-		t.Fatal(err)
-	}
-	finalDone, err := filepath.Glob(doneGlob)
-	if err != nil {
-		t.Fatal(err)
-	}
+	finalQueued := globForTest(t, queuedGlob)
+	finalRunning := globForTest(t, runningGlob)
+	finalDone := globForTest(t, doneGlob)
 	if total := len(finalQueued) + len(finalRunning) + len(finalDone); total != 1 {
 		t.Fatalf("final placement: expected exactly one live copy, got %d (queued=%v running=%v done=%v)",
 			total, finalQueued, finalRunning, finalDone)
@@ -220,4 +154,75 @@ func TestMaintenanceRequeueAndExecutionClaimStayRaceFree(t *testing.T) {
 		t.Fatalf("final placement: requeued task source remained in done: %v", finalDone)
 	}
 	assertGlobCount(t, runningGlob, len(finalRunning))
+}
+
+func globForTest(t *testing.T, pattern string) []string {
+	t.Helper()
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return matches
+}
+
+func removeMatching(t *testing.T, patterns ...string) {
+	t.Helper()
+	for _, pattern := range patterns {
+		for _, m := range globForTest(t, pattern) {
+			if rmErr := os.Remove(m); rmErr != nil && !os.IsNotExist(rmErr) {
+				t.Fatal(rmErr)
+			}
+		}
+	}
+}
+
+// claimUntilClaimedOrDeadline claims queued tasks via the no-overwrite rename,
+// retrying briefly so it overlaps publication; a conflict just continues the scan.
+func claimUntilClaimedOrDeadline(root string, errs chan<- error) {
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for {
+		queued, qErr := queue.QueuedTasks(root)
+		if qErr != nil {
+			errs <- fmt.Errorf("QueuedTasks failed: %w", qErr)
+			return
+		}
+		claimed := false
+		for _, qPath := range queued {
+			if _, claimErr := queue.ClaimTask(root, qPath); claimErr == nil {
+				claimed = true
+			}
+		}
+		if claimed || time.Now().After(deadline) {
+			return
+		}
+	}
+}
+
+// taskGlobs are the queue-location globs one interleaving round asserts over.
+type taskGlobs struct {
+	Queued  string
+	Running string
+	Done    string
+}
+
+// assertExactlyOneLiveCopy checks exactly-once placement: the task lives in one
+// of queued or running, is never double-claimed or lost, and leaves done once.
+func assertExactlyOneLiveCopy(t *testing.T, round int, globs taskGlobs) {
+	t.Helper()
+	queued := globForTest(t, globs.Queued)
+	running := globForTest(t, globs.Running)
+	done := globForTest(t, globs.Done)
+	if live := len(queued) + len(running) + len(done); live != 1 {
+		t.Fatalf("round %d: expected exactly one live copy of the task, got %d (queued=%v running=%v done=%v)",
+			round, live, queued, running, done)
+	}
+	if len(done) != 0 {
+		t.Fatalf("round %d: requeued task source remained in done after publication: %v", round, done)
+	}
+	if len(running) > 1 {
+		t.Fatalf("round %d: task was double-claimed into running: %v", round, running)
+	}
+	if len(queued) == 1 && len(running) == 1 {
+		t.Fatalf("round %d: task present in both queued and running (lost no-overwrite boundary)", round)
+	}
 }

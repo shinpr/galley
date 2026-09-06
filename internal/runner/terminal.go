@@ -5,9 +5,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"github.com/shinpr/galley/internal/proc"
 	"io"
 	"strings"
+
+	"github.com/shinpr/galley/internal/proc"
 )
 
 // ExecutorTerminal is Galley's routing decision for one executor process exit.
@@ -127,14 +128,15 @@ func scanClaudeStream(provider string, stdout []byte) ExecutorTerminal {
 	var failure *claudeResultEvent
 	forEachLine(stdout, func(line string) {
 		var ev claudeResultEvent
-		if err := json.Unmarshal([]byte(line), &ev); err == nil && ev.Type == "result" {
-			captured := ev
-			if !captured.IsError && captured.Subtype == "success" {
-				success = &captured
-			} else {
-				failure = &captured
-			}
+		if err := json.Unmarshal([]byte(line), &ev); err != nil || ev.Type != "result" {
+			return
 		}
+		captured := ev
+		if !captured.IsError && captured.Subtype == "success" {
+			success = &captured
+			return
+		}
+		failure = &captured
 	})
 	// An explicit failure result wins over any later success event, so a normal
 	// terminal never masks an earlier provider failure; a missing or unknown

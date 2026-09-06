@@ -84,6 +84,8 @@ func TestDo_ExhaustionReturnsLastError(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Do returned nil, want last error")
 	}
+	// Do returns fn's final error unchanged, so identity is the contract.
+	//nolint:errorlint // identity, not chain membership, is the asserted contract
 	if err != lastErr {
 		t.Fatalf("Do returned %v, want %v (identical to fn's last return)", err, lastErr)
 	}

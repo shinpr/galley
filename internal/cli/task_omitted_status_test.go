@@ -100,17 +100,7 @@ func TestTaskQueuePersistsQueuedStatusFromOmittedStatusDraft(t *testing.T) {
 	}
 
 	// Queue may rename by source basename; also accept the standard task.yaml path.
-	queuedPath := filepath.Join(root, "tasks", "queued", filepath.Base(src))
-	if _, err := os.Stat(queuedPath); err != nil {
-		entries, readErr := os.ReadDir(filepath.Join(root, "tasks", "queued"))
-		if readErr != nil {
-			t.Fatalf("queued dir: %v (stat %s: %v)", readErr, queuedPath, err)
-		}
-		if len(entries) != 1 {
-			t.Fatalf("expected one queued file, got %#v (stat %s: %v)", entries, queuedPath, err)
-		}
-		queuedPath = filepath.Join(root, "tasks", "queued", entries[0].Name())
-	}
+	queuedPath := resolveQueuedTaskPath(t, root, src)
 
 	loaded, err := taskpkg.Load(queuedPath)
 	if err != nil {
@@ -126,4 +116,24 @@ func TestTaskQueuePersistsQueuedStatusFromOmittedStatusDraft(t *testing.T) {
 	if !strings.Contains(string(raw), "status: queued") && !strings.Contains(string(raw), `status: "queued"`) {
 		t.Fatalf("queued YAML must persist status queued:\n%s", raw)
 	}
+}
+
+// resolveQueuedTaskPath finds the queued file. Queue may rename by source
+// basename, so the standard task.yaml path is accepted as well.
+func resolveQueuedTaskPath(t *testing.T, root, src string) string {
+	t.Helper()
+	queuedDir := filepath.Join(root, "tasks", "queued")
+	byBasename := filepath.Join(queuedDir, filepath.Base(src))
+	statErr := error(nil)
+	if _, statErr = os.Stat(byBasename); statErr == nil {
+		return byBasename
+	}
+	entries, readErr := os.ReadDir(queuedDir)
+	if readErr != nil {
+		t.Fatalf("queued dir: %v (stat %s: %v)", readErr, byBasename, statErr)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected one queued file, got %#v (stat %s: %v)", entries, byBasename, statErr)
+	}
+	return filepath.Join(queuedDir, entries[0].Name())
 }

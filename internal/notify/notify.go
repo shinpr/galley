@@ -110,7 +110,7 @@ func BuildCommand(command string, ev Event, opts Options) (proc.Command, func(),
 	if goos == "" {
 		goos = runtime.GOOS
 	}
-	argv, cleanup, _, err := profilecmd.ShellArgvForOSWithResolver(goos, command, opts.ScratchDir, profile.RequiredCheckEnvironment{}, opts.Resolver)
+	argv, cleanup, _, err := profilecmd.ShellArgvForOSWithResolver(profilecmd.ShellRequest{GOOS: goos, Command: command, ScratchDir: opts.ScratchDir, Shell: profile.RequiredCheckEnvironment{}}, opts.Resolver)
 	if err != nil {
 		return proc.Command{}, nil, err
 	}

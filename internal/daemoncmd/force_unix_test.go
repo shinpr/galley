@@ -23,20 +23,19 @@ func spawnTrackedChild(t *testing.T, root string, reap bool, ownerOverride ...da
 	if err != nil {
 		t.Skip("sleep not available")
 	}
-	child := exec.Command(sleepPath, "60")
+	child := exec.CommandContext(t.Context(), sleepPath, "60")
 	child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := child.Start(); err != nil {
 		t.Fatalf("start tracked child: %v", err)
 	}
+	// When reap is false, done is closed only by the cleanup below so callers
+	// can still select on it; the zombie is reaped after the assertions run.
 	done := make(chan struct{})
 	if reap {
 		go func() {
 			_, _ = child.Process.Wait()
 			close(done)
 		}()
-	} else {
-		// Closed only by the cleanup below so callers can still select on it.
-		// The zombie is reaped here, after the assertions have run.
 	}
 	t.Cleanup(func() {
 		_ = child.Process.Kill()

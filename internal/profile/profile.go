@@ -166,27 +166,44 @@ func LoadEnvironment(path string) (Environment, error) {
 
 func LoadBundle(qualityPath, environmentPath string) (Bundle, error) {
 	var bundle Bundle
-	if qualityPath != "" {
-		quality, err := LoadQuality(qualityPath)
-		if err != nil {
-			return Bundle{}, err
-		}
-		if result := ValidateQuality(quality); !result.Valid() {
-			return Bundle{}, fmt.Errorf("invalid quality profile %s: %s", qualityPath, strings.Join(result.Errors, "; "))
-		}
-		bundle.Quality = &quality
+	quality, err := loadValidQuality(qualityPath)
+	if err != nil {
+		return Bundle{}, err
 	}
-	if environmentPath != "" {
-		env, err := LoadEnvironment(environmentPath)
-		if err != nil {
-			return Bundle{}, err
-		}
-		if result := ValidateEnvironment(env); !result.Valid() {
-			return Bundle{}, fmt.Errorf("invalid environment profile %s: %s", environmentPath, strings.Join(result.Errors, "; "))
-		}
-		bundle.Environment = &env
+	env, err := loadValidEnvironment(environmentPath)
+	if err != nil {
+		return Bundle{}, err
 	}
+	bundle.Quality, bundle.Environment = quality, env
 	return bundle, nil
+}
+
+func loadValidQuality(path string) (*Quality, error) {
+	if path == "" {
+		return nil, nil
+	}
+	quality, err := LoadQuality(path)
+	if err != nil {
+		return nil, err
+	}
+	if result := ValidateQuality(quality); !result.Valid() {
+		return nil, fmt.Errorf("invalid quality profile %s: %s", path, strings.Join(result.Errors, "; "))
+	}
+	return &quality, nil
+}
+
+func loadValidEnvironment(path string) (*Environment, error) {
+	if path == "" {
+		return nil, nil
+	}
+	env, err := LoadEnvironment(path)
+	if err != nil {
+		return nil, err
+	}
+	if result := ValidateEnvironment(env); !result.Valid() {
+		return nil, fmt.Errorf("invalid environment profile %s: %s", path, strings.Join(result.Errors, "; "))
+	}
+	return &env, nil
 }
 
 func ValidateQuality(q Quality) ValidationResult {
@@ -234,69 +251,94 @@ func ValidateEnvironment(env Environment) ValidationResult {
 	require(&result, env.Constraints.Network != "", "constraints.network is required")
 	require(&result, env.Constraints.SecretsPolicy != "", "constraints.secrets_policy is required")
 	require(&result, env.Constraints.DestructiveCommands != "", "constraints.destructive_commands is required")
-	if env.Executor != nil && env.Executor.DefaultCLI != "" {
-		require(&result, validExecutorCLI(env.Executor.DefaultCLI), "executor.default_cli must be one of: %s", strings.Join(provider.ExecutorIDs(), ", "))
-	}
-	if env.Executor != nil && env.Executor.Effort != "" {
-		if env.Executor.DefaultCLI != "" {
-			if efforts, ok := provider.EffortsForID(env.Executor.DefaultCLI); ok {
-				require(&result, slices.Contains(efforts, env.Executor.Effort), "executor.effort for %s must be one of: %s", env.Executor.DefaultCLI, strings.Join(efforts, ", "))
-			}
-		} else {
-			require(&result, slices.Contains(provider.ExecutorEfforts(), env.Executor.Effort), "executor.effort must be one of: %s", strings.Join(provider.ExecutorEfforts(), ", "))
-		}
-	}
-	if env.Supervisor != nil && env.Supervisor.DefaultCLI != "" {
-		require(&result, provider.IsSupervisor(env.Supervisor.DefaultCLI), "supervisor.default_cli must be one of: %s", strings.Join(provider.SupervisorIDs(), ", "))
-	}
-	if env.Supervisor != nil && env.Supervisor.Effort != "" {
-		// Without default_cli, profile validation can enforce only the provider union; preflight narrows it later.
-		if env.Supervisor.DefaultCLI != "" {
-			if efforts, ok := provider.EffortsForID(env.Supervisor.DefaultCLI); ok {
-				require(&result, slices.Contains(efforts, env.Supervisor.Effort), "supervisor.effort for %s must be one of: %s", env.Supervisor.DefaultCLI, strings.Join(efforts, ", "))
-			}
-		} else {
-			require(&result, slices.Contains(provider.SupervisorEfforts(), env.Supervisor.Effort), "supervisor.effort must be one of: %s", strings.Join(provider.SupervisorEfforts(), ", "))
-		}
-	}
-	if env.RequiredChecks.Shell != "" {
-		require(&result, validRequiredCheckShell(env.RequiredChecks.Shell), "required_checks.shell must be one of: auto, sh, bash, cmd, powershell, pwsh")
-	}
-	if env.RequiredChecks.ShellPath != "" {
-		if strings.TrimSpace(env.RequiredChecks.ShellPath) != env.RequiredChecks.ShellPath {
-			result.Errors = append(result.Errors, "required_checks.shell_path must not have leading or trailing whitespace")
-		}
-		// required_checks.shell_path is the more specific executable selection.
-		// When the executable basename is one of the recognized shells, Galley
-		// can infer the invocation style and shell_path may stand alone. When
-		// the basename is not recognized, an explicit non-auto
-		// required_checks.shell is required as fallback kind metadata.
-		if InferRequiredCheckShellKind(env.RequiredChecks.ShellPath) == "" {
-			switch env.RequiredChecks.Shell {
-			case "", "auto":
-				result.Errors = append(result.Errors, "required_checks.shell_path basename is not a recognized shell executable; set an explicit required_checks.shell kind (sh, bash, cmd, powershell, or pwsh) as fallback metadata")
-			}
-		}
-	}
+	validateExecutorDefault(&result, env.Executor)
+	validateSupervisorDefault(&result, env.Supervisor)
+	validateRequiredChecks(&result, env.RequiredChecks)
 	if env.PR.Comments.Reply && !env.PR.Comments.Enabled {
 		result.Warnings = append(result.Warnings, "pr.comments.reply is set while pr.comments.enabled is false")
 	}
-	if env.Setup != nil {
-		if len(env.Setup.Commands) == 0 {
-			result.Errors = append(result.Errors, "setup.commands must not be empty when setup is present")
+	validateSetupPlan(&result, env.Setup)
+	return result
+}
+
+func validateExecutorDefault(result *ValidationResult, executor *ExecutorDefault) {
+	if executor == nil {
+		return
+	}
+	if executor.DefaultCLI != "" {
+		require(result, validExecutorCLI(executor.DefaultCLI), "executor.default_cli must be one of: %s", strings.Join(provider.ExecutorIDs(), ", "))
+	}
+	if executor.Effort == "" {
+		return
+	}
+	if executor.DefaultCLI == "" {
+		require(result, slices.Contains(provider.ExecutorEfforts(), executor.Effort), "executor.effort must be one of: %s", strings.Join(provider.ExecutorEfforts(), ", "))
+		return
+	}
+	if efforts, ok := provider.EffortsForID(executor.DefaultCLI); ok {
+		require(result, slices.Contains(efforts, executor.Effort), "executor.effort for %s must be one of: %s", executor.DefaultCLI, strings.Join(efforts, ", "))
+	}
+}
+
+func validateSupervisorDefault(result *ValidationResult, supervisor *SupervisorDefault) {
+	if supervisor == nil {
+		return
+	}
+	if supervisor.DefaultCLI != "" {
+		require(result, provider.IsSupervisor(supervisor.DefaultCLI), "supervisor.default_cli must be one of: %s", strings.Join(provider.SupervisorIDs(), ", "))
+	}
+	if supervisor.Effort == "" {
+		return
+	}
+	// Without default_cli, profile validation can enforce only the provider
+	// union; preflight narrows it later.
+	if supervisor.DefaultCLI == "" {
+		require(result, slices.Contains(provider.SupervisorEfforts(), supervisor.Effort), "supervisor.effort must be one of: %s", strings.Join(provider.SupervisorEfforts(), ", "))
+		return
+	}
+	if efforts, ok := provider.EffortsForID(supervisor.DefaultCLI); ok {
+		require(result, slices.Contains(efforts, supervisor.Effort), "supervisor.effort for %s must be one of: %s", supervisor.DefaultCLI, strings.Join(efforts, ", "))
+	}
+}
+
+func validateRequiredChecks(result *ValidationResult, checks RequiredCheckEnvironment) {
+	if checks.Shell != "" {
+		require(result, validRequiredCheckShell(checks.Shell), "required_checks.shell must be one of: auto, sh, bash, cmd, powershell, pwsh")
+	}
+	if checks.ShellPath == "" {
+		return
+	}
+	if strings.TrimSpace(checks.ShellPath) != checks.ShellPath {
+		result.Errors = append(result.Errors, "required_checks.shell_path must not have leading or trailing whitespace")
+	}
+	// A recognized shell_path basename lets Galley infer the invocation style, so
+	// shell_path stands alone; otherwise an explicit shell kind supplies it.
+	if InferRequiredCheckShellKind(checks.ShellPath) != "" {
+		return
+	}
+	switch checks.Shell {
+	case "", "auto":
+		result.Errors = append(result.Errors, "required_checks.shell_path basename is not a recognized shell executable; set an explicit required_checks.shell kind (sh, bash, cmd, powershell, or pwsh) as fallback metadata")
+	}
+}
+
+func validateSetupPlan(result *ValidationResult, setup *SetupPlan) {
+	if setup == nil {
+		return
+	}
+	if len(setup.Commands) == 0 {
+		result.Errors = append(result.Errors, "setup.commands must not be empty when setup is present")
+	}
+	for i, cmd := range setup.Commands {
+		prefix := fmt.Sprintf("setup.commands[%d]", i)
+		if strings.TrimSpace(cmd.Run) == "" {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s.run is required", prefix))
 		}
-		for i, cmd := range env.Setup.Commands {
-			prefix := fmt.Sprintf("setup.commands[%d]", i)
-			if strings.TrimSpace(cmd.Run) == "" {
-				result.Errors = append(result.Errors, fmt.Sprintf("%s.run is required", prefix))
-			}
-			validateSetupCommandText(&result, prefix+".run", cmd.Run, MaxSetupCommandRunLength)
-			if cmd.Why != "" {
-				validateSetupCommandText(&result, prefix+".why", cmd.Why, MaxSetupCommandWhyLength)
-			}
+		validateSetupCommandText(result, prefix+".run", cmd.Run, MaxSetupCommandRunLength)
+		if cmd.Why != "" {
+			validateSetupCommandText(result, prefix+".why", cmd.Why, MaxSetupCommandWhyLength)
 		}
 	}
-	return result
 }
 
 func validateSetupCommandText(result *ValidationResult, field, value string, max int) {
@@ -423,7 +465,7 @@ func replaceEnvironmentSetup(root *yaml.Node, plan SetupPlan) error {
 	keyNode := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "setup"}
 	valueNode := &yaml.Node{}
 	if err := valueNode.Encode(plan); err != nil {
-		return err
+		return fmt.Errorf("encode executor plan: %w", err)
 	}
 	for i := 0; i+1 < len(mapping.Content); i += 2 {
 		if mapping.Content[i].Value == "setup" {
@@ -465,10 +507,10 @@ func loadYAML(path string, out any, schema map[string]any) error {
 func decodeProfileYAML(data []byte, out any, schema map[string]any) error {
 	var root yaml.Node
 	if err := yaml.Unmarshal(data, &root); err != nil {
-		return err
+		return fmt.Errorf("parse profile YAML: %w", err)
 	}
 	if err := root.Decode(out); err != nil {
-		return err
+		return fmt.Errorf("decode profile document: %w", err)
 	}
 	missing := missingRequiredYAMLFields(&root, schema, "")
 	if len(missing) > 0 {
@@ -478,61 +520,75 @@ func decodeProfileYAML(data []byte, out any, schema map[string]any) error {
 }
 
 func missingRequiredYAMLFields(node *yaml.Node, schema map[string]any, path string) []string {
-	if isYAMLNull(node) {
-		node = nil
-	}
-	if node != nil && node.Kind == yaml.DocumentNode {
-		if len(node.Content) == 0 {
-			node = nil
-		} else {
-			node = node.Content[0]
-		}
-	}
-
+	node = unwrapYAMLNode(node)
 	schemaType, _ := schema["type"].(string)
 	switch schemaType {
 	case "object":
-		if node == nil {
-			var missing []string
-			for _, key := range schemaRequiredFields(schema) {
-				missing = append(missing, yamlFieldPath(path, key))
-			}
-			return missing
-		}
-		if node.Kind != yaml.MappingNode {
-			return nil
-		}
-		var missing []string
-		for _, key := range schemaRequiredFields(schema) {
-			if isYAMLNull(yamlMappingValue(node, key)) {
-				missing = append(missing, yamlFieldPath(path, key))
-			}
-		}
-		properties, _ := schema["properties"].(map[string]any)
-		for i := 0; i+1 < len(node.Content); i += 2 {
-			childSchema, ok := properties[node.Content[i].Value].(map[string]any)
-			if !ok {
-				continue
-			}
-			missing = append(missing, missingRequiredYAMLFields(node.Content[i+1], childSchema, yamlFieldPath(path, node.Content[i].Value))...)
-		}
-		return missing
+		return missingObjectFields(node, schema, path)
 	case "array":
-		if node == nil || node.Kind != yaml.SequenceNode {
-			return nil
-		}
-		itemSchema, ok := schema["items"].(map[string]any)
-		if !ok {
-			return nil
-		}
-		var missing []string
-		for i, item := range node.Content {
-			missing = append(missing, missingRequiredYAMLFields(item, itemSchema, fmt.Sprintf("%s[%d]", path, i))...)
-		}
-		return missing
+		return missingArrayFields(node, schema, path)
 	default:
 		return nil
 	}
+}
+
+// unwrapYAMLNode resolves a document node to its content and normalizes an
+// explicit YAML null to a nil node, so callers see one absent representation.
+func unwrapYAMLNode(node *yaml.Node) *yaml.Node {
+	if isYAMLNull(node) {
+		return nil
+	}
+	if node == nil || node.Kind != yaml.DocumentNode {
+		return node
+	}
+	if len(node.Content) == 0 {
+		return nil
+	}
+	return node.Content[0]
+}
+
+// missingObjectFields reports the required fields absent from an object node.
+// An absent node means every required field is missing.
+func missingObjectFields(node *yaml.Node, schema map[string]any, path string) []string {
+	var missing []string
+	if node == nil {
+		for _, key := range schemaRequiredFields(schema) {
+			missing = append(missing, yamlFieldPath(path, key))
+		}
+		return missing
+	}
+	if node.Kind != yaml.MappingNode {
+		return nil
+	}
+	for _, key := range schemaRequiredFields(schema) {
+		if isYAMLNull(yamlMappingValue(node, key)) {
+			missing = append(missing, yamlFieldPath(path, key))
+		}
+	}
+	properties, _ := schema["properties"].(map[string]any)
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		childSchema, ok := properties[node.Content[i].Value].(map[string]any)
+		if !ok {
+			continue
+		}
+		missing = append(missing, missingRequiredYAMLFields(node.Content[i+1], childSchema, yamlFieldPath(path, node.Content[i].Value))...)
+	}
+	return missing
+}
+
+func missingArrayFields(node *yaml.Node, schema map[string]any, path string) []string {
+	if node == nil || node.Kind != yaml.SequenceNode {
+		return nil
+	}
+	itemSchema, ok := schema["items"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	var missing []string
+	for i, item := range node.Content {
+		missing = append(missing, missingRequiredYAMLFields(item, itemSchema, fmt.Sprintf("%s[%d]", path, i))...)
+	}
+	return missing
 }
 
 func schemaRequiredFields(schema map[string]any) []string {

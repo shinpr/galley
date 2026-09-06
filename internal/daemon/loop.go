@@ -52,7 +52,16 @@ func asReviewStagingError(err error) (*reviewStagingError, bool) {
 
 const progressNoDiffThreshold = 2
 
-func defaultSupervisorRunner(ctx context.Context, opts Options, evidence supervisor.Evidence, tryDir, workDir string) (supervisor.Verdict, error) {
+// supervisorRunRequest is one supervisor invocation.
+type supervisorRunRequest struct {
+	Opts     Options
+	Evidence supervisor.Evidence
+	TryDir   string
+	WorkDir  string
+}
+
+func defaultSupervisorRunner(ctx context.Context, req supervisorRunRequest) (supervisor.Verdict, error) {
+	opts, evidence, tryDir, workDir := req.Opts, req.Evidence, req.TryDir, req.WorkDir
 	return supervisor.RunAdapter(ctx, supervisor.AdapterOptions{
 		Provider:     opts.Supervisor,
 		Model:        opts.SupervisorModel,
@@ -69,7 +78,57 @@ func defaultSupervisorRunner(ctx context.Context, opts Options, evidence supervi
 	}, evidence)
 }
 
-func runSupervisorLoop(execCtx, daemonCtx context.Context, opts Options, runningPath string, loaded *task.Task, prepared claimedWorkspace, profiles profile.Bundle, runDir, runID string, effectiveExecutor task.Executor) error {
+// withoutStaticSkeletonOutputs drops rendered skeleton outputs from the prompt.
+// Runtime obligations own that content after preflight, so keeping both duplicates.
+func withoutStaticSkeletonOutputs(promptTask task.Task) task.Task {
+	if promptTask.Preflight == nil || promptTask.Preflight.AcceptanceSkeleton == nil {
+		return promptTask
+	}
+	cfgCopy := *promptTask.Preflight.AcceptanceSkeleton
+	cfgCopy.Outputs = nil
+	preflightCopy := *promptTask.Preflight
+	preflightCopy.AcceptanceSkeleton = &cfgCopy
+	promptTask.Preflight = &preflightCopy
+	return promptTask
+}
+
+// logAttemptFailure distinguishes a supervisor idle timeout and an executor
+// interruption from a task total-timeout expiry in the daemon log.
+func logAttemptFailure(taskID string, err error) {
+	if idle, ok := asSupervisorIdleTimeout(err); ok {
+		fmt.Fprintln(os.Stderr, idle.logLine(taskID))
+	}
+	if interruption, ok := asExecutorInterruptionError(err); ok {
+		fmt.Fprintf(os.Stderr, "galley: task %s executor interrupted (%s) before Supervisor review; preserving worktree for requeue\n", taskID, interruption.terminal.Reason)
+	}
+}
+
+// attemptMadeProgress excludes baseline-matching skeletons from the dirty set;
+// counting them every attempt would keep the no-diff invariant from firing.
+func attemptMadeProgress(outcome attemptOutcome, workDir string, preflightResult *skeletonpreflight.Result) bool {
+	if outcome.DiffErr != nil {
+		return false
+	}
+	progress, _ := hasNonSkeletonProgress(outcome.DiffSnapshot, workDir, preflightResult)
+	return progress
+}
+
+// supervisorLoopRequest is one claimed task's attempt/review loop.
+type supervisorLoopRequest struct {
+	Opts              Options
+	RunningPath       string
+	Loaded            *task.Task
+	Prepared          claimedWorkspace
+	Profiles          profile.Bundle
+	RunDir            string
+	RunID             string
+	EffectiveExecutor task.Executor
+}
+
+func runSupervisorLoop(execCtx, daemonCtx context.Context, req supervisorLoopRequest) error {
+	opts, runningPath, loaded := req.Opts, req.RunningPath, req.Loaded
+	prepared, profiles := req.Prepared, req.Profiles
+	runDir, runID, effectiveExecutor := req.RunDir, req.RunID, req.EffectiveExecutor
 	fmt.Fprintf(os.Stderr, "galley: task %s running in %s (run_id=%s)\n", loaded.ID, prepared.CWD, runID)
 	// Persist the resolved supervisor and its source as run evidence.
 	// Reviewers can then tell whether the per-task supervisor came from the
@@ -90,17 +149,7 @@ func runSupervisorLoop(execCtx, daemonCtx context.Context, opts Options, running
 	supervisor.ReconcileReviewProgressWithContext(loaded, profiles, prepared.ReviewContractContext)
 	promptTask := executionTask(*loaded, prepared.CWD, effectiveExecutor)
 	if preflightResult != nil {
-		// Runtime obligations below are the source of truth after preflight.
-		// Suppress static task-output rendering here to avoid duplicate
-		// sections after processClaimedTask writes generated outputs back to
-		// the running task file for auditability.
-		if promptTask.Preflight != nil && promptTask.Preflight.AcceptanceSkeleton != nil {
-			cfgCopy := *promptTask.Preflight.AcceptanceSkeleton
-			cfgCopy.Outputs = nil
-			preflightCopy := *promptTask.Preflight
-			preflightCopy.AcceptanceSkeleton = &cfgCopy
-			promptTask.Preflight = &preflightCopy
-		}
+		promptTask = withoutStaticSkeletonOutputs(promptTask)
 	}
 	budget := attemptBudget(loaded.ExecutionPolicy.LoopBudget)
 	consecutiveNoDiff := 0
@@ -128,18 +177,10 @@ func runSupervisorLoop(execCtx, daemonCtx context.Context, opts Options, running
 			EffectiveTask: effectiveTask,
 		})
 		if err != nil {
-			// When a supervisor idle timeout fails the task,
-			// emit one concise line in the existing Galley log tone so the
-			// daemon log distinguishes it from a task total-timeout expiry.
-			if idle, ok := asSupervisorIdleTimeout(err); ok {
-				fmt.Fprintln(os.Stderr, idle.logLine(loaded.ID))
-			}
-			if interruption, ok := asExecutorInterruptionError(err); ok {
-				fmt.Fprintf(os.Stderr, "galley: task %s executor interrupted (%s) before Supervisor review; preserving worktree for requeue\n", loaded.ID, interruption.terminal.Reason)
-			}
+			logAttemptFailure(loaded.ID, err)
 			return taskstate.FailMoveToStatus(opts.Root, runningPath, loaded, err)
 		}
-		mergeAttemptEvidence(loaded, review.Outcome, runID, prepared.CWD, review.AttemptDir)
+		mergeAttemptEvidence(loaded, review.Outcome, attemptEvidencePaths{RunID: runID, WorkDir: prepared.CWD, AttemptDir: review.AttemptDir})
 		supervisor.ApplyReviewProgressWithContext(loaded, profiles, prepared.ReviewContractContext, review.Verdict)
 		// Progress detection. The dirty-diff
 		// signal alone over-counts: preflight materialized skeleton files in
@@ -149,15 +190,10 @@ func runSupervisorLoop(execCtx, daemonCtx context.Context, opts Options, running
 		// skeleton files from the dirty set so changed skeletons (or any
 		// non-skeleton change) count as progress, while unchanged skeletons
 		// across repeated attempts let the existing no-diff invariant fire.
-		nonSkeletonProgress := false
-		if review.Outcome.DiffErr == nil {
-			progress, _ := hasNonSkeletonProgress(review.Outcome.DiffSnapshot, prepared.CWD, preflightResult)
-			nonSkeletonProgress = progress
-		}
-		if !nonSkeletonProgress {
-			consecutiveNoDiff++
-		} else {
+		if attemptMadeProgress(review.Outcome, prepared.CWD, preflightResult) {
 			consecutiveNoDiff = 0
+		} else {
+			consecutiveNoDiff++
 		}
 		fmt.Fprintf(os.Stderr, "galley: task %s attempt %d verdict=%s summary=%s\n", loaded.ID, attempt, review.Verdict.Status, review.Verdict.Summary)
 		loaded.Attempts[len(loaded.Attempts)-1].SupervisorVerdict = review.Verdict.Status
@@ -217,13 +253,13 @@ func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) 
 	fmt.Fprintf(os.Stderr, "galley: task %s attempt %d/%s starting\n", req.Loaded.ID, req.Attempt, req.Loaded.ExecutionPolicy.LoopBudget.String())
 	attemptDir := filepath.Join(req.RunDir, runartifact.AttemptDirname(req.Attempt))
 	if err := os.MkdirAll(attemptDir, 0o700); err != nil {
-		appendFailureAttempt(req.Loaded, "attempt_setup", "attempt_setup_failed", err, req.RunDir)
+		appendFailureAttempt(req.Loaded, attemptFailure{Phase: "attempt_setup", Kind: "attempt_setup_failed", Err: err, ArtifactDir: req.RunDir})
 		return attemptReview{}, fmt.Errorf("create attempt dir %s: %w", attemptDir, err)
 	}
 	effectiveTask := req.EffectiveTask
 	effectiveTaskPath := runartifact.Path(attemptDir, runartifact.EffectiveTaskSnapshotFilename)
 	if err := task.Save(effectiveTaskPath, effectiveTask); err != nil {
-		appendFailureAttempt(req.Loaded, "attempt_setup", "attempt_setup_failed", err, attemptDir)
+		appendFailureAttempt(req.Loaded, attemptFailure{Phase: "attempt_setup", Kind: "attempt_setup_failed", Err: err, ArtifactDir: attemptDir})
 		return attemptReview{}, err
 	}
 	// Load the runtime preflight result before the executor attempt so the
@@ -233,17 +269,17 @@ func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) 
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "galley: task %s attempt %d could not load preflight result: %v\n", req.Loaded.ID, req.Attempt, err)
 	}
-	outcome, err := runExecutorAttempt(ctx, req.Opts, effectiveTask, req.Prepared.CWD, req.Prepared.BaseSHA, attemptDir, req.Prompt)
+	outcome, err := runExecutorAttempt(ctx, executorAttemptRequest{Opts: req.Opts, Loaded: effectiveTask, WorkDir: req.Prepared.CWD, BaseSHA: req.Prepared.BaseSHA, AttemptDir: attemptDir, Prompt: req.Prompt})
 	if err != nil {
 		// A review-time staging failure is recorded under a distinct phase
 		// and kind so the failed task surfaces the staging-related error to
 		// the supervisor and operators instead of mis-classifying it as an
 		// executor failure.
 		if _, ok := asReviewStagingError(err); ok {
-			appendFailureAttempt(req.Loaded, "review_staging", "review_staging_failed", err, attemptDir)
+			appendFailureAttempt(req.Loaded, attemptFailure{Phase: "review_staging", Kind: "review_staging_failed", Err: err, ArtifactDir: attemptDir})
 			return attemptReview{}, err
 		}
-		appendFailureAttempt(req.Loaded, "executor", classifyFailureKind("executor_failed", err), err, attemptDir)
+		appendFailureAttempt(req.Loaded, attemptFailure{Phase: "executor", Kind: classifyFailureKind("executor_failed", err), Err: err, ArtifactDir: attemptDir})
 		return attemptReview{}, err
 	}
 	// A provider or runtime interruption never reaches Supervisor and never
@@ -271,13 +307,13 @@ func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) 
 		SetupResult:            setupResultEvidence,
 		SetupEnvironmentUpdate: setupUpdateEvidence,
 	}
-	verdict, err := evaluateSupervisor(ctx, req.Opts, evidence, attemptDir, req.Prepared.CWD)
+	verdict, err := evaluateSupervisor(ctx, req.Opts, supervisorEvaluation{Evidence: evidence, AttemptDir: attemptDir, WorkDir: req.Prepared.CWD})
 	if err != nil {
 		appendSupervisorFailureAttempt(req.Loaded, outcome, err, attemptDir)
 		return attemptReview{}, err
 	}
 	if err := writeJSON(runartifact.Path(attemptDir, runartifact.SupervisorVerdictFilename), verdict); err != nil {
-		appendFailureAttempt(req.Loaded, "run_evidence", "run_evidence_failed", err, attemptDir)
+		appendFailureAttempt(req.Loaded, attemptFailure{Phase: "run_evidence", Kind: "run_evidence_failed", Err: err, ArtifactDir: attemptDir})
 		return attemptReview{}, err
 	}
 	return attemptReview{AttemptDir: attemptDir, Outcome: outcome, Verdict: verdict}, nil
@@ -317,7 +353,7 @@ func applySupervisorVerdict(execCtx, daemonCtx context.Context, req verdictAppli
 			fmt.Fprintf(os.Stderr, "galley: task %s accepted verdict rejected by acceptance gate: %s\n", req.Loaded.ID, reason)
 			return true, failVerdictApplication(req, "acceptance-gate", "Accepted verdict rejected by acceptance skeleton gate: "+reason, "Inspect preflight_result.json before re-finalizing.")
 		}
-		err := acceptSupervisorVerdict(execCtx, req.Opts, req.RunningPath, req.Loaded, req.Prepared, req.Profiles, req.RunDir, req.Verdict)
+		err := acceptSupervisorVerdict(execCtx, req)
 		// A finalization failure keeps the accepted work, worktree, and review
 		// progress and spends the next attempt of this loop repairing it.
 		if failure, ok := asFinalizeFailure(err); ok {
@@ -341,31 +377,18 @@ func applySupervisorVerdict(execCtx, daemonCtx context.Context, req verdictAppli
 
 func failVerdictApplication(req verdictApplication, riskPrefix, detail, mitigation string) error {
 	req.Loaded.Status = "failed"
-	appendRisk(req.Loaded, riskPrefix, "partial_verification", detail, mitigation, true)
+	appendRisk(req.Loaded, riskPrefix, riskSpec{Type: "partial_verification", Detail: detail, Mitigation: mitigation, HumanReview: true})
 	return taskstate.MoveToStatus(req.Opts.Root, req.RunningPath, req.Loaded)
 }
 
-func acceptSupervisorVerdict(ctx context.Context, opts Options, runningPath string, loaded *task.Task, prepared workspace.Prepared, profiles profile.Bundle, runDir string, verdict supervisor.Verdict) error {
+func acceptSupervisorVerdict(ctx context.Context, req verdictApplication) error {
+	opts, runningPath, loaded := req.Opts, req.RunningPath, req.Loaded
+	profiles, verdict := req.Profiles, req.Verdict
 	mergeDiscussionItems(loaded, profiles, verdict)
 	*loaded = (supervisorRevision{}).applyToTask(*loaded)
 	applyAcceptedAcceptanceCriteria(loaded)
-	if opts.CommitOnAccept {
-		fmt.Fprintf(os.Stderr, "galley: task %s accepted; finalizing commit/pr\n", loaded.ID)
-		if err := finalizeAcceptedChange(ctx, opts, loaded, prepared.CWD, prepared.BaseSHA, runDir); err != nil {
-			// A failed commit, push, or PR creation goes back to the verdict
-			// path; every other finalization failure still fails the task.
-			if _, ok := asFinalizeFailure(err); ok {
-				return err
-			}
-			loaded.Status = "failed"
-			appendRisk(loaded, "finalize", "partial_verification", err.Error(), "The executor diff and run evidence were stored; a supervisor should inspect and finish commit or PR creation.", true)
-			return taskstate.FailMoveToStatus(opts.Root, runningPath, loaded, err)
-		}
-		markFinalizeRevisionsAddressed(loaded)
-	} else if err := inputfiles.CleanupNonCommitted(prepared.CWD, loaded.Files); err != nil {
-		loaded.Status = "failed"
-		appendRisk(loaded, "input-file-cleanup", "partial_verification", err.Error(), "Remove non-committed task input files from the execution workspace before archiving or reusing it.", true)
-		return taskstate.FailMoveToStatus(opts.Root, runningPath, loaded, err)
+	if err := finalizeOrCleanup(ctx, req); err != nil {
+		return err
 	}
 	loaded.Status = "accepted"
 	if opts.OpenPR {
@@ -384,12 +407,20 @@ func executionTask(loaded task.Task, workDir string, effectiveExecutor task.Exec
 // evaluateSupervisor runs one supervisor evaluation for an executor attempt.
 // A failed supervisor invocation is preserved as evidence and returned to the
 // task-state path; Galley does not rerun the same model against unchanged input.
-func evaluateSupervisor(ctx context.Context, opts Options, evidence supervisor.Evidence, attemptDir, workDir string) (supervisor.Verdict, error) {
+// supervisorEvaluation is one supervisor evaluation of an attempt.
+type supervisorEvaluation struct {
+	Evidence   supervisor.Evidence
+	AttemptDir string
+	WorkDir    string
+}
+
+func evaluateSupervisor(ctx context.Context, opts Options, req supervisorEvaluation) (supervisor.Verdict, error) {
+	evidence, attemptDir, workDir := req.Evidence, req.AttemptDir, req.WorkDir
 	artifactDir := runartifact.Path(attemptDir, runartifact.SupervisorTryDirname)
 	if err := os.MkdirAll(artifactDir, 0o700); err != nil {
 		return supervisor.Verdict{}, fmt.Errorf("create supervisor artifact dir %s: %w", artifactDir, err)
 	}
-	verdict, err := opts.daemonDependencies().supervisorRunner(ctx, opts, evidence, artifactDir, workDir)
+	verdict, err := opts.daemonDependencies().supervisorRunner(ctx, supervisorRunRequest{Opts: opts, Evidence: evidence, TryDir: artifactDir, WorkDir: workDir})
 	if err != nil {
 		kind := supervisorFailureKind(err)
 		_ = writeJSON(runartifact.Path(artifactDir, runartifact.SupervisorErrorFilename), map[string]any{
@@ -436,23 +467,29 @@ func mergeDiscussionItems(loaded *task.Task, profiles profile.Bundle, verdict su
 			true,
 		)
 	}
-	if profiles.Quality != nil {
-		passed := map[string]bool{}
-		if loaded.ReviewProgress != nil {
-			for _, id := range loaded.ReviewProgress.Quality {
-				passed[id] = true
-			}
-		}
-		var gaps []string
-		for _, dimension := range profiles.Quality.ReviewDimensions {
-			if !passed[dimension.ID] {
-				gaps = append(gaps, dimension.ID)
-			}
-		}
-		if len(gaps) > 0 {
-			appendDiscussionItem(loaded, "Quality review gaps", strings.Join(gaps, ", "), true)
+	if gaps := qualityReviewGaps(loaded, profiles.Quality); len(gaps) > 0 {
+		appendDiscussionItem(loaded, "Quality review gaps", strings.Join(gaps, ", "), true)
+	}
+}
+
+// qualityReviewGaps lists the quality review dimensions the task has not passed.
+func qualityReviewGaps(loaded *task.Task, quality *profile.Quality) []string {
+	if quality == nil {
+		return nil
+	}
+	passed := map[string]bool{}
+	if loaded.ReviewProgress != nil {
+		for _, id := range loaded.ReviewProgress.Quality {
+			passed[id] = true
 		}
 	}
+	var gaps []string
+	for _, dimension := range quality.ReviewDimensions {
+		if !passed[dimension.ID] {
+			gaps = append(gaps, dimension.ID)
+		}
+	}
+	return gaps
 }
 
 func appendDiscussionItem(loaded *task.Task, topic, summary string, requiresHumanDecision bool) {
@@ -514,4 +551,53 @@ func writeSupervisorEvidence(runDir string, effectiveOpts Options) error {
 		"effort":        effectiveOpts.SupervisorEffort,
 		"effort_source": effortSource,
 	})
+}
+
+// finalizeOnAccept commits and opens the PR. A failed commit, push, or PR
+// creation returns to the verdict path; any other failure fails the task.
+func finalizeOnAccept(ctx context.Context, req verdictApplication) error {
+	opts, loaded, prepared := req.Opts, req.Loaded, req.Prepared
+	fmt.Fprintf(os.Stderr, "galley: task %s accepted; finalizing commit/pr\n", loaded.ID)
+	err := finalizeAcceptedChange(ctx, acceptedChange{Opts: opts, Loaded: loaded, WorkDir: prepared.CWD, BaseSHA: prepared.BaseSHA, RunDir: req.RunDir})
+	if err == nil {
+		markFinalizeRevisionsAddressed(loaded)
+		return nil
+	}
+	if _, ok := asFinalizeFailure(err); ok {
+		return err
+	}
+	loaded.Status = "failed"
+	appendRisk(loaded, "finalize", riskSpec{
+		Type:        "partial_verification",
+		Detail:      err.Error(),
+		Mitigation:  "The executor diff and run evidence were stored; a supervisor should inspect and finish commit or PR creation.",
+		HumanReview: true,
+	})
+	return taskstate.FailMoveToStatus(opts.Root, req.RunningPath, loaded, err)
+}
+
+// cleanupNonCommittedOnAccept removes context-only inputs from a workspace that
+// is kept without a commit.
+func cleanupNonCommittedOnAccept(req verdictApplication) error {
+	err := inputfiles.CleanupNonCommitted(req.Prepared.CWD, req.Loaded.Files)
+	if err == nil {
+		return nil
+	}
+	req.Loaded.Status = "failed"
+	appendRisk(req.Loaded, "input-file-cleanup", riskSpec{
+		Type:        "partial_verification",
+		Detail:      err.Error(),
+		Mitigation:  "Remove non-committed task input files from the execution workspace before archiving or reusing it.",
+		HumanReview: true,
+	})
+	return taskstate.FailMoveToStatus(req.Opts.Root, req.RunningPath, req.Loaded, err)
+}
+
+// finalizeOrCleanup commits and opens the PR, or removes context-only inputs
+// from the kept workspace when the daemon does not commit on accept.
+func finalizeOrCleanup(ctx context.Context, req verdictApplication) error {
+	if req.Opts.CommitOnAccept {
+		return finalizeOnAccept(ctx, req)
+	}
+	return cleanupNonCommittedOnAccept(req)
 }

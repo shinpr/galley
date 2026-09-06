@@ -27,7 +27,7 @@ func startStaleDaemon(t *testing.T) (root, pidFile string) {
 	if err != nil {
 		t.Skip("true not available")
 	}
-	cmd := exec.Command(truePath)
+	cmd := exec.CommandContext(t.Context(), truePath)
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start short-lived process: %v", err)
 	}

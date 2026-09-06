@@ -191,25 +191,7 @@ func runBuiltinCreatorCommand(ctx context.Context, opts Options, commandPlan pro
 // the manifest directly on stdout.
 func resolveCreatorManifest(opts Options, stdoutTail, stdoutPath string) (creatorManifest, error) {
 	if task.ExecutorTransport(opts.Task) == provider.TransportGrok {
-		data, readErr := os.ReadFile(stdoutPath)
-		if readErr != nil {
-			data = []byte(stdoutTail)
-		}
-		if err := runner.WriteGrokCompletionMetadata(filepath.Join(opts.RunDir, runartifact.GrokSkeletonCompletionFilename), data); err != nil {
-			return creatorManifest{}, err
-		}
-		envelope, err := runner.DecodeGrokEnvelope(data)
-		if err != nil {
-			return creatorManifest{}, err
-		}
-		var manifest creatorManifest
-		if err := json.Unmarshal(runner.GrokResultPayload(envelope), &manifest); err != nil {
-			return creatorManifest{}, fmt.Errorf("decode grok creator manifest: %w", err)
-		}
-		if manifest.Outputs == nil || manifest.NoSkeletons == nil {
-			return creatorManifest{}, fmt.Errorf("invalid grok creator manifest: outputs and no_skeletons are required")
-		}
-		return manifest, nil
+		return resolveGrokCreatorManifest(opts, stdoutTail, stdoutPath)
 	}
 	if task.ExecutorTransport(opts.Task) == provider.TransportCodex {
 		lastMessagePath := filepath.Join(opts.RunDir, runner.CodexLastMessageFilename)
@@ -286,6 +268,7 @@ func parseCreatorManifestLine(line string) (creatorManifest, bool, error) {
 	}
 	var event map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(line), &event); err != nil {
+		//nolint:nilerr // a non-JSON line simply is not a manifest
 		return creatorManifest{}, false, nil
 	}
 	for _, key := range []string{"result", "response", "message"} {
@@ -324,4 +307,26 @@ func parseCreatorManifestRaw(data []byte) (creatorManifest, bool) {
 		return creatorManifest{}, false
 	}
 	return manifest, true
+}
+
+func resolveGrokCreatorManifest(opts Options, stdoutTail, stdoutPath string) (creatorManifest, error) {
+	data, readErr := os.ReadFile(stdoutPath)
+	if readErr != nil {
+		data = []byte(stdoutTail)
+	}
+	if err := runner.WriteGrokCompletionMetadata(filepath.Join(opts.RunDir, runartifact.GrokSkeletonCompletionFilename), data); err != nil {
+		return creatorManifest{}, err
+	}
+	envelope, err := runner.DecodeGrokEnvelope(data)
+	if err != nil {
+		return creatorManifest{}, err
+	}
+	var manifest creatorManifest
+	if err := json.Unmarshal(runner.GrokResultPayload(envelope), &manifest); err != nil {
+		return creatorManifest{}, fmt.Errorf("decode grok creator manifest: %w", err)
+	}
+	if manifest.Outputs == nil || manifest.NoSkeletons == nil {
+		return creatorManifest{}, fmt.Errorf("invalid grok creator manifest: outputs and no_skeletons are required")
+	}
+	return manifest, nil
 }

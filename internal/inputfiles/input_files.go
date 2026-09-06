@@ -52,6 +52,7 @@ func PrepareReusing(workDir string, files []task.InputFile, prior []Prepared) ([
 		}
 		// Check the existing ancestor before MkdirAll, then the final parent after
 		// creation, so a symlinked parent cannot redirect copies outside workDir.
+		//nolint:gosec // G301: destination is inside the worktree checkout
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			_ = CleanupPrepared(prepared)
 			return nil, fmt.Errorf("create input file dir %s: %w", filepath.Dir(dst), err)
@@ -60,36 +61,17 @@ func PrepareReusing(workDir string, files []task.InputFile, prior []Prepared) ([
 			_ = CleanupPrepared(prepared)
 			return nil, fmt.Errorf("files[%d].destination: %w", i, err)
 		}
-		reused := false
-		contentSHA256 := ""
-		for _, known := range prior {
-			if known.Source != file.Source || known.Destination != filepath.Clean(file.Destination) || known.Commit != file.Commit || filepath.Clean(known.Path) != filepath.Clean(dst) {
-				continue
-			}
-			info, statErr := os.Lstat(dst)
-			if os.IsNotExist(statErr) {
-				break
-			}
-			if statErr != nil || !info.Mode().IsRegular() {
-				_ = CleanupPrepared(prepared)
-				return nil, fmt.Errorf("reused input must be a regular file: %s (%v)", dst, statErr)
-			}
-			data, readErr := os.ReadFile(dst)
-			if readErr != nil {
-				_ = CleanupPrepared(prepared)
-				return nil, readErr
-			}
-			sum := sha256.Sum256(data)
-			contentSHA256 = hex.EncodeToString(sum[:])
-			reused = true
-			break
+		contentSHA256, reused, err := reusePriorInput(file, dst, prior)
+		if err != nil {
+			_ = CleanupPrepared(prepared)
+			return nil, err
 		}
 		if !reused {
 			contentSHA256, err = copyFileNoOverwrite(file.Source, dst)
-		}
-		if err != nil {
-			_ = CleanupPrepared(prepared)
-			return nil, fmt.Errorf("copy input file %s to %s: %w", file.Source, dst, err)
+			if err != nil {
+				_ = CleanupPrepared(prepared)
+				return nil, fmt.Errorf("copy input file %s to %s: %w", file.Source, dst, err)
+			}
 		}
 		prepared = append(prepared, Prepared{
 			Source:        file.Source,
@@ -180,7 +162,7 @@ func copyFileNoOverwrite(src, dst string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("open %s: %w", src, err)
 	}
-	defer source.Close()
+	defer func() { _ = source.Close() }()
 	openedInfo, err := source.Stat()
 	if err != nil {
 		return "", fmt.Errorf("stat opened source %s: %w", src, err)
@@ -265,6 +247,7 @@ func pruneEmptyParents(root, dir string) error {
 			return nil
 		}
 		rel, err := filepath.Rel(root, dir)
+		//nolint:nilerr // leaving the root stops pruning; that is the safe end state
 		if err != nil || rel == ".." || filepath.IsAbs(rel) || rel == "." || strings.HasPrefix(rel, "../") {
 			return nil
 		}
@@ -273,7 +256,7 @@ func pruneEmptyParents(root, dir string) error {
 			if os.IsNotExist(err) {
 				return nil
 			}
-			return err
+			return fmt.Errorf("read dir %s: %w", dir, err)
 		}
 		if len(entries) > 0 {
 			return nil
@@ -282,8 +265,35 @@ func pruneEmptyParents(root, dir string) error {
 			if os.IsNotExist(err) {
 				return nil
 			}
-			return err
+			return fmt.Errorf("remove empty dir %s: %w", dir, err)
 		}
 		dir = filepath.Dir(dir)
 	}
+}
+
+// reusePriorInput returns the digest of an input a prior run already placed when
+// source, destination, and commit match; reused=false means the caller copies it.
+func reusePriorInput(file task.InputFile, dst string, prior []Prepared) (string, bool, error) {
+	for _, known := range prior {
+		if known.Source != file.Source || known.Destination != filepath.Clean(file.Destination) || known.Commit != file.Commit || filepath.Clean(known.Path) != filepath.Clean(dst) {
+			continue
+		}
+		info, statErr := os.Lstat(dst)
+		if os.IsNotExist(statErr) {
+			return "", false, nil
+		}
+		if statErr != nil {
+			return "", false, fmt.Errorf("reused input must be a regular file: %s: %w", dst, statErr)
+		}
+		if !info.Mode().IsRegular() {
+			return "", false, fmt.Errorf("reused input must be a regular file: %s", dst)
+		}
+		data, readErr := os.ReadFile(dst)
+		if readErr != nil {
+			return "", false, fmt.Errorf("read reused input %s: %w", dst, readErr)
+		}
+		sum := sha256.Sum256(data)
+		return hex.EncodeToString(sum[:]), true, nil
+	}
+	return "", false, nil
 }

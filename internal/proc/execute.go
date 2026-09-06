@@ -128,11 +128,7 @@ func envNameMatches(kv string, names []string) bool {
 		name = kv[:i]
 	}
 	for _, n := range names {
-		if runtime.GOOS == "windows" {
-			if strings.EqualFold(name, n) {
-				return true
-			}
-		} else if name == n {
+		if envNameEqual(name, n) {
 			return true
 		}
 	}
@@ -153,41 +149,19 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 		defer cancel()
 	}
 
-	cmd := exec.CommandContext(runCtx, command.Argv[0], command.Argv[1:]...)
-	// The cancellation branch below owns tree termination. CommandContext's
-	// default parent-only kill can orphan children before taskkill finds them.
-	cmd.Cancel = nil
-	cmd.SysProcAttr = processGroupAttr()
-	if command.WorkDir != "" {
-		cmd.Dir = command.WorkDir
-	}
-	if len(command.EnvAppend) > 0 || len(command.EnvRemove) > 0 {
-		cmd.Env = childEnv(command.EnvRemove, command.EnvAppend)
-	}
-	if command.Stdin != "" {
-		cmd.Stdin = strings.NewReader(command.Stdin)
-	}
+	cmd := buildExecCmd(runCtx, command)
 
-	tailBytes := opts.TailBytes
-	if tailBytes == 0 {
-		tailBytes = defaultTailBytes
-	}
-	stdout := newTailBuffer(tailBytes)
-	stderr := newTailBuffer(tailBytes)
-	stdoutWriter, stdoutFile, err := captureWriter(stdout, opts.StdoutPath)
+	sinks, err := newCaptureSinks(opts)
 	if err != nil {
 		return RunResult{}, err
 	}
-	stderrWriter, stderrFile, err := captureWriter(stderr, opts.StderrPath)
-	if err != nil {
-		_ = stdoutFile.Close()
-		return RunResult{}, err
-	}
+	stdout, stderr := sinks.stdout, sinks.stderr
+	stdoutFile, stderrFile := sinks.stdoutFile, sinks.stderrFile
 
 	var lastActivity atomic.Int64
 	lastActivity.Store(time.Now().UnixNano())
-	cmd.Stdout = &activityWriter{w: stdoutWriter, last: &lastActivity}
-	cmd.Stderr = &activityWriter{w: stderrWriter, last: &lastActivity}
+	cmd.Stdout = &activityWriter{w: sinks.stdoutWriter, last: &lastActivity}
+	cmd.Stderr = &activityWriter{w: sinks.stderrWriter, last: &lastActivity}
 
 	if err := cmd.Start(); err != nil {
 		_ = stdoutFile.Close()
@@ -199,26 +173,7 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 	// --force can SIGKILL it if the daemon itself is being torn down.
 	// Registration is best-effort: unregister always runs when Wait returns so
 	// transient registry write errors cannot leak entries.
-	registry := DefaultChildRegistry()
-	if scoped, ok := ctx.Value(childRegistryContextKey{}).(*ChildRegistry); ok {
-		registry = scoped
-	}
-	if registry != nil && cmd.Process != nil {
-		pgid := cmd.Process.Pid
-		if reportedPGID, perr := processGroupID(cmd); perr == nil && reportedPGID > 0 {
-			pgid = reportedPGID
-		}
-		_ = registry.Register(ChildRecord{
-			PID:     cmd.Process.Pid,
-			PGID:    pgid,
-			Argv0:   command.Argv[0],
-			WorkDir: command.WorkDir,
-		})
-	}
-	registeredPID := 0
-	if cmd.Process != nil {
-		registeredPID = cmd.Process.Pid
-	}
+	registry, registeredPID := registerChildProcess(ctx, cmd, command)
 
 	done := make(chan error, 1)
 	go func() {
@@ -228,29 +183,7 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 	var idleTimedOut atomic.Bool
 	watchdogStop := make(chan struct{})
 	if opts.IdleTimeout > 0 {
-		go func() {
-			interval := opts.IdleTimeout / 4
-			if interval < minIdleCheckInterval {
-				interval = minIdleCheckInterval
-			}
-			if interval > maxIdleCheckInterval {
-				interval = maxIdleCheckInterval
-			}
-			ticker := time.NewTicker(interval)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-watchdogStop:
-					return
-				case now := <-ticker.C:
-					if now.Sub(time.Unix(0, lastActivity.Load())) >= opts.IdleTimeout {
-						idleTimedOut.Store(true)
-						killProcessGroup(cmd)
-						return
-					}
-				}
-			}
-		}()
+		go watchIdleOutput(idleWatch{Cmd: cmd, Timeout: opts.IdleTimeout, LastActivity: &lastActivity, TimedOut: &idleTimedOut, Stop: watchdogStop})
 	}
 
 	var runErr error
@@ -281,26 +214,26 @@ func RunCommand(ctx context.Context, command Command, opts RunOptions) (RunResul
 	if cmd.ProcessState != nil {
 		result.ExitCode = cmd.ProcessState.ExitCode()
 	}
-	var closeErr error
-	if !waitTimedOut {
-		closeErr = errors.Join(stdoutFile.Close(), stderrFile.Close())
+	release := func() error {
+		err := errors.Join(stdoutFile.Close(), stderrFile.Close())
 		if registry != nil && registeredPID > 0 {
 			_ = registry.Unregister(registeredPID)
 		}
-	} else {
+		return err
+	}
+	var closeErr error
+	if waitTimedOut {
 		// cmd.Wait owns the stdout/stderr copy goroutines. Closing the capture
 		// files before it returns can race with those writers, so final close is
 		// deferred to a goroutine. If the OS never reaps the process, this leaks
-		// until the daemon exits; at that point returning is preferable to blocking
-		// all task processing indefinitely.
+		// until the daemon exits; at that point returning is preferable to
+		// blocking all task processing indefinitely.
 		go func() {
 			<-done
-			_ = stdoutFile.Close()
-			_ = stderrFile.Close()
-			if registry != nil && registeredPID > 0 {
-				_ = registry.Unregister(registeredPID)
-			}
+			_ = release()
 		}()
+	} else {
+		closeErr = release()
 	}
 	if result.IdleTimedOut {
 		return result, errors.Join(&CommandError{
@@ -346,6 +279,7 @@ func (a *activityWriter) Write(p []byte) (int, error) {
 	if n > 0 {
 		a.last.Store(time.Now().UnixNano())
 	}
+	//nolint:wrapcheck // io.Writer contract: the underlying error passes through
 	return n, err
 }
 
@@ -392,4 +326,120 @@ func (b *tailBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return string(append([]byte(nil), b.data...))
+}
+
+// buildExecCmd prepares the child. RunCommand owns tree termination, so
+// CommandContext's parent-only kill is disabled to avoid orphaning children.
+func buildExecCmd(runCtx context.Context, command Command) *exec.Cmd {
+	cmd := exec.CommandContext(runCtx, command.Argv[0], command.Argv[1:]...)
+	cmd.Cancel = nil
+	cmd.SysProcAttr = processGroupAttr()
+	if command.WorkDir != "" {
+		cmd.Dir = command.WorkDir
+	}
+	if len(command.EnvAppend) > 0 || len(command.EnvRemove) > 0 {
+		cmd.Env = childEnv(command.EnvRemove, command.EnvAppend)
+	}
+	if command.Stdin != "" {
+		cmd.Stdin = strings.NewReader(command.Stdin)
+	}
+	return cmd
+}
+
+// captureSinks are the in-memory tails and optional evidence files a command's
+// stdout and stderr are copied to.
+type captureSinks struct {
+	stdout       *tailBuffer
+	stderr       *tailBuffer
+	stdoutWriter io.Writer
+	stderrWriter io.Writer
+	stdoutFile   io.Closer
+	stderrFile   io.Closer
+}
+
+func newCaptureSinks(opts RunOptions) (captureSinks, error) {
+	tailBytes := opts.TailBytes
+	if tailBytes == 0 {
+		tailBytes = defaultTailBytes
+	}
+	sinks := captureSinks{stdout: newTailBuffer(tailBytes), stderr: newTailBuffer(tailBytes)}
+	stdoutWriter, stdoutFile, err := captureWriter(sinks.stdout, opts.StdoutPath)
+	if err != nil {
+		return captureSinks{}, err
+	}
+	stderrWriter, stderrFile, err := captureWriter(sinks.stderr, opts.StderrPath)
+	if err != nil {
+		_ = stdoutFile.Close()
+		return captureSinks{}, err
+	}
+	sinks.stdoutWriter, sinks.stdoutFile = stdoutWriter, stdoutFile
+	sinks.stderrWriter, sinks.stderrFile = stderrWriter, stderrFile
+	return sinks, nil
+}
+
+// registerChildProcess tracks the child process group so `daemon stop --force`
+// can reach it. It is best-effort: unregister always runs when Wait returns.
+func registerChildProcess(ctx context.Context, cmd *exec.Cmd, command Command) (*ChildRegistry, int) {
+	registry := DefaultChildRegistry()
+	if scoped, ok := ctx.Value(childRegistryContextKey{}).(*ChildRegistry); ok {
+		registry = scoped
+	}
+	if cmd.Process == nil {
+		return registry, 0
+	}
+	if registry != nil {
+		pgid := cmd.Process.Pid
+		if reportedPGID, err := processGroupID(cmd); err == nil && reportedPGID > 0 {
+			pgid = reportedPGID
+		}
+		_ = registry.Register(ChildRecord{
+			PID:     cmd.Process.Pid,
+			PGID:    pgid,
+			Argv0:   command.Argv[0],
+			WorkDir: command.WorkDir,
+		})
+	}
+	return registry, cmd.Process.Pid
+}
+
+// idleWatch is one command's idle-output watchdog.
+type idleWatch struct {
+	Cmd          *exec.Cmd
+	Timeout      time.Duration
+	LastActivity *atomic.Int64
+	TimedOut     *atomic.Bool
+	Stop         <-chan struct{}
+}
+
+func watchIdleOutput(w idleWatch) {
+	interval := w.Timeout / 4
+	if interval < minIdleCheckInterval {
+		interval = minIdleCheckInterval
+	}
+	if interval > maxIdleCheckInterval {
+		interval = maxIdleCheckInterval
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-w.Stop:
+			return
+		case now := <-ticker.C:
+			if now.Sub(time.Unix(0, w.LastActivity.Load())) >= w.Timeout {
+				w.TimedOut.Store(true)
+				killProcessGroup(w.Cmd)
+				return
+			}
+		}
+	}
+}
+
+// envNameEqual compares environment variable names using the platform's
+// case rule: Windows environment names are case-insensitive.
+func envNameEqual(name, want string) bool {
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(name, want)
+	}
+	return name == want
 }

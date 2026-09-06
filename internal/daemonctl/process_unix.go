@@ -4,6 +4,7 @@ package daemonctl
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -39,12 +40,14 @@ func ProcessInfo(pid int) (ProcessInfoResult, error) {
 	}, nil
 }
 
+// psField runs on its own bounded budget rather than a caller context: a
+// liveness probe must still answer while the caller is shutting down.
 func psField(pid, field string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	output, err := exec.CommandContext(ctx, "ps", "-p", pid, "-o", field).Output()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("read ps field %s for pid %s: %w", field, pid, err)
 	}
 	return strings.TrimSpace(string(output)), nil
 }

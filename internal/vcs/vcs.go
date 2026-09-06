@@ -42,6 +42,37 @@ type Binaries struct {
 	GH  string
 }
 
+// Repo names the working tree a git or gh command runs in, its binaries, and
+// the run directory for evidence. RunDir is empty when no evidence is written.
+type Repo struct {
+	Bins    Binaries
+	WorkDir string
+	RunDir  string
+}
+
+// PullRequestSpec is the content of the pull request Galley opens.
+type PullRequestSpec struct {
+	Title    string
+	BodyPath string
+	Base     string
+}
+
+// ghAPIRequest is one `gh api` call: the API path, the label used in error and
+// evidence text, and any extra gh arguments.
+type ghAPIRequest struct {
+	Path      string
+	Label     string
+	ExtraArgs []string
+}
+
+// commandEvidence names where a command's evidence files land and how its
+// failure is described.
+type commandEvidence struct {
+	RunDir  string
+	Label   string
+	Failure string
+}
+
 func (b Binaries) git() string {
 	if b.Git != "" {
 		return b.Git
@@ -57,11 +88,11 @@ func (b Binaries) gh() string {
 }
 
 // AddPaths stages literal worktree paths, using stdin on Windows and for large sets.
-func AddPaths(ctx context.Context, bins Binaries, workDir, runDir string, paths []string) error {
-	return addPathsForOS(ctx, bins, workDir, runDir, paths, runtime.GOOS)
+func AddPaths(ctx context.Context, repo Repo, paths []string) error {
+	return addPathsForOS(ctx, repo, paths, runtime.GOOS)
 }
 
-func addPathsForOS(ctx context.Context, bins Binaries, workDir, runDir string, paths []string, goos string) error {
+func addPathsForOS(ctx context.Context, repo Repo, paths []string, goos string) error {
 	stagePaths := make([]string, 0, len(paths))
 	seen := make(map[string]bool, len(paths))
 	for _, path := range paths {
@@ -76,15 +107,15 @@ func addPathsForOS(ctx context.Context, bins Binaries, workDir, runDir string, p
 		return fmt.Errorf("git add paths is empty")
 	}
 	pathspecs := literalPathspecs(stagePaths)
-	cmd := proc.Command{WorkDir: workDir}
+	cmd := proc.Command{WorkDir: repo.WorkDir}
 	if goos == "windows" || len(strings.Join(pathspecs, "\x00")) > 32*1024 {
 		// Bound argv on every OS and preserve literal filename bytes via NUL separators.
-		cmd.Argv = proc.GitArgs(bins.git(), "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul")
+		cmd.Argv = proc.GitArgs(repo.Bins.git(), "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul")
 		cmd.Stdin = strings.Join(pathspecs, "\x00") + "\x00"
 	} else {
-		cmd.Argv = proc.GitArgs(bins.git(), append([]string{"add", "-A", "--"}, pathspecs...)...)
+		cmd.Argv = proc.GitArgs(repo.Bins.git(), append([]string{"add", "-A", "--"}, pathspecs...)...)
 	}
-	_, err := runCommandWithEvidence(ctx, cmd, runDir, "git_add", "git add failed")
+	_, err := runCommandWithEvidence(ctx, cmd, commandEvidence{RunDir: repo.RunDir, Label: "git_add", Failure: "git add failed"})
 	return err
 }
 
@@ -103,10 +134,10 @@ func addPathsForOS(ctx context.Context, bins Binaries, workDir, runDir string, p
 // directory and leak the context-only input into the supervisor diff. The
 // `all` mode emits one entry per untracked file, which is the resolution
 // the reviewable-path-set contract requires.
-func StatusPorcelainZ(ctx context.Context, bins Binaries, workDir string) (string, error) {
+func StatusPorcelainZ(ctx context.Context, repo Repo) (string, error) {
 	result, err := proc.RunVCSCommand(ctx, proc.Command{
-		WorkDir: workDir,
-		Argv:    proc.GitArgs(bins.git(), "status", "--porcelain=v1", "-z", "--untracked-files=all"),
+		WorkDir: repo.WorkDir,
+		Argv:    proc.GitArgs(repo.Bins.git(), "status", "--porcelain=v1", "-z", "--untracked-files=all"),
 	}, proc.RunOptions{TailBytes: -1})
 	if err != nil {
 		return "", fmt.Errorf("git status --porcelain -z (review staging discovery) failed: %w", err)
@@ -116,11 +147,11 @@ func StatusPorcelainZ(ctx context.Context, bins Binaries, workDir string) (strin
 
 // StagePathsForReview stages only literal executor-produced paths and records
 // skipped or completed staging evidence for the supervisor.
-func StagePathsForReview(ctx context.Context, bins Binaries, workDir, runDir string, paths []string) error {
-	return stagePathsForReviewForOS(ctx, bins, workDir, runDir, paths, runtime.GOOS)
+func StagePathsForReview(ctx context.Context, repo Repo, paths []string) error {
+	return stagePathsForReviewForOS(ctx, repo, paths, runtime.GOOS)
 }
 
-func stagePathsForReviewForOS(ctx context.Context, bins Binaries, workDir, runDir string, paths []string, goos string) error {
+func stagePathsForReviewForOS(ctx context.Context, repo Repo, paths []string, goos string) error {
 	stagePaths := dedupeReviewPaths(paths)
 	if len(stagePaths) == 0 {
 		// The executor produced no reviewable change. Persist a skipped
@@ -130,22 +161,22 @@ func stagePathsForReviewForOS(ctx context.Context, bins Binaries, workDir, runDi
 		// `git add -A` over the whole worktree would re-stage every
 		// dirty path (including context-only commit:false inputs),
 		// defeating the explicit reviewable-set contract.
-		return writeReviewStagingSkipped(runDir, "no executor-produced paths to stage")
+		return writeReviewStagingSkipped(repo.RunDir, "no executor-produced paths to stage")
 	}
 	pathspecs := literalPathspecs(stagePaths)
-	cmd := proc.Command{WorkDir: workDir}
+	cmd := proc.Command{WorkDir: repo.WorkDir}
 	if goos == "windows" || len(strings.Join(pathspecs, "\x00")) > 32*1024 {
 		// Large reviews use the same literal stdin pathspec protocol as finalization.
-		cmd.Argv = proc.GitArgs(bins.git(), "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul")
+		cmd.Argv = proc.GitArgs(repo.Bins.git(), "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul")
 		cmd.Stdin = strings.Join(pathspecs, "\x00") + "\x00"
 	} else {
-		cmd.Argv = proc.GitArgs(bins.git(), append([]string{"add", "-A", "--"}, pathspecs...)...)
+		cmd.Argv = proc.GitArgs(repo.Bins.git(), append([]string{"add", "-A", "--"}, pathspecs...)...)
 	}
 	result, err := proc.RunVCSCommand(ctx, cmd, proc.RunOptions{
-		StdoutPath: filepath.Join(runDir, "git_add_review.stdout.log"),
-		StderrPath: filepath.Join(runDir, "git_add_review.stderr.log"),
+		StdoutPath: filepath.Join(repo.RunDir, "git_add_review.stdout.log"),
+		StderrPath: filepath.Join(repo.RunDir, "git_add_review.stderr.log"),
 	})
-	writeErr := writeJSON(filepath.Join(runDir, "git_add_review_result.json"), result)
+	writeErr := writeJSON(filepath.Join(repo.RunDir, "git_add_review_result.json"), result)
 	if err != nil {
 		return errors.Join(fmt.Errorf("git add -A (review staging) failed: %w", err), writeErr)
 	}
@@ -191,10 +222,10 @@ func literalPathspecs(paths []string) []string {
 
 // IsAncestor reports whether ancestor is reachable from descendant in workDir.
 // Exit code 0 is yes, 1 is no, and any other exit code is an error.
-func IsAncestor(ctx context.Context, bins Binaries, workDir, ancestor, descendant string) (bool, error) {
+func IsAncestor(ctx context.Context, repo Repo, ancestor, descendant string) (bool, error) {
 	result, err := proc.RunVCSCommand(ctx, proc.Command{
-		WorkDir: workDir,
-		Argv:    proc.GitArgs(bins.git(), "merge-base", "--is-ancestor", ancestor, descendant),
+		WorkDir: repo.WorkDir,
+		Argv:    proc.GitArgs(repo.Bins.git(), "merge-base", "--is-ancestor", ancestor, descendant),
 	}, proc.RunOptions{})
 	if err == nil {
 		return true, nil
@@ -206,37 +237,37 @@ func IsAncestor(ctx context.Context, bins Binaries, workDir, ancestor, descendan
 }
 
 // Commit creates a git commit and writes command evidence.
-func Commit(ctx context.Context, bins Binaries, workDir, runDir, message string) error {
+func Commit(ctx context.Context, repo Repo, message string) error {
 	_, err := runCommandWithEvidence(ctx, proc.Command{
-		WorkDir: workDir,
-		Argv:    proc.GitArgs(bins.git(), "commit", "-m", message),
-	}, runDir, "git_commit", "git commit failed")
+		WorkDir: repo.WorkDir,
+		Argv:    proc.GitArgs(repo.Bins.git(), "commit", "-m", message),
+	}, commandEvidence{RunDir: repo.RunDir, Label: "git_commit", Failure: "git commit failed"})
 	return err
 }
 
 // PushCurrentBranch pushes HEAD to origin and writes command evidence.
-func PushCurrentBranch(ctx context.Context, bins Binaries, workDir, runDir string) error {
+func PushCurrentBranch(ctx context.Context, repo Repo) error {
 	_, err := runCommandWithEvidence(ctx, proc.Command{
-		WorkDir: workDir,
-		Argv:    proc.GitArgs(bins.git(), "push", "-u", "origin", "HEAD"),
-	}, runDir, "git_push", "git push failed")
+		WorkDir: repo.WorkDir,
+		Argv:    proc.GitArgs(repo.Bins.git(), "push", "-u", "origin", "HEAD"),
+	}, commandEvidence{RunDir: repo.RunDir, Label: "git_push", Failure: "git push failed"})
 	return err
 }
 
 // CreatePullRequest opens a GitHub PR with gh and writes command evidence.
-func CreatePullRequest(ctx context.Context, bins Binaries, workDir, runDir, bodyPath, base, title string) (string, error) {
-	absoluteBodyPath, err := filepath.Abs(bodyPath)
+func CreatePullRequest(ctx context.Context, repo Repo, spec PullRequestSpec) (string, error) {
+	absoluteBodyPath, err := filepath.Abs(spec.BodyPath)
 	if err != nil {
 		return "", fmt.Errorf("resolve pr body path: %w", err)
 	}
-	argv := []string{bins.gh(), "pr", "create", "--title", title, "--body-file", absoluteBodyPath}
-	if base != "" {
-		argv = append(argv, "--base", base)
+	argv := []string{repo.Bins.gh(), "pr", "create", "--title", spec.Title, "--body-file", absoluteBodyPath}
+	if spec.Base != "" {
+		argv = append(argv, "--base", spec.Base)
 	}
 	result, err := runCommandWithEvidence(ctx, proc.Command{
-		WorkDir: workDir,
+		WorkDir: repo.WorkDir,
 		Argv:    argv,
-	}, runDir, "gh_pr_create", "gh pr create failed")
+	}, commandEvidence{RunDir: repo.RunDir, Label: "gh_pr_create", Failure: "gh pr create failed"})
 	if err != nil {
 		return "", err
 	}
@@ -254,20 +285,18 @@ func CreatePullRequest(ctx context.Context, bins Binaries, workDir, runDir, body
 // response was lost, the URL is recovered; if no PR exists, the function
 // returns "" with a nil error so the caller can surface the original
 // create-failure unchanged.
-func FetchPRURLForCurrentBranch(ctx context.Context, bins Binaries, workDir, runDir string) (string, error) {
+func FetchPRURLForCurrentBranch(ctx context.Context, repo Repo) (string, error) {
 	cmd := proc.Command{
-		WorkDir: workDir,
-		Argv:    []string{bins.gh(), "pr", "view", "--json", "url", "-q", ".url"},
+		WorkDir: repo.WorkDir,
+		Argv:    []string{repo.Bins.gh(), "pr", "view", "--json", "url", "-q", ".url"},
 	}
-	result, runErr, writeErr := runCommandEvidence(ctx, cmd, runDir, "gh_pr_view")
-	if runErr != nil {
-		if isGHPRViewNoPullRequest(result.Stderr) {
-			if writeErr != nil {
-				return "", writeErr
-			}
-			return "", nil
-		}
+	result, runErr, writeErr := runCommandEvidence(ctx, cmd, repo.RunDir, "gh_pr_view")
+	if runErr != nil && !isGHPRViewNoPullRequest(result.Stderr) {
 		return "", errors.Join(fmt.Errorf("gh pr view failed: %w", runErr), writeErr)
+	}
+	if runErr != nil {
+		// No open PR for this branch: recover with an empty URL, not an error.
+		return "", writeErr
 	}
 	if writeErr != nil {
 		return "", writeErr
@@ -281,10 +310,10 @@ func isGHPRViewNoPullRequest(stderr string) bool {
 	return ghPRViewNoPullRequestPattern.MatchString(stderr)
 }
 
-func runCommandWithEvidence(ctx context.Context, cmd proc.Command, runDir, label, failure string) (proc.RunResult, error) {
-	result, runErr, writeErr := runCommandEvidence(ctx, cmd, runDir, label)
+func runCommandWithEvidence(ctx context.Context, cmd proc.Command, ev commandEvidence) (proc.RunResult, error) {
+	result, runErr, writeErr := runCommandEvidence(ctx, cmd, ev.RunDir, ev.Label)
 	if runErr != nil {
-		return result, errors.Join(fmt.Errorf("%s: %w", failure, runErr), writeErr)
+		return result, errors.Join(fmt.Errorf("%s: %w", ev.Failure, runErr), writeErr)
 	}
 	if writeErr != nil {
 		return result, writeErr
@@ -302,13 +331,13 @@ func runCommandEvidence(ctx context.Context, cmd proc.Command, runDir, label str
 }
 
 // FetchPRComments returns all PR comments using gh api pagination.
-func FetchPRComments(ctx context.Context, bins Binaries, root, prURL string) ([]PRComment, error) {
-	owner, repo, number, err := ParseGitHubPRURL(prURL)
+func FetchPRComments(ctx context.Context, repo Repo, prURL string) ([]PRComment, error) {
+	owner, repoName, number, err := ParseGitHubPRURL(prURL)
 	if err != nil {
 		return nil, err
 	}
-	apiPath := fmt.Sprintf("repos/%s/%s/issues/%s/comments", owner, repo, number)
-	output, err := fetchGHAPIOutput(ctx, bins, root, apiPath, "PR comments", "--paginate", "--slurp")
+	apiPath := fmt.Sprintf("repos/%s/%s/issues/%s/comments", owner, repoName, number)
+	output, err := fetchGHAPIOutput(ctx, repo, ghAPIRequest{Path: apiPath, Label: "PR comments", ExtraArgs: []string{"--paginate", "--slurp"}})
 	if err != nil {
 		return nil, err
 	}
@@ -320,19 +349,19 @@ func FetchPRComments(ctx context.Context, bins Binaries, root, prURL string) ([]
 }
 
 // PostPRComment posts a single GitHub PR comment via gh api.
-func PostPRComment(ctx context.Context, bins Binaries, root, prURL, body string) error {
-	owner, repo, number, err := ParseGitHubPRURL(prURL)
+func PostPRComment(ctx context.Context, repo Repo, prURL, body string) error {
+	owner, repoName, number, err := ParseGitHubPRURL(prURL)
 	if err != nil {
 		return err
 	}
-	apiPath := fmt.Sprintf("repos/%s/%s/issues/%s/comments", owner, repo, number)
+	apiPath := fmt.Sprintf("repos/%s/%s/issues/%s/comments", owner, repoName, number)
 	payload, err := json.Marshal(map[string]string{"body": body})
 	if err != nil {
 		return fmt.Errorf("encode PR comment body: %w", err)
 	}
 	_, err = proc.RunVCSCommand(ctx, proc.Command{
-		WorkDir: root,
-		Argv:    []string{bins.gh(), "api", "-X", "POST", apiPath, "--input", "-"},
+		WorkDir: repo.WorkDir,
+		Argv:    []string{repo.Bins.gh(), "api", "-X", "POST", apiPath, "--input", "-"},
 		Stdin:   string(payload),
 	}, proc.RunOptions{})
 	if err != nil {
@@ -345,17 +374,17 @@ func PostPRComment(ctx context.Context, bins Binaries, root, prURL, body string)
 // Galley persists the result on the task PR record at PR creation time so
 // later PR comment authorization can verify the comment author matches the
 // PR author without re-fetching from GitHub.
-func FetchPRAuthorLogin(ctx context.Context, bins Binaries, root, prURL string) (string, error) {
-	owner, repo, number, err := ParseGitHubPRURL(prURL)
+func FetchPRAuthorLogin(ctx context.Context, repo Repo, prURL string) (string, error) {
+	owner, repoName, number, err := ParseGitHubPRURL(prURL)
 	if err != nil {
 		return "", err
 	}
-	apiPath := fmt.Sprintf("repos/%s/%s/pulls/%s", owner, repo, number)
+	apiPath := fmt.Sprintf("repos/%s/%s/pulls/%s", owner, repoName, number)
 	payload, err := fetchGHAPIJSON[struct {
 		User struct {
 			Login string `json:"login"`
 		} `json:"user"`
-	}](ctx, bins, root, apiPath, "PR author")
+	}](ctx, repo, ghAPIRequest{Path: apiPath, Label: "PR author"})
 	if err != nil {
 		return "", err
 	}
@@ -369,49 +398,49 @@ func FetchPRAuthorLogin(ctx context.Context, bins Binaries, root, prURL string) 
 }
 
 // FetchPRState returns the current GitHub PR state via gh api.
-func FetchPRState(ctx context.Context, bins Binaries, root, prURL string) (PullRequestState, error) {
-	owner, repo, number, err := ParseGitHubPRURL(prURL)
+func FetchPRState(ctx context.Context, repo Repo, prURL string) (PullRequestState, error) {
+	owner, repoName, number, err := ParseGitHubPRURL(prURL)
 	if err != nil {
 		return PullRequestState{}, err
 	}
-	apiPath := fmt.Sprintf("repos/%s/%s/pulls/%s", owner, repo, number)
-	return fetchGHAPIJSON[PullRequestState](ctx, bins, root, apiPath, "PR state")
+	apiPath := fmt.Sprintf("repos/%s/%s/pulls/%s", owner, repoName, number)
+	return fetchGHAPIJSON[PullRequestState](ctx, repo, ghAPIRequest{Path: apiPath, Label: "PR state"})
 }
 
-func fetchGHAPIJSON[T any](ctx context.Context, bins Binaries, root, apiPath, label string, extraArgs ...string) (T, error) {
+func fetchGHAPIJSON[T any](ctx context.Context, repo Repo, req ghAPIRequest) (T, error) {
 	var zero T
-	output, err := fetchGHAPIOutput(ctx, bins, root, apiPath, label, extraArgs...)
+	output, err := fetchGHAPIOutput(ctx, repo, req)
 	if err != nil {
 		return zero, err
 	}
 	var value T
 	if err := json.Unmarshal(output, &value); err != nil {
-		return zero, fmt.Errorf("decode %s: %w", label, err)
+		return zero, fmt.Errorf("decode %s: %w", req.Label, err)
 	}
 	return value, nil
 }
 
-func fetchGHAPIOutput(ctx context.Context, bins Binaries, root, apiPath, label string, extraArgs ...string) ([]byte, error) {
+func fetchGHAPIOutput(ctx context.Context, repo Repo, req ghAPIRequest) ([]byte, error) {
 	stdoutFile, err := os.CreateTemp("", "galley-gh-api-*.json")
 	if err != nil {
-		return nil, fmt.Errorf("create %s temp file: %w", label, err)
+		return nil, fmt.Errorf("create %s temp file: %w", req.Label, err)
 	}
 	stdoutPath := stdoutFile.Name()
 	if err := stdoutFile.Close(); err != nil {
-		return nil, fmt.Errorf("close %s temp file: %w", label, err)
+		return nil, fmt.Errorf("close %s temp file: %w", req.Label, err)
 	}
-	defer os.Remove(stdoutPath)
-	argv := append([]string{bins.gh(), "api", apiPath}, extraArgs...)
+	defer func() { _ = os.Remove(stdoutPath) }()
+	argv := append([]string{repo.Bins.gh(), "api", req.Path}, req.ExtraArgs...)
 	_, err = proc.RunVCSCommand(ctx, proc.Command{
-		WorkDir: root,
+		WorkDir: repo.WorkDir,
 		Argv:    argv,
 	}, proc.RunOptions{StdoutPath: stdoutPath})
 	if err != nil {
-		return nil, fmt.Errorf("gh api %s failed: %w", label, err)
+		return nil, fmt.Errorf("gh api %s failed: %w", req.Label, err)
 	}
 	output, err := os.ReadFile(stdoutPath)
 	if err != nil {
-		return nil, fmt.Errorf("read %s response: %w", label, err)
+		return nil, fmt.Errorf("read %s response: %w", req.Label, err)
 	}
 	return output, nil
 }
@@ -428,7 +457,7 @@ func DecodePRComments(stdout string) ([]PRComment, error) {
 	}
 	var comments []PRComment
 	if err := json.Unmarshal([]byte(stdout), &comments); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode PR comments: %w", err)
 	}
 	return comments, nil
 }

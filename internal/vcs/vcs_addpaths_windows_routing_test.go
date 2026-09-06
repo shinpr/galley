@@ -42,7 +42,7 @@ cat > `+stdinPath+`
 		paths[i] = paths[i] + filepath.ToSlash("/idx_"+fmt.Sprintf("%06d", i))
 	}
 
-	if err := addPathsForOS(t.Context(), Binaries{Git: fakeGit}, workDir, runDir, paths, "windows"); err != nil {
+	if err := addPathsForOS(t.Context(), Repo{Bins: Binaries{Git: fakeGit}, WorkDir: workDir, RunDir: runDir}, paths, "windows"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -95,7 +95,7 @@ printf '%s\n' "$*" > `+capturePath+`
 		t.Fatal(err)
 	}
 
-	if err := addPathsForOS(t.Context(), Binaries{Git: fakeGit}, workDir, runDir, []string{"internal/foo.go", "internal/bar.go"}, "linux"); err != nil {
+	if err := addPathsForOS(t.Context(), Repo{Bins: Binaries{Git: fakeGit}, WorkDir: workDir, RunDir: runDir}, []string{"internal/foo.go", "internal/bar.go"}, "linux"); err != nil {
 		t.Fatal(err)
 	}
 

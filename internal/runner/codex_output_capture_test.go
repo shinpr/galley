@@ -188,49 +188,61 @@ func TestCodexCommandPlanConvergesCanonicalSchemaInputs(t *testing.T) {
 	}
 	derivatives := make([][]byte, 0, len(cases))
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			attemptDir := t.TempDir()
-			opts := CodexFromTask(minimalCodexTask())
-			opts.WorkDir = "/tmp/codex-schema-boundary"
-			opts.AttemptDir = attemptDir
-			opts.JSONSchema = tc.inline
-			opts.JSONSchemaFile = tc.file
-			opts.Prompt = "work order"
-
-			plan, err := CodexCommandPlan(opts)
-			if err != nil {
-				t.Fatalf("CodexCommandPlan: %v", err)
-			}
-			schemaFlag := flagValue(t, plan.Argv, "--output-schema")
-			if schemaFlag == "" {
-				t.Fatalf("argv missing --output-schema: %v", plan.Argv)
-			}
-			if filepath.Dir(schemaFlag) != attemptDir {
-				t.Fatalf("output-schema must be attempt-scoped derivative: got %q, want under %q", schemaFlag, attemptDir)
-			}
-			if tc.file != "" && schemaFlag == tc.file {
-				t.Fatalf("argv must reference normalized derivative, not canonical file %q", tc.file)
-			}
-			derivative, err := os.ReadFile(schemaFlag)
-			if err != nil {
-				t.Fatalf("read materialized derivative: %v", err)
-			}
-			assertCodexNormalized(t, derivative)
-			if tc.file != "" {
-				source, err := os.ReadFile(tc.file)
-				if err != nil {
-					t.Fatalf("read canonical source: %v", err)
-				}
-				if !bytes.Equal(source, []byte(canonical)) {
-					t.Fatalf("canonical source file must not be mutated")
-				}
-			}
-			derivatives = append(derivatives, derivative)
+			derivatives = append(derivatives, materializeCodexSchemaDerivative(t, tc.inline, tc.file, canonical))
 		})
 	}
 	if !bytes.Equal(derivatives[0], derivatives[1]) {
 		t.Fatalf("canonical inputs must converge on one normalized artifact")
+	}
+}
+
+// materializeCodexSchemaDerivative builds the plan and returns the attempt-scoped
+// normalized schema; any canonical source file stays unmutated.
+func materializeCodexSchemaDerivative(t *testing.T, inline, file, canonical string) []byte {
+	t.Helper()
+	attemptDir := t.TempDir()
+	opts := CodexFromTask(minimalCodexTask())
+	opts.WorkDir = "/tmp/codex-schema-boundary"
+	opts.AttemptDir = attemptDir
+	opts.JSONSchema = inline
+	opts.JSONSchemaFile = file
+	opts.Prompt = "work order"
+
+	plan, err := CodexCommandPlan(opts)
+	if err != nil {
+		t.Fatalf("CodexCommandPlan: %v", err)
+	}
+	schemaFlag := flagValue(t, plan.Argv, "--output-schema")
+	if schemaFlag == "" {
+		t.Fatalf("argv missing --output-schema: %v", plan.Argv)
+	}
+	if filepath.Dir(schemaFlag) != attemptDir {
+		t.Fatalf("output-schema must be attempt-scoped derivative: got %q, want under %q", schemaFlag, attemptDir)
+	}
+	if file != "" && schemaFlag == file {
+		t.Fatalf("argv must reference normalized derivative, not canonical file %q", file)
+	}
+	derivative, err := os.ReadFile(schemaFlag)
+	if err != nil {
+		t.Fatalf("read materialized derivative: %v", err)
+	}
+	assertCodexNormalized(t, derivative)
+	assertCanonicalSourceUnchanged(t, file, canonical)
+	return derivative
+}
+
+func assertCanonicalSourceUnchanged(t *testing.T, file, canonical string) {
+	t.Helper()
+	if file == "" {
+		return
+	}
+	source, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatalf("read canonical source: %v", err)
+	}
+	if !bytes.Equal(source, []byte(canonical)) {
+		t.Fatalf("canonical source file must not be mutated")
 	}
 }
 
@@ -347,10 +359,10 @@ func TestPrepareCodexOutputSchemaRejectsAliasedDestination(t *testing.T) {
 		name  string
 		setup func(t *testing.T) (destDir, filename string)
 	}{
-		{name: "exact-path", setup: func(t *testing.T) (string, string) {
+		{name: "exact-path", setup: func(_ *testing.T) (string, string) {
 			return filepath.Dir(sourcePath), filepath.Base(sourcePath)
 		}},
-		{name: "cleaned-path", setup: func(t *testing.T) (string, string) {
+		{name: "cleaned-path", setup: func(_ *testing.T) (string, string) {
 			return filepath.Dir(sourcePath), "./" + filepath.Base(sourcePath)
 		}},
 		{name: "symlink-alias", setup: func(t *testing.T) (string, string) {
@@ -577,23 +589,6 @@ func objectProp(t *testing.T, parent map[string]any, name string) map[string]any
 		t.Fatalf("property %q is not an object: %#v", name, parent[name])
 	}
 	return got
-}
-
-func assertNoSchemaKeyword(t *testing.T, node any, keyword string) {
-	t.Helper()
-	switch value := node.(type) {
-	case map[string]any:
-		if _, ok := value[keyword]; ok {
-			t.Fatalf("Codex output schema contains unsupported %q keyword: %#v", keyword, value)
-		}
-		for _, child := range value {
-			assertNoSchemaKeyword(t, child, keyword)
-		}
-	case []any:
-		for _, child := range value {
-			assertNoSchemaKeyword(t, child, keyword)
-		}
-	}
 }
 
 func requiredSet(t *testing.T, schema map[string]any) map[string]bool {

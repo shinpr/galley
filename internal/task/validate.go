@@ -95,7 +95,7 @@ func ValidateStructural(t Task) ValidationResult {
 		require(&result, validTaskIDPattern.MatchString(t.ID), "id must contain only letters, numbers, dot, underscore, and dash")
 	}
 	require(&result, slices.Contains(validModes, t.Mode), "mode must be one of: %s", strings.Join(validModes, ", "))
-	require(&result, slices.Contains(validStatuses, t.Status), "status must be one of: %s", strings.Join(validStatuses, ", "))
+	require(&result, slices.Contains(validStatuses, t.Status), "status must be one of: %s", strings.Join(statusStrings(validStatuses), ", "))
 	require(&result, t.Goal != "", "goal is required")
 
 	validateAcceptance(&result, t)
@@ -335,17 +335,7 @@ func validatePreflightOutputs(result *ValidationResult, t Task, cfg *AcceptanceS
 		require(result, out.Purpose != "", "%s.purpose is required", field)
 		if out.Path != "" {
 			validateRelativePath(result, field+".path", out.Path)
-			if !filepath.IsAbs(out.Path) {
-				clean := normalizeLogicalPath(out.Path)
-				if !logicalPathEscapes(clean) {
-					if !pathAllowedByScope(out.Path, t.Scope.AllowedPaths) {
-						result.Errors = append(result.Errors, fmt.Sprintf("%s.path %q must be inside scope.allowed_paths", field, out.Path))
-					}
-					if pathForbiddenByScope(out.Path, t.Scope.ForbiddenPaths) {
-						result.Errors = append(result.Errors, fmt.Sprintf("%s.path %q must not be inside scope.forbidden_paths", field, out.Path))
-					}
-				}
-			}
+			validateOutputPathScope(result, t.Scope, field, out.Path)
 		}
 	}
 }
@@ -385,4 +375,18 @@ func require(result *ValidationResult, ok bool, format string, args ...any) {
 		return
 	}
 	result.Errors = append(result.Errors, fmt.Sprintf(format, args...))
+}
+
+// validateOutputPathScope checks a relative, non-escaping path against the task
+// scope; validateRelativePath already reports absolute and escaping paths.
+func validateOutputPathScope(result *ValidationResult, scope Scope, field, path string) {
+	if filepath.IsAbs(path) || logicalPathEscapes(normalizeLogicalPath(path)) {
+		return
+	}
+	if !pathAllowedByScope(path, scope.AllowedPaths) {
+		result.Errors = append(result.Errors, fmt.Sprintf("%s.path %q must be inside scope.allowed_paths", field, path))
+	}
+	if pathForbiddenByScope(path, scope.ForbiddenPaths) {
+		result.Errors = append(result.Errors, fmt.Sprintf("%s.path %q must not be inside scope.forbidden_paths", field, path))
+	}
 }

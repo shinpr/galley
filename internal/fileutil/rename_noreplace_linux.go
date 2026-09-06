@@ -4,6 +4,7 @@ package fileutil
 
 import (
 	"errors"
+	"fmt"
 
 	"golang.org/x/sys/unix"
 )
@@ -13,5 +14,8 @@ func renameNoReplace(src, dst string) error {
 	if errors.Is(err, unix.EINVAL) || errors.Is(err, unix.ENOSYS) || errors.Is(err, unix.EOPNOTSUPP) {
 		return errNoReplaceUnsupported
 	}
-	return err
+	if err != nil {
+		return fmt.Errorf("renameat2 %s to %s: %w", src, dst, err)
+	}
+	return nil
 }

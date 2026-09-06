@@ -19,17 +19,20 @@ type ProcessInfoResult struct {
 // ProcessInfo returns stable identity fields directly from the Windows
 // process API without starting an external query process.
 func ProcessInfo(pid int) (ProcessInfoResult, error) {
-	if pid <= 0 {
-		return ProcessInfoResult{}, fmt.Errorf("query process %d: invalid pid", pid)
+	id, err := windowsProcessID(pid)
+	if err != nil {
+		return ProcessInfoResult{}, fmt.Errorf("query process: %w", err)
 	}
-	handle, err := windows.OpenProcess(processQueryLimitedInformation, false, uint32(pid))
+	handle, err := windows.OpenProcess(processQueryLimitedInformation, false, id)
 	if err != nil {
 		return ProcessInfoResult{}, fmt.Errorf("query process %d: open: %w", pid, err)
 	}
-	defer windows.CloseHandle(handle)
+	defer func() { _ = windows.CloseHandle(handle) }()
 
-	pathBuffer := make([]uint16, 32768)
-	pathLength := uint32(len(pathBuffer))
+	// The buffer length is typed so the Windows API call needs no conversion.
+	const pathBufferLen uint32 = 32768
+	pathBuffer := make([]uint16, pathBufferLen)
+	pathLength := pathBufferLen
 	if err := windows.QueryFullProcessImageName(handle, 0, &pathBuffer[0], &pathLength); err != nil {
 		return ProcessInfoResult{}, fmt.Errorf("query process %d executable: %w", pid, err)
 	}
@@ -47,6 +50,6 @@ func ProcessInfo(pid int) (ProcessInfoResult, error) {
 
 // Zombie reports whether pid is a zombie process. Windows has no zombie
 // processes, so this is always false.
-func Zombie(pid int) bool {
+func Zombie(_ int) bool {
 	return false
 }

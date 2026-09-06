@@ -112,9 +112,14 @@ jobs:
         run: ./scripts/smoke-local.sh
 
   lint:
-    name: Lint
+    name: Lint (${{ matrix.goos }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [darwin, linux, windows]
 
     steps:
       - name: Checkout
@@ -128,9 +133,13 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
+      # Build-tagged files are only analyzed for the target OS, so each
+      # supported platform gets its own lint pass.
       - name: Run golangci-lint
         # golangci/golangci-lint-action@v9.3.0
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a
+        env:
+          GOOS: ${{ matrix.goos }}
         with:
           # Keep in sync with the version developers install locally.
           version: v2.13.2

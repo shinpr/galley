@@ -4,6 +4,8 @@ package daemonctl
 
 import (
 	"errors"
+	"fmt"
+	"math"
 	"os"
 	"syscall"
 	"time"
@@ -19,37 +21,45 @@ const stillActive = 259
 // pulling in `golang.org/x/sys/windows` for one numeric value.
 const processQueryLimitedInformation = 0x1000
 
+// windowsProcessID narrows a PID for the Windows process APIs, which take an
+// unsigned 32-bit id.
+func windowsProcessID(pid int) (uint32, error) {
+	if pid <= 0 || int64(pid) > int64(math.MaxUint32) {
+		return 0, fmt.Errorf("pid %d is outside the Windows process id range", pid)
+	}
+	return uint32(pid), nil
+}
+
 // Alive reports whether pid exists by opening the process and inspecting its
 // exit code. Windows has no signal(0) equivalent: `process.Signal(Signal(0))`
 // surfaces a raw "not supported by windows" error from the Go runtime.
 func Alive(pid int) (bool, error) {
-	if pid <= 0 {
-		return false, nil
-	}
-	handle, err := syscall.OpenProcess(processQueryLimitedInformation, false, uint32(pid))
+	id, err := windowsProcessID(pid)
 	if err != nil {
-		// ERROR_INVALID_PARAMETER (87) means the pid does not exist; the
-		// other documented failure mode here is access-denied, which still
-		// implies a live process owned by another user. Treat unknown errors
-		// as "not alive" so daemon status reports a clean stopped state
-		// rather than surfacing a Windows API error to the operator.
-		var errno syscall.Errno
-		if errors.As(err, &errno) {
-			if errno == syscall.Errno(5) /* ERROR_ACCESS_DENIED */ {
-				return true, nil
-			}
-			if errno == syscall.Errno(87) /* ERROR_INVALID_PARAMETER */ {
-				return false, nil
-			}
-		}
 		return false, nil
 	}
-	defer syscall.CloseHandle(handle)
+	handle, err := syscall.OpenProcess(processQueryLimitedInformation, false, id)
+	if err != nil {
+		return aliveFromOpenError(err), nil
+	}
+	defer func() { _ = syscall.CloseHandle(handle) }()
 	var code uint32
 	if err := syscall.GetExitCodeProcess(handle, &code); err != nil {
-		return false, err
+		return false, fmt.Errorf("read exit code of process %d: %w", pid, err)
 	}
 	return code == stillActive, nil
+}
+
+// aliveFromOpenError classifies an OpenProcess failure. ERROR_INVALID_PARAMETER
+// means the pid does not exist; ERROR_ACCESS_DENIED still implies a live
+// process owned by another user. Any other error reports not alive so daemon
+// status shows a clean stopped state instead of a raw Windows API error.
+func aliveFromOpenError(err error) bool {
+	var errno syscall.Errno
+	if !errors.As(err, &errno) {
+		return false
+	}
+	return errno == syscall.Errno(5) /* ERROR_ACCESS_DENIED */
 }
 
 // Stop terminates pid. Windows does not have a SIGTERM equivalent that can
@@ -69,13 +79,13 @@ func Stop(pid int, timeout time.Duration) error {
 	}
 	process, err := os.FindProcess(pid)
 	if err != nil {
-		return err
+		return fmt.Errorf("find process %d: %w", pid, err)
 	}
 	if err := process.Kill(); err != nil {
 		if errors.Is(err, os.ErrProcessDone) {
 			return ErrNotRunning
 		}
-		return err
+		return fmt.Errorf("terminate process %d: %w", pid, err)
 	}
 	return waitExit(pid, timeout, "stop")
 }

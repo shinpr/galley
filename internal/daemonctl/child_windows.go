@@ -4,6 +4,7 @@ package daemonctl
 
 import (
 	"errors"
+	"fmt"
 	"os"
 )
 
@@ -25,7 +26,7 @@ func TerminateChildProcess(p *os.Process) error {
 		if errors.Is(err, os.ErrProcessDone) {
 			return nil
 		}
-		return err
+		return fmt.Errorf("terminate child %d: %w", p.Pid, err)
 	}
 	return nil
 }

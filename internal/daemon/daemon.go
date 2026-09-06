@@ -222,7 +222,7 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 	// Preserve outstanding children for force-stop recovery; never clear another daemon's registry.
-	//nolint:contextcheck // ProcessInfo probes liveness on its own 2s budget; a cancelled daemon context must not corrupt owner metadata
+	//nolint:contextcheck,nolintlint // ProcessInfo probes liveness on its own 2s budget (unix only), so a cancelled daemon context cannot corrupt owner metadata
 	owner := currentRunningOwner()
 	registry := proc.NewChildRegistry(proc.OwnedChildRegistryPath(opts.Root, owner.PID, owner.ProcessStartedAt))
 	ctx = proc.WithChildRegistry(ctx, registry)
@@ -512,7 +512,7 @@ func claimAvailableTasks(daemonCtx, execCtx context.Context, batch claimBatch) (
 			return claimedCount, firstNonNil(firstClaimErr, daemonCtx.Err())
 		default:
 		}
-		//nolint:contextcheck // ProcessInfo probes liveness on its own 2s budget; a cancelled daemon context must not corrupt owner metadata
+		//nolint:contextcheck,nolintlint // ProcessInfo probes liveness on its own 2s budget (unix only), so a cancelled daemon context cannot corrupt owner metadata
 		claimed, err := batch.claimOne(queuedPath)
 		if err != nil {
 			firstClaimErr = firstNonNil(firstClaimErr, err)

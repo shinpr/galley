@@ -27,7 +27,7 @@ func TestTerminateChildProcessWindowsNilIsNoOp(t *testing.T) {
 // before a failed `galley daemon start` returns an error.
 func TestTerminateChildProcessWindowsTerminatesLivingProcess(t *testing.T) {
 	t.Parallel()
-	cmd := exec.Command("cmd.exe", "/C", "ping -n 30 127.0.0.1 > NUL")
+	cmd := exec.CommandContext(t.Context(), "cmd.exe", "/C", "ping -n 30 127.0.0.1 > NUL")
 	if err := cmd.Start(); err != nil {
 		t.Skipf("cmd.exe not available: %v", err)
 	}

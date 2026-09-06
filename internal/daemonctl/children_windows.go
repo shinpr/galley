@@ -4,6 +4,7 @@ package daemonctl
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"syscall"
 )
@@ -15,13 +16,13 @@ func killProcessGroupByID(pgid int) error {
 	}
 	process, err := os.FindProcess(pgid)
 	if err != nil {
-		return err
+		return fmt.Errorf("find process %d: %w", pgid, err)
 	}
 	if err := process.Kill(); err != nil {
 		if errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ESRCH) {
 			return nil
 		}
-		return err
+		return fmt.Errorf("terminate process %d: %w", pgid, err)
 	}
 	return nil
 }

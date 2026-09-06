@@ -57,49 +57,28 @@ func cleanupTaskWorktree(ctx context.Context, opts Options, path string) error {
 	// Querying GitHub for these tasks is a recurring maintenance failure, so
 	// the no-GitHub path is gated strictly on the persisted final status (R1).
 	persistedFinal := loaded.PR.Status == "merged" || loaded.PR.Status == "closed"
-	finalStatus := loaded.PR.Status
-	if !persistedFinal {
-		// The task still records a non-final PR (e.g. open), so the live PR
-		// state may have changed after Galley last persisted the task. Refresh
-		// it from GitHub. `gh pr view` is a GET-equivalent and idempotent, so a
-		// brief GitHub read flake should not abort worktree cleanup.
-		var state vcs.PullRequestState
-		err = retry.Do(ctx, func(ctx context.Context) error {
-			s, fetchErr := vcs.FetchPRState(ctx, vcsBinaries(effectiveOpts), effectiveOpts.Root, loaded.PR.URL)
-			if fetchErr != nil {
-				return fetchErr
-			}
-			state = s
-			return nil
-		})
-		if err != nil {
-			return cleanupTaskError(path, loaded, err)
-		}
-		if strings.EqualFold(state.State, "open") {
-			return nil
-		}
-		if !strings.EqualFold(state.State, "closed") {
-			return cleanupTaskError(path, loaded, fmt.Errorf("unsupported PR state %q", state.State))
-		}
-		finalStatus = closedPRTaskStatus(state)
+	finalStatus, stillOpen, err := resolveFinalStatus(ctx, effectiveOpts, loaded, persistedFinal)
+	if err != nil {
+		return cleanupTaskError(path, loaded, err)
+	}
+	if stillOpen {
+		return nil
 	}
 
 	cleanupResult, err := workspace.Remove(ctx, loaded.Scope.CWD, loaded.Worktree, workspaceOptions(effectiveOpts))
 	if err != nil {
 		return cleanupTaskError(path, loaded, err)
 	}
+	// Nothing is left to record: only the status is reconciled, and an
+	// unchanged status leaves the task file untouched.
 	if cleanupResult.AlreadyMissing && persistedFinal {
-		if loaded.Status == finalStatus {
-			return nil
-		}
-		loaded.Status = finalStatus
-		if err := task.Save(path, loaded); err != nil {
-			return cleanupTaskError(path, loaded, err)
-		}
-		return nil
+		return reconcileFinalStatus(path, loaded, finalStatus)
 	}
+
 	loaded.Status = finalStatus
-	loaded.PR.Status = finalStatus
+	// PR.Status carries the PR lifecycle vocabulary; a final task status maps
+	// onto its merged/closed values.
+	loaded.PR.Status = string(finalStatus)
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	loaded.Attempts = append(loaded.Attempts, task.Attempt{
 		Number:            len(loaded.Attempts) + 1,
@@ -128,9 +107,54 @@ func cleanupTaskError(path string, loaded task.Task, err error) error {
 	)
 }
 
-func closedPRTaskStatus(state vcs.PullRequestState) string {
+func closedPRTaskStatus(state vcs.PullRequestState) task.Status {
 	if state.Merged {
-		return "merged"
+		return task.StatusMerged
 	}
-	return "closed"
+	return task.StatusClosed
+}
+
+// refreshFinalPRStatus resolves a non-final PR's task status, reporting
+// stillOpen while the PR is open. The idempotent GET is retried on a flake.
+func refreshFinalPRStatus(ctx context.Context, opts Options, prURL string) (status task.Status, stillOpen bool, err error) {
+	var state vcs.PullRequestState
+	if err := retry.Do(ctx, func(ctx context.Context) error {
+		s, fetchErr := vcs.FetchPRState(ctx, vcsRepo(opts, opts.Root, ""), prURL)
+		if fetchErr != nil {
+			return fetchErr
+		}
+		state = s
+		return nil
+	}); err != nil {
+		return "", false, err
+	}
+	if strings.EqualFold(state.State, "open") {
+		return "", true, nil
+	}
+	if !strings.EqualFold(state.State, "closed") {
+		return "", false, fmt.Errorf("unsupported PR state %q", state.State)
+	}
+	return closedPRTaskStatus(state), false, nil
+}
+
+// resolveFinalStatus returns a completed PR's task status. An already-final
+// persisted status needs no GitHub call, so cleanup survives an API outage.
+func resolveFinalStatus(ctx context.Context, opts Options, loaded task.Task, persistedFinal bool) (status task.Status, stillOpen bool, err error) {
+	if persistedFinal {
+		return task.Status(loaded.PR.Status), false, nil
+	}
+	return refreshFinalPRStatus(ctx, opts, loaded.PR.URL)
+}
+
+// reconcileFinalStatus records a resolved final status on a task whose worktree
+// is already gone. An unchanged status must not rewrite the task file.
+func reconcileFinalStatus(path string, loaded task.Task, finalStatus task.Status) error {
+	if loaded.Status == finalStatus {
+		return nil
+	}
+	loaded.Status = finalStatus
+	if err := task.Save(path, loaded); err != nil {
+		return cleanupTaskError(path, loaded, err)
+	}
+	return nil
 }

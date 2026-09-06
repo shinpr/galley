@@ -90,18 +90,9 @@ func renderRevisionContext(b *strings.Builder, t Task, requests []RevisionReques
 	}
 	fmt.Fprintf(b, "\nReturn each request as one `acceptance_criteria` entry with the displayed `revision:<id>`, status, evidence, and notes. A supervisor request is satisfied by a supported correction or evidence-backed withdrawal; explain which in notes for independent supervisor review. Human requests still require fulfillment of the amended contract, and finalize requests remain subject to Galley's finalization result. Group repairs by shared cause while preserving evidence for each request ID; report unresolved obligations accurately.\n\n")
 
-	if t.ReviewProgress != nil && (len(t.ReviewProgress.Acceptance) > 0 || len(t.ReviewProgress.Quality) > 0) {
-		fmt.Fprintf(b, "## Verified Passes To Preserve\n\n")
-		fmt.Fprintf(b, "The supervisor has already verified these items. Preserve them and recheck any item this attempt can affect.\n\n")
-		if len(t.ReviewProgress.Acceptance) > 0 {
-			fmt.Fprintf(b, "- acceptance: `%s`\n", strings.Join(t.ReviewProgress.Acceptance, "`, `"))
-		}
-		if len(t.ReviewProgress.Quality) > 0 {
-			fmt.Fprintf(b, "- quality: `%s`\n", strings.Join(t.ReviewProgress.Quality, "`, `"))
-		}
-		fmt.Fprintf(b, "\n")
-	}
+	writeVerifiedPasses(b, t.ReviewProgress)
 }
+
 func renderInputFiles(b *strings.Builder, t Task) {
 	if len(t.Files) == 0 {
 		return
@@ -132,19 +123,7 @@ func renderReviewContext(b *strings.Builder, t Task, includeRequeueInstructions 
 		otherRisks = append(otherRisks, risk)
 	}
 	if t.PR.URL != "" || (includeRequeueInstructions && len(requeueInstructions) > 0) {
-		fmt.Fprintf(b, "## PR Review Context\n\n")
-		if t.PR.URL != "" {
-			fmt.Fprintf(b, "- PR: `%s`\n", t.PR.URL)
-		}
-		if t.Supervisor.ReviewIterations > 0 {
-			fmt.Fprintf(b, "- review iteration: `%d`\n", t.Supervisor.ReviewIterations)
-		}
-		if includeRequeueInstructions {
-			for _, instruction := range requeueInstructions {
-				fmt.Fprintf(b, "- additional instruction `%s`: %s\n", instruction.ID, instruction.Detail)
-			}
-		}
-		fmt.Fprintf(b, "\n")
+		writePRReviewContext(b, t, requeueInstructions, includeRequeueInstructions)
 	}
 	if len(otherRisks) > 0 {
 		fmt.Fprintf(b, "## Existing Risks\n\n")
@@ -216,4 +195,37 @@ func renderProfileContext(b *strings.Builder, profiles profile.Bundle) {
 		fmt.Fprintf(b, "- secrets policy: `%s`\n", profiles.Environment.Constraints.SecretsPolicy)
 		fmt.Fprintf(b, "- destructive commands: `%s`\n", profiles.Environment.Constraints.DestructiveCommands)
 	}
+}
+
+// writeVerifiedPasses lists the items the supervisor already verified so the
+// next attempt preserves them.
+func writeVerifiedPasses(b *strings.Builder, progress *ReviewProgress) {
+	if progress == nil || (len(progress.Acceptance) == 0 && len(progress.Quality) == 0) {
+		return
+	}
+	fmt.Fprintf(b, "## Verified Passes To Preserve\n\n")
+	fmt.Fprintf(b, "The supervisor has already verified these items. Preserve them and recheck any item this attempt can affect.\n\n")
+	if len(progress.Acceptance) > 0 {
+		fmt.Fprintf(b, "- acceptance: `%s`\n", strings.Join(progress.Acceptance, "`, `"))
+	}
+	if len(progress.Quality) > 0 {
+		fmt.Fprintf(b, "- quality: `%s`\n", strings.Join(progress.Quality, "`, `"))
+	}
+	fmt.Fprintf(b, "\n")
+}
+
+func writePRReviewContext(b *strings.Builder, t Task, requeueInstructions []Risk, includeRequeueInstructions bool) {
+	fmt.Fprintf(b, "## PR Review Context\n\n")
+	if t.PR.URL != "" {
+		fmt.Fprintf(b, "- PR: `%s`\n", t.PR.URL)
+	}
+	if t.Supervisor.ReviewIterations > 0 {
+		fmt.Fprintf(b, "- review iteration: `%d`\n", t.Supervisor.ReviewIterations)
+	}
+	if includeRequeueInstructions {
+		for _, instruction := range requeueInstructions {
+			fmt.Fprintf(b, "- additional instruction `%s`: %s\n", instruction.ID, instruction.Detail)
+		}
+	}
+	fmt.Fprintf(b, "\n")
 }

@@ -38,7 +38,6 @@ func TestApplyReviewProgressReplacesPassLists(t *testing.T) {
 	if loaded.AcceptanceCriteria[0].Status != "pending" || loaded.AcceptanceCriteria[1].Status != "satisfied" {
 		t.Fatalf("acceptance statuses = %#v", loaded.AcceptanceCriteria)
 	}
-
 }
 
 func TestReconcileReviewProgressResetsWhenReviewContractChanges(t *testing.T) {

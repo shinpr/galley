@@ -284,7 +284,7 @@ func Duration(value string) (time.Duration, bool, error) {
 	}
 	d, err := time.ParseDuration(value)
 	if err != nil {
-		return 0, false, err
+		return 0, false, fmt.Errorf("parse duration %q: %w", value, err)
 	}
 	return d, true, nil
 }

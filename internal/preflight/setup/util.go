@@ -118,14 +118,16 @@ func DiscoverRepositorySignals(workDir string) []string {
 			out = append(out, name)
 		}
 	}
-	if scripts, err := os.ReadDir(filepath.Join(workDir, "scripts")); err == nil {
-		for _, entry := range scripts {
-			if len(out) >= maxResultFiles {
-				break
-			}
-			if !entry.IsDir() {
-				out = append(out, filepath.Join("scripts", entry.Name()))
-			}
+	scripts, err := os.ReadDir(filepath.Join(workDir, "scripts"))
+	if err != nil {
+		return out
+	}
+	for _, entry := range scripts {
+		if len(out) >= maxResultFiles {
+			break
+		}
+		if !entry.IsDir() {
+			out = append(out, filepath.Join("scripts", entry.Name()))
 		}
 	}
 	return out

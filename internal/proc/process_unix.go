@@ -3,6 +3,7 @@
 package proc
 
 import (
+	"fmt"
 	"os/exec"
 	"syscall"
 )
@@ -30,5 +31,9 @@ func processGroupID(cmd *exec.Cmd) (int, error) {
 	if cmd.Process == nil {
 		return 0, syscall.ESRCH
 	}
-	return syscall.Getpgid(cmd.Process.Pid)
+	pgid, err := syscall.Getpgid(cmd.Process.Pid)
+	if err != nil {
+		return 0, fmt.Errorf("get process group for pid %d: %w", cmd.Process.Pid, err)
+	}
+	return pgid, nil
 }

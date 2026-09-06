@@ -15,7 +15,7 @@ func TestForceStopGracefulSucceedsWithoutKill(t *testing.T) {
 	if err != nil {
 		t.Skip("sleep not available")
 	}
-	cmd := exec.Command(sleepPath, "10")
+	cmd := exec.CommandContext(t.Context(), sleepPath, "10")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestForceStopKillsUnresponsiveDaemonAfterTimeout(t *testing.T) {
 		t.Skip("sh not available")
 	}
 	// Ignore SIGTERM so graceful stop times out and the verified force kill runs.
-	cmd := exec.Command(shPath, "-c", `trap "" TERM; sleep 10`)
+	cmd := exec.CommandContext(t.Context(), shPath, "-c", `trap "" TERM; sleep 10`)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}

@@ -1,6 +1,7 @@
 package task
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -14,7 +15,7 @@ import (
 
 func TestWorkflowStateForStatus(t *testing.T) {
 	t.Parallel()
-	tests := map[string]WorkflowState{
+	tests := map[Status]WorkflowState{
 		StatusDraft: WorkflowStateDraft, StatusQueued: WorkflowStateQueued,
 		StatusRunning: WorkflowStateRunning, StatusAccepted: WorkflowStateDone,
 		StatusPROpened: WorkflowStateDone, StatusMerged: WorkflowStateDone,
@@ -34,7 +35,7 @@ func TestWorkflowStateForStatus(t *testing.T) {
 
 func TestCanonicalListsAreStableDefensiveCopies(t *testing.T) {
 	statuses := AllStatuses()
-	wantStatuses := []string{"draft", "queued", "running", "needs_supervisor_review", "accepted", "pr_opened", "failed", "closed", "merged", "archived"}
+	wantStatuses := []Status{"draft", "queued", "running", "needs_supervisor_review", "accepted", "pr_opened", "failed", "closed", "merged", "archived"}
 	if !reflect.DeepEqual(statuses, wantStatuses) {
 		t.Fatalf("statuses = %v; want %v", statuses, wantStatuses)
 	}
@@ -79,7 +80,7 @@ func TestProductionTaskPathsUseWorkflowStateContract(t *testing.T) {
 		}
 		file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
 		if err != nil {
-			return err
+			return fmt.Errorf("parse %s: %w", path, err)
 		}
 		ast.Inspect(file, func(node ast.Node) bool {
 			call, ok := node.(*ast.CallExpr)

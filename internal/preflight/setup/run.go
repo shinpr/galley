@@ -60,10 +60,8 @@ func Run(ctx context.Context, opts Options) (*Result, *EnvironmentUpdate, error)
 		if writeErr := recordSetupProfileUpdateFailure(opts.RunDir, perr); writeErr != nil {
 			perr = errors.Join(perr, writeErr)
 		}
-		if res != nil {
-			markSetupFailed(res, "learned setup plan persistence failed: "+perr.Error(), "Inspect setup_result.json and environment_update.json, fix environment.yaml, and requeue the task.")
-			_ = WriteResult(opts.RunDir, res)
-		}
+		markSetupFailed(res, "learned setup plan persistence failed: "+perr.Error(), "Inspect setup_result.json and environment_update.json, fix environment.yaml, and requeue the task.")
+		_ = WriteResult(opts.RunDir, res)
 		return res, nil, fmt.Errorf("setup phase failed: persist learned setup plan: %w", perr)
 	}
 	if update != nil {
@@ -82,14 +80,14 @@ func RunExecutor(ctx context.Context, opts Options) (*Result, error) {
 	}
 	payload, perr := marshalSetupExecutorRequest(opts, signals)
 	if perr != nil {
-		return setupExecutorFailureResult("plan setup executor request: "+perr.Error(), "", "", 0, "", "", signals), perr
+		return setupExecutorFailureResult(setupExecutorFailure{Message: "plan setup executor request: " + perr.Error(), Provider: "", ExecutorRun: "", ExitCode: 0, Stdout: "", Stderr: "", Inspected: signals}), perr
 	}
 	commandPlan, provider, perr := BuildExecutorCommandPlan(opts, payload)
 	if perr != nil {
-		return setupExecutorFailureResult("plan setup executor command: "+perr.Error(), provider, "", 0, "", "", signals), perr
+		return setupExecutorFailureResult(setupExecutorFailure{Message: "plan setup executor command: " + perr.Error(), Provider: provider, ExecutorRun: "", ExitCode: 0, Stdout: "", Stderr: "", Inspected: signals}), perr
 	}
 	if err := writeSetupExecutorCommandPlan(opts.RunDir, commandPlan); err != nil {
-		return setupExecutorFailureResult("write setup executor command plan: "+err.Error(), provider, "", 0, "", "", signals), err
+		return setupExecutorFailureResult(setupExecutorFailure{Message: "write setup executor command plan: " + err.Error(), Provider: provider, ExecutorRun: "", ExitCode: 0, Stdout: "", Stderr: "", Inspected: signals}), err
 	}
 	out, runErr := RunExecutorCommand(ctx, opts, commandPlan)
 	executorRun := fmt.Sprintf("<setup_executor:%s>", provider)
@@ -99,7 +97,7 @@ func RunExecutor(ctx context.Context, opts Options) (*Result, error) {
 		if runErr != nil {
 			message = fmt.Sprintf("setup executor exited %d: %s", out.ExitCode, truncateExcerpt(out.Stderr))
 		}
-		failure := setupExecutorFailureResult(message, provider, executorRun, out.ExitCode, out.Stdout, out.Stderr, signals)
+		failure := setupExecutorFailureResult(setupExecutorFailure{Message: message, Provider: provider, ExecutorRun: executorRun, ExitCode: out.ExitCode, Stdout: out.Stdout, Stderr: out.Stderr, Inspected: signals})
 		return failure, errors.Join(fmt.Errorf("setup executor failed: %w", parseErr), runErr)
 	}
 	parsed.Provider = provider

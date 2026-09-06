@@ -3,6 +3,7 @@
 package updatecheck
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -52,7 +53,7 @@ type latestRelease struct {
 
 // Run performs one advisory update check. It never reports an error and never
 // writes anywhere except the state file and the configured stderr writer.
-func Run(opts Options) {
+func Run(ctx context.Context, opts Options) {
 	isTTY := opts.IsTTY
 	if isTTY == nil {
 		isTTY = stderrIsTTY
@@ -76,7 +77,7 @@ func Run(opts Options) {
 	if err := writeState(root, now()); err != nil {
 		return
 	}
-	tag, ok := fetchLatestTag(opts)
+	tag, ok := fetchLatestTag(ctx, opts)
 	if !ok {
 		return
 	}
@@ -91,6 +92,7 @@ func Run(opts Options) {
 	if stderr == nil {
 		stderr = os.Stderr
 	}
+	//nolint:errcheck // stderr is the configured advisory stream; it cannot report its own write failure
 	fmt.Fprintf(stderr, "galley update available: %s -> %s\n", current, tag)
 }
 
@@ -107,10 +109,11 @@ func fileIsTerminal(f *os.File) bool {
 func readState(root string, now time.Time) (fresh bool, err error) {
 	data, err := os.ReadFile(filepath.Join(root, stateFileName))
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("read update-check state: %w", err)
 	}
 	var s state
 	if err := json.Unmarshal(data, &s); err != nil {
+		//nolint:nilerr // a corrupt state file is simply not fresh
 		return false, nil
 	}
 	// A future-dated record (negative age, e.g. after a clock rollback) is not
@@ -123,16 +126,19 @@ func writeState(root string, now time.Time) error {
 	// A newly created root is owner-only like other Galley root creators;
 	// MkdirAll leaves an existing root's permissions untouched.
 	if err := os.MkdirAll(root, 0o700); err != nil {
-		return err
+		return fmt.Errorf("create galley root %s: %w", root, err)
 	}
 	data, err := json.Marshal(state{LastAttempt: now.UTC()})
 	if err != nil {
-		return err
+		return fmt.Errorf("encode update-check state: %w", err)
 	}
-	return os.WriteFile(filepath.Join(root, stateFileName), data, 0o600)
+	if err := os.WriteFile(filepath.Join(root, stateFileName), data, 0o600); err != nil {
+		return fmt.Errorf("write update-check state: %w", err)
+	}
+	return nil
 }
 
-func fetchLatestTag(opts Options) (string, bool) {
+func fetchLatestTag(ctx context.Context, opts Options) (string, bool) {
 	do := opts.Do
 	if do == nil {
 		client := &http.Client{Timeout: Timeout}
@@ -142,7 +148,7 @@ func fetchLatestTag(opts Options) (string, bool) {
 	if endpoint == "" {
 		endpoint = Endpoint
 	}
-	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return "", false
 	}
@@ -151,7 +157,7 @@ func fetchLatestTag(opts Options) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return "", false
 	}

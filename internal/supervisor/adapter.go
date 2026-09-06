@@ -79,7 +79,7 @@ func RunAdapter(ctx context.Context, opts AdapterOptions, evidence Evidence) (Ve
 	request.Evidence.WorktreeCWD = opts.WorkDir
 	payload, err := json.Marshal(request)
 	if err != nil {
-		return Verdict{}, err
+		return Verdict{}, fmt.Errorf("encode supervisor request: %w", err)
 	}
 	output, err := RunAdapterPayload(ctx, opts, payload)
 	if err != nil {
@@ -309,22 +309,11 @@ func runClaudeAdapterForOS(ctx context.Context, opts AdapterOptions, request []b
 		"--output-format", "text",
 	}
 	args = runner.AppendProviderModelEffortArgs(args, provider.TransportClaude, opts.Model, opts.Effort)
-	if goos == "windows" {
-		systemPromptPath := filepath.Join(dir, ClaudeSupervisorSystemPromptFilename)
-		if err := writeSupervisorFile(systemPromptPath, []byte(prompts.ClaudeSupervisor())); err != nil {
-			return nil, err
-		}
-		args = append(args, "--system-prompt-file", systemPromptPath)
-	} else {
-		schema, err := runner.ClaudeCompatibleJSONSchema(schemas.SupervisorVerdict)
-		if err != nil {
-			return nil, fmt.Errorf("prepare Claude supervisor schema: %w", err)
-		}
-		args = append(args,
-			"--system-prompt", prompts.ClaudeSupervisor(),
-			"--json-schema", schema,
-		)
+	promptArgs, err := claudeSupervisorPromptArgs(dir, goos)
+	if err != nil {
+		return nil, err
 	}
+	args = append(args, promptArgs...)
 	args = append(args, "--plugin-dir", guardDir)
 	if opts.ArtifactDir != "" {
 		args = append(args, "--debug-file", debugPath)
@@ -357,26 +346,19 @@ func runClaudeAdapterForOS(ctx context.Context, opts AdapterOptions, request []b
 
 func supervisorArtifactDir(dir, pattern string) (string, func(), error) {
 	if dir != "" {
-		absolute, err := filepath.Abs(dir)
-		if err != nil {
-			return "", func() {}, fmt.Errorf("resolve supervisor artifact dir: %w", err)
-		}
-		dir = absolute
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return "", func() {}, fmt.Errorf("create supervisor artifact dir: %w", err)
-		}
-		return dir, func() {}, nil
+		resolved, err := ensureSupervisorArtifactDir(dir)
+		return resolved, func() {}, err
 	}
 	tmp, err := os.MkdirTemp("", pattern)
 	if err != nil {
-		return "", func() {}, err
+		return "", func() {}, fmt.Errorf("create supervisor temp dir: %w", err)
 	}
 	return tmp, func() { _ = os.RemoveAll(tmp) }, nil
 }
 
 func writeSupervisorFile(path string, body []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
+		return fmt.Errorf("create supervisor file dir %s: %w", filepath.Dir(path), err)
 	}
 	if err := os.WriteFile(path, body, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
@@ -389,4 +371,40 @@ func errorString(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+func writeClaudeSupervisorPrompt(dir string) (string, error) {
+	path := filepath.Join(dir, ClaudeSupervisorSystemPromptFilename)
+	if err := writeSupervisorFile(path, []byte(prompts.ClaudeSupervisor())); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func ensureSupervisorArtifactDir(dir string) (string, error) {
+	absolute, err := filepath.Abs(dir)
+	if err != nil {
+		return "", fmt.Errorf("resolve supervisor artifact dir: %w", err)
+	}
+	if err := os.MkdirAll(absolute, 0o700); err != nil {
+		return "", fmt.Errorf("create supervisor artifact dir: %w", err)
+	}
+	return absolute, nil
+}
+
+// claudeSupervisorPromptArgs supplies the system prompt and verdict schema;
+// Windows passes the prompt as a file because its argv length limit is tight.
+func claudeSupervisorPromptArgs(dir, goos string) ([]string, error) {
+	if goos == "windows" {
+		path, err := writeClaudeSupervisorPrompt(dir)
+		if err != nil {
+			return nil, err
+		}
+		return []string{"--system-prompt-file", path}, nil
+	}
+	schema, err := runner.ClaudeCompatibleJSONSchema(schemas.SupervisorVerdict)
+	if err != nil {
+		return nil, fmt.Errorf("prepare Claude supervisor schema: %w", err)
+	}
+	return []string{"--system-prompt", prompts.ClaudeSupervisor(), "--json-schema", schema}, nil
 }

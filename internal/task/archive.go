@@ -75,16 +75,10 @@ func archiveCurrentSchema(path string, loaded Task, opts ArchiveOptions) (Archiv
 		return ArchiveResult{}, fmt.Errorf("task %s has an open PR; close or merge the PR before archiving", loaded.ID)
 	}
 	loaded.Status = StatusArchived
-	appendLifecycleAttempt(&loaded, "archived", opts.Reason, "Task archived.", time.Now())
+	appendLifecycleAttempt(&loaded, lifecycleAttempt{Verdict: "archived", Reason: opts.Reason, Fallback: "Task archived."}, time.Now())
 	nextPath := siblingTaskPath(path, WorkflowStateArchived)
-	if nextPath == path {
-		if err := Save(path, loaded); err != nil {
-			return ArchiveResult{}, err
-		}
-	} else {
-		if err := WriteMovedTask(path, nextPath, loaded); err != nil {
-			return ArchiveResult{}, err
-		}
+	if err := saveOrMoveTask(path, nextPath, loaded, true); err != nil {
+		return ArchiveResult{}, err
 	}
 	return ArchiveResult{Task: loaded, From: path, To: nextPath, Mode: "current_schema"}, nil
 }
@@ -99,18 +93,11 @@ func archiveUnreadable(path string, opts ArchiveOptions, loadErr error) (Archive
 
 	// Try the safe top-level status edit via a yaml.Node round-trip. This
 	// preserves the rest of the YAML document exactly as authored.
-	if updated, ok, editErr := editTopLevelStatus(data, StatusArchived); ok && editErr == nil {
-		if nextPath == path {
-			// In-place lenient edit: overwrite the existing file. Lossy struct
-			// round-tripping is avoided because updated[] came from a YAML
-			// node mutation rather than yaml.Marshal(Task).
-			if err := fileutil.WriteFileAtomic(path, updated, 0o600); err != nil {
-				return ArchiveResult{}, err
-			}
-		} else {
-			if err := moveYAMLNoOverwrite(path, nextPath, updated); err != nil {
-				return ArchiveResult{}, err
-			}
+	// A non-nil editErr marks an editing-unsafe document; both it and a parse
+	// failure fall through to the move-unchanged path.
+	if updated, ok, editErr := editTopLevelStatus(data, string(StatusArchived)); ok && editErr == nil {
+		if err := writeLenientArchive(path, nextPath, updated); err != nil {
+			return ArchiveResult{}, err
 		}
 		summary, _ := lenientHeader(updated)
 		summary.Status = "archived"
@@ -121,11 +108,6 @@ func archiveUnreadable(path string, opts ArchiveOptions, loadErr error) (Archive
 			Mode:    "lenient_status_edit",
 			Warning: fmt.Sprintf("task load failed (%v); archived with safe top-level status edit only", loadErr),
 		}, nil
-	} else if editErr != nil {
-		// editTopLevelStatus reported an editing-unsafe condition (not a YAML
-		// parse error). Fall through to the move-unchanged path so archive
-		// can still evacuate the file from normal scans.
-		_ = editErr
 	}
 
 	// Fall back: move the file unchanged so it leaves normal scans without
@@ -163,6 +145,7 @@ func archiveUnreadable(path string, opts ArchiveOptions, loadErr error) (Archive
 func editTopLevelStatus(data []byte, value string) ([]byte, bool, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
+		//nolint:nilerr // documented contract: unparseable means "move unchanged"
 		return nil, false, nil
 	}
 	var mapping *yaml.Node
@@ -194,7 +177,7 @@ func editTopLevelStatus(data []byte, value string) ([]byte, bool, error) {
 		val.Style = yaml.DoubleQuotedStyle
 		buf, err := yaml.Marshal(&doc)
 		if err != nil {
-			return nil, false, err
+			return nil, false, fmt.Errorf("encode task document: %w", err)
 		}
 		return buf, true, nil
 	}
@@ -205,7 +188,7 @@ func editTopLevelStatus(data []byte, value string) ([]byte, bool, error) {
 	mapping.Content = append(mapping.Content, keyNode, valNode)
 	buf, err := yaml.Marshal(&doc)
 	if err != nil {
-		return nil, false, err
+		return nil, false, fmt.Errorf("encode task document: %w", err)
 	}
 	return buf, true, nil
 }
@@ -217,7 +200,7 @@ func editTopLevelStatus(data []byte, value string) ([]byte, bool, error) {
 func lenientHeader(data []byte) (Task, error) {
 	var t Task
 	if err := yaml.Unmarshal(data, &t); err != nil {
-		return Task{}, err
+		return Task{}, fmt.Errorf("parse task YAML: %w", err)
 	}
 	return t, nil
 }
@@ -241,4 +224,13 @@ func moveYAMLNoOverwrite(src, dst string, data []byte) error {
 		return fmt.Errorf("remove moved task %s: %w", src, err)
 	}
 	return nil
+}
+
+// writeLenientArchive persists a status-edited YAML document, overwriting in
+// place when the destination is unchanged. The bytes come from a node mutation.
+func writeLenientArchive(path, nextPath string, updated []byte) error {
+	if nextPath == path {
+		return fileutil.WriteFileAtomic(path, updated, 0o600)
+	}
+	return moveYAMLNoOverwrite(path, nextPath, updated)
 }

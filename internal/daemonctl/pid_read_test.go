@@ -34,32 +34,49 @@ func TestReadPIDFileReadFailures(t *testing.T) {
 			t.Parallel()
 			calls := 0
 			started := time.Now()
-			meta, err := readPIDFile("daemon.pid", tc.goos, func(path string) ([]byte, error) {
-				if path != "daemon.pid" {
-					t.Fatalf("read wrong PID file: %s", path)
-				}
-				failure := tc.failures[min(calls, len(tc.failures)-1)]
-				calls++
-				if failure != nil {
-					return nil, failure
-				}
-				return []byte(`{"pid":123}`), nil
-			})
+			meta, err := readPIDFile("daemon.pid", tc.goos, stubPIDReader(t, tc.failures, &calls))
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("read error = %v, want %v", err, tc.wantErr)
 			}
 			if err == nil && meta.PID != 123 {
 				t.Fatalf("read lost PID: %#v", meta)
 			}
-			if tc.wantCalls > 0 && calls != tc.wantCalls {
-				t.Fatalf("read attempts = %d, want %d", calls, tc.wantCalls)
-			}
-			if tc.wantCalls == 0 && calls < 2 {
-				t.Fatal("persistent conflict was not retried")
-			}
+			assertPIDReadAttempts(t, calls, tc.wantCalls)
 			if elapsed := time.Since(started); elapsed > 2*time.Second {
 				t.Fatalf("PID read was not bounded: %s", elapsed)
 			}
 		})
+	}
+}
+
+// stubPIDReader replays failures in order, repeating the last one once the list
+// is exhausted, and counts every attempt.
+func stubPIDReader(t *testing.T, failures []error, calls *int) func(string) ([]byte, error) {
+	t.Helper()
+	return func(path string) ([]byte, error) {
+		if path != "daemon.pid" {
+			t.Fatalf("read wrong PID file: %s", path)
+		}
+		failure := failures[min(*calls, len(failures)-1)]
+		*calls++
+		if failure != nil {
+			return nil, failure
+		}
+		return []byte(`{"pid":123}`), nil
+	}
+}
+
+// assertPIDReadAttempts checks the retry budget. wantCalls == 0 means the
+// conflict is persistent, so only "was it retried at all" can be asserted.
+func assertPIDReadAttempts(t *testing.T, calls, wantCalls int) {
+	t.Helper()
+	if wantCalls > 0 {
+		if calls != wantCalls {
+			t.Fatalf("read attempts = %d, want %d", calls, wantCalls)
+		}
+		return
+	}
+	if calls < 2 {
+		t.Fatal("persistent conflict was not retried")
 	}
 }

@@ -1,0 +1,97 @@
+version: "2"
+
+run:
+  timeout: 10m
+
+linters:
+  default: standard          # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - forcetypeassert
+    - exhaustive
+    - errorlint
+    - wrapcheck
+    - nolintlint
+    - nilerr
+    - gocognit
+    - nestif
+    - contextcheck
+    - noctx
+    - gosec
+    - revive
+  settings:
+    errcheck:
+      # A strings.Builder write cannot fail, and reporting an os.Stderr write
+      # failure would use the same stream. Every other writer stays checked.
+      exclude-functions:
+        - fmt.Fprintf(*strings.Builder)
+        - fmt.Fprintln(*strings.Builder)
+        - fmt.Fprint(*strings.Builder)
+        - fmt.Fprintf(os.Stderr)
+        - fmt.Fprintln(os.Stderr)
+        - fmt.Fprint(os.Stderr)
+    govet:
+      # shadow is not enabled: in `if err := f(); err != nil` the inner binding
+      # dies at the closing brace, so no read is ambiguous and renaming adds none.
+      enable:
+        - nilness
+        - lostcancel
+    gocognit:
+      min-complexity: 25
+    nestif:
+      # nestif sums nesting and else branches rather than measuring depth: a
+      # 3-deep serial nest and three ifs under one guard both score 3.
+      min-complexity: 3
+    exhaustive:
+      default-signifies-exhaustive: false
+    gosec:
+      # SECURITY.md defines task/profile input as trusted, and neither rule
+      # separates a permitted operation from an escape; boundary checks do that.
+      excludes:
+        - G304
+        - G204
+    wrapcheck:
+      ignore-package-globs:
+        - github.com/shinpr/galley/internal/*
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    revive:
+      rules:
+        - name: argument-limit
+          arguments: [4]
+        - name: unused-parameter
+        - name: early-return
+  exclusions:
+    rules:
+      # A cobra command cannot report a write failure on its own output stream.
+      # Only the accessor itself is excluded, and only in the command packages.
+      - linters:
+          - errcheck
+        path: ^internal/(cli|daemoncmd)/
+        source: 'fmt\.Fprint(f|ln)?\(cmd\.(OutOrStdout|ErrOrStderr)\(\)'
+      # Unchecked assertions on values the test itself constructed carry no
+      # information; assertions on code under test use comma-ok + t.Fatalf.
+      - path: _test\.go
+        linters:
+          - forcetypeassert
+      # Test scaffolding writes under paths it built from t.TempDir(), so only
+      # the permission and taint rules are excluded; credential rules still apply.
+      - path: _test\.go
+        linters:
+          - gosec
+        text: "G301|G306|G703"
+      # profile.Constraints holds only policy enums; its secrets_policy name
+      # matches G101's credential pattern while the values are policy names.
+      - linters:
+          - gosec
+        text: "G101"
+        source: "Constraints\\{"
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

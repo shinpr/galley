@@ -24,12 +24,12 @@ func TestGitPathsRoundTrip(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	status, err := vcs.StatusPorcelainZ(t.Context(), vcs.Binaries{}, repo)
+	status, err := vcs.StatusPorcelainZ(t.Context(), vcs.Repo{WorkDir: repo})
 	if err != nil {
 		t.Fatal(err)
 	}
 	paths := reviewablePathsFromStatus(status, nil)
-	if err := vcs.StagePathsForReview(t.Context(), vcs.Binaries{}, repo, t.TempDir(), paths); err != nil {
+	if err := vcs.StagePathsForReview(t.Context(), vcs.Repo{WorkDir: repo, RunDir: t.TempDir()}, paths); err != nil {
 		t.Fatal(err)
 	}
 	snapshot, err := workspace.CaptureSnapshot(t.Context(), repo, workspace.Options{})
@@ -42,7 +42,7 @@ func TestGitPathsRoundTrip(t *testing.T) {
 			t.Fatalf("missing path %q in %#v", name, changed)
 		}
 	}
-	if err := vcs.AddPaths(t.Context(), vcs.Binaries{}, repo, t.TempDir(), addEligiblePorcelainPaths(snapshot.StatusPorcelain)); err != nil {
+	if err := vcs.AddPaths(t.Context(), vcs.Repo{WorkDir: repo, RunDir: t.TempDir()}, addEligiblePorcelainPaths(snapshot.StatusPorcelain)); err != nil {
 		t.Fatal(err)
 	}
 }

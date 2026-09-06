@@ -12,7 +12,10 @@ func renderOutput(cmd *cobra.Command, output string, payload any, renderText fun
 	case "json":
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
-		return enc.Encode(payload)
+		if err := enc.Encode(payload); err != nil {
+			return fmt.Errorf("encode %s output: %w", output, err)
+		}
+		return nil
 	case "text":
 		return renderText()
 	default:

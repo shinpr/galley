@@ -54,11 +54,11 @@ func TestReuseCompletedPreflightsFindsEarlierSuccessfulRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	setupRes, setupReused, err := reuseReadySetup(root, taskID, currentRun, effective, "test")
+	setupRes, setupReused, err := reuseReadySetup(preflightReuseQuery{Root: root, TaskID: taskID, RunDir: currentRun, Effective: effective, InputKey: "test"})
 	if err != nil || !setupReused || setupRes.ReadinessEvidence != "ready once" {
 		t.Fatalf("setup reuse = (%+v, %v, %v)", setupRes, setupReused, err)
 	}
-	skeletonRes, skeletonReused, err := reuseCompletedAcceptanceSkeleton(root, taskID, currentRun, effective, "test", "")
+	skeletonRes, skeletonReused, err := reuseCompletedAcceptanceSkeleton(preflightReuseQuery{Root: root, TaskID: taskID, RunDir: currentRun, Effective: effective, InputKey: "test", WorkDir: ""})
 	if err != nil || !skeletonReused || len(skeletonRes.NoSkeletons) != 1 {
 		t.Fatalf("skeleton reuse = (%+v, %v, %v)", skeletonRes, skeletonReused, err)
 	}
@@ -77,10 +77,10 @@ func TestReuseCompletedPreflightsFallsBackWhenNoSuccessExists(t *testing.T) {
 	runDir := filepath.Join(root, "runs", "task-new-100")
 	effective := task.Executor{CLI: "claude", Effort: "high"}
 
-	if res, reused, err := reuseReadySetup(root, "task-new", runDir, effective, "test"); err != nil || reused || res != nil {
+	if res, reused, err := reuseReadySetup(preflightReuseQuery{Root: root, TaskID: "task-new", RunDir: runDir, Effective: effective, InputKey: "test"}); err != nil || reused || res != nil {
 		t.Fatalf("setup reuse = (%+v, %v, %v)", res, reused, err)
 	}
-	if res, reused, err := reuseCompletedAcceptanceSkeleton(root, "task-new", runDir, effective, "test", ""); err != nil || reused || res != nil {
+	if res, reused, err := reuseCompletedAcceptanceSkeleton(preflightReuseQuery{Root: root, TaskID: "task-new", RunDir: runDir, Effective: effective, InputKey: "test", WorkDir: ""}); err != nil || reused || res != nil {
 		t.Fatalf("skeleton reuse = (%+v, %v, %v)", res, reused, err)
 	}
 }
@@ -105,10 +105,10 @@ func TestReuseCompletedPreflightsRejectsMismatchedExecutorIdentity(t *testing.T)
 		t.Fatal(err)
 	}
 
-	if res, reused, err := reuseReadySetup(root, taskID, currentRun, current, "test"); err != nil || reused || res != nil {
+	if res, reused, err := reuseReadySetup(preflightReuseQuery{Root: root, TaskID: taskID, RunDir: currentRun, Effective: current, InputKey: "test"}); err != nil || reused || res != nil {
 		t.Fatalf("setup should not reuse mismatched identity: (%+v, %v, %v)", res, reused, err)
 	}
-	if res, reused, err := reuseCompletedAcceptanceSkeleton(root, taskID, currentRun, current, "test", ""); err != nil || reused || res != nil {
+	if res, reused, err := reuseCompletedAcceptanceSkeleton(preflightReuseQuery{Root: root, TaskID: taskID, RunDir: currentRun, Effective: current, InputKey: "test", WorkDir: ""}); err != nil || reused || res != nil {
 		t.Fatalf("skeleton should not reuse mismatched identity: (%+v, %v, %v)", res, reused, err)
 	}
 }
@@ -131,13 +131,13 @@ func TestReuseCompletedPreflightsDerivesSetupCLIFromProvider(t *testing.T) {
 	}
 	// Match when current also has empty model/effort (only CLI resolved).
 	matchEmpty := task.Executor{CLI: "claude"}
-	if res, reused, err := reuseReadySetup(root, taskID, currentRun, matchEmpty, "test"); err != nil || !reused || res == nil {
+	if res, reused, err := reuseReadySetup(preflightReuseQuery{Root: root, TaskID: taskID, RunDir: currentRun, Effective: matchEmpty, InputKey: "test"}); err != nil || !reused || res == nil {
 		t.Fatalf("expected provider-derived CLI match with empty model/effort: (%+v, %v, %v)", res, reused, err)
 	}
 	// Mismatch when current carries resolved model/effort that legacy lacks.
 	currentRun2 := filepath.Join(root, "runs", taskID+"-3")
 	full := task.Executor{CLI: "claude", Model: "m", Effort: "high"}
-	if res, reused, err := reuseReadySetup(root, taskID, currentRun2, full, "test"); err != nil || reused || res != nil {
+	if res, reused, err := reuseReadySetup(preflightReuseQuery{Root: root, TaskID: taskID, RunDir: currentRun2, Effective: full, InputKey: "test"}); err != nil || reused || res != nil {
 		t.Fatalf("legacy provider-only evidence must not match full identity: (%+v, %v, %v)", res, reused, err)
 	}
 }
@@ -163,11 +163,11 @@ func TestReuseCompletedPreflightsMatchesExplicitEmptyModel(t *testing.T) {
 	}
 
 	// Same empty model reuses both preflights.
-	gotSetup, setupReused, err := reuseReadySetup(root, taskID, currentRun, effective, "test")
+	gotSetup, setupReused, err := reuseReadySetup(preflightReuseQuery{Root: root, TaskID: taskID, RunDir: currentRun, Effective: effective, InputKey: "test"})
 	if err != nil || !setupReused || gotSetup == nil || gotSetup.ExecutorModel != "" {
 		t.Fatalf("setup empty-model reuse = (%+v, %v, %v)", gotSetup, setupReused, err)
 	}
-	gotSkeleton, skeletonReused, err := reuseCompletedAcceptanceSkeleton(root, taskID, currentRun, effective, "test", "")
+	gotSkeleton, skeletonReused, err := reuseCompletedAcceptanceSkeleton(preflightReuseQuery{Root: root, TaskID: taskID, RunDir: currentRun, Effective: effective, InputKey: "test", WorkDir: ""})
 	if err != nil || !skeletonReused || gotSkeleton == nil || gotSkeleton.ExecutorModel != "" {
 		t.Fatalf("skeleton empty-model reuse = (%+v, %v, %v)", gotSkeleton, skeletonReused, err)
 	}
@@ -175,10 +175,10 @@ func TestReuseCompletedPreflightsMatchesExplicitEmptyModel(t *testing.T) {
 	// A later non-empty model must invalidate the empty-model evidence.
 	currentRun3 := filepath.Join(root, "runs", taskID+"-3")
 	withModel := task.Executor{CLI: "grok", Model: "grok-code", Effort: "low"}
-	if res, reused, err := reuseReadySetup(root, taskID, currentRun3, withModel, "test"); err != nil || reused || res != nil {
+	if res, reused, err := reuseReadySetup(preflightReuseQuery{Root: root, TaskID: taskID, RunDir: currentRun3, Effective: withModel, InputKey: "test"}); err != nil || reused || res != nil {
 		t.Fatalf("setup must not reuse empty-model evidence for non-empty model: (%+v, %v, %v)", res, reused, err)
 	}
-	if res, reused, err := reuseCompletedAcceptanceSkeleton(root, taskID, currentRun3, withModel, "test", ""); err != nil || reused || res != nil {
+	if res, reused, err := reuseCompletedAcceptanceSkeleton(preflightReuseQuery{Root: root, TaskID: taskID, RunDir: currentRun3, Effective: withModel, InputKey: "test", WorkDir: ""}); err != nil || reused || res != nil {
 		t.Fatalf("skeleton must not reuse empty-model evidence for non-empty model: (%+v, %v, %v)", res, reused, err)
 	}
 }
@@ -221,14 +221,14 @@ func TestReuseCompletedPreflightsEffortIdentityTransitions(t *testing.T) {
 				assertPersistedExecutorEffortEmpty(t, filepath.Join(priorRun, runartifact.PreflightResultFilename))
 			}
 
-			_, setupReused, err := reuseReadySetup(root, taskID, currentRun, current, "test")
+			_, setupReused, err := reuseReadySetup(preflightReuseQuery{Root: root, TaskID: taskID, RunDir: currentRun, Effective: current, InputKey: "test"})
 			if err != nil {
 				t.Fatalf("setup reuse err: %v", err)
 			}
 			if setupReused != tc.wantReuse {
 				t.Fatalf("setup reuse = %v, want %v (prior effort %q, current effort %q)", setupReused, tc.wantReuse, tc.prior, tc.current)
 			}
-			_, skeletonReused, err := reuseCompletedAcceptanceSkeleton(root, taskID, currentRun, current, "test", "")
+			_, skeletonReused, err := reuseCompletedAcceptanceSkeleton(preflightReuseQuery{Root: root, TaskID: taskID, RunDir: currentRun, Effective: current, InputKey: "test", WorkDir: ""})
 			if err != nil {
 				t.Fatalf("skeleton reuse err: %v", err)
 			}

@@ -61,38 +61,38 @@ func TestVCSGitInvocationsApplyLongpathsFlag(t *testing.T) {
 		{
 			name: "AddPaths",
 			run: func(t *testing.T, git string) error {
-				return AddPaths(t.Context(), Binaries{Git: git}, t.TempDir(), t.TempDir(), []string{"a.txt"})
+				return AddPaths(t.Context(), Repo{Bins: Binaries{Git: git}, WorkDir: t.TempDir(), RunDir: t.TempDir()}, []string{"a.txt"})
 			},
 		},
 		{
 			name: "StatusPorcelainZ",
 			run: func(t *testing.T, git string) error {
-				_, err := StatusPorcelainZ(t.Context(), Binaries{Git: git}, t.TempDir())
+				_, err := StatusPorcelainZ(t.Context(), Repo{Bins: Binaries{Git: git}, WorkDir: t.TempDir()})
 				return err
 			},
 		},
 		{
 			name: "StagePathsForReview",
 			run: func(t *testing.T, git string) error {
-				return StagePathsForReview(t.Context(), Binaries{Git: git}, t.TempDir(), t.TempDir(), []string{"changed.go"})
+				return StagePathsForReview(t.Context(), Repo{Bins: Binaries{Git: git}, WorkDir: t.TempDir(), RunDir: t.TempDir()}, []string{"changed.go"})
 			},
 		},
 		{
 			name: "Commit",
 			run: func(t *testing.T, git string) error {
-				return Commit(t.Context(), Binaries{Git: git}, t.TempDir(), t.TempDir(), "msg")
+				return Commit(t.Context(), Repo{Bins: Binaries{Git: git}, WorkDir: t.TempDir(), RunDir: t.TempDir()}, "msg")
 			},
 		},
 		{
 			name: "PushCurrentBranch",
 			run: func(t *testing.T, git string) error {
-				return PushCurrentBranch(t.Context(), Binaries{Git: git}, t.TempDir(), t.TempDir())
+				return PushCurrentBranch(t.Context(), Repo{Bins: Binaries{Git: git}, WorkDir: t.TempDir(), RunDir: t.TempDir()})
 			},
 		},
 		{
 			name: "addPathsForOS_windows",
 			run: func(t *testing.T, git string) error {
-				return addPathsForOS(t.Context(), Binaries{Git: git}, t.TempDir(), t.TempDir(), []string{"a.go", "b.go"}, "windows")
+				return addPathsForOS(t.Context(), Repo{Bins: Binaries{Git: git}, WorkDir: t.TempDir(), RunDir: t.TempDir()}, []string{"a.go", "b.go"}, "windows")
 			},
 			requireStdin: true,
 		},

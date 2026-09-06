@@ -12,9 +12,9 @@ import (
 func TestShellArgvForOSHonorsExplicitShellPathWithoutDiscovery(t *testing.T) {
 	lookCalls := 0
 	statCalls := 0
-	argv, cleanup, shell, err := ShellArgvForOSWithResolver("linux", "echo ok", "", profile.RequiredCheckEnvironment{
+	argv, cleanup, shell, err := ShellArgvForOSWithResolver(ShellRequest{GOOS: "linux", Command: "echo ok", ScratchDir: "", Shell: profile.RequiredCheckEnvironment{
 		ShellPath: "/opt/galley/bin/bash",
-	}, Resolver{
+	}}, Resolver{
 		LookPath: func(string) (string, error) {
 			lookCalls++
 			return "", os.ErrNotExist
@@ -42,9 +42,9 @@ func TestShellArgvForOSHonorsExplicitShellPathWithoutDiscovery(t *testing.T) {
 }
 
 func TestShellArgvForOSWindowsBashRejectsNonStandardPathDiscovery(t *testing.T) {
-	_, cleanup, _, err := ShellArgvForOSWithResolver("windows", "echo ok", t.TempDir(), profile.RequiredCheckEnvironment{
+	_, cleanup, _, err := ShellArgvForOSWithResolver(ShellRequest{GOOS: "windows", Command: "echo ok", ScratchDir: t.TempDir(), Shell: profile.RequiredCheckEnvironment{
 		Shell: "bash",
-	}, Resolver{
+	}}, Resolver{
 		LookPath: func(file string) (string, error) {
 			if file == "bash.exe" || file == "bash" {
 				return `C:\Windows\System32\bash.exe`, nil

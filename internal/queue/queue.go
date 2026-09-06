@@ -27,7 +27,7 @@ func EnsureLayout(root string) error {
 	}
 	paths = append(paths, filepath.Join(root, "runs"))
 	for _, path := range paths {
-		if err := os.MkdirAll(path, 0o755); err != nil {
+		if err := os.MkdirAll(path, 0o700); err != nil {
 			return fmt.Errorf("create %s: %w", path, err)
 		}
 	}
@@ -144,13 +144,11 @@ func RecoverStaleClaimsExcept(root string, ttl time.Duration, now time.Time, act
 		if now.Sub(info.ModTime()) < ttl {
 			continue
 		}
-		if entry.Type().IsRegular() && isTaskYAMLName(entry.Name()) {
-			if err := requeueRunningTask(root, path); err != nil {
-				if errors.Is(err, os.ErrExist) {
-					continue
-				}
-				return err
-			}
+		if !entry.Type().IsRegular() || !isTaskYAMLName(entry.Name()) {
+			continue
+		}
+		if err := requeueRunningTask(root, path); err != nil && !errors.Is(err, os.ErrExist) {
+			return err
 		}
 	}
 	return nil
@@ -189,15 +187,7 @@ func removeStaleLocks(dir string, ttl time.Duration, now time.Time, active map[s
 func requeueRunningTask(root, runningPath string) error {
 	loaded, err := task.Load(runningPath)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		if moveErr := taskstate.QuarantineUnreadableClaim(root, runningPath, err); moveErr != nil {
-			return errors.Join(err, moveErr)
-		}
-		_ = RemoveOwner(runningPath)
-		fmt.Fprintf(os.Stderr, "galley: quarantined unreadable running task: %v\n", err)
-		return nil
+		return quarantineUnreadableRunningTask(root, runningPath, err)
 	}
 	loaded.Status = task.StatusQueued
 	if err := task.Save(runningPath, loaded); err != nil {
@@ -223,4 +213,18 @@ func noOverwriteRename(src, dst string) error {
 			return fileutil.RenameNoReplaceUnderMarker(src, dst)
 		})
 	})
+}
+
+// quarantineUnreadableRunningTask moves an unparseable running task out of the
+// queue so recovery stops retrying it; an already-gone file needs no action.
+func quarantineUnreadableRunningTask(root, runningPath string, loadErr error) error {
+	if errors.Is(loadErr, os.ErrNotExist) {
+		return nil
+	}
+	if moveErr := taskstate.QuarantineUnreadableClaim(root, runningPath, loadErr); moveErr != nil {
+		return errors.Join(loadErr, moveErr)
+	}
+	_ = RemoveOwner(runningPath)
+	fmt.Fprintf(os.Stderr, "galley: quarantined unreadable running task: %v\n", loadErr)
+	return nil
 }

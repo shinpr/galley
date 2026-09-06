@@ -24,9 +24,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var stopVerifiedForCommand = daemonctl.StopVerified
-var forceStopForCommand = daemonctl.ForceStop
-var afterInitialStopInspectForCommand func()
+var (
+	stopVerifiedForCommand            = daemonctl.StopVerified
+	forceStopForCommand               = daemonctl.ForceStop
+	afterInitialStopInspectForCommand func()
+)
 
 func NewCommand(use string) *cobra.Command {
 	var opts daemon.Options
@@ -42,34 +44,14 @@ func NewCommand(use string) *cobra.Command {
 		Short:         "Run the Galley file-backed task daemon",
 		SilenceErrors: true,
 		SilenceUsage:  true,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, cancel := context.WithCancel(cmd.Context())
 			defer cancel()
-			signals := make(chan os.Signal, 1)
-			signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
-			defer signal.Stop(signals)
 			done := make(chan struct{})
-			go func() {
-				select {
-				case <-signals:
-					fmt.Fprintf(cmd.ErrOrStderr(), "galley: shutdown requested; active attempts have up to %s to finish\n", opts.ShutdownTimeout)
-					cancel()
-				case <-done:
-					return
-				}
-				select {
-				case <-signals:
-					fmt.Fprintln(cmd.ErrOrStderr(), "galley: second shutdown signal received; exiting")
-					os.Exit(130)
-				case <-done:
-				}
-			}()
-			if supervisorProvider != "" {
-				if !provider.IsSupervisor(supervisorProvider) {
-					return fmt.Errorf("--supervisor must be one of: %s", strings.Join(provider.SupervisorIDs(), ", "))
-				}
-				opts.Supervisor = supervisorProvider
-				opts.SupervisorSource = daemon.SupervisorSourceCLI
+			stopSignals := watchShutdownSignals(cmd, &opts, cancel, done)
+			defer stopSignals()
+			if err := applySupervisorFlag(&opts, supervisorProvider); err != nil {
+				return err
 			}
 			opts.Explicit = explicitOptionsFromFlags(cmd)
 			if pollInterval > 0 {
@@ -89,44 +71,21 @@ func NewCommand(use string) *cobra.Command {
 			if _, err := daemonconfig.EnsureDefault(opts.Root); err != nil {
 				return err
 			}
-			if cfg, present, err := daemonconfig.Load(opts.Root); err != nil {
+			cfg, present, err := daemonconfig.Load(opts.Root)
+			if err != nil {
 				return err
-			} else if present {
+			}
+			if present {
 				if err := applyDaemonConfig(&opts, &pollInterval, cfg); err != nil {
 					return err
 				}
 			}
-			daemonToken := os.Getenv(daemonctl.EnvToken)
-			if daemonToken != "" {
-				_ = os.Unsetenv(daemonctl.EnvToken)
+			releasePID, err := registerBackgroundDaemon(&opts, pidFile)
+			if err != nil {
+				return err
 			}
-			if daemonToken != "" && pidFile == "" {
-				return fmt.Errorf("%s requires --pid-file", daemonctl.EnvToken)
-			}
-			if daemonToken != "" {
-				exe, err := os.Executable()
-				if err != nil {
-					return err
-				}
-				resolved, err := daemon.Preflight(opts)
-				if err != nil {
-					return err
-				}
-				opts = resolved
-				meta := daemonctl.NewPIDFile(os.Getpid(), exe, opts.Root, os.Args).WithToken(daemonToken)
-				if err := daemonctl.WritePID(pidFile, meta); err != nil {
-					return err
-				}
-				if err := daemonctl.Heartbeat(pidFile, meta); err != nil {
-					return err
-				}
-				stopHeartbeat := startPIDHeartbeat(pidFile, meta)
-				defer func() {
-					stopHeartbeat()
-					_ = daemonctl.RemovePID(pidFile, os.Getpid())
-				}()
-			}
-			err := daemon.Run(ctx, opts)
+			defer releasePID()
+			err = daemon.Run(ctx, opts)
 			close(done)
 			return err
 		},
@@ -182,33 +141,18 @@ func applyDaemonConfig(opts *daemon.Options, pollInterval *time.Duration, cfg da
 		opts.MaxConcurrentPerRepo = *cfg.MaxConcurrentPerRepo
 		opts.Explicit.MaxConcurrentPerRepo = true
 	}
-	if !opts.Explicit.PollInterval && cfg.PollInterval != "" {
-		if d, ok, err := daemonConfigDuration("poll_interval", cfg.PollInterval); err != nil {
-			return err
-		} else if ok {
+	durations := []daemonConfigDurationField{
+		{Name: "poll_interval", Value: cfg.PollInterval, Explicit: opts.Explicit.PollInterval, Apply: func(d time.Duration) {
 			*pollInterval = d
 			opts.PollInterval = d
-		}
+		}},
+		{Name: "claim_ttl", Value: cfg.ClaimTTL, Explicit: opts.Explicit.ClaimTTL, Apply: func(d time.Duration) { opts.ClaimTTL = d }},
+		{Name: "shutdown_timeout", Value: cfg.ShutdownTimeout, Explicit: opts.Explicit.ShutdownTimeout, Apply: func(d time.Duration) { opts.ShutdownTimeout = d }},
+		{Name: "idle_timeout", Value: cfg.IdleTimeout, Explicit: opts.Explicit.IdleTimeout, Apply: func(d time.Duration) { opts.IdleTimeout = d }},
 	}
-	if !opts.Explicit.ClaimTTL && cfg.ClaimTTL != "" {
-		if d, ok, err := daemonConfigDuration("claim_ttl", cfg.ClaimTTL); err != nil {
+	for _, field := range durations {
+		if err := field.apply(); err != nil {
 			return err
-		} else if ok {
-			opts.ClaimTTL = d
-		}
-	}
-	if !opts.Explicit.ShutdownTimeout && cfg.ShutdownTimeout != "" {
-		if d, ok, err := daemonConfigDuration("shutdown_timeout", cfg.ShutdownTimeout); err != nil {
-			return err
-		} else if ok {
-			opts.ShutdownTimeout = d
-		}
-	}
-	if !opts.Explicit.IdleTimeout && cfg.IdleTimeout != "" {
-		if d, ok, err := daemonConfigDuration("idle_timeout", cfg.IdleTimeout); err != nil {
-			return err
-		} else if ok {
-			opts.IdleTimeout = d
 		}
 	}
 	// Notifications come only from daemon.yaml; there is no CLI flag because the
@@ -218,6 +162,29 @@ func applyDaemonConfig(opts *daemon.Options, pollInterval *time.Duration, cfg da
 	// Provider API keys are injected only into selected child environments.
 	opts.GLMAuthToken = cfg.GLMAPIKey
 	opts.KimiAPIKey = cfg.KimiAPIKey
+	return nil
+}
+
+// daemonConfigDurationField is one daemon.yaml duration setting. A CLI flag
+// that set the same option keeps precedence, so an explicit field is skipped.
+type daemonConfigDurationField struct {
+	Name     string
+	Value    string
+	Explicit bool
+	Apply    func(time.Duration)
+}
+
+func (f daemonConfigDurationField) apply() error {
+	if f.Explicit || f.Value == "" {
+		return nil
+	}
+	d, ok, err := daemonConfigDuration(f.Name, f.Value)
+	if err != nil {
+		return err
+	}
+	if ok {
+		f.Apply(d)
+	}
 	return nil
 }
 
@@ -260,7 +227,7 @@ func newConfigInitCommand(opts *daemon.Options) *cobra.Command {
 		Short:         "Create daemon.yaml with documented defaults without starting the daemon",
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			// EnsureDefault is the sole daemon.yaml writer, so init creates the
 			// same editable defaults as daemon startup and preserves existing files.
 			created, err := daemonconfig.EnsureDefault(opts.Root)
@@ -294,92 +261,132 @@ func newStartCommand(opts *daemon.Options, pidFile, logFile *string, readinessTi
 		Short:         "Start Galley daemon in the background",
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if opts.Once {
-				return fmt.Errorf("start does not support --once")
-			}
-			// Ensure daemon.yaml exists under the selected root before the
-			// child daemon spawns. The background child cannot reliably
-			// surface a creation error to the operator, and operators expect
-			// to edit daemon.yaml immediately after `galley daemon start`
-			// returns. The child still re-loads daemon.yaml so any value
-			// written here is what the child resolves on first boot.
-			if _, err := daemonconfig.EnsureDefault(opts.Root); err != nil {
-				return err
-			}
-			paths := daemonctl.ResolvePaths(opts.Root, *pidFile, *logFile)
-			exe, err := os.Executable()
-			if err != nil {
-				return err
-			}
-			release, err := daemonctl.ReservePID(paths.PIDFile)
-			if err != nil {
-				return err
-			}
-			defer release()
-			if status, err := daemonctl.Inspect(paths.PIDFile, opts.Root, exe); err == nil {
-				if status.Alive && status.Verified {
-					return fmt.Errorf("galley daemon already running with pid %d", status.Meta.PID)
-				}
-				if status.Alive && !status.Verified {
-					return fmt.Errorf("refusing to replace pid file for unverified live pid %d", status.Meta.PID)
-				}
-				if !status.Alive {
-					if err := daemonctl.RemovePID(paths.PIDFile, status.Meta.PID); err != nil {
-						return err
-					}
-				}
-			} else if !errors.Is(err, daemonctl.ErrNotRunning) {
-				return err
-			}
-			if err := os.MkdirAll(opts.Root, 0o700); err != nil {
-				return fmt.Errorf("create root: %w", err)
-			}
-			if err := os.MkdirAll(filepath.Dir(paths.LogFile), 0o700); err != nil {
-				return fmt.Errorf("create log dir: %w", err)
-			}
-			log, err := os.OpenFile(paths.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-			if err != nil {
-				return fmt.Errorf("open log file: %w", err)
-			}
-			defer log.Close()
-			token, err := randomToken()
-			if err != nil {
-				return err
-			}
-			childArgs := foregroundArgs(os.Args[1:], cmd.Name())
-			childArgs = append(childArgs, "--pid-file", paths.PIDFile)
-			child := exec.Command(exe, childArgs...)
-			child.Stdout = log
-			child.Stderr = log
-			child.Stdin = nil
-			child.Env = append(os.Environ(), daemonctl.EnvToken+"="+token)
-			configureBackgroundProcess(child)
-			if err := child.Start(); err != nil {
-				return err
-			}
-			meta := daemonctl.NewPIDFile(child.Process.Pid, exe, opts.Root, append([]string{exe}, childArgs...)).WithToken(token)
-			if err := daemonctl.WritePID(paths.PIDFile, meta); err != nil {
-				// Cross-platform start cleanup uses SIGTERM on Unix and
-				// TerminateProcess on Windows so a PID write failure does
-				// not leave a background daemon running.
-				_ = daemonctl.TerminateChildProcess(child.Process)
-				return err
-			}
-			if err := waitReady(paths.PIDFile, opts.Root, exe, *readinessTimeout); err != nil {
-				// Same cross-platform start cleanup boundary as above: a
-				// readiness timeout must actually terminate the child on
-				// every OS, otherwise a slow-to-start daemon survives an
-				// aborted `galley daemon start` and races a subsequent
-				// retry against a stale process.
-				_ = daemonctl.TerminateChildProcess(child.Process)
-				_ = daemonctl.RemovePID(paths.PIDFile, child.Process.Pid)
-				return fmt.Errorf("%w; see log file %s", err, paths.LogFile)
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "galley daemon started pid=%d\npid_file=%s\nlog_file=%s\n", child.Process.Pid, paths.PIDFile, paths.LogFile)
-			return child.Process.Release()
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runStartCommand(cmd, startRequest{Opts: opts, PIDFile: *pidFile, LogFile: *logFile, ReadinessTimeout: *readinessTimeout})
 		},
 	}
+}
+
+// startRequest is one `galley daemon start` invocation.
+type startRequest struct {
+	Opts             *daemon.Options
+	PIDFile          string
+	LogFile          string
+	ReadinessTimeout time.Duration
+}
+
+func runStartCommand(cmd *cobra.Command, req startRequest) error {
+	opts := req.Opts
+	if opts.Once {
+		return fmt.Errorf("start does not support --once")
+	}
+	// The background child cannot surface a creation error, so daemon.yaml is
+	// created here; the child re-loads it and resolves what is written.
+	if _, err := daemonconfig.EnsureDefault(opts.Root); err != nil {
+		return err
+	}
+	paths := daemonctl.ResolvePaths(opts.Root, req.PIDFile, req.LogFile)
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve galley executable: %w", err)
+	}
+	release, err := daemonctl.ReservePID(paths.PIDFile)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if err := clearReplaceablePIDRecord(paths.PIDFile, opts.Root, exe); err != nil {
+		return err
+	}
+	log, err := openDaemonLog(opts.Root, paths.LogFile)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = log.Close() }()
+	child, meta, err := spawnBackgroundDaemon(cmd, spawnPlan{Exe: exe, Root: opts.Root, PIDFile: paths.PIDFile, Log: log})
+	if err != nil {
+		return err
+	}
+	if err := daemonctl.WritePID(paths.PIDFile, meta); err != nil {
+		// Cross-platform cleanup (SIGTERM on Unix, TerminateProcess on Windows)
+		// so a PID write failure leaves no background daemon running.
+		_ = daemonctl.TerminateChildProcess(child.Process)
+		return err
+	}
+	if err := waitReady(paths.PIDFile, opts.Root, exe, req.ReadinessTimeout); err != nil {
+		// Same cleanup boundary: a readiness timeout must terminate the child on
+		// every OS, or a slow starter races the next `galley daemon start`.
+		_ = daemonctl.TerminateChildProcess(child.Process)
+		_ = daemonctl.RemovePID(paths.PIDFile, child.Process.Pid)
+		return fmt.Errorf("%w; see log file %s", err, paths.LogFile)
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "galley daemon started pid=%d\npid_file=%s\nlog_file=%s\n", child.Process.Pid, paths.PIDFile, paths.LogFile)
+	if err := child.Process.Release(); err != nil {
+		return fmt.Errorf("release background daemon process %d: %w", child.Process.Pid, err)
+	}
+	return nil
+}
+
+// clearReplaceablePIDRecord removes a stale PID record so a new daemon can take
+// its place. A live daemon (verified or not) is never replaced.
+func clearReplaceablePIDRecord(pidFile, root, exe string) error {
+	status, err := daemonctl.Inspect(pidFile, root, exe)
+	if err != nil {
+		if errors.Is(err, daemonctl.ErrNotRunning) {
+			return nil
+		}
+		return err
+	}
+	if status.Alive && status.Verified {
+		return fmt.Errorf("galley daemon already running with pid %d", status.Meta.PID)
+	}
+	if status.Alive {
+		return fmt.Errorf("refusing to replace pid file for unverified live pid %d", status.Meta.PID)
+	}
+	return daemonctl.RemovePID(pidFile, status.Meta.PID)
+}
+
+func openDaemonLog(root, logPath string) (*os.File, error) {
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return nil, fmt.Errorf("create root: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
+		return nil, fmt.Errorf("create log dir: %w", err)
+	}
+	log, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open log file: %w", err)
+	}
+	return log, nil
+}
+
+// spawnPlan is the background daemon child this start command launches.
+type spawnPlan struct {
+	Exe     string
+	Root    string
+	PIDFile string
+	Log     *os.File
+}
+
+func spawnBackgroundDaemon(cmd *cobra.Command, plan spawnPlan) (*exec.Cmd, daemonctl.PIDFile, error) {
+	token, err := randomToken()
+	if err != nil {
+		return nil, daemonctl.PIDFile{}, err
+	}
+	childArgs := foregroundArgs(os.Args[1:], cmd.Name())
+	childArgs = append(childArgs, "--pid-file", plan.PIDFile)
+	//nolint:noctx // the background daemon must outlive this start command
+	child := exec.Command(plan.Exe, childArgs...)
+	child.Stdout = plan.Log
+	child.Stderr = plan.Log
+	child.Stdin = nil
+	child.Env = append(os.Environ(), daemonctl.EnvToken+"="+token)
+	configureBackgroundProcess(child)
+	if err := child.Start(); err != nil {
+		return nil, daemonctl.PIDFile{}, fmt.Errorf("start background daemon: %w", err)
+	}
+	meta := daemonctl.NewPIDFile(child.Process.Pid, plan.Exe, plan.Root, append([]string{plan.Exe}, childArgs...)).WithToken(token)
+	return child, meta, nil
 }
 
 func newStopCommand(opts *daemon.Options, pidFile *string, stopTimeout *time.Duration) *cobra.Command {
@@ -389,134 +396,191 @@ func newStopCommand(opts *daemon.Options, pidFile *string, stopTimeout *time.Dur
 		Short:         "Stop a background Galley daemon",
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			paths := daemonctl.ResolvePaths(opts.Root, *pidFile, "")
-			exe, err := os.Executable()
-			if err != nil {
-				return err
-			}
-			initial, err := daemonctl.Inspect(paths.PIDFile, opts.Root, exe)
-			if errors.Is(err, daemonctl.ErrNotRunning) {
-				return daemonctl.ErrNotRunning
-			}
-			if err != nil {
-				return err
-			}
-			if afterInitialStopInspectForCommand != nil {
-				afterInitialStopInspectForCommand()
-			}
-			var intentPath string
-			leader := false
-			if !force {
-				intentPath, leader, err = claimStopIntent(paths.PIDFile, initial.Meta)
-				if err != nil {
-					return err
-				}
-				status, inspectErr := daemonctl.Inspect(paths.PIDFile, opts.Root, exe)
-				if errors.Is(inspectErr, daemonctl.ErrNotRunning) || (inspectErr == nil && !sameDaemonIdentity(initial.Meta, status.Meta)) {
-					removeStopIntent(intentPath)
-					fmt.Fprintf(cmd.OutOrStdout(), "galley daemon stopped pid=%d\n", initial.Meta.PID)
-					return nil
-				}
-				if inspectErr != nil {
-					if leader {
-						removeStopIntent(intentPath)
-					}
-					return inspectErr
-				}
-				initial = status
-				if !leader {
-					if err := waitForDaemonStop(paths.PIDFile, opts.Root, exe, initial.Meta, *stopTimeout); err != nil {
-						return err
-					}
-					removeStopIntent(intentPath)
-					fmt.Fprintf(cmd.OutOrStdout(), "galley daemon stopped pid=%d\n", initial.Meta.PID)
-					return nil
-				}
-			}
-			status := initial
-			if !status.Alive {
-				if intentPath != "" {
-					removeStopIntent(intentPath)
-				}
-				// A stale daemon record means the daemon process is gone, but
-				// it may have left behind executor/supervisor child process
-				// groups it can no longer reap. Force stop must clean those up
-				// before discarding the record; on cleanup failure surface the
-				// surviving PIDs/PGIDs and keep the PID file so a follow-up
-				// action can target the same daemon record.
-				if err := cleanupOnForce(cmd, force, opts.Root, status.Meta, *stopTimeout); err != nil {
-					return err
-				}
-				failedTasks := 0
-				if force {
-					failedTasks, err = failOwnedRunningTasks(opts.Root, status.Meta)
-					if err != nil {
-						return err
-					}
-				}
-				if err := daemonctl.RemovePID(paths.PIDFile, status.Meta.PID); err != nil {
-					return err
-				}
-				if force && failedTasks > 0 {
-					fmt.Fprintf(cmd.OutOrStdout(), "galley daemon force stopped pid=%d\n", status.Meta.PID)
-					return nil
-				}
-				return daemonctl.ErrNotRunning
-			}
-			if !status.Verified {
-				if leader {
-					removeStopIntent(intentPath)
-				}
-				return fmt.Errorf("%w: pid=%d", daemonctl.ErrUnverifiedProcess, status.Meta.PID)
-			}
-			forced := false
-			if force {
-				wasForced, err := forceStopForCommand(status.Meta, *stopTimeout)
-				if err != nil && !errors.Is(err, daemonctl.ErrNotRunning) {
-					return err
-				}
-				defer removeStopIntent(stopIntentPath(paths.PIDFile, status.Meta))
-				forced = wasForced
-			} else {
-				if err := stopVerifiedForCommand(status.Meta, *stopTimeout); err != nil && !errors.Is(err, daemonctl.ErrNotRunning) {
-					return fmt.Errorf("shutdown remains in progress; normal stop will not signal again; use stop --force to recover, which interrupts active attempts: %w", err)
-				}
-				defer removeStopIntent(intentPath)
-			}
-			// Force stop must clean up the daemon's known active child
-			// process groups before reporting a stopped state or removing the
-			// PID file. The daemon intentionally puts executor and supervisor
-			// subprocesses into their own pgids, so killing only the daemon
-			// PID can orphan them. On child cleanup failure we
-			// surface a visible error that names the surviving PIDs/PGIDs and
-			// intentionally leave the PID file in place so a follow-up
-			// operator action can target the same daemon record instead of
-			// observing a falsely-clean stop.
-			if err := cleanupOnForce(cmd, force, opts.Root, status.Meta, *stopTimeout); err != nil {
-				return err
-			}
-			if force {
-				if _, err := failOwnedRunningTasks(opts.Root, status.Meta); err != nil {
-					return err
-				}
-			}
-			if err := daemonctl.RemovePID(paths.PIDFile, status.Meta.PID); err != nil {
-				return err
-			}
-			if forced {
-				fmt.Fprintf(cmd.OutOrStdout(), "galley daemon force stopped pid=%d\n", status.Meta.PID)
-			} else {
-				fmt.Fprintf(cmd.OutOrStdout(), "galley daemon stopped pid=%d\n", status.Meta.PID)
-			}
-			return nil
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runStopCommand(cmd, stopRequest{Opts: opts, PIDFile: *pidFile, StopTimeout: *stopTimeout, Force: force})
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "After the stop timeout, send a verified SIGKILL to the daemon and to any known active executor or supervisor child process groups")
 	return cmd
 }
 
-func cleanupOnForce(cmd *cobra.Command, force bool, root string, owner daemonctl.PIDFile, stopTimeout time.Duration) error {
+// stopRequest is one `galley daemon stop` invocation.
+type stopRequest struct {
+	Opts        *daemon.Options
+	PIDFile     string
+	StopTimeout time.Duration
+	Force       bool
+}
+
+// stopIntent is the stop-intent marker this invocation claimed. Only the leader
+// signals the daemon; followers wait for the leader's stop to complete.
+type stopIntent struct {
+	Path   string
+	Leader bool
+}
+
+// stopSession is one stop invocation bound to the daemon record it targets.
+type stopSession struct {
+	Req   stopRequest
+	Paths daemonctl.Paths
+	Exe   string
+}
+
+func runStopCommand(cmd *cobra.Command, req stopRequest) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve galley executable: %w", err)
+	}
+	session := stopSession{Req: req, Paths: daemonctl.ResolvePaths(req.Opts.Root, req.PIDFile, ""), Exe: exe}
+	initial, err := daemonctl.Inspect(session.Paths.PIDFile, req.Opts.Root, exe)
+	if errors.Is(err, daemonctl.ErrNotRunning) {
+		return daemonctl.ErrNotRunning
+	}
+	if err != nil {
+		return err
+	}
+	if afterInitialStopInspectForCommand != nil {
+		afterInitialStopInspectForCommand()
+	}
+	var intent stopIntent
+	if !req.Force {
+		done, claimed, status, err := session.claimLeadership(cmd, initial)
+		if err != nil || done {
+			return err
+		}
+		intent, initial = claimed, status
+	}
+	if !initial.Alive {
+		return session.stopStaleDaemon(cmd, initial, intent)
+	}
+	if !initial.Verified {
+		if intent.Leader {
+			removeStopIntent(intent.Path)
+		}
+		return fmt.Errorf("%w: pid=%d", daemonctl.ErrUnverifiedProcess, initial.Meta.PID)
+	}
+	return session.stopLiveDaemon(cmd, initial, intent)
+}
+
+// claimLeadership claims the stop intent and re-inspects the record. done means
+// nothing is left: already stopped, identity changed, or the leader finished.
+func (s stopSession) claimLeadership(cmd *cobra.Command, initial daemonctl.Status) (bool, stopIntent, daemonctl.Status, error) {
+	intentPath, leader, err := claimStopIntent(s.Paths.PIDFile, initial.Meta)
+	if err != nil {
+		return false, stopIntent{}, initial, err
+	}
+	intent := stopIntent{Path: intentPath, Leader: leader}
+	status, inspectErr := daemonctl.Inspect(s.Paths.PIDFile, s.Req.Opts.Root, s.Exe)
+	if errors.Is(inspectErr, daemonctl.ErrNotRunning) || (inspectErr == nil && !sameDaemonIdentity(initial.Meta, status.Meta)) {
+		removeStopIntent(intentPath)
+		fmt.Fprintf(cmd.OutOrStdout(), "galley daemon stopped pid=%d\n", initial.Meta.PID)
+		return true, intent, initial, nil
+	}
+	if inspectErr != nil {
+		if leader {
+			removeStopIntent(intentPath)
+		}
+		return false, intent, initial, inspectErr
+	}
+	if leader {
+		return false, intent, status, nil
+	}
+	if err := waitForDaemonStop(stopWait{PIDFile: s.Paths.PIDFile, Root: s.Req.Opts.Root, Executable: s.Exe, Target: status.Meta, Timeout: s.Req.StopTimeout}); err != nil {
+		return false, intent, status, err
+	}
+	removeStopIntent(intentPath)
+	fmt.Fprintf(cmd.OutOrStdout(), "galley daemon stopped pid=%d\n", status.Meta.PID)
+	return true, intent, status, nil
+}
+
+// stopStaleDaemon discards a record whose process is gone, force-cleaning the
+// child groups first; on failure the PIDs surface and the PID file stays.
+func (s stopSession) stopStaleDaemon(cmd *cobra.Command, status daemonctl.Status, intent stopIntent) error {
+	if intent.Path != "" {
+		removeStopIntent(intent.Path)
+	}
+	if err := cleanupOnForce(cmd, s.forceCleanupFor(status)); err != nil {
+		return err
+	}
+	failedTasks := 0
+	if s.Req.Force {
+		var err error
+		failedTasks, err = failOwnedRunningTasks(s.Req.Opts.Root, status.Meta)
+		if err != nil {
+			return err
+		}
+	}
+	if err := daemonctl.RemovePID(s.Paths.PIDFile, status.Meta.PID); err != nil {
+		return err
+	}
+	if s.Req.Force && failedTasks > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "galley daemon force stopped pid=%d\n", status.Meta.PID)
+		return nil
+	}
+	return daemonctl.ErrNotRunning
+}
+
+// stopLiveDaemon signals a verified daemon and clears its record. Executor and
+// supervisor subprocesses hold their own pgids, so force stop reaps them first.
+func (s stopSession) stopLiveDaemon(cmd *cobra.Command, status daemonctl.Status, intent stopIntent) error {
+	forced, intentPath, err := s.signalDaemon(status, intent)
+	if err != nil {
+		return err
+	}
+	// The stop intent is released only after the PID file is cleared so a
+	// concurrent stop cannot observe a half-removed daemon record.
+	if intentPath != "" {
+		defer removeStopIntent(intentPath)
+	}
+	if err := cleanupOnForce(cmd, s.forceCleanupFor(status)); err != nil {
+		return err
+	}
+	if s.Req.Force {
+		if _, err := failOwnedRunningTasks(s.Req.Opts.Root, status.Meta); err != nil {
+			return err
+		}
+	}
+	if err := daemonctl.RemovePID(s.Paths.PIDFile, status.Meta.PID); err != nil {
+		return err
+	}
+	if forced {
+		fmt.Fprintf(cmd.OutOrStdout(), "galley daemon force stopped pid=%d\n", status.Meta.PID)
+		return nil
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "galley daemon stopped pid=%d\n", status.Meta.PID)
+	return nil
+}
+
+// signalDaemon stops the daemon and returns the stop-intent path to release
+// once the record is cleared; an error keeps the intent for a follow-up stop.
+func (s stopSession) signalDaemon(status daemonctl.Status, intent stopIntent) (forced bool, intentPath string, err error) {
+	if s.Req.Force {
+		wasForced, err := forceStopForCommand(status.Meta, s.Req.StopTimeout)
+		if err != nil && !errors.Is(err, daemonctl.ErrNotRunning) {
+			return false, "", err
+		}
+		return wasForced, stopIntentPath(s.Paths.PIDFile, status.Meta), nil
+	}
+	if err := stopVerifiedForCommand(status.Meta, s.Req.StopTimeout); err != nil && !errors.Is(err, daemonctl.ErrNotRunning) {
+		return false, "", fmt.Errorf("shutdown remains in progress; normal stop will not signal again; use stop --force to recover, which interrupts active attempts: %w", err)
+	}
+	return false, intent.Path, nil
+}
+
+func (s stopSession) forceCleanupFor(status daemonctl.Status) forceCleanup {
+	return forceCleanup{Force: s.Req.Force, Root: s.Req.Opts.Root, Owner: status.Meta, StopTimeout: s.Req.StopTimeout}
+}
+
+// forceCleanup is a force-stop's target daemon and its shutdown budget.
+type forceCleanup struct {
+	Force       bool
+	Root        string
+	Owner       daemonctl.PIDFile
+	StopTimeout time.Duration
+}
+
+func cleanupOnForce(cmd *cobra.Command, req forceCleanup) error {
+	force, root, owner, stopTimeout := req.Force, req.Root, req.Owner, req.StopTimeout
 	if !force {
 		return nil
 	}
@@ -534,19 +598,19 @@ func newStatusCommand(opts *daemon.Options, pidFile *string) *cobra.Command {
 		Short:         "Report background Galley daemon status",
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			if output != "text" && output != "json" {
 				return fmt.Errorf("unsupported output format %q", output)
 			}
 			paths := daemonctl.ResolvePaths(opts.Root, *pidFile, "")
 			exe, err := os.Executable()
 			if err != nil {
-				return err
+				return fmt.Errorf("resolve galley executable: %w", err)
 			}
 			status, err := daemonctl.Inspect(paths.PIDFile, opts.Root, exe)
 			if errors.Is(err, daemonctl.ErrNotRunning) {
 				if output == "json" {
-					return writeStatusJSON(cmd, opts, paths, nil, false, false)
+					return writeStatusJSON(cmd, opts, paths, daemonLiveness{Status: nil, Alive: false, Verified: false})
 				}
 				fmt.Fprintln(cmd.OutOrStdout(), "galley daemon not running")
 				return nil
@@ -556,20 +620,20 @@ func newStatusCommand(opts *daemon.Options, pidFile *string) *cobra.Command {
 			}
 			if !status.Alive {
 				if output == "json" {
-					return writeStatusJSON(cmd, opts, paths, &status, false, status.Verified)
+					return writeStatusJSON(cmd, opts, paths, daemonLiveness{Status: &status, Alive: false, Verified: status.Verified})
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "galley daemon not running stale_pid=%d\n", status.Meta.PID)
 				return nil
 			}
 			if !status.Verified {
 				if output == "json" {
-					return writeStatusJSON(cmd, opts, paths, &status, true, false)
+					return writeStatusJSON(cmd, opts, paths, daemonLiveness{Status: &status, Alive: true, Verified: false})
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "galley daemon unverified pid=%d\n", status.Meta.PID)
 				return nil
 			}
 			if output == "json" {
-				return writeStatusJSON(cmd, opts, paths, &status, true, true)
+				return writeStatusJSON(cmd, opts, paths, daemonLiveness{Status: &status, Alive: true, Verified: true})
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "galley daemon running pid=%d\n", status.Meta.PID)
 			return nil
@@ -579,7 +643,15 @@ func newStatusCommand(opts *daemon.Options, pidFile *string) *cobra.Command {
 	return cmd
 }
 
-func writeStatusJSON(cmd *cobra.Command, opts *daemon.Options, paths daemonctl.Paths, status *daemonctl.Status, alive, verified bool) error {
+// daemonLiveness is what the status probe concluded about the daemon.
+type daemonLiveness struct {
+	Status   *daemonctl.Status
+	Alive    bool
+	Verified bool
+}
+
+func writeStatusJSON(cmd *cobra.Command, opts *daemon.Options, paths daemonctl.Paths, live daemonLiveness) error {
+	status, alive, verified := live.Status, live.Alive, live.Verified
 	// Daemon status intentionally does not surface daemon startup
 	// defaults that can be overridden by daemon.yaml or by per-repository
 	// environment.yaml. `supervisor` is omitted because a daemon-wide value
@@ -607,7 +679,10 @@ func writeStatusJSON(cmd *cobra.Command, opts *daemon.Options, paths daemonctl.P
 	}
 	enc := json.NewEncoder(cmd.OutOrStdout())
 	enc.SetIndent("", "  ")
-	return enc.Encode(payload)
+	if err := enc.Encode(payload); err != nil {
+		return fmt.Errorf("encode daemon status: %w", err)
+	}
+	return nil
 }
 
 func waitReady(pidFile, root, executable string, timeout time.Duration) error {
@@ -655,7 +730,7 @@ func startPIDHeartbeat(pidFile string, meta daemonctl.PIDFile) func() {
 func randomToken() (string, error) {
 	var data [16]byte
 	if _, err := rand.Read(data[:]); err != nil {
-		return "", err
+		return "", fmt.Errorf("generate readiness token: %w", err)
 	}
 	return hex.EncodeToString(data[:]), nil
 }
@@ -671,4 +746,73 @@ func foregroundArgs(args []string, commandName string) []string {
 		out = append(out, arg)
 	}
 	return out
+}
+
+// watchShutdownSignals cancels the daemon on the first SIGINT/SIGTERM and exits
+// immediately on the second. The returned function stops the watch.
+func watchShutdownSignals(cmd *cobra.Command, opts *daemon.Options, cancel context.CancelFunc, done <-chan struct{}) func() {
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		select {
+		case <-signals:
+			fmt.Fprintf(cmd.ErrOrStderr(), "galley: shutdown requested; active attempts have up to %s to finish\n", opts.ShutdownTimeout)
+			cancel()
+		case <-done:
+			return
+		}
+		select {
+		case <-signals:
+			fmt.Fprintln(cmd.ErrOrStderr(), "galley: second shutdown signal received; exiting")
+			os.Exit(130)
+		case <-done:
+		}
+	}()
+	return func() { signal.Stop(signals) }
+}
+
+func applySupervisorFlag(opts *daemon.Options, supervisorProvider string) error {
+	if supervisorProvider == "" {
+		return nil
+	}
+	if !provider.IsSupervisor(supervisorProvider) {
+		return fmt.Errorf("--supervisor must be one of: %s", strings.Join(provider.SupervisorIDs(), ", "))
+	}
+	opts.Supervisor = supervisorProvider
+	opts.SupervisorSource = daemon.SupervisorSourceCLI
+	return nil
+}
+
+// registerBackgroundDaemon claims the PID file when the one-shot environment
+// token marks this process as the `galley daemon start` child; the result releases it.
+func registerBackgroundDaemon(opts *daemon.Options, pidFile string) (func(), error) {
+	daemonToken := os.Getenv(daemonctl.EnvToken)
+	if daemonToken == "" {
+		return func() {}, nil
+	}
+	_ = os.Unsetenv(daemonctl.EnvToken)
+	if pidFile == "" {
+		return nil, fmt.Errorf("%s requires --pid-file", daemonctl.EnvToken)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("resolve galley executable: %w", err)
+	}
+	resolved, err := daemon.Preflight(*opts)
+	if err != nil {
+		return nil, err
+	}
+	*opts = resolved
+	meta := daemonctl.NewPIDFile(os.Getpid(), exe, opts.Root, os.Args).WithToken(daemonToken)
+	if err := daemonctl.WritePID(pidFile, meta); err != nil {
+		return nil, err
+	}
+	if err := daemonctl.Heartbeat(pidFile, meta); err != nil {
+		return nil, err
+	}
+	stopHeartbeat := startPIDHeartbeat(pidFile, meta)
+	return func() {
+		stopHeartbeat()
+		_ = daemonctl.RemovePID(pidFile, os.Getpid())
+	}, nil
 }

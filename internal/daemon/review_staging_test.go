@@ -236,7 +236,7 @@ func TestRunOnceAcceptedFinalizationExcludesNonCommittedInputFile(t *testing.T) 
 	worktreePath := taskWorktreePath(repo, doneTask.Worktree.Path)
 	// Non-committed input file destination must not be present in the HEAD
 	// tree even though review-time staging happened before finalization.
-	committedFiles, err := exec.Command("git", "-C", worktreePath, "show", "--name-only", "--format=", "HEAD").Output()
+	committedFiles, err := exec.CommandContext(t.Context(), "git", "-C", worktreePath, "show", "--name-only", "--format=", "HEAD").Output()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,12 +340,12 @@ func TestRunOnceReviewStagingFailureRecordsAttemptErrorBeforeSupervisor(t *testi
 	// Override the staging seam to capture invocation evidence under the
 	// attempt dir (so file-based evidence still exists for review) and then
 	// return an error that mimics a real `git add -A` failure.
-	stageForTest := func(_ context.Context, _ Options, workDir, attemptDir string, _ []string) error {
-		if err := os.MkdirAll(attemptDir, 0o700); err != nil {
-			return err
+	stageForTest := func(_ context.Context, req stageOutputRequest) error {
+		if err := os.MkdirAll(req.AttemptDir, 0o700); err != nil {
+			return fmt.Errorf("create attempt dir: %w", err)
 		}
-		if err := os.WriteFile(filepath.Join(attemptDir, "git_add_review_result.json"), []byte(`{"exit_code":128}`), 0o600); err != nil {
-			return err
+		if err := os.WriteFile(filepath.Join(req.AttemptDir, "git_add_review_result.json"), []byte(`{"exit_code":128}`), 0o600); err != nil {
+			return fmt.Errorf("write git add result: %w", err)
 		}
 		return fmt.Errorf("git add -A (review staging) failed: simulated index lock")
 	}

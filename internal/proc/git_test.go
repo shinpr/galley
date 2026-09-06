@@ -1,6 +1,7 @@
 package proc
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -99,40 +100,21 @@ func TestProductionGitInvocationsUseGitArgs(t *testing.T) {
 			return walkErr
 		}
 		if entry.IsDir() {
-			switch entry.Name() {
-			case ".git", ".claude", "node_modules", "vendor":
-				return filepath.SkipDir
-			}
-			return nil
+			return skipVendoredDir(entry)
 		}
 		rel, err := filepath.Rel(repoRoot, path)
 		if err != nil {
-			return err
+			return fmt.Errorf("relativize %s: %w", path, err)
 		}
 		rel = filepath.ToSlash(rel)
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		if rel == "internal/proc/git.go" {
+		if !isScannedProductionGoFile(path, rel) {
 			return nil
 		}
 		file, err := parser.ParseFile(fset, path, nil, 0)
 		if err != nil {
-			return err
+			return fmt.Errorf("parse %s: %w", path, err)
 		}
-		ast.Inspect(file, func(node ast.Node) bool {
-			switch n := node.(type) {
-			case *ast.CallExpr:
-				if gitExecArgIndex(n) >= 0 {
-					violations = append(violations, rel+":"+fset.Position(n.Pos()).String())
-				}
-			case *ast.CompositeLit:
-				if stringSliceStartsWithGit(n) {
-					violations = append(violations, rel+":"+fset.Position(n.Pos()).String())
-				}
-			}
-			return true
-		})
+		violations = append(violations, gitArgvViolations(fset, file, rel)...)
 		return nil
 	})
 	if err != nil {
@@ -194,4 +176,40 @@ func isGitExpr(expr ast.Expr) bool {
 	default:
 		return false
 	}
+}
+
+func skipVendoredDir(entry os.DirEntry) error {
+	switch entry.Name() {
+	case ".git", ".claude", "node_modules", "vendor":
+		return filepath.SkipDir
+	}
+	return nil
+}
+
+// isScannedProductionGoFile excludes tests and proc/git.go itself, which owns
+// the sanctioned git argv construction.
+func isScannedProductionGoFile(path, rel string) bool {
+	if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+		return false
+	}
+	return rel != "internal/proc/git.go"
+}
+
+// gitArgvViolations reports every direct git invocation that bypasses GitArgs.
+func gitArgvViolations(fset *token.FileSet, file *ast.File, rel string) []string {
+	var violations []string
+	ast.Inspect(file, func(node ast.Node) bool {
+		switch n := node.(type) {
+		case *ast.CallExpr:
+			if gitExecArgIndex(n) >= 0 {
+				violations = append(violations, rel+":"+fset.Position(n.Pos()).String())
+			}
+		case *ast.CompositeLit:
+			if stringSliceStartsWithGit(n) {
+				violations = append(violations, rel+":"+fset.Position(n.Pos()).String())
+			}
+		}
+		return true
+	})
+	return violations
 }

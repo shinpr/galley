@@ -1,6 +1,7 @@
 package task
 
 import (
+	"fmt"
 	"path/filepath"
 	"sort"
 )
@@ -11,7 +12,7 @@ func YAMLFiles(dir string) ([]string, error) {
 	for _, ext := range []string{"*.yaml", "*.yml"} {
 		paths, err := filepath.Glob(filepath.Join(dir, ext))
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("glob %s in %s: %w", ext, dir, err)
 		}
 		matches = append(matches, paths...)
 	}

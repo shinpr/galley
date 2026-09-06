@@ -12,7 +12,7 @@ func AppendObligations(prompt string, res *Result) string {
 	var b strings.Builder
 	b.WriteString("\n## Acceptance Skeleton Obligations (Runtime)\n\n")
 	if res.Status == "failed" {
-		b.WriteString(fmt.Sprintf("Acceptance skeleton preflight failed (%s); see preflight_result.json for details.\n", failureMessage(res)))
+		fmt.Fprintf(&b, "Acceptance skeleton preflight failed (%s); see preflight_result.json for details.\n", failureMessage(res))
 		return prompt + b.String()
 	}
 	if len(res.Outputs) == 0 {
@@ -21,13 +21,13 @@ func AppendObligations(prompt string, res *Result) string {
 	}
 	b.WriteString("Galley pre-created the following AC-linked test skeletons in the worktree before this attempt. Read each skeleton, complete the implementation it verifies, and keep the assertions meaningful. Do not delete skeleton files, leave placeholder assertions, skip the tests, or weaken their assertions.\n\n")
 	for _, out := range res.Outputs {
-		b.WriteString(fmt.Sprintf("- AC `%s` -> `%s` (kind=%s, implementation_required=%t)\n", out.ACID, out.Path, out.Kind, out.ImplementationRequired))
-		b.WriteString(fmt.Sprintf("  Purpose: %s\n", out.Purpose))
+		fmt.Fprintf(&b, "- AC `%s` -> `%s` (kind=%s, implementation_required=%t)\n", out.ACID, out.Path, out.Kind, out.ImplementationRequired)
+		fmt.Fprintf(&b, "  Purpose: %s\n", out.Purpose)
 		if out.Satisfies != "" {
-			b.WriteString(fmt.Sprintf("  Satisfies: %s\n", out.Satisfies))
+			fmt.Fprintf(&b, "  Satisfies: %s\n", out.Satisfies)
 		}
 		if out.IntegrationPoint != "" {
-			b.WriteString(fmt.Sprintf("  Integration point: %s\n", out.IntegrationPoint))
+			fmt.Fprintf(&b, "  Integration point: %s\n", out.IntegrationPoint)
 		}
 	}
 	b.WriteString("\nCompletion obligations: every implementation_required skeleton above must be implemented and covered by the normal required verification checks before the supervisor accepts the attempt.\n")

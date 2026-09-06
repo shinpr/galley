@@ -46,7 +46,7 @@ func TestMergeAttemptEvidenceDoesNotOverwriteSupervisorAcceptanceState(t *testin
 		AcceptanceCriteria: []runner.ExecutorAcceptanceCriterion{{
 			ID: "AC1", Status: "not_satisfied", Evidence: []string{"executor self-report"},
 		}},
-	}}, "run", "/work", "/attempt")
+	}}, attemptEvidencePaths{RunID: "run", WorkDir: "/work", AttemptDir: "/attempt"})
 
 	if loaded.AcceptanceCriteria[0].Status != "satisfied" {
 		t.Fatalf("acceptance status = %q, want supervisor-owned satisfied", loaded.AcceptanceCriteria[0].Status)
@@ -56,7 +56,7 @@ func TestMergeAttemptEvidenceDoesNotOverwriteSupervisorAcceptanceState(t *testin
 func TestCodexParseFailureEvidenceUsesProviderSpecificVocabulary(t *testing.T) {
 	t.Parallel()
 	loaded := task.Task{Executor: task.Executor{CLI: "codex"}}
-	mergeAttemptEvidence(&loaded, attemptOutcome{ParseErr: errors.New("invalid output")}, "run", "/work", "/attempt")
+	mergeAttemptEvidence(&loaded, attemptOutcome{ParseErr: errors.New("invalid output")}, attemptEvidencePaths{RunID: "run", WorkDir: "/work", AttemptDir: "/attempt"})
 	if len(loaded.Risks) != 1 {
 		t.Fatalf("risks = %#v", loaded.Risks)
 	}

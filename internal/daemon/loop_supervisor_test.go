@@ -22,16 +22,16 @@ func runnerCommandErr(kind proc.CommandErrorKind, err error) error {
 func TestEvaluateSupervisorRunsOnceAndWritesVerdict(t *testing.T) {
 	attemptDir := t.TempDir()
 	calls := 0
-	runnerForTest := func(_ context.Context, _ Options, _ supervisor.Evidence, artifactDir, _ string) (supervisor.Verdict, error) {
+	runnerForTest := func(_ context.Context, req supervisorRunRequest) (supervisor.Verdict, error) {
 		calls++
-		if want := filepath.Join(attemptDir, "supervisor-try-1"); artifactDir != want {
-			t.Fatalf("artifactDir got %q, want %q", artifactDir, want)
+		if want := filepath.Join(attemptDir, "supervisor-try-1"); req.TryDir != want {
+			t.Fatalf("TryDir got %q, want %q", req.TryDir, want)
 		}
 		return supervisor.Verdict{Status: "accepted", Summary: "ok"}, nil
 	}
 
 	opts := Options{Supervisor: "codex", dependencies: &daemonDependencies{supervisorRunner: runnerForTest}}
-	verdict, err := evaluateSupervisor(context.Background(), opts, supervisor.Evidence{Task: task.Task{ID: "test"}}, attemptDir, attemptDir)
+	verdict, err := evaluateSupervisor(context.Background(), opts, supervisorEvaluation{Evidence: supervisor.Evidence{Task: task.Task{ID: "test"}}, AttemptDir: attemptDir, WorkDir: attemptDir})
 	if err != nil {
 		t.Fatalf("evaluateSupervisor returned error: %v", err)
 	}
@@ -55,13 +55,13 @@ func TestEvaluateSupervisorReturnsInvalidVerdictWithoutRetry(t *testing.T) {
 	attemptDir := t.TempDir()
 	calls := 0
 	wantErr := &supervisor.VerdictContractError{Err: errors.New("missing quality coverage")}
-	runnerForTest := func(_ context.Context, _ Options, _ supervisor.Evidence, _, _ string) (supervisor.Verdict, error) {
+	runnerForTest := func(_ context.Context, _ supervisorRunRequest) (supervisor.Verdict, error) {
 		calls++
 		return supervisor.Verdict{}, wantErr
 	}
 
 	opts := Options{Supervisor: "codex", dependencies: &daemonDependencies{supervisorRunner: runnerForTest}}
-	_, err := evaluateSupervisor(context.Background(), opts, supervisor.Evidence{Task: task.Task{ID: "test"}}, attemptDir, attemptDir)
+	_, err := evaluateSupervisor(context.Background(), opts, supervisorEvaluation{Evidence: supervisor.Evidence{Task: task.Task{ID: "test"}}, AttemptDir: attemptDir, WorkDir: attemptDir})
 	if !errors.Is(err, wantErr) || calls != 1 {
 		t.Fatalf("err=%v calls=%d, want original error after one invocation", err, calls)
 	}
@@ -84,13 +84,13 @@ func TestEvaluateSupervisorReturnsInvalidVerdictWithoutRetry(t *testing.T) {
 func TestEvaluateSupervisorReturnsIdleTimeoutWithoutRetry(t *testing.T) {
 	attemptDir := t.TempDir()
 	calls := 0
-	runnerForTest := func(_ context.Context, _ Options, _ supervisor.Evidence, _, _ string) (supervisor.Verdict, error) {
+	runnerForTest := func(_ context.Context, _ supervisorRunRequest) (supervisor.Verdict, error) {
 		calls++
 		return supervisor.Verdict{}, runnerCommandErr(proc.CommandErrorIdleTimeout, errors.New("no output"))
 	}
 
 	opts := Options{Supervisor: "codex", IdleTimeout: 90 * time.Second, dependencies: &daemonDependencies{supervisorRunner: runnerForTest}}
-	_, err := evaluateSupervisor(context.Background(), opts, supervisor.Evidence{Task: task.Task{ID: "test"}}, attemptDir, attemptDir)
+	_, err := evaluateSupervisor(context.Background(), opts, supervisorEvaluation{Evidence: supervisor.Evidence{Task: task.Task{ID: "test"}}, AttemptDir: attemptDir, WorkDir: attemptDir})
 	idle, ok := asSupervisorIdleTimeout(err)
 	if !ok || calls != 1 {
 		t.Fatalf("err=%v calls=%d, want one typed idle-timeout failure", err, calls)

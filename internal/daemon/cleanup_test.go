@@ -122,8 +122,8 @@ func assertGHNotInvoked(t *testing.T, marker string) {
 }
 
 func TestCleanupWorktreesSkipsAlreadyFinalMissingWorktreeWithoutGitHubAPI(t *testing.T) {
-	for _, prStatus := range []string{"merged", "closed"} {
-		t.Run(prStatus, func(t *testing.T) {
+	for _, prStatus := range []task.Status{"merged", "closed"} {
+		t.Run(string(prStatus), func(t *testing.T) {
 			root := filepath.Join(t.TempDir(), ".agent-workflow")
 			repo := initDaemonGitRepo(t)
 			if err := queue.EnsureLayout(root); err != nil {
@@ -131,7 +131,7 @@ func TestCleanupWorktreesSkipsAlreadyFinalMissingWorktreeWithoutGitHubAPI(t *tes
 			}
 			taskPath := filepath.Join(root, "tasks", "done", "task.yaml")
 			writeDaemonTask(t, taskPath, repo)
-			_, worktreePath := prepareDonePRTask(t, taskPath, repo, prStatus)
+			_, worktreePath := prepareDonePRTask(t, taskPath, repo, string(prStatus))
 			if err := os.RemoveAll(worktreePath); err != nil {
 				t.Fatal(err)
 			}
@@ -141,39 +141,50 @@ func TestCleanupWorktreesSkipsAlreadyFinalMissingWorktreeWithoutGitHubAPI(t *tes
 				t.Fatal(err)
 			}
 			assertGHNotInvoked(t, marker)
-
-			reloaded, err := task.Load(taskPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if reloaded.Status != prStatus {
-				t.Fatalf("task status got %q want %q", reloaded.Status, prStatus)
-			}
-			if reloaded.PR.Status != prStatus {
-				t.Fatalf("pr status got %q want %q", reloaded.PR.Status, prStatus)
-			}
-			old := time.Now().Add(-time.Hour)
-			if err := os.Chtimes(taskPath, old, old); err != nil {
-				t.Fatal(err)
-			}
-			before, err := os.Stat(taskPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := cleanupWorktrees(t.Context(), Options{Root: root, GHBin: ghBin}.withDefaults()); err != nil {
-				t.Fatal(err)
-			}
-			after, err := os.Stat(taskPath)
-			if err != nil || !before.ModTime().Equal(after.ModTime()) {
-				t.Fatalf("unchanged cleanup rewrote task: %v", err)
-			}
+			assertTaskAndPRStatus(t, taskPath, prStatus)
+			assertSecondCleanupDoesNotRewrite(t, taskPath, Options{Root: root, GHBin: ghBin}.withDefaults())
 		})
 	}
 }
 
+func assertTaskAndPRStatus(t *testing.T, taskPath string, want task.Status) {
+	t.Helper()
+	reloaded, err := task.Load(taskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Status != want {
+		t.Fatalf("task status got %q want %q", reloaded.Status, want)
+	}
+	if reloaded.PR.Status != string(want) {
+		t.Fatalf("pr status got %q want %q", reloaded.PR.Status, want)
+	}
+}
+
+// assertSecondCleanupDoesNotRewrite pins, via mtime, that a second cleanup
+// leaves an already reconciled task file untouched.
+func assertSecondCleanupDoesNotRewrite(t *testing.T, taskPath string, opts Options) {
+	t.Helper()
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(taskPath, old, old); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(taskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cleanupWorktrees(t.Context(), opts); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(taskPath)
+	if err != nil || !before.ModTime().Equal(after.ModTime()) {
+		t.Fatalf("unchanged cleanup rewrote task: %v", err)
+	}
+}
+
 func TestCleanupWorktreesRemovesPersistedFinalWorktreeWithoutGitHubAPI(t *testing.T) {
-	for _, prStatus := range []string{"merged", "closed"} {
-		t.Run(prStatus, func(t *testing.T) {
+	for _, prStatus := range []task.Status{"merged", "closed"} {
+		t.Run(string(prStatus), func(t *testing.T) {
 			root := filepath.Join(t.TempDir(), ".agent-workflow")
 			repo := initDaemonGitRepo(t)
 			if err := queue.EnsureLayout(root); err != nil {
@@ -181,7 +192,7 @@ func TestCleanupWorktreesRemovesPersistedFinalWorktreeWithoutGitHubAPI(t *testin
 			}
 			taskPath := filepath.Join(root, "tasks", "done", "task.yaml")
 			writeDaemonTask(t, taskPath, repo)
-			_, worktreePath := prepareDonePRTask(t, taskPath, repo, prStatus)
+			_, worktreePath := prepareDonePRTask(t, taskPath, repo, string(prStatus))
 			ghBin, marker := writeFailIfInvokedGH(t)
 
 			if err := cleanupWorktrees(context.Background(), Options{Root: root, GHBin: ghBin}.withDefaults()); err != nil {
@@ -196,7 +207,7 @@ func TestCleanupWorktreesRemovesPersistedFinalWorktreeWithoutGitHubAPI(t *testin
 			if err != nil {
 				t.Fatal(err)
 			}
-			if reloaded.PR.Status != prStatus {
+			if reloaded.PR.Status != string(prStatus) {
 				t.Fatalf("pr status got %q want %q", reloaded.PR.Status, prStatus)
 			}
 			if reloaded.Status != prStatus {

@@ -10,23 +10,31 @@ import (
 	"github.com/shinpr/galley/internal/task"
 )
 
-func appendFailureAttempt(loaded *task.Task, phase, kind string, err error, artifactDir string) {
+// attemptFailure is one failed attempt Galley records on the task.
+type attemptFailure struct {
+	Phase       string
+	Kind        string
+	Err         error
+	ArtifactDir string
+}
+
+func appendFailureAttempt(loaded *task.Task, failure attemptFailure) {
 	if loaded == nil {
 		return
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	message := ""
-	if err != nil {
-		message = err.Error()
+	if failure.Err != nil {
+		message = failure.Err.Error()
 	}
 	loaded.Attempts = append(loaded.Attempts, task.Attempt{
 		Number:            len(loaded.Attempts) + 1,
 		StartedAt:         now,
 		CompletedAt:       now,
 		ClaudeStatus:      "not_run",
-		SupervisorVerdict: kind,
+		SupervisorVerdict: failure.Kind,
 		Summary:           message,
-		Error:             attemptError(phase, kind, err, artifactDir),
+		Error:             attemptError(failure),
 	})
 }
 
@@ -37,16 +45,16 @@ func supervisorFailureKind(err error) string {
 	return classifyFailureKind("supervisor_failed", err)
 }
 
-func attemptError(phase, kind string, err error, artifactDir string) *task.AttemptError {
+func attemptError(failure attemptFailure) *task.AttemptError {
 	message := ""
-	if err != nil {
-		message = err.Error()
+	if failure.Err != nil {
+		message = failure.Err.Error()
 	}
 	return &task.AttemptError{
-		Phase:       phase,
-		Kind:        kind,
+		Phase:       failure.Phase,
+		Kind:        failure.Kind,
 		Message:     message,
-		ArtifactDir: artifactDir,
+		ArtifactDir: failure.ArtifactDir,
 	}
 }
 

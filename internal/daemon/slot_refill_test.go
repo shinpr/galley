@@ -37,17 +37,7 @@ func testSlotRefill(t *testing.T, recoverStale bool) {
 		if recoverStale && name == "third" {
 			path = filepath.Join(root, "tasks", "running", "c.yaml")
 		}
-		writeDaemonTask(t, path, initDaemonGitRepo(t))
-		loaded, err := task.Load(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		loaded.ID = name
-		loaded.ExecutionPolicy.TimeoutMS = 15000
-		loaded.Worktree.Path = filepath.Join("..", "worktrees", name)
-		if err := task.Save(path, loaded); err != nil {
-			t.Fatal(err)
-		}
+		writeSlotRefillTask(t, path, name)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
@@ -65,27 +55,59 @@ func testSlotRefill(t *testing.T, recoverStale bool) {
 			t.Fatalf("daemon exited before refill: %v", err)
 		default:
 		}
-		if recoverStale && !madeStale {
-			if _, err := os.Stat(longStarted); err == nil {
-				old := time.Now().Add(-2 * time.Hour)
-				for _, name := range []string{"a.yaml", "c.yaml"} {
-					if err := os.Chtimes(filepath.Join(root, "tasks", "running", name), old, old); err != nil {
-						t.Fatal(err)
-					}
-				}
-				madeStale = true
-			}
+		if recoverStale && !madeStale && fileExists(longStarted) {
+			ageRunningClaims(t, root, "a.yaml", "c.yaml")
+			madeStale = true
 		}
-		if _, err := os.Stat(thirdStarted); err == nil {
-			if _, err := os.Stat(longStarted); err != nil {
-				t.Fatal("long task did not start")
-			}
-			if _, err := os.Stat(filepath.Join(root, "tasks", "running", "a.yaml")); err != nil {
-				t.Fatal("long task no longer running")
-			}
+		if fileExists(thirdStarted) {
+			assertLongTaskStillRunning(t, root, longStarted)
 			return
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("free slot stayed idle while the long task was running")
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// writeSlotRefillTask seeds one queued or running task with a long timeout and
+// its own worktree so the refill scenario can run them concurrently.
+func writeSlotRefillTask(t *testing.T, path, name string) {
+	t.Helper()
+	writeDaemonTask(t, path, initDaemonGitRepo(t))
+	loaded, err := task.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.ID = name
+	loaded.ExecutionPolicy.TimeoutMS = 15000
+	loaded.Worktree.Path = filepath.Join("..", "worktrees", name)
+	if err := task.Save(path, loaded); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// ageRunningClaims backdates running claims so the daemon's stale-claim
+// recovery treats them as abandoned.
+func ageRunningClaims(t *testing.T, root string, names ...string) {
+	t.Helper()
+	old := time.Now().Add(-2 * time.Hour)
+	for _, name := range names {
+		if err := os.Chtimes(filepath.Join(root, "tasks", "running", name), old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func assertLongTaskStillRunning(t *testing.T, root, longStarted string) {
+	t.Helper()
+	if !fileExists(longStarted) {
+		t.Fatal("long task did not start")
+	}
+	if !fileExists(filepath.Join(root, "tasks", "running", "a.yaml")) {
+		t.Fatal("long task no longer running")
+	}
 }

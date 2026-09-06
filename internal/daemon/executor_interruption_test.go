@@ -15,17 +15,16 @@ import (
 	"github.com/shinpr/galley/internal/runner"
 	"github.com/shinpr/galley/internal/supervisor"
 	"github.com/shinpr/galley/internal/task"
-	"github.com/shinpr/galley/internal/workspace"
 )
 
-func countingSupervisor(calls *int32, verdict func(attempt int) supervisor.Verdict) func(context.Context, Options, supervisor.Evidence, string, string) (supervisor.Verdict, error) {
-	return func(_ context.Context, _ Options, _ supervisor.Evidence, _, _ string) (supervisor.Verdict, error) {
+func countingSupervisor(calls *int32, verdict func(attempt int) supervisor.Verdict) func(context.Context, supervisorRunRequest) (supervisor.Verdict, error) {
+	return func(_ context.Context, _ supervisorRunRequest) (supervisor.Verdict, error) {
 		n := atomic.AddInt32(calls, 1)
 		return verdict(int(n)), nil
 	}
 }
 
-func withSupervisorSeam(opts Options, seam func(context.Context, Options, supervisor.Evidence, string, string) (supervisor.Verdict, error)) Options {
+func withSupervisorSeam(opts Options, seam func(context.Context, supervisorRunRequest) (supervisor.Verdict, error)) Options {
 	deps := opts.daemonDependencies()
 	deps.supervisorRunner = seam
 	opts.dependencies = &deps
@@ -116,79 +115,124 @@ func TestExecutorInterruptionLifecycleMatrix(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			root := filepath.Join(t.TempDir(), ".agent-workflow")
-			repo := initDaemonGitRepo(t)
-			promptPath, schemaPath := writeDaemonPromptFiles(t)
-			taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
-			if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			writeDaemonTask(t, taskPath, repo)
-			setExecutorCLI(t, taskPath, tc.cli)
-			setLoopBudget(t, taskPath, 2)
-
-			opts := Options{Root: root, SystemPromptFile: promptPath, JSONSchemaFile: schemaPath, Once: true, MaxConcurrentTasks: 1, Supervisor: "claude"}
-			switch tc.cli {
-			case "codex":
-				opts.ClaudeBin = writeFakeClaude(t, "exit 1\n")
-				opts.CodexBin = writeRawExecutor(t, "codex", tc.stdout)
-			case "grok":
-				opts.ClaudeBin = writeFakeClaude(t, "exit 1\n")
-				opts.GrokBin = writeRawExecutor(t, "grok", tc.stdout)
-			case "glm":
-				opts.ClaudeBin = writeRawExecutor(t, "claude", tc.stdout)
-				opts.GLMAuthToken = "test-glm-token"
-			default:
-				opts.ClaudeBin = writeRawExecutor(t, "claude", tc.stdout)
-			}
-
 			var supCalls int32
-			opts = testDaemonOptions(opts)
-			opts = withSupervisorSeam(opts, countingSupervisor(&supCalls, func(int) supervisor.Verdict {
-				t.Errorf("supervisor must not run for a %s interruption", tc.name)
-				return supervisor.Verdict{Status: "accepted"}
-			}))
-			_ = Run(context.Background(), opts)
+			runInterruptedExecutor(t, interruptedRun{
+				Root: root, CaseName: tc.name, CLI: tc.cli, Stdout: tc.stdout, SupCalls: &supCalls,
+			})
 
 			failed := assertInterruptedFailedTask(t, root, &supCalls)
 			last := failed.Attempts[len(failed.Attempts)-1]
 			if last.Error.Kind != "executor_interrupted" {
 				t.Fatalf("error kind = %q, want executor_interrupted", last.Error.Kind)
 			}
-			for _, want := range tc.wantMessage {
-				if !strings.Contains(last.Error.Message, want) {
-					t.Fatalf("attempt error message missing %q: %q", want, last.Error.Message)
-				}
-			}
-			for _, unwanted := range tc.notMessage {
-				if strings.Contains(last.Error.Message, unwanted) {
-					t.Fatalf("attempt error message must not contain %q: %q", unwanted, last.Error.Message)
-				}
-			}
+			assertMessageContent(t, last.Error.Message, tc.wantMessage, tc.notMessage)
 			// task show consumes these fields to render the interruption and
 			// requeue recovery (see cli.isExecutorInterruption).
 			if last.Error.Phase != "executor" || last.SupervisorVerdict != "not_reviewed" || last.Error.ArtifactDir == "" {
 				t.Fatalf("task-show fields incomplete: %#v", last.Error)
 			}
-			terminalData := mustReadSingleGlob(t, filepath.Join(root, "runs", "*", "attempt-1", runartifact.ExecutorTerminalFilename))
-			var terminal runner.ExecutorTerminal
-			if err := json.Unmarshal(terminalData, &terminal); err != nil {
-				t.Fatalf("decode executor_terminal.json: %v", err)
-			}
-			if terminal.Normal {
-				t.Fatalf("executor_terminal.json Normal = true, want interrupted: %s", terminalData)
-			}
-			if terminal.Reason != tc.wantReason {
-				t.Fatalf("executor_terminal.json reason = %q, want %q", terminal.Reason, tc.wantReason)
-			}
-			if terminal.Provider != tc.wantProvider {
-				t.Fatalf("executor_terminal.json provider = %q, want %q", terminal.Provider, tc.wantProvider)
-			}
-			for _, want := range tc.wantMessage {
-				if !strings.Contains(string(terminalData), want) {
-					t.Fatalf("executor_terminal.json missing detail %q: %s", want, terminalData)
-				}
-			}
+			assertExecutorTerminalEvidence(t, root, terminalExpectation{
+				Reason: tc.wantReason, Provider: tc.wantProvider, Details: tc.wantMessage,
+			})
 		})
+	}
+}
+
+// interruptedRun is one task whose executor emits an interrupted terminal.
+type interruptedRun struct {
+	Root     string
+	CaseName string
+	CLI      string
+	Stdout   string
+	SupCalls *int32
+}
+
+// runInterruptedExecutor drives the task with a supervisor seam that must never
+// fire, so the test can prove the interruption bypasses review.
+func runInterruptedExecutor(t *testing.T, run interruptedRun) {
+	t.Helper()
+	repo := initDaemonGitRepo(t)
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+	taskPath := filepath.Join(run.Root, "tasks", "queued", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(taskPath), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonTask(t, taskPath, repo)
+	setExecutorCLI(t, taskPath, run.CLI)
+	setLoopBudget(t, taskPath, 2)
+
+	opts := Options{Root: run.Root, SystemPromptFile: promptPath, JSONSchemaFile: schemaPath, Once: true, MaxConcurrentTasks: 1, Supervisor: "claude"}
+	applyInterruptedExecutorBins(t, &opts, run.CLI, run.Stdout)
+
+	opts = testDaemonOptions(opts)
+	opts = withSupervisorSeam(opts, countingSupervisor(run.SupCalls, func(int) supervisor.Verdict {
+		t.Errorf("supervisor must not run for a %s interruption", run.CaseName)
+		return supervisor.Verdict{Status: "accepted"}
+	}))
+	_ = Run(context.Background(), opts)
+}
+
+// applyInterruptedExecutorBins points the selected executor at a verbatim-stdout
+// fake; other providers keep a failing stub so a misdispatch is visible.
+func applyInterruptedExecutorBins(t *testing.T, opts *Options, cli, stdout string) {
+	t.Helper()
+	switch cli {
+	case "codex":
+		opts.ClaudeBin = writeFakeClaude(t, "exit 1\n")
+		opts.CodexBin = writeRawExecutor(t, "codex", stdout)
+	case "grok":
+		opts.ClaudeBin = writeFakeClaude(t, "exit 1\n")
+		opts.GrokBin = writeRawExecutor(t, "grok", stdout)
+	case "glm":
+		opts.ClaudeBin = writeRawExecutor(t, "claude", stdout)
+		opts.GLMAuthToken = "test-glm-token"
+	default:
+		opts.ClaudeBin = writeRawExecutor(t, "claude", stdout)
+	}
+}
+
+func assertMessageContent(t *testing.T, message string, want, unwanted []string) {
+	t.Helper()
+	for _, w := range want {
+		if !strings.Contains(message, w) {
+			t.Fatalf("attempt error message missing %q: %q", w, message)
+		}
+	}
+	for _, u := range unwanted {
+		if strings.Contains(message, u) {
+			t.Fatalf("attempt error message must not contain %q: %q", u, message)
+		}
+	}
+}
+
+// terminalExpectation is what executor_terminal.json must record for one
+// interrupted attempt.
+type terminalExpectation struct {
+	Reason   string
+	Provider string
+	Details  []string
+}
+
+func assertExecutorTerminalEvidence(t *testing.T, root string, want terminalExpectation) {
+	t.Helper()
+	terminalData := mustReadSingleGlob(t, filepath.Join(root, "runs", "*", "attempt-1", runartifact.ExecutorTerminalFilename))
+	var terminal runner.ExecutorTerminal
+	if err := json.Unmarshal(terminalData, &terminal); err != nil {
+		t.Fatalf("decode executor_terminal.json: %v", err)
+	}
+	if terminal.Normal {
+		t.Fatalf("executor_terminal.json Normal = true, want interrupted: %s", terminalData)
+	}
+	if terminal.Reason != want.Reason {
+		t.Fatalf("executor_terminal.json reason = %q, want %q", terminal.Reason, want.Reason)
+	}
+	if terminal.Provider != want.Provider {
+		t.Fatalf("executor_terminal.json provider = %q, want %q", terminal.Provider, want.Provider)
+	}
+	for _, detail := range want.Details {
+		if !strings.Contains(string(terminalData), detail) {
+			t.Fatalf("executor_terminal.json missing detail %q: %s", detail, terminalData)
+		}
 	}
 }
 
@@ -205,7 +249,7 @@ func TestInterruptedExecutorStagingFailureStaysInterrupted(t *testing.T) {
 	writeDaemonTask(t, taskPath, repo)
 	setLoopBudget(t, taskPath, 3)
 
-	stageFail := func(_ context.Context, _ Options, _, _ string, _ []string) error {
+	stageFail := func(_ context.Context, _ stageOutputRequest) error {
 		return context.Canceled
 	}
 	var supCalls int32
@@ -255,7 +299,7 @@ func TestInterruptedExecutorDiffCaptureFailureStaysInterrupted(t *testing.T) {
 	writeDaemonTask(t, taskPath, repo)
 	setLoopBudget(t, taskPath, 3)
 
-	diffFail := func(_ context.Context, _, _, _ string, _ workspace.Options) (executorflow.DiffArtifacts, error) {
+	diffFail := func(_ context.Context, _ executorflow.DiffCapture) (executorflow.DiffArtifacts, error) {
 		return executorflow.DiffArtifacts{Err: errors.New("git status: snapshot failed")}, nil
 	}
 	var supCalls int32
@@ -386,14 +430,15 @@ func TestInterruptionPreservesWorkspaceAndRequeueReuses(t *testing.T) {
 		if err := json.Unmarshal(data, &prepared); err != nil {
 			continue
 		}
-		if prepared.WorktreeReused {
-			reuseFound = true
-			if !prepared.Dirty {
-				t.Fatalf("reused worktree evidence must be dirty: %s", data)
-			}
-			if !strings.Contains(prepared.StatusPorcelain, "new-file.txt") {
-				t.Fatalf("reused worktree must still show retained change: %s", data)
-			}
+		if !prepared.WorktreeReused {
+			continue
+		}
+		reuseFound = true
+		if !prepared.Dirty {
+			t.Fatalf("reused worktree evidence must be dirty: %s", data)
+		}
+		if !strings.Contains(prepared.StatusPorcelain, "new-file.txt") {
+			t.Fatalf("reused worktree must still show retained change: %s", data)
 		}
 	}
 	if !reuseFound {

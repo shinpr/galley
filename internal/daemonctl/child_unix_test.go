@@ -33,7 +33,7 @@ func TestTerminateChildProcessUnixUsesSIGTERM(t *testing.T) {
 	if err != nil {
 		t.Skipf("sleep not available: %v", err)
 	}
-	cmd := exec.Command(sleepPath, "30")
+	cmd := exec.CommandContext(t.Context(), sleepPath, "30")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start sleep: %v", err)
 	}

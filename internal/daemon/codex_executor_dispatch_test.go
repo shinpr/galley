@@ -64,103 +64,131 @@ func TestDaemonDispatchesSelectedExecutorBinary(t *testing.T) {
 		{"codex", "codex"},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			root := filepath.Join(t.TempDir(), ".agent-workflow")
-			repo := initDaemonGitRepo(t)
-			promptPath, schemaPath := writeDaemonPromptFiles(t)
-
-			markerDir := t.TempDir()
-			claudeExecMarker := filepath.Join(markerDir, "claude-exec.marker")
-			codexExecMarker := filepath.Join(markerDir, "codex-exec.marker")
-
-			executorResult := `{"status":"completed","summary":"done","files_modified":["daemon-output.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}`
-
-			// The supervisor branch in writeFakeClaude exits before running
-			// body, so the executor marker only fires when claude is invoked
-			// as the executor (not as the supervisor on a codex task).
-			claudeBin := writeFakeClaude(t, "echo executor >> "+claudeExecMarker+"\necho change > daemon-output.txt\necho '"+executorResult+"'\n")
-			codexBin := writeFakeCodexExecutor(t, "echo executor >> "+codexExecMarker+"\necho change > daemon-output.txt\necho '"+executorResult+"'\n")
-
-			taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
-			if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			writeDaemonTask(t, taskPath, repo)
-			loaded, err := task.Load(taskPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			loaded.Executor.CLI = tc.cli
-			if err := task.Save(taskPath, loaded); err != nil {
-				t.Fatal(err)
-			}
-
-			err = runTestDaemon(context.Background(), Options{
-				Root:               root,
-				SystemPromptFile:   promptPath,
-				JSONSchemaFile:     schemaPath,
-				Once:               true,
-				MaxConcurrentTasks: 1,
-				Supervisor:         "claude",
-				ClaudeBin:          claudeBin,
-				CodexBin:           codexBin,
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			doneTask, err := task.Load(filepath.Join(root, "tasks", "done", "task.yaml"))
-			if err != nil {
-				t.Fatalf("done task missing: %v", err)
-			}
-			if doneTask.Status != "accepted" {
-				t.Fatalf("status got %q", doneTask.Status)
-			}
-			if len(doneTask.Attempts) != 1 || doneTask.Attempts[0].ClaudeStatus != "completed" {
-				t.Fatalf("attempts got %#v", doneTask.Attempts)
-			}
-
-			if tc.cli == "claude" {
-				if _, err := os.Stat(claudeExecMarker); err != nil {
-					t.Fatalf("claude executor marker missing: %v", err)
-				}
-				if _, err := os.Stat(codexExecMarker); !os.IsNotExist(err) {
-					t.Fatalf("codex executor marker should not exist for cli=claude: %v", err)
-				}
-			} else {
-				if _, err := os.Stat(codexExecMarker); err != nil {
-					t.Fatalf("codex executor marker missing: %v", err)
-				}
-				if _, err := os.Stat(claudeExecMarker); !os.IsNotExist(err) {
-					// claudeBin was invoked as supervisor only, which exits
-					// before running the body that writes the marker.
-					t.Fatalf("claude executor marker should not exist for cli=codex (supervisor path only): %v", err)
-				}
-			}
-
-			planData := mustReadSingleGlob(t, filepath.Join(root, "runs", "*", "attempt-1", "command_plan.json"))
-			var plan struct {
-				Argv []string `json:"argv"`
-				Env  []string `json:"env,omitempty"`
-			}
-			if err := json.Unmarshal(planData, &plan); err != nil {
-				t.Fatalf("decode command_plan.json: %v", err)
-			}
-			if len(plan.Argv) == 0 {
-				t.Fatal("command_plan.json argv is empty")
-			}
-			if len(plan.Env) != 0 {
-				t.Fatalf("command_plan.json must not persist environment entries: %v", plan.Env)
-			}
-			wantBin := claudeBin
-			if tc.cli == "codex" {
-				wantBin = codexBin
-			}
-			if filepath.Base(plan.Argv[0]) != filepath.Base(wantBin) {
-				t.Fatalf("command_plan.json argv[0] basename got %q, want %q (selected cli=%s)", filepath.Base(plan.Argv[0]), filepath.Base(wantBin), tc.cli)
-			}
+			assertExecutorBinaryDispatched(t, tc.cli)
 		})
+	}
+}
+
+// assertExecutorBinaryDispatched pins that only the selected binary ran as the
+// executor and that the persisted command plan names it.
+func assertExecutorBinaryDispatched(t *testing.T, cli string) {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+
+	markerDir := t.TempDir()
+	claudeExecMarker := filepath.Join(markerDir, "claude-exec.marker")
+	codexExecMarker := filepath.Join(markerDir, "codex-exec.marker")
+
+	executorResult := `{"status":"completed","summary":"done","files_modified":["daemon-output.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}`
+
+	// writeFakeClaude's supervisor branch exits before body, so the marker
+	// fires only when claude runs as the executor.
+	claudeBin := writeFakeClaude(t, "echo executor >> "+claudeExecMarker+"\necho change > daemon-output.txt\necho '"+executorResult+"'\n")
+	codexBin := writeFakeCodexExecutor(t, "echo executor >> "+codexExecMarker+"\necho change > daemon-output.txt\necho '"+executorResult+"'\n")
+
+	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(taskPath), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	writeDaemonTask(t, taskPath, repo)
+	loaded, err := task.Load(taskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Executor.CLI = cli
+	if err := task.Save(taskPath, loaded); err != nil {
+		t.Fatal(err)
+	}
+
+	err = runTestDaemon(context.Background(), Options{
+		Root:               root,
+		SystemPromptFile:   promptPath,
+		JSONSchemaFile:     schemaPath,
+		Once:               true,
+		MaxConcurrentTasks: 1,
+		Supervisor:         "claude",
+		ClaudeBin:          claudeBin,
+		CodexBin:           codexBin,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertTaskAccepted(t, filepath.Join(root, "tasks", "done", "task.yaml"))
+	assertOnlySelectedExecutorRan(t, executorMarkers{CLI: cli, Claude: claudeExecMarker, Codex: codexExecMarker})
+	assertCommandPlanBinary(t, root, dispatchBinaries{CLI: cli, Claude: claudeBin, Codex: codexBin})
+}
+
+func assertTaskAccepted(t *testing.T, donePath string) {
+	t.Helper()
+	doneTask, err := task.Load(donePath)
+	if err != nil {
+		t.Fatalf("done task missing: %v", err)
+	}
+	if doneTask.Status != "accepted" {
+		t.Fatalf("status got %q", doneTask.Status)
+	}
+	if len(doneTask.Attempts) != 1 || doneTask.Attempts[0].ClaudeStatus != "completed" {
+		t.Fatalf("attempts got %#v", doneTask.Attempts)
+	}
+}
+
+// executorMarkers are the per-binary execution markers for one dispatch case.
+type executorMarkers struct {
+	CLI    string
+	Claude string
+	Codex  string
+}
+
+// assertOnlySelectedExecutorRan pins that the unselected binary never ran as
+// the executor; claude's supervisor path exits before writing its marker.
+func assertOnlySelectedExecutorRan(t *testing.T, m executorMarkers) {
+	t.Helper()
+	ran, absent := m.Claude, m.Codex
+	if m.CLI != "claude" {
+		ran, absent = m.Codex, m.Claude
+	}
+	if _, err := os.Stat(ran); err != nil {
+		t.Fatalf("%s executor marker missing: %v", m.CLI, err)
+	}
+	if _, err := os.Stat(absent); !os.IsNotExist(err) {
+		t.Fatalf("unselected executor marker should not exist for cli=%s: %v", m.CLI, err)
+	}
+}
+
+// dispatchBinaries are the executor binaries one dispatch case can select.
+type dispatchBinaries struct {
+	CLI    string
+	Claude string
+	Codex  string
+}
+
+func assertCommandPlanBinary(t *testing.T, root string, bins dispatchBinaries) {
+	t.Helper()
+	cli := bins.CLI
+	planData := mustReadSingleGlob(t, filepath.Join(root, "runs", "*", "attempt-1", "command_plan.json"))
+	var plan struct {
+		Argv []string `json:"argv"`
+		Env  []string `json:"env,omitempty"`
+	}
+	if err := json.Unmarshal(planData, &plan); err != nil {
+		t.Fatalf("decode command_plan.json: %v", err)
+	}
+	if len(plan.Argv) == 0 {
+		t.Fatal("command_plan.json argv is empty")
+	}
+	if len(plan.Env) != 0 {
+		t.Fatalf("command_plan.json must not persist environment entries: %v", plan.Env)
+	}
+	wantBin := bins.Claude
+	if cli == "codex" {
+		wantBin = bins.Codex
+	}
+	if filepath.Base(plan.Argv[0]) != filepath.Base(wantBin) {
+		t.Fatalf("command_plan.json argv[0] basename got %q, want %q (selected cli=%s)", filepath.Base(plan.Argv[0]), filepath.Base(wantBin), cli)
 	}
 }
 

@@ -15,18 +15,18 @@ func TestFileIsTerminalRejectsRedirectedDescriptors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open %s: %v", os.DevNull, err)
 	}
-	defer devNull.Close()
+	defer func() { _ = devNull.Close() }()
 	regular, err := os.CreateTemp(t.TempDir(), "stderr")
 	if err != nil {
 		t.Fatalf("create regular file: %v", err)
 	}
-	defer regular.Close()
+	defer func() { _ = regular.Close() }()
 	pipeR, pipeW, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("create pipe: %v", err)
 	}
-	defer pipeR.Close()
-	defer pipeW.Close()
+	defer func() { _ = pipeR.Close() }()
+	defer func() { _ = pipeW.Close() }()
 
 	for name, f := range map[string]*os.File{
 		"null device":  devNull,
@@ -41,7 +41,7 @@ func TestFileIsTerminalRejectsRedirectedDescriptors(t *testing.T) {
 
 	// When the test process has a controlling terminal, it must stay eligible.
 	if tty, err := os.OpenFile("/dev/tty", os.O_WRONLY, 0); err == nil {
-		defer tty.Close()
+		defer func() { _ = tty.Close() }()
 		if !fileIsTerminal(tty) {
 			t.Fatal("controlling terminal reported as non-TTY")
 		}
@@ -54,16 +54,16 @@ func TestRedirectedStderrMakesNoRequestAndNoState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open %s: %v", os.DevNull, err)
 	}
-	defer devNull.Close()
+	defer func() { _ = devNull.Close() }()
 
 	root := filepath.Join(t.TempDir(), "root")
-	transport := &fakeTransport{handler: func(req *http.Request) (*http.Response, error) {
+	transport := &fakeTransport{handler: func(_ *http.Request) (*http.Response, error) {
 		return releaseResponse(t, "v0.13.0"), nil
 	}}
 	opts := baseOptions(root, transport)
 	opts.IsTTY = func() bool { return fileIsTerminal(devNull) }
 
-	Run(opts)
+	Run(t.Context(), opts)
 
 	if transport.calls != 0 {
 		t.Fatalf("redirected stderr made %d requests", transport.calls)
@@ -76,12 +76,12 @@ func TestRedirectedStderrMakesNoRequestAndNoState(t *testing.T) {
 func TestWriteStateCreatesOwnerOnlyRoot(t *testing.T) {
 	t.Parallel()
 	root := filepath.Join(t.TempDir(), "galley-root")
-	transport := &fakeTransport{handler: func(req *http.Request) (*http.Response, error) {
+	transport := &fakeTransport{handler: func(_ *http.Request) (*http.Response, error) {
 		return releaseResponse(t, "v0.13.0"), nil
 	}}
 	opts := baseOptions(root, transport)
 
-	Run(opts)
+	Run(t.Context(), opts)
 
 	if transport.calls != 1 {
 		t.Fatalf("first start made %d requests, want 1", transport.calls)

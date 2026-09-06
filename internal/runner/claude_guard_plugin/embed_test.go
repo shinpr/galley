@@ -239,7 +239,7 @@ func TestRequireFinalJSONSetupCorrectionIncludesRequiredReadyFields(t *testing.T
 func pythonCommand(t *testing.T, script string) *exec.Cmd {
 	t.Helper()
 	if runtime.GOOS != "windows" {
-		return exec.Command(script)
+		return exec.CommandContext(t.Context(), script)
 	}
 	python, err := exec.LookPath("python")
 	if err != nil {
@@ -248,5 +248,5 @@ func pythonCommand(t *testing.T, script string) *exec.Cmd {
 	if err != nil {
 		t.Skipf("python not available: %v", err)
 	}
-	return exec.Command(python, script)
+	return exec.CommandContext(t.Context(), python, script)
 }

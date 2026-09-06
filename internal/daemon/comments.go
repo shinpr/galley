@@ -78,7 +78,7 @@ func processTaskPRComments(ctx context.Context, opts Options, path string) error
 	// idempotency key, so retrying could create duplicate PR comments.
 	var comments []vcs.PRComment
 	err = retry.Do(ctx, func(ctx context.Context) error {
-		fetched, fetchErr := vcs.FetchPRComments(ctx, vcsBinaries(effectiveOpts), effectiveOpts.Root, loaded.PR.URL)
+		fetched, fetchErr := vcs.FetchPRComments(ctx, vcsRepo(effectiveOpts, effectiveOpts.Root, ""), loaded.PR.URL)
 		if fetchErr != nil {
 			return fetchErr
 		}
@@ -88,10 +88,23 @@ func processTaskPRComments(ctx context.Context, opts Options, path string) error
 	if err != nil {
 		return err
 	}
+	return applyPRCommands(ctx, prCommandRun{Opts: effectiveOpts, Path: path, Loaded: loaded}, comments)
+}
+
+// prCommandRun is one task's PR comment scan.
+type prCommandRun struct {
+	Opts   Options
+	Path   string
+	Loaded task.Task
+}
+
+// applyPRCommands acts on the first unprocessed /galley comment. Reply failures
+// are collected; a task-file write failure stops the scan.
+func applyPRCommands(ctx context.Context, run prCommandRun, comments []vcs.PRComment) error {
 	var errs []error
 	for _, comment := range comments {
 		commentID := strconv.FormatInt(comment.ID, 10)
-		if slices.Contains(loaded.PR.ProcessedCommentIDs, commentID) {
+		if slices.Contains(run.Loaded.PR.ProcessedCommentIDs, commentID) {
 			continue
 		}
 		command, ok := parsePRCommand(comment)
@@ -102,61 +115,71 @@ func processTaskPRComments(ctx context.Context, opts Options, path string) error
 		// them to the PR author recorded for this task. When the recorded PR
 		// author is empty (unknown), fail closed and reject the command.
 		// Replies are concise and do not echo the user-supplied request body.
-		if !prCommentMatchesPRAuthor(comment, loaded.PR.AuthorLogin) {
-			loaded.PR.ProcessedCommentIDs = append(loaded.PR.ProcessedCommentIDs, command.CommentID)
-			if err := task.Save(path, loaded); err != nil {
+		if !prCommentMatchesPRAuthor(comment, run.Loaded.PR.AuthorLogin) {
+			run.Loaded.PR.ProcessedCommentIDs = append(run.Loaded.PR.ProcessedCommentIDs, command.CommentID)
+			if err := task.Save(run.Path, run.Loaded); err != nil {
 				return err
 			}
-			if effectiveOpts.ReplyPRComments {
-				if err := vcs.PostPRComment(ctx, vcsBinaries(effectiveOpts), effectiveOpts.Root, loaded.PR.URL, "Galley ignored this comment because only the pull request author can run Galley from PR comments."); err != nil {
-					errs = append(errs, err)
-				}
-			}
+			errs = append(errs, run.reply(ctx, "Galley ignored this comment because only the pull request author can run Galley from PR comments."))
 			continue
 		}
-		if loaded.Status == "queued" || loaded.Status == "running" {
-			applyPRCommandToLoadedTask(&loaded, command)
-			if err := task.Save(path, loaded); err != nil {
+		if run.Loaded.Status == "queued" || run.Loaded.Status == "running" {
+			applyPRCommandToLoadedTask(&run.Loaded, command)
+			if err := task.Save(run.Path, run.Loaded); err != nil {
 				return err
 			}
-			if effectiveOpts.ReplyPRComments {
-				if err := vcs.PostPRComment(ctx, vcsBinaries(effectiveOpts), effectiveOpts.Root, loaded.PR.URL, fmt.Sprintf("Galley noted this comment; task is already %s.", loaded.Status)); err != nil {
-					errs = append(errs, err)
-				}
-			}
+			errs = append(errs, run.reply(ctx, fmt.Sprintf("Galley noted this comment; task is already %s.", run.Loaded.Status)))
 			continue
 		}
-		result, err := task.Requeue(path, task.RequeueOptions{
-			Reason:              command.Reason,
-			ProcessedCommentIDs: []string{command.CommentID},
-			RevisionRequests: []task.RevisionRequest{{
-				ID:        "pr-comment-" + command.CommentID,
-				Source:    "pr_comment",
-				CommentID: command.CommentID,
-				Text:      command.Reason,
-				Status:    "pending",
-			}},
-		})
+		result, err := requeueFromPRComment(run.Path, command)
 		if err != nil {
-			applyPRCommandToLoadedTask(&loaded, command)
-			appendRiskWithID(&loaded, "pr-requeue-"+command.CommentID, "external_dependency", fmt.Sprintf("PR comment %s requested a rerun, but Galley could not requeue the task: %v", command.CommentID, err), "Resolve the queued/running task conflict or filesystem error, then run galley task requeue manually.", true)
-			if saveErr := task.Save(path, loaded); saveErr != nil {
-				errs = append(errs, errors.Join(err, saveErr))
-				continue
-			}
-			errs = append(errs, err)
+			errs = append(errs, run.recordRequeueFailure(command, err))
 			continue
 		}
-		path = result.To
-		loaded = result.Task
-		if effectiveOpts.ReplyPRComments {
-			if err := vcs.PostPRComment(ctx, vcsBinaries(effectiveOpts), effectiveOpts.Root, loaded.PR.URL, fmt.Sprintf("Galley requeued task `%s` from this comment.", loaded.ID)); err != nil {
-				errs = append(errs, err)
-			}
-		}
+		run.Loaded = result.Task
+		errs = append(errs, run.reply(ctx, fmt.Sprintf("Galley requeued task `%s` from this comment.", run.Loaded.ID)))
 		break
 	}
 	return errors.Join(errs...)
+}
+
+// reply posts a PR comment when replies are enabled; PostPRComment is never
+// retried because posting a comment is non-idempotent.
+func (run prCommandRun) reply(ctx context.Context, body string) error {
+	if !run.Opts.ReplyPRComments {
+		return nil
+	}
+	return vcs.PostPRComment(ctx, vcsRepo(run.Opts, run.Opts.Root, ""), run.Loaded.PR.URL, body)
+}
+
+func requeueFromPRComment(path string, command prCommand) (task.RequeueResult, error) {
+	return task.Requeue(path, task.RequeueOptions{
+		Reason:              command.Reason,
+		ProcessedCommentIDs: []string{command.CommentID},
+		RevisionRequests: []task.RevisionRequest{{
+			ID:        "pr-comment-" + command.CommentID,
+			Source:    "pr_comment",
+			CommentID: command.CommentID,
+			Text:      command.Reason,
+			Status:    "pending",
+		}},
+	})
+}
+
+// recordRequeueFailure keeps the comment processed and records the failure as a
+// task risk so the PR comment cannot be retried in a loop.
+func (run *prCommandRun) recordRequeueFailure(command prCommand, err error) error {
+	applyPRCommandToLoadedTask(&run.Loaded, command)
+	appendRiskWithID(&run.Loaded, "pr-requeue-"+command.CommentID, riskSpec{
+		Type:        "external_dependency",
+		Detail:      fmt.Sprintf("PR comment %s requested a rerun, but Galley could not requeue the task: %v", command.CommentID, err),
+		Mitigation:  "Resolve the queued/running task conflict or filesystem error, then run galley task requeue manually.",
+		HumanReview: true,
+	})
+	if saveErr := task.Save(run.Path, run.Loaded); saveErr != nil {
+		return errors.Join(err, saveErr)
+	}
+	return err
 }
 
 func applyPRCommandToLoadedTask(loaded *task.Task, command prCommand) {
@@ -204,9 +227,13 @@ func isActionableForPRCommentPoll(loaded task.Task) bool {
 	if !strings.EqualFold(loaded.PR.Status, "open") {
 		return false
 	}
+	// A closed, merged, archived, accepted, draft, or failed task cannot drive a
+	// follow-up run from a /galley comment.
 	switch loaded.Status {
-	case "pr_opened", "needs_supervisor_review", "queued", "running":
+	case task.StatusPROpened, task.StatusNeedsSupervisorReview, task.StatusQueued, task.StatusRunning:
 		return true
+	case task.StatusDraft, task.StatusFailed, task.StatusAccepted, task.StatusMerged, task.StatusClosed, task.StatusArchived:
+		return false
 	default:
 		return false
 	}

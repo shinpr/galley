@@ -31,18 +31,18 @@ func newProfileResolveCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "resolve",
 		Short: "Resolve conventional profile paths for a repository",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			repoCWD := cwd
 			if repoCWD == "" {
 				current, err := os.Getwd()
 				if err != nil {
-					return err
+					return fmt.Errorf("resolve working directory: %w", err)
 				}
 				repoCWD = current
 			}
 			repoCWD, err := filepath.Abs(repoCWD)
 			if err != nil {
-				return err
+				return fmt.Errorf("resolve repository path %s: %w", repoCWD, err)
 			}
 			key, qualityPath, environmentPath, err := galleyhome.RepoProfilePaths(root, repoCWD)
 			if err != nil {

@@ -10,7 +10,7 @@ import (
 
 func TestSnapshotPreflightFilesExcludesGitMetadata(t *testing.T) {
 	root := t.TempDir()
-	if err := exec.Command("git", "init", root).Run(); err != nil {
+	if err := exec.CommandContext(t.Context(), "git", "init", root).Run(); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "src.go"), []byte("package src"), 0o600); err != nil {
@@ -37,7 +37,7 @@ func TestSnapshotPreflightFilesUsesConfiguredGitBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	if err := exec.Command(gitBin, "init", root).Run(); err != nil {
+	if err := exec.CommandContext(t.Context(), gitBin, "init", root).Run(); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "source.ts"), []byte("source"), 0o600); err != nil {
@@ -56,7 +56,7 @@ func TestSnapshotPreflightFilesUsesConfiguredGitBinary(t *testing.T) {
 
 func TestSnapshotPreflightFilesExcludesGitIgnoredCaches(t *testing.T) {
 	root := t.TempDir()
-	if err := exec.Command("git", "init", root).Run(); err != nil {
+	if err := exec.CommandContext(t.Context(), "git", "init", root).Run(); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("node_modules/\n"), 0o600); err != nil {
@@ -85,14 +85,14 @@ func TestSnapshotPreflightFilesExcludesGitIgnoredCaches(t *testing.T) {
 
 func TestSnapshotPreflightFilesIncludesTrackedAndNonIgnoredUntrackedFiles(t *testing.T) {
 	root := t.TempDir()
-	if err := exec.Command("git", "init", root).Run(); err != nil {
+	if err := exec.CommandContext(t.Context(), "git", "init", root).Run(); err != nil {
 		t.Fatal(err)
 	}
 	tracked := filepath.Join(root, "tracked.txt")
 	if err := os.WriteFile(tracked, []byte("tracked"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := exec.Command("git", "-C", root, "add", "tracked.txt").Run(); err != nil {
+	if err := exec.CommandContext(t.Context(), "git", "-C", root, "add", "tracked.txt").Run(); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "new.txt"), []byte("new"), 0o600); err != nil {

@@ -87,27 +87,7 @@ func resolveWorktreeStartPoint(ctx context.Context, opts Options, sourceCWD, bas
 		return "", err
 	}
 	if hasOrigin {
-		// Refuse to fall back to a possibly stale refs/remotes/origin/<base>:
-		// surface the fetch failure through the workspace phase so
-		// `galley task show` exposes the reason in latest_error_*.
-		if err := fetchOriginRef(ctx, opts, sourceCWD, base); err != nil {
-			return "", fmt.Errorf(
-				"refresh %s in source repository %s for pr.base %q failed: %w; "+
-					"Galley refused to use the stale remote-tracking ref as the worktree start-point",
-				originRef, sourceCWD, base, err,
-			)
-		}
-		ok, err := refExists(ctx, opts, sourceCWD, originRef)
-		if err != nil {
-			return "", err
-		}
-		if ok {
-			return originRef, nil
-		}
-		return "", fmt.Errorf(
-			"resolve pr.base %q: %s missing in source repository %s after successful fetch (attempted refs: %s, %s)",
-			base, originRef, sourceCWD, originRef, headsRef,
-		)
+		return resolveOriginStartPoint(ctx, opts, originStartPoint{SourceCWD: sourceCWD, Base: base, OriginRef: originRef, HeadsRef: headsRef})
 	}
 	// Origin-less local repository: use the local branch as the start-point.
 	ok, err := refExists(ctx, opts, sourceCWD, headsRef)
@@ -201,32 +181,43 @@ func resolveEffectiveTaskOptions(opts Options, profiles profile.Bundle) effectiv
 		SupervisorModel:  opts.SupervisorModel,
 		SupervisorEffort: opts.SupervisorEffort,
 	}
-	if profiles.Environment != nil {
-		env := profiles.Environment
-		effective.OpenPR = env.PR.Enabled
-		effective.PRBase = env.PR.Base
-		effective.PollPRComments = env.PR.Comments.Enabled
-		effective.ReplyPRComments = env.PR.Comments.Reply
-		if env.Worktree.Cleanup != nil {
-			effective.CleanupWorktrees = *env.Worktree.Cleanup
-		}
-		if env.Supervisor != nil {
-			if env.Supervisor.DefaultCLI != "" {
-				effective.Supervisor = env.Supervisor.DefaultCLI
-				effective.SupervisorSource = SupervisorSourceRepoProfile
-			}
-			if env.Supervisor.Model != "" {
-				effective.SupervisorModel = env.Supervisor.Model
-			}
-			if env.Supervisor.Effort != "" {
-				effective.SupervisorEffort = env.Supervisor.Effort
-			}
-		}
-	}
+	effective.applyEnvironment(profiles.Environment)
 	if effective.OpenPR {
 		effective.CommitOnAccept = true
 	}
 	return effective
+}
+
+// applyEnvironment overrides the daemon-wide defaults with the repository's
+// environment profile. A nil profile leaves the defaults untouched.
+func (effective *effectiveTaskOptions) applyEnvironment(env *profile.Environment) {
+	if env == nil {
+		return
+	}
+	effective.OpenPR = env.PR.Enabled
+	effective.PRBase = env.PR.Base
+	effective.PollPRComments = env.PR.Comments.Enabled
+	effective.ReplyPRComments = env.PR.Comments.Reply
+	if env.Worktree.Cleanup != nil {
+		effective.CleanupWorktrees = *env.Worktree.Cleanup
+	}
+	effective.applySupervisor(env.Supervisor)
+}
+
+func (effective *effectiveTaskOptions) applySupervisor(sup *profile.SupervisorDefault) {
+	if sup == nil {
+		return
+	}
+	if sup.DefaultCLI != "" {
+		effective.Supervisor = sup.DefaultCLI
+		effective.SupervisorSource = SupervisorSourceRepoProfile
+	}
+	if sup.Model != "" {
+		effective.SupervisorModel = sup.Model
+	}
+	if sup.Effort != "" {
+		effective.SupervisorEffort = sup.Effort
+	}
 }
 
 func (effective effectiveTaskOptions) apply(opts Options) Options {
@@ -245,4 +236,35 @@ func (effective effectiveTaskOptions) apply(opts Options) Options {
 
 func effectiveOptionsForProfiles(opts Options, profiles profile.Bundle) Options {
 	return resolveEffectiveTaskOptions(opts, profiles).apply(opts)
+}
+
+// originStartPoint names the refs a pr.base start-point resolves through.
+type originStartPoint struct {
+	SourceCWD string
+	Base      string
+	OriginRef string
+	HeadsRef  string
+}
+
+// resolveOriginStartPoint refuses a possibly stale refs/remotes/origin/<base>;
+// a fetch failure surfaces in `galley task show` as latest_error_*.
+func resolveOriginStartPoint(ctx context.Context, opts Options, sp originStartPoint) (string, error) {
+	if err := fetchOriginRef(ctx, opts, sp.SourceCWD, sp.Base); err != nil {
+		return "", fmt.Errorf(
+			"refresh %s in source repository %s for pr.base %q failed: %w; "+
+				"Galley refused to use the stale remote-tracking ref as the worktree start-point",
+			sp.OriginRef, sp.SourceCWD, sp.Base, err,
+		)
+	}
+	ok, err := refExists(ctx, opts, sp.SourceCWD, sp.OriginRef)
+	if err != nil {
+		return "", err
+	}
+	if ok {
+		return sp.OriginRef, nil
+	}
+	return "", fmt.Errorf(
+		"resolve pr.base %q: %s missing in source repository %s after successful fetch (attempted refs: %s, %s)",
+		sp.Base, sp.OriginRef, sp.SourceCWD, sp.OriginRef, sp.HeadsRef,
+	)
 }

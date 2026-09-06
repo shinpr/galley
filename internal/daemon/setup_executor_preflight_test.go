@@ -158,22 +158,26 @@ setup:
 		t.Fatal(err)
 	}
 	// AC8: setup readiness must be recorded in task verification history.
-	foundSetup := false
+	assertSetupVerificationRecorded(t, doneTask, "environment.yaml=unchanged")
+}
+
+// assertSetupVerificationRecorded pins that the task's verification history
+// carries a passed <galley:setup> entry whose excerpt names wantExcerpt.
+func assertSetupVerificationRecorded(t *testing.T, doneTask task.Task, wantExcerpt string) {
+	t.Helper()
 	for _, vc := range doneTask.Verification.Commands {
-		if strings.HasPrefix(vc.Cmd, "<galley:setup") {
-			foundSetup = true
-			if vc.Status != "passed" {
-				t.Fatalf("setup verification status got %q, want passed", vc.Status)
-			}
-			if !strings.Contains(vc.OutputExcerpt, "environment.yaml=unchanged") {
-				t.Fatalf("unchanged-setup excerpt missing 'environment.yaml=unchanged': %q", vc.OutputExcerpt)
-			}
-			break
+		if !strings.HasPrefix(vc.Cmd, "<galley:setup") {
+			continue
 		}
+		if vc.Status != "passed" {
+			t.Fatalf("setup verification status got %q, want passed", vc.Status)
+		}
+		if !strings.Contains(vc.OutputExcerpt, wantExcerpt) {
+			t.Fatalf("setup excerpt missing %q: %q", wantExcerpt, vc.OutputExcerpt)
+		}
+		return
 	}
-	if !foundSetup {
-		t.Fatalf("task verification history missing <galley:setup> entry: %#v", doneTask.Verification.Commands)
-	}
+	t.Fatalf("task verification history missing <galley:setup> entry: %#v", doneTask.Verification.Commands)
 }
 
 // TestSetupPreflightAbsentSetupInvokesExecutorWithEnvironmentAndSignals proves
@@ -524,18 +528,7 @@ pr:
 	setupCalls := 0
 	withSetupExecutorRunner(t, func(_ context.Context, opts setuppreflight.Options) (*setuppreflight.Result, error) {
 		setupCalls++
-		source := setuppreflight.SourceDiscovered
-		if opts.Profiles.Environment != nil && opts.Profiles.Environment.Setup != nil {
-			source = setuppreflight.SourceEnvironmentSetup
-		}
-		return &setuppreflight.Result{
-			Status:             setuppreflight.StatusReady,
-			Commands:           []setuppreflight.CommandAttempt{{Run: "echo learned", Source: source, ExitCode: 0}},
-			SuccessfulCommands: []profile.SetupCommand{{Run: "echo learned", Why: "learned setup"}},
-			ReadinessEvidence:  "setup executor passed",
-			Source:             source,
-			Provider:           "claude",
-		}, nil
+		return learnedSetupResult(opts), nil
 	})
 	res1, update1, err := runSetupPreflight(context.Background(), setuppreflight.Options{
 		Task:                   setupTask(),
@@ -560,30 +553,7 @@ pr:
 		t.Fatalf("environment update missing setup diff: %+v", update1)
 	}
 
-	// Verify the file was atomically rewritten with the new setup AND unrelated
-	// content is preserved.
-	rewritten, err := os.ReadFile(envPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := string(rewritten)
-	if !strings.Contains(body, "echo learned") {
-		t.Fatalf("setup not persisted: %s", body)
-	}
-	if !strings.Contains(body, "test_unit") || !strings.Contains(body, "approval_required") || !strings.Contains(body, "base: main") {
-		t.Fatalf("unrelated content lost in rewrite: %s", body)
-	}
-	// Re-validate the rewritten file end-to-end.
-	env2, err := profile.LoadEnvironment(envPath)
-	if err != nil {
-		t.Fatalf("reload rewritten env: %v", err)
-	}
-	if vr := profile.ValidateEnvironment(env2); !vr.Valid() {
-		t.Fatalf("rewritten env failed validation: %v", vr.Errors)
-	}
-	if env2.Setup == nil || len(env2.Setup.Commands) != 1 || env2.Setup.Commands[0].Run != "echo learned" {
-		t.Fatalf("rewritten env setup wrong: %+v", env2.Setup)
-	}
+	env2 := assertProfileRewrittenWithLearnedSetup(t, envPath)
 
 	// AC7 second-run reuse: re-running preflight with the persisted plan still
 	// invokes the setup executor, but as a seeded run that reuses the saved
@@ -608,10 +578,59 @@ pr:
 	if update2 != nil {
 		t.Fatalf("second run should not have rewritten environment.yaml: %+v", update2)
 	}
-	// All recorded commands should be from the seeded environment setup source.
-	for _, c := range res2.Commands {
+	assertAllCommandsSeeded(t, res2.Commands)
+}
+
+// learnedSetupResult mimics a setup executor that succeeds, reporting the
+// seeded source once environment.setup is present.
+func learnedSetupResult(opts setuppreflight.Options) *setuppreflight.Result {
+	source := setuppreflight.SourceDiscovered
+	if opts.Profiles.Environment != nil && opts.Profiles.Environment.Setup != nil {
+		source = setuppreflight.SourceEnvironmentSetup
+	}
+	return &setuppreflight.Result{
+		Status:             setuppreflight.StatusReady,
+		Commands:           []setuppreflight.CommandAttempt{{Run: "echo learned", Source: source, ExitCode: 0}},
+		SuccessfulCommands: []profile.SetupCommand{{Run: "echo learned", Why: "learned setup"}},
+		ReadinessEvidence:  "setup executor passed",
+		Source:             source,
+		Provider:           "claude",
+	}
+}
+
+// assertProfileRewrittenWithLearnedSetup pins that the atomic rewrite persisted
+// the learned setup, preserved unrelated content, and still validates.
+func assertProfileRewrittenWithLearnedSetup(t *testing.T, envPath string) profile.Environment {
+	t.Helper()
+	rewritten, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(rewritten)
+	if !strings.Contains(body, "echo learned") {
+		t.Fatalf("setup not persisted: %s", body)
+	}
+	if !strings.Contains(body, "test_unit") || !strings.Contains(body, "approval_required") || !strings.Contains(body, "base: main") {
+		t.Fatalf("unrelated content lost in rewrite: %s", body)
+	}
+	env, err := profile.LoadEnvironment(envPath)
+	if err != nil {
+		t.Fatalf("reload rewritten env: %v", err)
+	}
+	if vr := profile.ValidateEnvironment(env); !vr.Valid() {
+		t.Fatalf("rewritten env failed validation: %v", vr.Errors)
+	}
+	if env.Setup == nil || len(env.Setup.Commands) != 1 || env.Setup.Commands[0].Run != "echo learned" {
+		t.Fatalf("rewritten env setup wrong: %+v", env.Setup)
+	}
+	return env
+}
+
+func assertAllCommandsSeeded(t *testing.T, commands []setuppreflight.CommandAttempt) {
+	t.Helper()
+	for _, c := range commands {
 		if c.Source == setuppreflight.SourceDiscovered {
-			t.Fatalf("second run recorded discovered command but should use persisted seed plan: %+v", res2.Commands)
+			t.Fatalf("second run recorded discovered command but should use persisted seed plan: %+v", commands)
 		}
 	}
 }
@@ -674,7 +693,7 @@ func TestSetupPreflightSetupFailedClassifiesAndWritesEvidence(t *testing.T) {
 	// daemon helper used by processClaimedTask must yield phase=setup and
 	// kind=setup_failed in the task latest error.
 	tk := setupTask()
-	appendFailureAttempt(&tk, setuppreflight.Phase, setuppreflight.FailedKind, err, runDir)
+	appendFailureAttempt(&tk, attemptFailure{Phase: setuppreflight.Phase, Kind: setuppreflight.FailedKind, Err: err, ArtifactDir: runDir})
 	if len(tk.Attempts) == 0 || tk.Attempts[len(tk.Attempts)-1].Error == nil {
 		t.Fatalf("no attempt error appended")
 	}
@@ -990,49 +1009,13 @@ func TestSetupResultSchemaMatchesPersistedShape(t *testing.T) {
 // go.mod intentionally avoids one. It returns a list of human-readable
 // violation messages; an empty slice means the value satisfies the schema.
 func validateAgainstSchemaForTest(value any, schema map[string]any, path string) []string {
-	var errs []string
-	if typ, ok := schema["type"].(string); ok {
-		if !jsonTypeMatchesForTest(typ, value) {
-			errs = append(errs, fmt.Sprintf("%s: type mismatch: want %s, got %T", path, typ, value))
-			return errs
-		}
+	if typ, ok := schema["type"].(string); ok && !jsonTypeMatchesForTest(typ, value) {
+		return []string{fmt.Sprintf("%s: type mismatch: want %s, got %T", path, typ, value)}
 	}
-	if enum, ok := schema["enum"].([]any); ok {
-		matched := false
-		for _, allowed := range enum {
-			if allowed == value {
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			errs = append(errs, fmt.Sprintf("%s: value %v not in enum %v", path, value, enum))
-		}
-	}
+	errs := validateEnumForTest(value, schema, path)
 	switch v := value.(type) {
 	case map[string]any:
-		props, _ := schema["properties"].(map[string]any)
-		additional, additionalSpecified := schema["additionalProperties"]
-		if required, ok := schema["required"].([]any); ok {
-			for _, r := range required {
-				name, _ := r.(string)
-				if _, has := v[name]; !has {
-					errs = append(errs, fmt.Sprintf("%s: missing required property %q", path, name))
-				}
-			}
-		}
-		for key, child := range v {
-			subSchema, declared := props[key].(map[string]any)
-			if !declared {
-				if additionalSpecified {
-					if allow, ok := additional.(bool); ok && !allow {
-						errs = append(errs, fmt.Sprintf("%s: property %q is not declared in schema and additionalProperties is false", path, key))
-					}
-				}
-				continue
-			}
-			errs = append(errs, validateAgainstSchemaForTest(child, subSchema, path+"."+key)...)
-		}
+		errs = append(errs, validateObjectForTest(v, schema, path)...)
 	case []any:
 		if items, ok := schema["items"].(map[string]any); ok {
 			for i, child := range v {
@@ -1041,6 +1024,56 @@ func validateAgainstSchemaForTest(value any, schema map[string]any, path string)
 		}
 	}
 	return errs
+}
+
+func validateEnumForTest(value any, schema map[string]any, path string) []string {
+	enum, ok := schema["enum"].([]any)
+	if !ok {
+		return nil
+	}
+	for _, allowed := range enum {
+		if allowed == value {
+			return nil
+		}
+	}
+	return []string{fmt.Sprintf("%s: value %v not in enum %v", path, value, enum)}
+}
+
+func validateObjectForTest(v, schema map[string]any, path string) []string {
+	props, _ := schema["properties"].(map[string]any)
+	var errs []string
+	if required, ok := schema["required"].([]any); ok {
+		for _, r := range required {
+			name, _ := r.(string)
+			if _, has := v[name]; !has {
+				errs = append(errs, fmt.Sprintf("%s: missing required property %q", path, name))
+			}
+		}
+	}
+	for key, child := range v {
+		subSchema, declared := props[key].(map[string]any)
+		if !declared {
+			if msg := undeclaredPropertyErrorForTest(schema, path, key); msg != "" {
+				errs = append(errs, msg)
+			}
+			continue
+		}
+		errs = append(errs, validateAgainstSchemaForTest(child, subSchema, path+"."+key)...)
+	}
+	return errs
+}
+
+// undeclaredPropertyErrorForTest reports a property the schema does not declare
+// only when additionalProperties is explicitly false.
+func undeclaredPropertyErrorForTest(schema map[string]any, path, key string) string {
+	additional, specified := schema["additionalProperties"]
+	if !specified {
+		return ""
+	}
+	if allow, ok := additional.(bool); ok && !allow {
+		return fmt.Sprintf("%s: property %q is not declared in schema and additionalProperties is false", path, key)
+	}
+	return ""
 }
 
 func jsonTypeMatchesForTest(want string, value any) bool {

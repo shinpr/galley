@@ -32,7 +32,7 @@ func OwnerPath(runningPath string) string {
 func WriteOwner(runningPath string, owner Owner) error {
 	data, err := json.Marshal(owner)
 	if err != nil {
-		return err
+		return fmt.Errorf("encode owner: %w", err)
 	}
 	if err := os.WriteFile(OwnerPath(runningPath), data, 0o600); err != nil {
 		return fmt.Errorf("write task owner %s: %w", OwnerPath(runningPath), err)
@@ -45,7 +45,7 @@ func WriteOwner(runningPath string, owner Owner) error {
 func ReadOwner(runningPath string) (Owner, error) {
 	data, err := os.ReadFile(OwnerPath(runningPath))
 	if err != nil {
-		return Owner{}, err
+		return Owner{}, fmt.Errorf("read owner %s: %w", OwnerPath(runningPath), err)
 	}
 	var owner Owner
 	if err := json.Unmarshal(data, &owner); err != nil || owner.PID <= 0 {
@@ -57,7 +57,7 @@ func ReadOwner(runningPath string) (Owner, error) {
 // RemoveOwner removes the owner sidecar for a running task if present.
 func RemoveOwner(runningPath string) error {
 	if err := os.Remove(OwnerPath(runningPath)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+		return fmt.Errorf("remove owner %s: %w", OwnerPath(runningPath), err)
 	}
 	return nil
 }

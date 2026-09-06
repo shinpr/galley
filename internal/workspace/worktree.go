@@ -84,10 +84,12 @@ func Prepare(ctx context.Context, sourceCWD string, spec task.Worktree, opts Opt
 	}
 	worktreePath = filepath.Clean(worktreePath)
 	if _, err := os.Stat(worktreePath); err == nil {
-		return reuseExistingWorktree(ctx, sourceCWD, worktreePath, spec.Branch, opts)
+		return reuseExistingWorktree(ctx, worktreeReuse{SourceCWD: sourceCWD, WorktreePath: worktreePath, Branch: spec.Branch}, opts)
 	} else if !os.IsNotExist(err) {
 		return Prepared{}, fmt.Errorf("inspect worktree path %s: %w", worktreePath, err)
 	}
+	// The worktree sits beside the user's repository and follows its conventions.
+	//nolint:gosec // G301: user-visible checkout parent, not Galley state
 	if err := os.MkdirAll(filepath.Dir(worktreePath), 0o755); err != nil {
 		return Prepared{}, fmt.Errorf("create worktree parent %s: %w", filepath.Dir(worktreePath), err)
 	}
@@ -130,7 +132,15 @@ func Prepare(ctx context.Context, sourceCWD string, spec task.Worktree, opts Opt
 	}, nil
 }
 
-func reuseExistingWorktree(ctx context.Context, sourceCWD, worktreePath, branch string, opts Options) (Prepared, error) {
+// worktreeReuse identifies an existing worktree that a task reuses.
+type worktreeReuse struct {
+	SourceCWD    string
+	WorktreePath string
+	Branch       string
+}
+
+func reuseExistingWorktree(ctx context.Context, req worktreeReuse, opts Options) (Prepared, error) {
+	sourceCWD, worktreePath, branch := req.SourceCWD, req.WorktreePath, req.Branch
 	inside, err := gitOutput(ctx, opts, worktreePath, "rev-parse", "--is-inside-work-tree")
 	if err != nil || inside != "true" {
 		return Prepared{}, fmt.Errorf("worktree path already exists and is not a git worktree: %s", worktreePath)
@@ -145,11 +155,11 @@ func reuseExistingWorktree(ctx context.Context, sourceCWD, worktreePath, branch 
 	}
 	sourceInfo, err := os.Stat(sourceCommon)
 	if err != nil {
-		return Prepared{}, err
+		return Prepared{}, fmt.Errorf("stat source git common dir %s: %w", sourceCommon, err)
 	}
 	worktreeInfo, err := os.Stat(worktreeCommon)
 	if err != nil {
-		return Prepared{}, err
+		return Prepared{}, fmt.Errorf("stat worktree git common dir %s: %w", worktreeCommon, err)
 	}
 	if !os.SameFile(sourceInfo, worktreeInfo) {
 		return Prepared{}, fmt.Errorf("worktree path %s belongs to another repository (source %s)", worktreePath, sourceCWD)
@@ -243,13 +253,9 @@ func CaptureSnapshotFromBase(ctx context.Context, cwd, baseSHA string, opts Opti
 	branchDiff := ""
 	var branchFiles []string
 	if baseSHA != "" && baseSHA != head {
-		branchDiff, err = gitOutput(ctx, opts, cwd, "diff", "--binary", baseSHA+"..HEAD")
+		branchDiff, branchFiles, err = branchDiffFromBase(ctx, cwd, baseSHA, opts)
 		if err != nil {
-			return Snapshot{}, fmt.Errorf("git branch diff: %w", err)
-		}
-		branchFiles, err = gitChangedFiles(ctx, cwd, baseSHA+"..HEAD", opts)
-		if err != nil {
-			return Snapshot{}, fmt.Errorf("git branch changed files: %w", err)
+			return Snapshot{}, err
 		}
 	}
 	stagedDiff, err := gitOutput(ctx, opts, cwd, "diff", "--cached", "--binary")
@@ -326,23 +332,15 @@ func Remove(ctx context.Context, sourceCWD string, spec task.Worktree, opts Opti
 	}
 	gitResult, err := runGitCommand(ctx, opts, "", "-C", sourceCWD, "worktree", "remove", "--force", worktreePath)
 	if err != nil {
-		inside, insideErr := isGitWorktree(ctx, worktreePath, opts)
-		if insideErr == nil && !inside {
-			if validateErr := validateManagedLeftoverPath(sourceCWD, worktreePath); validateErr != nil {
-				return result, fmt.Errorf("git worktree remove --force: %w: %s; %v", err, strings.TrimSpace(gitResult.Stderr), validateErr)
-			}
-			if removeErr := os.RemoveAll(worktreePath); removeErr != nil {
-				return result, fmt.Errorf("git worktree remove --force: %w: %s; remove leftover path: %v", err, strings.TrimSpace(gitResult.Stderr), removeErr)
-			}
-		} else {
-			return result, fmt.Errorf("git worktree remove --force: %w: %s", err, strings.TrimSpace(gitResult.Stderr))
+		failure := gitRemoveFailure{SourceCWD: sourceCWD, WorktreePath: worktreePath, GitErr: err, Stderr: gitResult.Stderr}
+		if removeErr := removeLeftoverAfterGitFailure(ctx, failure, opts); removeErr != nil {
+			return result, removeErr
 		}
-	} else if _, statErr := os.Stat(worktreePath); statErr == nil {
-		if removeErr := os.RemoveAll(worktreePath); removeErr != nil {
-			return result, fmt.Errorf("remove leftover worktree path %s: %w", worktreePath, removeErr)
-		}
-	} else if !os.IsNotExist(statErr) {
-		return result, fmt.Errorf("inspect removed worktree path %s: %w", worktreePath, statErr)
+		result.Removed = true
+		return result, nil
+	}
+	if err := removeLeftoverPath(worktreePath); err != nil {
+		return result, err
 	}
 	result.Removed = true
 	return result, nil
@@ -402,11 +400,11 @@ func isManagedWorktreeRoot(name, sourceBase string) bool {
 func canonicalExistingPath(path string) (string, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolve absolute path %s: %w", path, err)
 	}
 	resolved, err := filepath.EvalSymlinks(abs)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolve symlinks for %s: %w", abs, err)
 	}
 	return filepath.Clean(resolved), nil
 }
@@ -425,4 +423,57 @@ func runGitCommand(ctx context.Context, opts Options, cwd string, args ...string
 		WorkDir: cwd,
 		Argv:    proc.GitArgs(opts.git(), args...),
 	}, proc.RunOptions{TailBytes: -1})
+}
+
+// removeLeftoverAfterGitFailure deletes what `git worktree remove` could not,
+// refusing any path that is still a worktree or not a Galley-managed leftover.
+func removeLeftoverAfterGitFailure(ctx context.Context, f gitRemoveFailure, opts Options) error {
+	stderr := strings.TrimSpace(f.Stderr)
+	inside, insideErr := isGitWorktree(ctx, f.WorktreePath, opts)
+	if insideErr != nil || inside {
+		return fmt.Errorf("git worktree remove --force: %w: %s", f.GitErr, stderr)
+	}
+	if validateErr := validateManagedLeftoverPath(f.SourceCWD, f.WorktreePath); validateErr != nil {
+		return fmt.Errorf("git worktree remove --force: %w: %s; %w", f.GitErr, stderr, validateErr)
+	}
+	if removeErr := os.RemoveAll(f.WorktreePath); removeErr != nil {
+		return fmt.Errorf("git worktree remove --force: %w: %s; remove leftover path: %w", f.GitErr, stderr, removeErr)
+	}
+	return nil
+}
+
+// gitRemoveFailure is a failed `git worktree remove --force` and its evidence.
+type gitRemoveFailure struct {
+	SourceCWD    string
+	WorktreePath string
+	GitErr       error
+	Stderr       string
+}
+
+func branchDiffFromBase(ctx context.Context, cwd, baseSHA string, opts Options) (string, []string, error) {
+	diff, err := gitOutput(ctx, opts, cwd, "diff", "--binary", baseSHA+"..HEAD")
+	if err != nil {
+		return "", nil, fmt.Errorf("git branch diff: %w", err)
+	}
+	files, err := gitChangedFiles(ctx, cwd, baseSHA+"..HEAD", opts)
+	if err != nil {
+		return "", nil, fmt.Errorf("git branch changed files: %w", err)
+	}
+	return diff, files, nil
+}
+
+// removeLeftoverPath deletes a path git reported as removed but that still
+// exists on disk. A path that is already gone is not an error.
+func removeLeftoverPath(worktreePath string) error {
+	_, statErr := os.Stat(worktreePath)
+	if os.IsNotExist(statErr) {
+		return nil
+	}
+	if statErr != nil {
+		return fmt.Errorf("inspect removed worktree path %s: %w", worktreePath, statErr)
+	}
+	if removeErr := os.RemoveAll(worktreePath); removeErr != nil {
+		return fmt.Errorf("remove leftover worktree path %s: %w", worktreePath, removeErr)
+	}
+	return nil
 }

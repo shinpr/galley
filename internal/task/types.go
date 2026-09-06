@@ -11,7 +11,7 @@ import (
 type Task struct {
 	ID                 string                `yaml:"id" json:"id"`
 	Mode               string                `yaml:"mode" json:"mode"`
-	Status             string                `yaml:"status" json:"status"`
+	Status             Status                `yaml:"status" json:"status"`
 	Goal               string                `yaml:"goal" json:"goal"`
 	AcceptanceCriteria []AcceptanceCriterion `yaml:"acceptance_criteria" json:"acceptance_criteria"`
 	Files              []InputFile           `yaml:"files,omitempty" json:"files,omitempty"`
@@ -85,7 +85,9 @@ type AcceptanceCriterion struct {
 	ID           string `yaml:"id" json:"id"`
 	Text         string `yaml:"text" json:"text"`
 	Verification string `yaml:"verification" json:"verification"`
-	Status       string `yaml:"status" json:"status"`
+	// Status is the executor-reported acceptance vocabulary
+	// (satisfied/partially_satisfied/not_satisfied), not a task lifecycle Status.
+	Status string `yaml:"status" json:"status"`
 }
 
 // Scope constrains where and how a task may operate.
@@ -115,7 +117,11 @@ func (b LoopBudget) MarshalJSON() ([]byte, error) {
 	if !b.Set {
 		count = DefaultLoopBudget
 	}
-	return json.Marshal(count)
+	data, err := json.Marshal(count)
+	if err != nil {
+		return nil, fmt.Errorf("encode loop budget: %w", err)
+	}
+	return data, nil
 }
 
 // UnmarshalJSON accepts the integer shape emitted by MarshalJSON.
@@ -140,7 +146,7 @@ func (b *LoopBudget) UnmarshalYAML(value *yaml.Node) error {
 	}
 	var count int
 	if err := value.Decode(&count); err != nil {
-		return err
+		return fmt.Errorf("decode loop budget: %w", err)
 	}
 	b.Count = count
 	return nil
@@ -217,8 +223,10 @@ type RevisionRequest struct {
 	Source    string `yaml:"source" json:"source"`
 	CommentID string `yaml:"comment_id,omitempty" json:"comment_id,omitempty"`
 	Text      string `yaml:"text" json:"text"`
-	Status    string `yaml:"status" json:"status"`
-	Evidence  string `yaml:"evidence,omitempty" json:"evidence,omitempty"`
+	// Status is the revision-request vocabulary (pending/addressed), not a task
+	// lifecycle Status.
+	Status   string `yaml:"status" json:"status"`
+	Evidence string `yaml:"evidence,omitempty" json:"evidence,omitempty"`
 }
 
 // ReviewProgress is daemon-owned state for supervisor checks that remain

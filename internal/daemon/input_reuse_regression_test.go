@@ -25,19 +25,36 @@ func TestPrepareClaimedWorkspacePreservesEditedInputs(t *testing.T) {
 		if err := os.MkdirAll(runDir, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		prepared, err := prepareClaimedWorkspace(t.Context(), Options{Root: root}, profile.Bundle{}, running, runDir, &loaded, task.Executor{})
+		prepared, err := prepareClaimedWorkspace(t.Context(), Options{Root: root}, claimedWorkspaceRequest{Profiles: profile.Bundle{}, RunningPath: running, RunDir: runDir, Loaded: &loaded, EffectiveExecutor: task.Executor{}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		for _, file := range loaded.Files {
 			path := filepath.Join(prepared.CWD, file.Destination)
 			if i == 0 {
-				if err := os.WriteFile(path, []byte("executor edits"), 0o600); err != nil {
-					t.Fatal(err)
-				}
-			} else if data, err := os.ReadFile(path); err != nil || string(data) != "executor edits" {
-				t.Fatalf("lost prior work: %q %v", data, err)
+				seedExecutorEdit(t, path)
+				continue
 			}
+			assertExecutorEditPreserved(t, path)
 		}
+	}
+}
+
+const executorEditMarker = "executor edits"
+
+func seedExecutorEdit(t *testing.T, path string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(executorEditMarker), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// assertExecutorEditPreserved pins that reusing a worktree keeps the executor's
+// prior edit to a task input file.
+func assertExecutorEditPreserved(t *testing.T, path string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != executorEditMarker {
+		t.Fatalf("lost prior work: %q %v", data, err)
 	}
 }

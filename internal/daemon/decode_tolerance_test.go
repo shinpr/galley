@@ -114,7 +114,7 @@ func TestPollPRCommentsProcessesUnknownFieldTask(t *testing.T) {
 	if err := queue.EnsureLayout(root); err != nil {
 		t.Fatal(err)
 	}
-	writeDaemonEnvironmentProfile(t, root, repo, true, false)
+	writeDaemonEnvironmentProfile(t, commentProfileSpec{Root: root, Repo: repo, PollComments: true, ReplyComments: false})
 
 	// Readable task that should still be requeued.
 	donePath := filepath.Join(root, "tasks", "done", "readable.yaml")
@@ -180,7 +180,7 @@ func TestCleanupWorktreesProcessesUnknownFieldTask(t *testing.T) {
 	if err := queue.EnsureLayout(root); err != nil {
 		t.Fatal(err)
 	}
-	writeDaemonEnvironmentProfile(t, root, repo, false, false)
+	writeDaemonEnvironmentProfile(t, commentProfileSpec{Root: root, Repo: repo, PollComments: false, ReplyComments: false})
 
 	// Readable task with an open PR worktree.
 	taskPath := filepath.Join(root, "tasks", "done", "readable.yaml")

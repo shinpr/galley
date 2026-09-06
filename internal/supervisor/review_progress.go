@@ -232,14 +232,6 @@ func acceptanceIDs(value task.Task) []string {
 	return ids
 }
 
-func acceptanceIDSet(value task.Task) map[string]struct{} {
-	ids := make(map[string]struct{}, len(value.AcceptanceCriteria))
-	for _, criterion := range value.AcceptanceCriteria {
-		ids[criterion.ID] = struct{}{}
-	}
-	return ids
-}
-
 func qualityIDs(quality *profile.Quality) []string {
 	if quality == nil {
 		return nil

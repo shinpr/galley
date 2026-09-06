@@ -3,6 +3,7 @@ package task
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 
 	"github.com/shinpr/galley/internal/provider"
 )
@@ -21,7 +22,7 @@ func TaskJSONSchema() ([]byte, error) {
 	schema["properties"] = map[string]any{
 		"id":                  stringSchema("pattern", validTaskIDPattern.String()),
 		"mode":                enumSchema(validModes),
-		"status":              enumSchema(validStatuses),
+		"status":              enumSchema(statusStrings(validStatuses)),
 		"goal":                stringSchema("minLength", 1),
 		"acceptance_criteria": arraySchema(acceptanceCriterionSchema(), "minItems", 1),
 		"files":               arraySchema(inputFileSchema()),
@@ -46,7 +47,7 @@ func TaskJSONSchema() ([]byte, error) {
 	enc.SetEscapeHTML(false)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(schema); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("encode task schema: %w", err)
 	}
 	return buf.Bytes(), nil
 }
@@ -353,4 +354,12 @@ func applyKV(m map[string]any, kv ...any) {
 			m[key] = kv[i+1]
 		}
 	}
+}
+
+func statusStrings(values []Status) []string {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		out = append(out, string(v))
+	}
+	return out
 }

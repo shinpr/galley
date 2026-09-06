@@ -66,12 +66,12 @@ func deliverTerminalNotification(ctx context.Context, opts Options, base, runDir
 	if !ok {
 		return
 	}
-	if !cfg.Matches(published.Status) {
+	if !cfg.Matches(string(published.Status)) {
 		return
 	}
 	ev := notify.Event{
 		TaskID:  published.ID,
-		Status:  published.Status,
+		Status:  string(published.Status),
 		Repo:    published.Scope.CWD,
 		Summary: latestTaskSummary(published),
 		RunDir:  runDir,

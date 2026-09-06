@@ -2,8 +2,9 @@ package runner
 
 import (
 	"errors"
-	"github.com/shinpr/galley/internal/proc"
 	"testing"
+
+	"github.com/shinpr/galley/internal/proc"
 )
 
 // validExecutorResultLine is a minimal executor result that passes Validate; a

@@ -100,7 +100,7 @@ func TestFailMovePreservesReviewStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := moved.Status, "needs_supervisor_review"; got != want {
+	if got, want := moved.Status, task.Status("needs_supervisor_review"); got != want {
 		t.Fatalf("status got %q, want %q", got, want)
 	}
 }
@@ -128,7 +128,7 @@ func TestFailMoveDefaultsRunningStatusToFailed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := moved.Status, "failed"; got != want {
+	if got, want := moved.Status, task.Status("failed"); got != want {
 		t.Fatalf("status got %q, want %q", got, want)
 	}
 }

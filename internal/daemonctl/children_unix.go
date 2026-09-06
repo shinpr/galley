@@ -4,6 +4,7 @@ package daemonctl
 
 import (
 	"errors"
+	"fmt"
 	"syscall"
 )
 
@@ -22,7 +23,7 @@ func killProcessGroupByID(pgid int) error {
 	if errors.Is(err, syscall.ESRCH) {
 		return nil
 	}
-	return err
+	return fmt.Errorf("signal process group %d: %w", pgid, err)
 }
 
 // processGroupAlive reports whether any process in the pgid group is still
@@ -43,5 +44,5 @@ func processGroupAlive(pgid int) (bool, error) {
 	if errors.Is(err, syscall.EPERM) {
 		return true, nil
 	}
-	return false, err
+	return false, fmt.Errorf("probe process group %d: %w", pgid, err)
 }

@@ -102,13 +102,13 @@ func TestEnsureDefaultThenLoadRoundTripsDocumentedDefaults(t *testing.T) {
 		t.Fatalf("notifications must default to disabled, got enabled=true")
 	}
 	wantOn := DefaultNotificationEvents()
-	if got := file.Notifications.On; len(got) != len(wantOn) {
+	got := file.Notifications.On
+	if len(got) != len(wantOn) {
 		t.Fatalf("notifications.on got %v, want %v", got, wantOn)
-	} else {
-		for i := range wantOn {
-			if got[i] != wantOn[i] {
-				t.Fatalf("notifications.on[%d] got %q, want %q", i, got[i], wantOn[i])
-			}
+	}
+	for i := range wantOn {
+		if got[i] != wantOn[i] {
+			t.Fatalf("notifications.on[%d] got %q, want %q", i, got[i], wantOn[i])
 		}
 	}
 }

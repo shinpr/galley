@@ -63,17 +63,11 @@ func queue(path string, opts QueueOptions, readTaskID func(string) (string, erro
 	if err := rejectDuplicateTaskID(path, loaded.ID, opts.Root, readTaskID); err != nil {
 		return QueueResult{}, err
 	}
-	appendLifecycleAttempt(&loaded, "queued", opts.Reason, "Task queued for daemon execution.", time.Now())
+	appendLifecycleAttempt(&loaded, lifecycleAttempt{Verdict: "queued", Reason: opts.Reason, Fallback: "Task queued for daemon execution."}, time.Now())
 	nextPath := queuedPathFor(path, opts.Root)
-	if nextPath == path {
-		if err := Save(path, loaded); err != nil {
-			return QueueResult{}, err
-		}
-	} else {
-		removeSource := opts.MoveSource || taskPathUnderRoot(path, opts.Root)
-		if err := writeQueuedTask(path, nextPath, loaded, removeSource); err != nil {
-			return QueueResult{}, err
-		}
+	removeSource := opts.MoveSource || taskPathUnderRoot(path, opts.Root)
+	if err := saveOrMoveTask(path, nextPath, loaded, removeSource); err != nil {
+		return QueueResult{}, err
 	}
 	return QueueResult{Task: loaded, From: path, To: nextPath}, nil
 }
@@ -85,7 +79,7 @@ func rejectDuplicateTaskID(path, id, root string, readTaskID func(string) (strin
 	}
 	current, err := filepath.Abs(path)
 	if err != nil {
-		return err
+		return fmt.Errorf("resolve task path %s: %w", path, err)
 	}
 	for attempt := 0; attempt < duplicateScanMaxAttempts; attempt++ {
 		duplicatePath, moved, err := scanForDuplicateTaskID(root, current, id, readTaskID)
@@ -116,7 +110,7 @@ func scanForDuplicateTaskID(root, current, id string, readTaskID func(string) (s
 	for _, match := range matches {
 		absMatch, err := filepath.Abs(match)
 		if err != nil {
-			return "", false, err
+			return "", false, fmt.Errorf("resolve task path %s: %w", match, err)
 		}
 		if absMatch == current {
 			continue
@@ -138,12 +132,13 @@ func scanForDuplicateTaskID(root, current, id string, readTaskID func(string) (s
 func taskIDFromFile(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("read task file %s: %w", path, err)
 	}
 	var header struct {
 		ID string `yaml:"id"`
 	}
 	if err := yaml.Unmarshal(data, &header); err != nil {
+		//nolint:nilerr // an unparseable file has no ID to report
 		return "", nil
 	}
 	return header.ID, nil

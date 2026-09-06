@@ -144,12 +144,14 @@ func HashesMatchBaseline(workDir string, baseline Baseline) (bool, error) {
 	for _, h := range baseline.SkeletonHashes {
 		fullPath := filepath.Join(workDir, h.Path)
 		if err := ensureRealPathInsideWorktree(workDir, fullPath); err != nil {
+			//nolint:nilerr // a path outside the worktree counts as changed baseline
 			return false, nil
 		}
 		data, err := os.ReadFile(fullPath)
 		if err != nil {
 			// A missing skeleton means the executor altered baseline state;
 			// treat that as progress so the no-diff invariant cannot trigger.
+			//nolint:nilerr // a missing skeleton counts as changed baseline
 			return false, nil
 		}
 		sum := sha256.Sum256(data)

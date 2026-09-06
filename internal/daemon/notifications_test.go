@@ -17,7 +17,14 @@ func shellPath(path string) string {
 	return "'" + strings.ReplaceAll(filepath.ToSlash(path), "'", `'\''`) + "'"
 }
 
-func writePublishedTask(t *testing.T, root, state, base string, tk task.Task) string {
+type publishedTaskSpec struct {
+	Root  string
+	State string
+	Base  string
+}
+
+func writePublishedTask(t *testing.T, spec publishedTaskSpec, tk task.Task) string {
+	root, state, base := spec.Root, spec.State, spec.Base
 	t.Helper()
 	dir := filepath.Join(root, "tasks", state)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -30,7 +37,7 @@ func writePublishedTask(t *testing.T, root, state, base string, tk task.Task) st
 	return p
 }
 
-func baseTask(id, status string) task.Task {
+func baseTask(id string, status task.Status) task.Task {
 	return task.Task{
 		ID:       id,
 		Mode:     "afk",
@@ -46,7 +53,7 @@ func baseTask(id, status string) task.Task {
 func TestNotifyTerminalPublicationFiresOnMatchingStatus(t *testing.T) {
 	root := t.TempDir()
 	marker := filepath.Join(t.TempDir(), "fired")
-	writePublishedTask(t, root, "failed", "task-a.yaml", baseTask("task-a", "failed"))
+	writePublishedTask(t, publishedTaskSpec{Root: root, State: "failed", Base: "task-a.yaml"}, baseTask("task-a", "failed"))
 	runDir := "/galley/runs/run-1"
 	opts := Options{Root: root, Notifications: &daemonconfig.NotificationConfig{
 		Enabled: true,
@@ -66,7 +73,7 @@ func TestNotifyTerminalPublicationFiresOnMatchingStatus(t *testing.T) {
 func TestNotifyTerminalPublicationFiresOnNeedsSupervisorReview(t *testing.T) {
 	root := t.TempDir()
 	marker := filepath.Join(t.TempDir(), "fired")
-	writePublishedTask(t, root, "failed", "task-b.yaml", baseTask("task-b", "needs_supervisor_review"))
+	writePublishedTask(t, publishedTaskSpec{Root: root, State: "failed", Base: "task-b.yaml"}, baseTask("task-b", "needs_supervisor_review"))
 	opts := Options{Root: root, Notifications: &daemonconfig.NotificationConfig{Enabled: true, Command: "touch " + shellPath(marker)}}
 	deliverTerminalNotification(context.Background(), opts, "task-b.yaml", "")
 	if _, err := os.Stat(marker); err != nil {
@@ -78,7 +85,7 @@ func TestNotifyTerminalPublicationFiresOnNeedsSupervisorReview(t *testing.T) {
 func TestNotifyTerminalPublicationSkipsNonDefaultStatus(t *testing.T) {
 	root := t.TempDir()
 	marker := filepath.Join(t.TempDir(), "fired")
-	writePublishedTask(t, root, "done", "task-c.yaml", baseTask("task-c", "accepted"))
+	writePublishedTask(t, publishedTaskSpec{Root: root, State: "done", Base: "task-c.yaml"}, baseTask("task-c", "accepted"))
 	opts := Options{Root: root, Notifications: &daemonconfig.NotificationConfig{Enabled: true, Command: "touch " + shellPath(marker)}}
 	deliverTerminalNotification(context.Background(), opts, "task-c.yaml", "")
 	if _, err := os.Stat(marker); err == nil {
@@ -90,7 +97,7 @@ func TestNotifyTerminalPublicationSkipsNonDefaultStatus(t *testing.T) {
 func TestNotifyTerminalPublicationFiresOnOptInAccepted(t *testing.T) {
 	root := t.TempDir()
 	marker := filepath.Join(t.TempDir(), "fired")
-	writePublishedTask(t, root, "done", "task-d.yaml", baseTask("task-d", "accepted"))
+	writePublishedTask(t, publishedTaskSpec{Root: root, State: "done", Base: "task-d.yaml"}, baseTask("task-d", "accepted"))
 	opts := Options{Root: root, Notifications: &daemonconfig.NotificationConfig{Enabled: true, On: []string{"accepted"}, Command: "touch " + shellPath(marker)}}
 	deliverTerminalNotification(context.Background(), opts, "task-d.yaml", "")
 	if _, err := os.Stat(marker); err != nil {
@@ -113,7 +120,7 @@ func TestNotifyTerminalPublicationSkipsWhenNotPublished(t *testing.T) {
 // AC5: a failing hook command must not panic and must not alter task state.
 func TestNotifyTerminalPublicationSwallowsHookFailure(t *testing.T) {
 	root := t.TempDir()
-	published := writePublishedTask(t, root, "failed", "task-e.yaml", baseTask("task-e", "failed"))
+	published := writePublishedTask(t, publishedTaskSpec{Root: root, State: "failed", Base: "task-e.yaml"}, baseTask("task-e", "failed"))
 	opts := Options{Root: root, Notifications: &daemonconfig.NotificationConfig{Enabled: true, Command: "exit 7"}}
 	// Must not panic.
 	deliverTerminalNotification(context.Background(), opts, "task-e.yaml", "")
@@ -127,7 +134,7 @@ func TestNotifyTerminalPublicationSwallowsHookFailure(t *testing.T) {
 func TestNotifyTerminalPublicationDisabled(t *testing.T) {
 	root := t.TempDir()
 	marker := filepath.Join(t.TempDir(), "fired")
-	writePublishedTask(t, root, "failed", "task-f.yaml", baseTask("task-f", "failed"))
+	writePublishedTask(t, publishedTaskSpec{Root: root, State: "failed", Base: "task-f.yaml"}, baseTask("task-f", "failed"))
 	// nil config
 	deliverTerminalNotification(context.Background(), Options{Root: root}, "task-f.yaml", "")
 	// disabled config
@@ -148,7 +155,7 @@ func TestNotifyTerminalPublicationDoesNotBlockOnSlowCommand(t *testing.T) {
 	}
 	root := t.TempDir()
 	marker := filepath.Join(t.TempDir(), "fired")
-	writePublishedTask(t, root, "failed", "task-slow.yaml", baseTask("task-slow", "failed"))
+	writePublishedTask(t, publishedTaskSpec{Root: root, State: "failed", Base: "task-slow.yaml"}, baseTask("task-slow", "failed"))
 	dispatcher := newNotificationDispatcher(context.Background())
 	opts := Options{Root: root, Notifications: &daemonconfig.NotificationConfig{
 		Enabled: true,
@@ -184,7 +191,7 @@ func TestNotifyTerminalPublicationStuckCommandKilledByTimeout(t *testing.T) {
 		t.Skip("uses a POSIX shell command")
 	}
 	root := t.TempDir()
-	writePublishedTask(t, root, "failed", "task-stuck.yaml", baseTask("task-stuck", "failed"))
+	writePublishedTask(t, publishedTaskSpec{Root: root, State: "failed", Base: "task-stuck.yaml"}, baseTask("task-stuck", "failed"))
 	dispatcher := newNotificationDispatcher(context.Background())
 	opts := Options{
 		Root:             root,
@@ -219,7 +226,7 @@ func TestNotifyTerminalPublicationShutdownCancelsStuckCommand(t *testing.T) {
 		t.Skip("uses a POSIX shell command")
 	}
 	root := t.TempDir()
-	writePublishedTask(t, root, "failed", "task-shutdown.yaml", baseTask("task-shutdown", "failed"))
+	writePublishedTask(t, publishedTaskSpec{Root: root, State: "failed", Base: "task-shutdown.yaml"}, baseTask("task-shutdown", "failed"))
 	ctx, cancel := context.WithCancel(context.Background())
 	dispatcher := newNotificationDispatcher(ctx)
 	opts := Options{

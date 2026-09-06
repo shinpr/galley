@@ -4,6 +4,7 @@ package daemonctl
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"syscall"
 	"time"
@@ -14,7 +15,7 @@ import (
 func Alive(pid int) (bool, error) {
 	process, err := os.FindProcess(pid)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("find process %d: %w", pid, err)
 	}
 	err = process.Signal(syscall.Signal(0))
 	if err == nil {
@@ -29,20 +30,20 @@ func Alive(pid int) (bool, error) {
 	if errors.Is(err, syscall.EPERM) {
 		return true, nil
 	}
-	return false, err
+	return false, fmt.Errorf("probe process %d: %w", pid, err)
 }
 
 // Stop sends SIGTERM and waits for process exit until timeout.
 func Stop(pid int, timeout time.Duration) error {
 	process, err := os.FindProcess(pid)
 	if err != nil {
-		return err
+		return fmt.Errorf("find process %d: %w", pid, err)
 	}
 	if err := process.Signal(syscall.SIGTERM); err != nil {
 		if errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ESRCH) {
 			return ErrNotRunning
 		}
-		return err
+		return fmt.Errorf("signal process %d: %w", pid, err)
 	}
 	return waitExit(pid, timeout, "stop")
 }

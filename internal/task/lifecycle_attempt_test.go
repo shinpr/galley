@@ -9,7 +9,7 @@ func TestAppendLifecycleAttemptRecordsOneInstant(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 7, 25, 10, 11, 12, 13, time.FixedZone("offset", 9*60*60))
 	task := Task{Attempts: []Attempt{{Number: 1}}}
-	appendLifecycleAttempt(&task, "requeued", "", "fallback", now)
+	appendLifecycleAttempt(&task, lifecycleAttempt{Verdict: "requeued", Reason: "", Fallback: "fallback"}, now)
 
 	got := task.Attempts[1]
 	if got.Number != 2 || got.StartedAt != got.CompletedAt {

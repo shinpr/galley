@@ -267,9 +267,8 @@ func TestQueueDuplicateTaskIDSkipsMalformedExistingTask(t *testing.T) {
 
 func TestQueueRejectsNonAuthoringStatuses(t *testing.T) {
 	t.Parallel()
-	for _, status := range []string{"ready", "queued", "running", "needs_supervisor_review", "accepted", "pr_opened", "failed"} {
-		status := status
-		t.Run(status, func(t *testing.T) {
+	for _, status := range []Status{"ready", "queued", "running", "needs_supervisor_review", "accepted", "pr_opened", "failed"} {
+		t.Run(string(status), func(t *testing.T) {
 			t.Parallel()
 			path := writeTaskYAML(t, "loop_budget: 3")
 			loaded, err := Load(path)

@@ -38,11 +38,11 @@ func resolveExecutorResult(cli, stdoutPath, stdoutTail, lastMessagePath string) 
 	}
 	var resultErrs []error
 	if transport == provider.TransportCodex && lastMessagePath != "" {
-		if lastResult, lastErr := runner.ExtractCodexLastMessageFile(lastMessagePath); lastErr == nil {
+		lastResult, lastErr := runner.ExtractCodexLastMessageFile(lastMessagePath)
+		if lastErr == nil {
 			return lastResult, nil
-		} else {
-			resultErrs = append(resultErrs, fmt.Errorf("codex last-message parse failed: %w", lastErr))
 		}
+		resultErrs = append(resultErrs, fmt.Errorf("codex last-message parse failed: %w", lastErr))
 	}
 
 	fileResult, fileErr := runner.ExtractExecutorResultFile(stdoutPath)
@@ -78,15 +78,21 @@ func classifyExecutorTerminal(cli, stdoutPath, stdoutTail string, runErr error) 
 		return runner.GrokTerminal(data, runErr)
 	case provider.TransportCodex:
 		return runner.CodexTerminal(readExecutorStdout(stdoutPath, stdoutTail), runErr)
+	case provider.TransportClaude:
+		return claudeExecutorTerminal(cli, stdoutPath, stdoutTail, runErr)
 	default:
-		// cli is "claude", "glm", or empty (defaulting to claude); GLM shares
-		// Claude's transport but keeps its own provider identity in evidence.
-		providerID := cli
-		if providerID == "" {
-			providerID = "claude"
-		}
-		return runner.ClaudeTerminal(providerID, readExecutorStdout(stdoutPath, stdoutTail), runErr)
+		return claudeExecutorTerminal(cli, stdoutPath, stdoutTail, runErr)
 	}
+}
+
+// cli is "claude", "glm", or empty (defaulting to claude); GLM shares Claude's
+// transport but keeps its own provider identity in evidence.
+func claudeExecutorTerminal(cli, stdoutPath, stdoutTail string, runErr error) runner.ExecutorTerminal {
+	providerID := cli
+	if providerID == "" {
+		providerID = "claude"
+	}
+	return runner.ClaudeTerminal(providerID, readExecutorStdout(stdoutPath, stdoutTail), runErr)
 }
 
 func readExecutorStdout(stdoutPath, stdoutTail string) []byte {

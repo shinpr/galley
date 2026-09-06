@@ -140,27 +140,14 @@ func buildClaudeArgv(opts ClaudeOptions, fileValue func(label, path string) (str
 	common := buildClaudeCommonArgs(opts)
 	argv := append(baseClaudeArgv(opts), common.Prefix...)
 	if opts.SystemPromptFile != "" || opts.SystemPrompt != "" {
-		systemPrompt := opts.SystemPrompt
-		if opts.SystemPromptFile != "" {
-			var err error
-			systemPrompt, err = fileValue("system prompt", opts.SystemPromptFile)
-			if err != nil {
-				return nil, err
-			}
+		systemPrompt, err := inlineOrFile(opts.SystemPrompt, opts.SystemPromptFile, "system prompt", fileValue)
+		if err != nil {
+			return nil, err
 		}
 		argv = append(argv, "--system-prompt", systemPrompt)
 	}
 	if opts.JSONSchemaFile != "" || opts.JSONSchema != "" {
-		schema := opts.JSONSchema
-		if opts.JSONSchemaFile != "" {
-			var err error
-			schema, err = fileValue("JSON schema", opts.JSONSchemaFile)
-			if err != nil {
-				return nil, err
-			}
-		}
-		var err error
-		schema, err = ClaudeCompatibleJSONSchema(schema)
+		schema, err := claudeSchemaArg(opts, fileValue)
 		if err != nil {
 			return nil, err
 		}
@@ -333,14 +320,35 @@ func claudeWarnings(opts ClaudeOptions) []string {
 	return warnings
 }
 
+func isShellSafeRune(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || strings.ContainsRune("-_./:=@", r)
+}
+
 func shellToken(s string) string {
 	if s == "" {
 		return "''"
 	}
-	if strings.IndexFunc(s, func(r rune) bool {
-		return !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || strings.ContainsRune("-_./:=@", r))
-	}) == -1 {
+	if !strings.ContainsFunc(s, func(r rune) bool { return !isShellSafeRune(r) }) {
 		return s
 	}
 	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
+}
+
+// inlineOrFile prefers the file form when a path is set, so a caller can supply
+// either an inline value or a path without the caller branching.
+func inlineOrFile(inline, path, label string, fileValue func(label, path string) (string, error)) (string, error) {
+	if path == "" {
+		return inline, nil
+	}
+	return fileValue(label, path)
+}
+
+// claudeSchemaArg resolves the schema from its inline or file form and
+// normalizes it for the Claude CLI.
+func claudeSchemaArg(opts ClaudeOptions, fileValue func(label, path string) (string, error)) (string, error) {
+	schema, err := inlineOrFile(opts.JSONSchema, opts.JSONSchemaFile, "JSON schema", fileValue)
+	if err != nil {
+		return "", err
+	}
+	return ClaudeCompatibleJSONSchema(schema)
 }

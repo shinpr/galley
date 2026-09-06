@@ -6,6 +6,12 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.12.9 - 2026-09-06
+
+### Changed
+
+- Galley now creates its own queue and task-state directories under the workflow root with `0700` instead of `0755`. Directories that already exist keep their current permissions, so tighten them manually to apply this to an existing installation.
+
 ## v0.12.8 - 2026-09-05
 
 ### Fixed

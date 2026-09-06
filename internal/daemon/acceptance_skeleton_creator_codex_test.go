@@ -77,7 +77,8 @@ func readCreatorCommandPlan(t *testing.T, runDir string) (struct {
 	Argv  []string `json:"argv"`
 	Env   []string `json:"env"`
 	Stdin string   `json:"stdin"`
-}, []byte) {
+}, []byte,
+) {
 	t.Helper()
 	var plan struct {
 		Argv  []string `json:"argv"`
@@ -104,7 +105,7 @@ func TestAcceptanceSkeletonPreflightCodexProviderHappyPath(t *testing.T) {
 	codexBin := fakeCodexCreator(t, manifest, `mkdir -p internal/foo
 printf 'package foo_test\n\n// TODO(galley-skeleton): implement AC1 assertion.\n' > internal/foo/foo_test.go`)
 
-	res, err, runDir := runPreflightWithOptions(t, codexPreflightTask("AC1"), skeletonpreflight.Options{CodexBin: codexBin})
+	res, runDir, err := runPreflightWithOptions(t, codexPreflightTask("AC1"), skeletonpreflight.Options{CodexBin: codexBin})
 	if err != nil {
 		t.Fatalf("preflight error: %v", err)
 	}
@@ -184,7 +185,7 @@ printf 'package foo_test\n\n// TODO(galley-skeleton): implement AC1 assertion.\n
 printf '%s\n' '{"event":"assistant_message","message":'`+strconv.Quote(manifest)+`'}'
 `)
 
-	res, err, runDir := runPreflightWithOptions(t, codexPreflightTask("AC1"), skeletonpreflight.Options{CodexBin: codexBin})
+	res, runDir, err := runPreflightWithOptions(t, codexPreflightTask("AC1"), skeletonpreflight.Options{CodexBin: codexBin})
 	if err != nil {
 		t.Fatalf("preflight error: %v", err)
 	}
@@ -236,7 +237,7 @@ printf 'package foo_test\n' > internal/foo/foo_test.go`
 		t.Run(tc.name, func(t *testing.T) {
 			tk := preflightTestTask("AC1")
 			tk.Executor.CLI = tc.cli
-			res, err, runDir := runPreflightWithOptions(t, tk, tc.opts)
+			res, runDir, err := runPreflightWithOptions(t, tk, tc.opts)
 			if err != nil {
 				t.Fatalf("preflight error: %v", err)
 			}
@@ -308,7 +309,7 @@ printf 'package foo_test\n' > internal/foo/foo_test.go`
 			tk.Executor.CLI = tc.cli
 			tk.Executor.Model = tc.model
 			tk.Executor.Effort = tc.effort
-			res, err, runDir := runPreflightWithOptions(t, tk, tc.opts)
+			res, runDir, err := runPreflightWithOptions(t, tk, tc.opts)
 			if err != nil {
 				t.Fatalf("preflight error: %v", err)
 			}

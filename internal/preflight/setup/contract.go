@@ -12,7 +12,20 @@ import (
 // When the failure occurred before the executor could run (request marshaling,
 // command plan construction) the executor-specific arguments may be zero
 // values and only the message is recorded.
-func setupExecutorFailureResult(message, provider, executorRun string, exitCode int, stdout, stderr string, inspected []string) *Result {
+// setupExecutorFailure is one failed setup-executor invocation.
+type setupExecutorFailure struct {
+	Message     string
+	Provider    string
+	ExecutorRun string
+	ExitCode    int
+	Stdout      string
+	Stderr      string
+	Inspected   []string
+}
+
+func setupExecutorFailureResult(f setupExecutorFailure) *Result {
+	message, provider, executorRun := f.Message, f.Provider, f.ExecutorRun
+	exitCode, stdout, stderr, inspected := f.ExitCode, f.Stdout, f.Stderr, f.Inspected
 	res := &Result{
 		Status:         StatusFailed,
 		Commands:       []CommandAttempt{},

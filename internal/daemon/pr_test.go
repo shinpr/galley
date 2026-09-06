@@ -74,76 +74,15 @@ func TestPRTitleTruncatesOnWordBoundary(t *testing.T) {
 	t.Parallel()
 
 	t.Run("english long goal breaks on whitespace", func(t *testing.T) {
-		t.Parallel()
-		// Build a goal whose rune length comfortably exceeds the current
-		// prTitleRuneBudget so the rune-budget pass engages and the cut must
-		// fall on a whitespace boundary inside the goal.
-		goal := "Fix Galley user-visible output so that supervisor-accepted tasks no longer show stale not_satisfied AC status in the PR body, and also extend the executor work order rendering so reviewers can audit every acceptance criterion together with the recorded supervisor verdict, decision rationale, residual risks, and verification commands without opening the underlying run evidence directory."
-		if len([]rune(goal)) <= prTitleRuneBudget {
-			t.Fatalf("test setup invariant: goal must exceed rune budget; len=%d budget=%d", len([]rune(goal)), prTitleRuneBudget)
-		}
-		title := prTitle(task.Task{Goal: goal})
-		if len([]rune(title)) > prTitleRuneBudget {
-			t.Fatalf("title exceeds rune budget: len=%d title=%q", len([]rune(title)), title)
-		}
-		if !strings.HasSuffix(title, prTitleEllipsis) {
-			t.Fatalf("expected ellipsis suffix, got %q", title)
-		}
-		// The character immediately before the ellipsis must not be a
-		// whitespace and must come from a complete word in the original goal.
-		core := strings.TrimSuffix(title, prTitleEllipsis)
-		core = strings.TrimRight(core, " \t")
-		if core == "" {
-			t.Fatalf("title core is empty after trimming whitespace: %q", title)
-		}
-		// The core must end at a word boundary in the original goal — i.e.,
-		// the next rune in the goal must be whitespace (or the goal must end).
-		if !strings.HasPrefix(goal, core) {
-			t.Fatalf("title core %q is not a prefix of goal", core)
-		}
-		next := goal[len(core):]
-		if next != "" && next[0] != ' ' && next[0] != '\t' {
-			t.Fatalf("title cut mid-word; next rune in goal is %q (title=%q)", string(next[0]), title)
-		}
+		assertEnglishLongGoalBreaksOnWhitespace(t)
 	})
 
 	t.Run("multibyte goal without whitespace falls back to rune cut", func(t *testing.T) {
-		t.Parallel()
-		// A long no-whitespace multibyte goal exercises both passes: the
-		// rune-budget pass takes the hard-cut fallback (no whitespace), then
-		// the byte-budget pass trims further because 3-byte runes overflow
-		// the 256-byte hard cap. The result must stay valid UTF-8, fit the
-		// byte budget, end with the ellipsis, and contain only complete 界
-		// runes (no partial UTF-8 sequences).
-		goal := strings.Repeat("界", prTitleRuneBudget+60)
-		title := prTitle(task.Task{Goal: goal})
-		if len(title) > prTitleByteBudget {
-			t.Fatalf("title exceeds byte budget: bytes=%d title=%q", len(title), title)
-		}
-		if !utf8.ValidString(title) {
-			t.Fatalf("title is invalid UTF-8: %q", title)
-		}
-		if !strings.HasSuffix(title, prTitleEllipsis) {
-			t.Fatalf("expected ellipsis suffix on no-whitespace goal, got %q", title)
-		}
-		core := strings.TrimSuffix(title, prTitleEllipsis)
-		for _, r := range core {
-			if r != '界' {
-				t.Fatalf("title core contains unexpected rune %q in %q", r, title)
-			}
-		}
+		assertMultibyteGoalWithoutWhitespaceFallsBackToRuneCut(t)
 	})
 
 	t.Run("short goal stays untouched", func(t *testing.T) {
-		t.Parallel()
-		goal := "Tighten PR body status rendering"
-		title := prTitle(task.Task{Goal: goal})
-		if title != goal {
-			t.Fatalf("short goal should stay untouched, got %q", title)
-		}
-		if strings.HasSuffix(title, prTitleEllipsis) {
-			t.Fatalf("short goal should not gain ellipsis: %q", title)
-		}
+		assertShortGoalStaysUntouched(t)
 	})
 
 	// 4-byte UTF-8 runes such as emoji (🎉 = U+1F389, 4 bytes) can push a
@@ -152,29 +91,7 @@ func TestPRTitleTruncatesOnWordBoundary(t *testing.T) {
 	// must be trimmed back to <= 256 bytes while staying valid UTF-8 and
 	// keeping the ellipsis marker.
 	t.Run("4-byte runes stay within byte budget", func(t *testing.T) {
-		t.Parallel()
-		goal := strings.Repeat("🎉", 200)
-		title := prTitle(task.Task{Goal: goal})
-		if len(title) > prTitleByteBudget {
-			t.Fatalf("title exceeds byte budget: bytes=%d title=%q", len(title), title)
-		}
-		if !utf8.ValidString(title) {
-			t.Fatalf("title is invalid UTF-8: %q", title)
-		}
-		if !strings.HasSuffix(title, prTitleEllipsis) {
-			t.Fatalf("expected ellipsis suffix on truncated 4-byte goal, got %q", title)
-		}
-		// The body before the ellipsis must consist entirely of complete
-		// 🎉 runes — no partial 4-byte sequences sneaking through.
-		core := strings.TrimSuffix(title, prTitleEllipsis)
-		if !utf8.ValidString(core) {
-			t.Fatalf("title core is invalid UTF-8: %q", core)
-		}
-		for _, r := range core {
-			if r != '🎉' {
-				t.Fatalf("title core contains unexpected rune %q in %q", r, title)
-			}
-		}
+		assert4ByteRunesStayWithinByteBudget(t)
 	})
 
 	// Mixed ASCII + 4-byte rune goal: GitHub's byte limit must hold even
@@ -182,25 +99,128 @@ func TestPRTitleTruncatesOnWordBoundary(t *testing.T) {
 	// bytes. The byte pass should still prefer a whitespace boundary so
 	// reviewers see complete words near the cut.
 	t.Run("ascii plus 4-byte runes break on whitespace under byte budget", func(t *testing.T) {
-		t.Parallel()
-		// 60 emoji * 4 bytes = 240 bytes, plus a long ASCII tail that
-		// forces a break inside the byte budget.
-		goal := strings.Repeat("🎉 ", 60) + "Tail context that should be dropped on truncation"
-		title := prTitle(task.Task{Goal: goal})
-		if len(title) > prTitleByteBudget {
-			t.Fatalf("title exceeds byte budget: bytes=%d title=%q", len(title), title)
-		}
-		if !utf8.ValidString(title) {
-			t.Fatalf("title is invalid UTF-8: %q", title)
-		}
-		if !strings.HasSuffix(title, prTitleEllipsis) {
-			t.Fatalf("expected ellipsis suffix, got %q", title)
-		}
-		core := strings.TrimSuffix(title, prTitleEllipsis)
-		if strings.HasSuffix(core, " ") {
-			t.Fatalf("trailing whitespace before ellipsis: %q", title)
-		}
+		assertAsciiPlus4ByteRunesBreakOnWhitespaceUnderByteBudget(t)
 	})
+}
+
+func assertEnglishLongGoalBreaksOnWhitespace(t *testing.T) {
+	t.Helper()
+	t.Parallel()
+	// A goal past prTitleRuneBudget engages the rune-budget pass, whose cut
+	// must land on a whitespace boundary inside the goal.
+	goal := "Fix Galley user-visible output so that supervisor-accepted tasks no longer show stale not_satisfied AC status in the PR body, and also extend the executor work order rendering so reviewers can audit every acceptance criterion together with the recorded supervisor verdict, decision rationale, residual risks, and verification commands without opening the underlying run evidence directory."
+	if len([]rune(goal)) <= prTitleRuneBudget {
+		t.Fatalf("test setup invariant: goal must exceed rune budget; len=%d budget=%d", len([]rune(goal)), prTitleRuneBudget)
+	}
+	title := prTitle(task.Task{Goal: goal})
+	if len([]rune(title)) > prTitleRuneBudget {
+		t.Fatalf("title exceeds rune budget: len=%d title=%q", len([]rune(title)), title)
+	}
+	if !strings.HasSuffix(title, prTitleEllipsis) {
+		t.Fatalf("expected ellipsis suffix, got %q", title)
+	}
+	// The character immediately before the ellipsis must not be a
+	// whitespace and must come from a complete word in the original goal.
+	core := strings.TrimSuffix(title, prTitleEllipsis)
+	core = strings.TrimRight(core, " \t")
+	if core == "" {
+		t.Fatalf("title core is empty after trimming whitespace: %q", title)
+	}
+	// The core must end at a word boundary in the original goal — i.e.,
+	// the next rune in the goal must be whitespace (or the goal must end).
+	if !strings.HasPrefix(goal, core) {
+		t.Fatalf("title core %q is not a prefix of goal", core)
+	}
+	next := goal[len(core):]
+	if next != "" && next[0] != ' ' && next[0] != '\t' {
+		t.Fatalf("title cut mid-word; next rune in goal is %q (title=%q)", string(next[0]), title)
+	}
+}
+
+func assertMultibyteGoalWithoutWhitespaceFallsBackToRuneCut(t *testing.T) {
+	t.Helper()
+	t.Parallel()
+	// A long no-whitespace multibyte goal exercises both passes; the result
+	// must stay valid UTF-8, fit the byte budget, and end with the ellipsis.
+	goal := strings.Repeat("界", prTitleRuneBudget+60)
+	title := prTitle(task.Task{Goal: goal})
+	if len(title) > prTitleByteBudget {
+		t.Fatalf("title exceeds byte budget: bytes=%d title=%q", len(title), title)
+	}
+	if !utf8.ValidString(title) {
+		t.Fatalf("title is invalid UTF-8: %q", title)
+	}
+	if !strings.HasSuffix(title, prTitleEllipsis) {
+		t.Fatalf("expected ellipsis suffix on no-whitespace goal, got %q", title)
+	}
+	core := strings.TrimSuffix(title, prTitleEllipsis)
+	for _, r := range core {
+		if r != '界' {
+			t.Fatalf("title core contains unexpected rune %q in %q", r, title)
+		}
+	}
+}
+
+func assertShortGoalStaysUntouched(t *testing.T) {
+	t.Helper()
+	t.Parallel()
+	goal := "Tighten PR body status rendering"
+	title := prTitle(task.Task{Goal: goal})
+	if title != goal {
+		t.Fatalf("short goal should stay untouched, got %q", title)
+	}
+	if strings.HasSuffix(title, prTitleEllipsis) {
+		t.Fatalf("short goal should not gain ellipsis: %q", title)
+	}
+}
+
+func assert4ByteRunesStayWithinByteBudget(t *testing.T) {
+	t.Helper()
+	t.Parallel()
+	goal := strings.Repeat("🎉", 200)
+	title := prTitle(task.Task{Goal: goal})
+	if len(title) > prTitleByteBudget {
+		t.Fatalf("title exceeds byte budget: bytes=%d title=%q", len(title), title)
+	}
+	if !utf8.ValidString(title) {
+		t.Fatalf("title is invalid UTF-8: %q", title)
+	}
+	if !strings.HasSuffix(title, prTitleEllipsis) {
+		t.Fatalf("expected ellipsis suffix on truncated 4-byte goal, got %q", title)
+	}
+	// The body before the ellipsis must consist entirely of complete
+	// 🎉 runes — no partial 4-byte sequences sneaking through.
+	core := strings.TrimSuffix(title, prTitleEllipsis)
+	if !utf8.ValidString(core) {
+		t.Fatalf("title core is invalid UTF-8: %q", core)
+	}
+	for _, r := range core {
+		if r != '🎉' {
+			t.Fatalf("title core contains unexpected rune %q in %q", r, title)
+		}
+	}
+}
+
+func assertAsciiPlus4ByteRunesBreakOnWhitespaceUnderByteBudget(t *testing.T) {
+	t.Helper()
+	t.Parallel()
+	// 60 emoji * 4 bytes = 240 bytes, plus a long ASCII tail that
+	// forces a break inside the byte budget.
+	goal := strings.Repeat("🎉 ", 60) + "Tail context that should be dropped on truncation"
+	title := prTitle(task.Task{Goal: goal})
+	if len(title) > prTitleByteBudget {
+		t.Fatalf("title exceeds byte budget: bytes=%d title=%q", len(title), title)
+	}
+	if !utf8.ValidString(title) {
+		t.Fatalf("title is invalid UTF-8: %q", title)
+	}
+	if !strings.HasSuffix(title, prTitleEllipsis) {
+		t.Fatalf("expected ellipsis suffix, got %q", title)
+	}
+	core := strings.TrimSuffix(title, prTitleEllipsis)
+	if strings.HasSuffix(core, " ") {
+		t.Fatalf("trailing whitespace before ellipsis: %q", title)
+	}
 }
 
 func TestRenderPRBodyShowsSupervisorAcceptedStatus(t *testing.T) {

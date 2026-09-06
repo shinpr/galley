@@ -62,6 +62,7 @@ var sleep = func(ctx context.Context, d time.Duration) error {
 // so the schedule asserts against the documented base delays.
 var jitter = func() float64 {
 	// rand.Float64 returns [0.0, 1.0). (rand*2 - 1) maps to [-1, 1).
+	//nolint:gosec // G404: jitter only spreads retry timing; unpredictability is not required
 	return 1 + (rand.Float64()*2-1)*JitterRatio
 }
 
@@ -96,11 +97,13 @@ func SetHooksForTest(
 // would see in the no-retry path.
 func Do(ctx context.Context, fn func(context.Context) error) error {
 	if err := ctx.Err(); err != nil {
+		//nolint:wrapcheck // Do documents that it returns ctx.Err(); wrapping would change the documented return
 		return err
 	}
 	var lastErr error
 	for attempt := 0; attempt < MaxAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
+			//nolint:wrapcheck // Do documents that it returns ctx.Err(); wrapping would change the documented return
 			return err
 		}
 		err := fn(ctx)

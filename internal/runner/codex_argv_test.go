@@ -70,7 +70,6 @@ func TestCodexArgvDoesNotEmitUnsupportedFlags(t *testing.T) {
 	if plan.Argv[len(plan.Argv)-1] != "-" {
 		t.Fatalf("argv must end with the `-` stdin marker; full argv=%v", plan.Argv)
 	}
-
 }
 
 func TestCodexCommandPlanPassesExpandedEffortLiterals(t *testing.T) {

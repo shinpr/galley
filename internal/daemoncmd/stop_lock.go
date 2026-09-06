@@ -29,7 +29,7 @@ func stopIntentPath(pidFile string, target daemonctl.PIDFile) string {
 func claimStopIntent(pidFile string, target daemonctl.PIDFile) (path string, leader bool, err error) {
 	path = stopIntentPath(pidFile, target)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return "", false, err
+		return "", false, fmt.Errorf("create stop intent dir: %w", err)
 	}
 	err = os.Mkdir(path, 0o700)
 	if err == nil {
@@ -38,10 +38,20 @@ func claimStopIntent(pidFile string, target daemonctl.PIDFile) (path string, lea
 	if errors.Is(err, os.ErrExist) {
 		return path, false, nil
 	}
-	return "", false, err
+	return "", false, fmt.Errorf("claim stop intent %s: %w", path, err)
 }
 
-func waitForDaemonStop(pidFile, root, executable string, target daemonctl.PIDFile, timeout time.Duration) error {
+// stopWait identifies the daemon to wait on and how long to wait.
+type stopWait struct {
+	PIDFile    string
+	Root       string
+	Executable string
+	Target     daemonctl.PIDFile
+	Timeout    time.Duration
+}
+
+func waitForDaemonStop(w stopWait) error {
+	pidFile, root, executable, target, timeout := w.PIDFile, w.Root, w.Executable, w.Target, w.Timeout
 	deadline := time.Now().Add(timeout)
 	for {
 		status, err := daemonctl.Inspect(pidFile, root, executable)

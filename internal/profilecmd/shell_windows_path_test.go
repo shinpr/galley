@@ -39,55 +39,70 @@ func TestShellArgvForOSWindowsAutoPrefersStandardGitForWindowsInstalls(t *testin
 		},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			oldLook := lookPath
-			oldStat := statFile
-			// PATH always exposes a non-standard WindowsApps bash to confirm
-			// the standard install wins.
-			lookPath = func(file string) (string, error) {
-				switch file {
-				case "bash.exe", "bash":
-					return `C:\Users\runner\AppData\Local\Microsoft\WindowsApps\bash.exe`, nil
-				case "git.exe", "git":
-					if tc.gitPath != "" {
-						return tc.gitPath, nil
-					}
-					return "", os.ErrNotExist
-				}
-				return "", os.ErrNotExist
-			}
-			statFile = func(name string) (os.FileInfo, error) {
-				if tc.statFromB && name == tc.stdPath {
-					return fakeFileInfo{}, nil
-				}
-				if !tc.statFromB && name == tc.wantBin {
-					return fakeFileInfo{}, nil
-				}
-				return nil, os.ErrNotExist
-			}
-			defer func() {
-				lookPath = oldLook
-				statFile = oldStat
-			}()
-
-			argv, cleanup, shell, err := shellArgvForOS("windows", "grep -F ok proof.txt", t.TempDir(), "", "")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if cleanup != nil {
-				defer cleanup()
-			}
-			if shell != "bash" {
-				t.Fatalf("resolved shell got %q, want bash", shell)
-			}
-			if argv[0] != tc.wantBin {
-				t.Fatalf("argv[0] got %q, want %q", argv[0], tc.wantBin)
-			}
-			if !strings.HasSuffix(argv[1], ".sh") {
-				t.Fatalf("argv[1] should reference a .sh script, got %q", argv[1])
-			}
+			assertStandardInstallWins(t, gitBashLayout{
+				StdPath: tc.stdPath, GitPath: tc.gitPath, WantBin: tc.wantBin, StatFromB: tc.statFromB,
+				PathBash: `C:\Users\runner\AppData\Local\Microsoft\WindowsApps\bash.exe`,
+			})
 		})
+	}
+}
+
+// assertStandardInstallWins pins that a recognized Git for Windows install wins
+// even while PATH exposes a non-standard WindowsApps bash.
+
+// gitBashLayout is one Git for Windows install layout under discovery.
+type gitBashLayout struct {
+	StdPath   string // standard install path visible to statFile
+	GitPath   string // git.exe path on PATH; empty means no git
+	WantBin   string // bash binary the resolver must select
+	StatFromB bool   // statFile recognizes StdPath (true) or the inferred WantBin (false)
+	PathBash  string // bash the PATH lookup always returns
+	Shell     string // configured required_checks.shell
+}
+
+func assertStandardInstallWins(t *testing.T, layout gitBashLayout) {
+	t.Helper()
+	stdPath, gitPath, wantBin, statFromB := layout.StdPath, layout.GitPath, layout.WantBin, layout.StatFromB
+	oldLook, oldStat := lookPath, statFile
+	lookPath = func(file string) (string, error) {
+		switch file {
+		case "bash.exe", "bash":
+			return layout.PathBash, nil
+		case "git.exe", "git":
+			if gitPath != "" {
+				return gitPath, nil
+			}
+		}
+		return "", os.ErrNotExist
+	}
+	statFile = func(name string) (os.FileInfo, error) {
+		recognized := stdPath
+		if !statFromB {
+			recognized = wantBin
+		}
+		if name == recognized {
+			return fakeFileInfo{}, nil
+		}
+		return nil, os.ErrNotExist
+	}
+	defer func() { lookPath, statFile = oldLook, oldStat }()
+
+	argv, cleanup, shell, err := shellArgvForOS(shellArgvSpec{GOOS: "windows", Command: "grep -F ok proof.txt", ScratchDir: t.TempDir(), ConfiguredShell: layout.Shell})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if shell != "bash" {
+		t.Fatalf("resolved shell got %q, want bash", shell)
+	}
+	if argv[0] != wantBin {
+		t.Fatalf("argv[0] got %q, want %q", argv[0], wantBin)
+	}
+	if !strings.HasSuffix(argv[1], ".sh") {
+		t.Fatalf("argv[1] should reference a .sh script, got %q", argv[1])
 	}
 }
 
@@ -95,122 +110,97 @@ func TestShellArgvForOSWindowsAutoPrefersStandardGitForWindowsInstalls(t *testin
 // C:\Windows\System32\bash.exe or a WindowsApps bash.exe, the Windows
 // auto-discovery path shall NOT select those entries as Git Bash. If no
 // usable Git Bash is found, Galley shall fall back to cmd.exe.
+// autoResolveCase is one PATH-discovered bash layout and the shell Galley must
+// select for it.
+type autoResolveCase struct {
+	name          string
+	pathBash      string
+	standardBash  string
+	command       string
+	wantShell     string
+	wantArgv0     string
+	wantArgv0Note string
+}
+
 func TestShellArgvForOSWindowsAutoRejectsWSLLauncherBashAndFallsBackToCmd(t *testing.T) {
-	t.Run("WSLSystem32FallsBackToCmd", func(t *testing.T) {
-		oldLook := lookPath
-		oldStat := statFile
-		lookPath = func(file string) (string, error) {
-			if file == "bash.exe" || file == "bash" {
-				return `C:\Windows\System32\bash.exe`, nil
-			}
-			return "", os.ErrNotExist
-		}
-		statFile = func(name string) (os.FileInfo, error) { return nil, os.ErrNotExist }
-		defer func() { lookPath = oldLook; statFile = oldStat }()
+	// Only a recognized Git for Windows install is auto-selected; WSL, MSYS2, and
+	// the WindowsApps shim fall back to cmd.exe.
+	cases := []autoResolveCase{
+		{
+			name:      "WSLSystem32FallsBackToCmd",
+			pathBash:  `C:\Windows\System32\bash.exe`,
+			command:   "go test ./...",
+			wantShell: "cmd",
+			wantArgv0: "cmd.exe",
+		},
+		{
+			name:          "NonStandardMSYS2PathFallsBackToCmd",
+			pathBash:      `C:\msys64\usr\bin\bash.exe`,
+			command:       "go test ./...",
+			wantShell:     "cmd",
+			wantArgv0:     "cmd.exe",
+			wantArgv0Note: "non-standard MSYS2 bash must not be auto-selected",
+		},
+		{
+			name:      "WindowsAppsShimFallsBackToCmd",
+			pathBash:  `C:\Users\runner\AppData\Local\Microsoft\WindowsApps\bash.exe`,
+			command:   "go test ./...",
+			wantShell: "cmd",
+			wantArgv0: "cmd.exe",
+		},
+		{
+			name:         "WSLLauncherWithStandardInstallStillPrefersStandard",
+			pathBash:     `C:\Windows\System32\bash.exe`,
+			standardBash: `C:\Program Files\Git\bin\bash.exe`,
+			command:      "grep -F ok proof.txt",
+			wantShell:    "bash",
+			wantArgv0:    `C:\Program Files\Git\bin\bash.exe`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assertAutoResolvedShell(t, tc)
+		})
+	}
+}
 
-		argv, cleanup, shell, err := shellArgvForOS("windows", "go test ./...", t.TempDir(), "", "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if cleanup != nil {
-			defer cleanup()
-		}
-		if shell != "cmd" {
-			t.Fatalf("resolved shell got %q, want cmd", shell)
-		}
-		if argv[0] != "cmd.exe" {
-			t.Fatalf("argv[0] got %q, want cmd.exe", argv[0])
-		}
-	})
-	t.Run("NonStandardMSYS2PathFallsBackToCmd", func(t *testing.T) {
-		// Regression: PATH-discovered bash that points at a non-standard,
-		// non-Git-for-Windows install (here MSYS2) must NOT be auto-selected
-		// because Galley cannot guarantee it is Git Bash. No standard install
-		// path is visible to statFile and no git.exe is on PATH, so the
-		// resolver must fall back to cmd.exe rather than silently switching
-		// required checks to MSYS2's bash.
-		oldLook := lookPath
-		oldStat := statFile
-		lookPath = func(file string) (string, error) {
-			if file == "bash.exe" || file == "bash" {
-				return `C:\msys64\usr\bin\bash.exe`, nil
-			}
-			return "", os.ErrNotExist
-		}
-		statFile = func(name string) (os.FileInfo, error) { return nil, os.ErrNotExist }
-		defer func() { lookPath = oldLook; statFile = oldStat }()
+func assertAutoResolvedShell(t *testing.T, tc autoResolveCase) {
+	t.Helper()
+	restore := stubShellDiscovery(tc.pathBash, tc.standardBash)
+	defer restore()
 
-		argv, cleanup, shell, err := shellArgvForOS("windows", "go test ./...", t.TempDir(), "", "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if cleanup != nil {
-			defer cleanup()
-		}
-		if shell != "cmd" {
-			t.Fatalf("resolved shell got %q, want cmd (non-standard MSYS2 bash must not be auto-selected)", shell)
-		}
-		if argv[0] != "cmd.exe" {
-			t.Fatalf("argv[0] got %q, want cmd.exe", argv[0])
-		}
-	})
-	t.Run("WindowsAppsShimFallsBackToCmd", func(t *testing.T) {
-		oldLook := lookPath
-		oldStat := statFile
-		lookPath = func(file string) (string, error) {
-			if file == "bash.exe" || file == "bash" {
-				return `C:\Users\runner\AppData\Local\Microsoft\WindowsApps\bash.exe`, nil
-			}
-			return "", os.ErrNotExist
-		}
-		statFile = func(name string) (os.FileInfo, error) { return nil, os.ErrNotExist }
-		defer func() { lookPath = oldLook; statFile = oldStat }()
+	argv, cleanup, shell, err := shellArgvForOS(shellArgvSpec{GOOS: "windows", Command: tc.command, ScratchDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if shell != tc.wantShell {
+		t.Fatalf("resolved shell got %q, want %q %s", shell, tc.wantShell, tc.wantArgv0Note)
+	}
+	if argv[0] != tc.wantArgv0 {
+		t.Fatalf("argv[0] got %q, want %q", argv[0], tc.wantArgv0)
+	}
+}
 
-		argv, cleanup, shell, err := shellArgvForOS("windows", "go test ./...", t.TempDir(), "", "")
-		if err != nil {
-			t.Fatal(err)
+// stubShellDiscovery makes bash resolve to pathBash on PATH and makes
+// standardBash the only path visible to statFile (none when empty).
+func stubShellDiscovery(pathBash, standardBash string) func() {
+	oldLook, oldStat := lookPath, statFile
+	lookPath = func(file string) (string, error) {
+		if file == "bash.exe" || file == "bash" {
+			return pathBash, nil
 		}
-		if cleanup != nil {
-			defer cleanup()
+		return "", os.ErrNotExist
+	}
+	statFile = func(name string) (os.FileInfo, error) {
+		if standardBash != "" && name == standardBash {
+			return fakeFileInfo{}, nil
 		}
-		if shell != "cmd" {
-			t.Fatalf("resolved shell got %q, want cmd", shell)
-		}
-		if argv[0] != "cmd.exe" {
-			t.Fatalf("argv[0] got %q, want cmd.exe", argv[0])
-		}
-	})
-	t.Run("WSLLauncherWithStandardInstallStillPrefersStandard", func(t *testing.T) {
-		oldLook := lookPath
-		oldStat := statFile
-		lookPath = func(file string) (string, error) {
-			if file == "bash.exe" || file == "bash" {
-				return `C:\Windows\System32\bash.exe`, nil
-			}
-			return "", os.ErrNotExist
-		}
-		statFile = func(name string) (os.FileInfo, error) {
-			if name == `C:\Program Files\Git\bin\bash.exe` {
-				return fakeFileInfo{}, nil
-			}
-			return nil, os.ErrNotExist
-		}
-		defer func() { lookPath = oldLook; statFile = oldStat }()
-
-		argv, cleanup, shell, err := shellArgvForOS("windows", "grep -F ok proof.txt", t.TempDir(), "", "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if cleanup != nil {
-			defer cleanup()
-		}
-		if shell != "bash" {
-			t.Fatalf("resolved shell got %q, want bash", shell)
-		}
-		if argv[0] != `C:\Program Files\Git\bin\bash.exe` {
-			t.Fatalf("argv[0] got %q, want standard Git for Windows bash", argv[0])
-		}
-	})
+		return nil, os.ErrNotExist
+	}
+	return func() { lookPath, statFile = oldLook, oldStat }
 }
 
 // AC3 (result-side): When required_checks.shell_path is set with an
@@ -244,7 +234,7 @@ func TestShellArgvForOSWindowsUsesExplicitRequiredCheckShellPathWithoutDiscovery
 			}
 			defer func() { lookPath = oldLook; statFile = oldStat }()
 
-			argv, cleanup, shell, err := shellArgvForOS("windows", "echo ok", t.TempDir(), tc.shell, tc.shellPath)
+			argv, cleanup, shell, err := shellArgvForOS(shellArgvSpec{GOOS: "windows", Command: "echo ok", ScratchDir: t.TempDir(), ConfiguredShell: tc.shell, ConfiguredShellPath: tc.shellPath})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -279,7 +269,7 @@ func TestShellArgvForOSExplicitRequiredCheckShellPathHonoredOnUnix(t *testing.T)
 	statFile = func(string) (os.FileInfo, error) { statCalls++; return nil, os.ErrNotExist }
 	defer func() { lookPath = oldLook; statFile = oldStat }()
 
-	argv, cleanup, shell, err := shellArgvForOS("linux", "echo ok", "", "bash", "/opt/galley/custom-bash")
+	argv, cleanup, shell, err := shellArgvForOS(shellArgvSpec{GOOS: "linux", Command: "echo ok", ScratchDir: "", ConfiguredShell: "bash", ConfiguredShellPath: "/opt/galley/custom-bash"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +317,7 @@ func TestShellArgvForOSInferShellKindFromShellPathBasenameWithoutExplicitShell(t
 			statFile = func(string) (os.FileInfo, error) { statCalls++; return nil, os.ErrNotExist }
 			defer func() { lookPath = oldLook; statFile = oldStat }()
 
-			argv, cleanup, shell, err := shellArgvForOS(tc.goos, "echo ok", t.TempDir(), "", tc.shellPath)
+			argv, cleanup, shell, err := shellArgvForOS(shellArgvSpec{GOOS: tc.goos, Command: "echo ok", ScratchDir: t.TempDir(), ConfiguredShellPath: tc.shellPath})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -343,15 +333,7 @@ func TestShellArgvForOSInferShellKindFromShellPathBasenameWithoutExplicitShell(t
 			if lookCalls != 0 || statCalls != 0 {
 				t.Fatalf("shell_path inference must skip discovery hooks (look=%d stat=%d)", lookCalls, statCalls)
 			}
-			if tc.goos == "windows" {
-				if !strings.HasSuffix(argv[len(argv)-1], tc.wantArgvOp) {
-					t.Fatalf("argv[-1] %q must end with %q", argv[len(argv)-1], tc.wantArgvOp)
-				}
-			} else {
-				if argv[1] != tc.wantArgvOp {
-					t.Fatalf("argv[1] got %q, want %q", argv[1], tc.wantArgvOp)
-				}
-			}
+			assertInvocationOperand(t, tc.goos, argv, tc.wantArgvOp)
 		})
 	}
 }
@@ -412,7 +394,7 @@ func TestShellArgvForOSShellPathInferredKindOverridesIncompatibleConfiguredShell
 			statFile = func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
 			defer func() { lookPath = oldLook; statFile = oldStat }()
 
-			argv, cleanup, shell, err := shellArgvForOS(tc.goos, "echo ok", t.TempDir(), tc.configuredShell, tc.shellPath)
+			argv, cleanup, shell, err := shellArgvForOS(shellArgvSpec{GOOS: tc.goos, Command: "echo ok", ScratchDir: t.TempDir(), ConfiguredShell: tc.configuredShell, ConfiguredShellPath: tc.shellPath})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -425,13 +407,7 @@ func TestShellArgvForOSShellPathInferredKindOverridesIncompatibleConfiguredShell
 			if argv[0] != tc.shellPath {
 				t.Fatalf("argv[0] got %q, want %q (verbatim shell_path)", argv[0], tc.shellPath)
 			}
-			if tc.goos == "windows" {
-				if !strings.HasSuffix(argv[len(argv)-1], tc.wantInvocation) {
-					t.Fatalf("argv[-1] %q must end with %q (invocation style must match resolved kind)", argv[len(argv)-1], tc.wantInvocation)
-				}
-			} else if len(argv) < 2 || argv[1] != tc.wantInvocation {
-				t.Fatalf("argv got %#v, want argv[1]=%q (invocation style must match resolved kind)", argv, tc.wantInvocation)
-			}
+			assertInvocationOperand(t, tc.goos, argv, tc.wantInvocation)
 		})
 	}
 }
@@ -459,7 +435,7 @@ func TestShellArgvForOSUnrecognizedShellPathFallsBackToConfiguredShellKindMetada
 			statFile = func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
 			defer func() { lookPath = oldLook; statFile = oldStat }()
 
-			argv, cleanup, shell, err := shellArgvForOS(tc.goos, "echo ok", t.TempDir(), tc.configuredShell, tc.shellPath)
+			argv, cleanup, shell, err := shellArgvForOS(shellArgvSpec{GOOS: tc.goos, Command: "echo ok", ScratchDir: t.TempDir(), ConfiguredShell: tc.configuredShell, ConfiguredShellPath: tc.shellPath})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -498,7 +474,7 @@ func TestShellArgvForOSUnrecognizedShellPathWithoutConfiguredShellReturnsError(t
 			statFile = func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
 			defer func() { lookPath = oldLook; statFile = oldStat }()
 
-			_, _, _, err := shellArgvForOS("linux", "echo ok", t.TempDir(), tc.configuredShell, "/opt/galley/custom-bash")
+			_, _, _, err := shellArgvForOS(shellArgvSpec{GOOS: "linux", Command: "echo ok", ScratchDir: t.TempDir(), ConfiguredShell: tc.configuredShell, ConfiguredShellPath: "/opt/galley/custom-bash"})
 			if err == nil {
 				t.Fatal("expected error: unrecognized shell_path without fallback shell kind")
 			}
@@ -527,48 +503,13 @@ func TestShellArgvForOSWindowsExplicitBashPrefersGitForWindowsOverWSL(t *testing
 		{name: "PortableGitFromGitExe", gitPath: `C:\PortableGit\cmd\git.exe`, wantBin: `C:/PortableGit/bin/bash.exe`, statKeyFB: false},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			oldLook := lookPath
-			oldStat := statFile
-			lookPath = func(file string) (string, error) {
-				switch file {
-				case "bash.exe", "bash":
-					// PATH bash is always the WSL launcher to confirm Git for
-					// Windows discovery wins over PATH lookup.
-					return `C:\Windows\System32\bash.exe`, nil
-				case "git.exe", "git":
-					if tc.gitPath != "" {
-						return tc.gitPath, nil
-					}
-					return "", os.ErrNotExist
-				}
-				return "", os.ErrNotExist
-			}
-			statFile = func(name string) (os.FileInfo, error) {
-				if tc.statKeyFB && name == tc.stdPath {
-					return fakeFileInfo{}, nil
-				}
-				if !tc.statKeyFB && name == tc.wantBin {
-					return fakeFileInfo{}, nil
-				}
-				return nil, os.ErrNotExist
-			}
-			defer func() { lookPath = oldLook; statFile = oldStat }()
-
-			argv, cleanup, shell, err := shellArgvForOS("windows", "grep -F ok proof.txt", t.TempDir(), "bash", "")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if cleanup != nil {
-				defer cleanup()
-			}
-			if shell != "bash" {
-				t.Fatalf("resolved shell got %q, want bash", shell)
-			}
-			if argv[0] != tc.wantBin {
-				t.Fatalf("argv[0] got %q, want %q (Git for Windows discovery must win over WSL launcher PATH lookup)", argv[0], tc.wantBin)
-			}
+			// PATH bash is always the WSL launcher to confirm Git for Windows
+			// discovery wins over PATH lookup.
+			assertStandardInstallWins(t, gitBashLayout{
+				StdPath: tc.stdPath, GitPath: tc.gitPath, WantBin: tc.wantBin, StatFromB: tc.statKeyFB,
+				PathBash: `C:\Windows\System32\bash.exe`, Shell: "bash",
+			})
 		})
 	}
 }
@@ -589,7 +530,7 @@ func TestShellArgvForOSWindowsExplicitBashErrorsWhenNoStandardBashDiscoverable(t
 	statFile = func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
 	defer func() { lookPath = oldLook; statFile = oldStat }()
 
-	argv, cleanup, _, err := shellArgvForOS("windows", "grep -F ok proof.txt", t.TempDir(), "bash", "")
+	argv, cleanup, _, err := shellArgvForOS(shellArgvSpec{GOOS: "windows", Command: "grep -F ok proof.txt", ScratchDir: t.TempDir(), ConfiguredShell: "bash", ConfiguredShellPath: ""})
 	if cleanup != nil {
 		defer cleanup()
 	}
@@ -637,7 +578,7 @@ func TestShellArgvForOSWindowsExplicitBashErrorsWhenOnlyNonStandardBashOnPath(t 
 			statFile = func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
 			defer func() { lookPath = oldLook; statFile = oldStat }()
 
-			argv, cleanup, _, err := shellArgvForOS("windows", "grep -F ok proof.txt", t.TempDir(), "bash", "")
+			argv, cleanup, _, err := shellArgvForOS(shellArgvSpec{GOOS: "windows", Command: "grep -F ok proof.txt", ScratchDir: t.TempDir(), ConfiguredShell: "bash", ConfiguredShellPath: ""})
 			if cleanup != nil {
 				defer cleanup()
 			}
@@ -654,5 +595,20 @@ func TestShellArgvForOSWindowsExplicitBashErrorsWhenOnlyNonStandardBashOnPath(t 
 				t.Fatalf("resolver must NOT return the rejected PATH entry %q as argv[0]; got argv %#v", tc.pathBash, argv)
 			}
 		})
+	}
+}
+
+// assertInvocationOperand checks where the operand lands: Windows uses the
+// trailing generated-script path, every other OS uses argv[1].
+func assertInvocationOperand(t *testing.T, goos string, argv []string, wantOperand string) {
+	t.Helper()
+	if goos == "windows" {
+		if !strings.HasSuffix(argv[len(argv)-1], wantOperand) {
+			t.Fatalf("argv[-1] %q must end with %q", argv[len(argv)-1], wantOperand)
+		}
+		return
+	}
+	if argv[1] != wantOperand {
+		t.Fatalf("argv[1] got %q, want %q", argv[1], wantOperand)
 	}
 }

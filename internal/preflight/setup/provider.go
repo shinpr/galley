@@ -34,7 +34,11 @@ func marshalSetupExecutorRequest(opts Options, signals []string) ([]byte, error)
 		"repository_signals": signals,
 		"worktree":           opts.WorkDir,
 	}
-	return json.MarshalIndent(request, "", " ")
+	payload, err := json.MarshalIndent(request, "", " ")
+	if err != nil {
+		return nil, fmt.Errorf("encode setup executor request: %w", err)
+	}
+	return payload, nil
 }
 
 func BuildExecutorCommandPlan(opts Options, payload []byte) (proc.Command, string, error) {
@@ -46,22 +50,30 @@ func BuildExecutorCommandPlan(opts Options, payload []byte) (proc.Command, strin
 	case provider.TransportGrok:
 		cmd, err := buildGrokSetupExecutorCommandPlan(opts, payload)
 		return cmd, string(transport), err
+	case provider.TransportClaude:
+		return buildClaudeSetupPlan(opts, payload)
 	default:
-		cmd, err := buildClaudeSetupExecutorCommandPlan(opts, payload)
-		if err != nil {
-			return proc.Command{}, "claude", err
-		}
-		if err := runner.ConfigureClaudeProvider(&cmd, runner.ClaudeProviderOptions{
-			Provider: opts.Task.Executor.CLI,
-			Credentials: runner.ClaudeCredentials{
-				GLMAuthToken: opts.GLMAuthToken,
-				KimiAPIKey:   opts.KimiAPIKey,
-			},
-		}); err != nil {
-			return proc.Command{}, "claude", err
-		}
-		return cmd, "claude", nil
+		return buildClaudeSetupPlan(opts, payload)
 	}
+}
+
+// An unknown or empty transport falls back to Claude, which also carries the
+// GLM and Kimi provider identities.
+func buildClaudeSetupPlan(opts Options, payload []byte) (proc.Command, string, error) {
+	cmd, err := buildClaudeSetupExecutorCommandPlan(opts, payload)
+	if err != nil {
+		return proc.Command{}, "claude", err
+	}
+	if err := runner.ConfigureClaudeProvider(&cmd, runner.ClaudeProviderOptions{
+		Provider: opts.Task.Executor.CLI,
+		Credentials: runner.ClaudeCredentials{
+			GLMAuthToken: opts.GLMAuthToken,
+			KimiAPIKey:   opts.KimiAPIKey,
+		},
+	}); err != nil {
+		return proc.Command{}, "claude", err
+	}
+	return cmd, "claude", nil
 }
 
 func buildGrokSetupExecutorCommandPlan(opts Options, payload []byte) (proc.Command, error) {

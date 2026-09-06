@@ -157,43 +157,69 @@ func runtimeTaskExecutorValid(c executorFieldCase) bool {
 }
 
 func validateTaskExecutorDoc(executor, doc map[string]any) []string {
-	var errs []string
 	props := executor["properties"].(map[string]any)
+	var errs []string
+	errs = append(errs, validateExecutorCLIField(props, doc)...)
+	errs = append(errs, validateExecutorModelField(props, doc)...)
+	errs = append(errs, validateExecutorEffortField(executor, props, doc)...)
+	return errs
+}
 
-	if cli, present := doc["cli"]; present {
-		if !effortEnumContains(props["cli"].(map[string]any)["enum"].([]any), cli) {
-			errs = append(errs, fmt.Sprintf("cli %v not in enum", cli))
-		}
+func validateExecutorCLIField(props, doc map[string]any) []string {
+	cli, present := doc["cli"]
+	if !present {
+		return nil
 	}
-	if model, present := doc["model"]; present {
-		// Model is free-form string; empty is allowed. Only type is constrained.
-		if _, ok := model.(string); !ok {
-			errs = append(errs, fmt.Sprintf("model %v is not a string", model))
-		}
-		if min, ok := props["model"].(map[string]any)["minLength"].(float64); ok {
-			if s, _ := model.(string); len(s) < int(min) {
-				errs = append(errs, fmt.Sprintf("model %q shorter than minLength %v", model, min))
-			}
-		}
+	if effortEnumContains(props["cli"].(map[string]any)["enum"].([]any), cli) {
+		return nil
 	}
-	if effort, present := doc["effort"]; present {
-		if !effortEnumContains(props["effort"].(map[string]any)["enum"].([]any), effort) {
-			errs = append(errs, fmt.Sprintf("effort %v not in base enum", effort))
+	return []string{fmt.Sprintf("cli %v not in enum", cli)}
+}
+
+// validateExecutorModelField checks the free-form model string; empty is
+// allowed, so only the type and minLength are constrained.
+func validateExecutorModelField(props, doc map[string]any) []string {
+	model, present := doc["model"]
+	if !present {
+		return nil
+	}
+	var errs []string
+	if _, ok := model.(string); !ok {
+		errs = append(errs, fmt.Sprintf("model %v is not a string", model))
+	}
+	min, ok := props["model"].(map[string]any)["minLength"].(float64)
+	if !ok {
+		return errs
+	}
+	if s, _ := model.(string); len(s) < int(min) {
+		errs = append(errs, fmt.Sprintf("model %q shorter than minLength %v", model, min))
+	}
+	return errs
+}
+
+func validateExecutorEffortField(executor, props, doc map[string]any) []string {
+	effort, present := doc["effort"]
+	if !present {
+		return nil
+	}
+	var errs []string
+	if !effortEnumContains(props["effort"].(map[string]any)["enum"].([]any), effort) {
+		errs = append(errs, fmt.Sprintf("effort %v not in base enum", effort))
+	}
+	// The provider-conditioned allOf applies only when cli is present and set.
+	cli, _ := doc["cli"].(string)
+	if cli == "" {
+		return errs
+	}
+	for _, raw := range executor["allOf"].([]any) {
+		rule := raw.(map[string]any)
+		ifConst := rule["if"].(map[string]any)["properties"].(map[string]any)["cli"].(map[string]any)["const"].(string)
+		if ifConst != cli {
+			continue
 		}
-		// Apply provider-conditioned allOf when cli is present (including empty).
-		cli, cliPresent := doc["cli"].(string)
-		if cliPresent && cli != "" {
-			for _, raw := range executor["allOf"].([]any) {
-				rule := raw.(map[string]any)
-				ifConst := rule["if"].(map[string]any)["properties"].(map[string]any)["cli"].(map[string]any)["const"].(string)
-				if ifConst != cli {
-					continue
-				}
-				enum := rule["then"].(map[string]any)["properties"].(map[string]any)["effort"].(map[string]any)["enum"].([]any)
-				if !effortEnumContains(enum, effort) {
-					errs = append(errs, fmt.Sprintf("effort %v not accepted for cli %q", effort, cli))
-				}
-			}
+		enum := rule["then"].(map[string]any)["properties"].(map[string]any)["effort"].(map[string]any)["enum"].([]any)
+		if !effortEnumContains(enum, effort) {
+			errs = append(errs, fmt.Sprintf("effort %v not accepted for cli %q", effort, cli))
 		}
 	}
 	return errs

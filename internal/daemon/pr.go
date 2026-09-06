@@ -19,22 +19,25 @@ import (
 	"github.com/shinpr/galley/internal/workspace"
 )
 
-func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task, workDir, baseSHA, runDir string) error {
+// acceptedChange is the accepted work a finalization commits and publishes.
+type acceptedChange struct {
+	Opts    Options
+	Loaded  *task.Task
+	WorkDir string
+	BaseSHA string
+	RunDir  string
+}
+
+func finalizeAcceptedChange(ctx context.Context, ch acceptedChange) error {
+	opts, loaded := ch.Opts, ch.Loaded
+	workDir, baseSHA, runDir := ch.WorkDir, ch.BaseSHA, ch.RunDir
 	if err := inputfiles.CleanupNonCommitted(workDir, loaded.Files); err != nil {
 		return err
 	}
 
 	snapshot, snapshotErr := workspace.CaptureSnapshotFromBase(ctx, workDir, baseSHA, workspaceOptions(opts))
 	if snapshotErr == nil && !snapshot.Dirty {
-		if loaded.PR.URL != "" {
-			loaded.PR.Status = "open"
-			return nil
-		}
-		if !opts.OpenPR {
-			loaded.PR.Status = "not_requested"
-			return nil
-		}
-		return fmt.Errorf("accepted task has no git diff to commit and no existing PR")
+		return finalizeWithoutDiff(loaded, opts.OpenPR)
 	}
 	if snapshotErr != nil {
 		return fmt.Errorf("capture final diff: %w", snapshotErr)
@@ -53,16 +56,8 @@ func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task
 		return fmt.Errorf("write pr body: %w", err)
 	}
 	if snapshot.StatusPorcelain != "" {
-		commitMessage := fmt.Sprintf("galley: %s", strutil.FirstNonEmpty(loaded.ID, "accepted task"))
-		// Skip git add when only already-staged deletions remain; they are
-		// still committed from the index.
-		if addPaths := addEligiblePorcelainPaths(snapshot.StatusPorcelain); len(addPaths) > 0 {
-			if err := vcs.AddPaths(ctx, vcsBinaries(opts), workDir, runDir, addPaths); err != nil {
-				return err
-			}
-		}
-		if err := vcs.Commit(ctx, vcsBinaries(opts), workDir, runDir, commitMessage); err != nil {
-			return &finalizeFailure{Err: err}
+		if err := commitAcceptedDiff(ctx, vcsRepo(opts, workDir, runDir), *loaded, snapshot.StatusPorcelain); err != nil {
+			return err
 		}
 	}
 	if !opts.OpenPR {
@@ -74,7 +69,7 @@ func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task
 	// the remote already has the SHA or surfaces a non-fast-forward error
 	// unchanged for the caller to handle.
 	if err := retry.Do(ctx, func(ctx context.Context) error {
-		return vcs.PushCurrentBranch(ctx, vcsBinaries(opts), workDir, runDir)
+		return vcs.PushCurrentBranch(ctx, vcsRepo(opts, workDir, runDir))
 	}); err != nil {
 		return &finalizeFailure{Err: err}
 	}
@@ -91,7 +86,7 @@ func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task
 	// failure surfaces unchanged.
 	var prURL string
 	err := retry.Do(ctx, func(ctx context.Context) error {
-		url, createErr := vcs.CreatePullRequest(ctx, vcsBinaries(opts), workDir, runDir, prBodyPath, opts.PRBase, prTitle(*loaded))
+		url, createErr := vcs.CreatePullRequest(ctx, vcsRepo(opts, workDir, runDir), vcs.PullRequestSpec{Title: prTitle(*loaded), BodyPath: prBodyPath, Base: opts.PRBase})
 		if createErr != nil {
 			return createErr
 		}
@@ -99,7 +94,7 @@ func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task
 		return nil
 	})
 	if err != nil {
-		recovered, viewErr := vcs.FetchPRURLForCurrentBranch(ctx, vcsBinaries(opts), workDir, runDir)
+		recovered, viewErr := vcs.FetchPRURLForCurrentBranch(ctx, vcsRepo(opts, workDir, runDir))
 		if viewErr != nil || recovered == "" {
 			return &finalizeFailure{Err: err}
 		}
@@ -117,7 +112,7 @@ func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task
 	// login. GET is idempotent, so retries are safe.
 	var authorLogin string
 	authorErr := retry.Do(ctx, func(ctx context.Context) error {
-		login, fetchErr := vcs.FetchPRAuthorLogin(ctx, vcsBinaries(opts), workDir, prURL)
+		login, fetchErr := vcs.FetchPRAuthorLogin(ctx, vcsRepo(opts, workDir, ""), prURL)
 		if fetchErr != nil {
 			return fetchErr
 		}
@@ -125,7 +120,7 @@ func finalizeAcceptedChange(ctx context.Context, opts Options, loaded *task.Task
 		return nil
 	})
 	if authorErr != nil {
-		appendRiskWithID(loaded, "pr-author-lookup-"+strutil.FirstNonEmpty(loaded.ID, "task"), "external_dependency", fmt.Sprintf("Galley created the PR but could not record its author login: %v", authorErr), "Re-run `gh api repos/{owner}/{repo}/pulls/{number}` after the GitHub API is reachable and set pr.author_login on the task YAML, or expect Galley to reject /galley PR comments until the author is known.", true)
+		appendRiskWithID(loaded, "pr-author-lookup-"+strutil.FirstNonEmpty(loaded.ID, "task"), riskSpec{Type: "external_dependency", Detail: fmt.Sprintf("Galley created the PR but could not record its author login: %v", authorErr), Mitigation: "Re-run `gh api repos/{owner}/{repo}/pulls/{number}` after the GitHub API is reachable and set pr.author_login on the task YAML, or expect Galley to reject /galley PR comments until the author is known.", HumanReview: true})
 		return nil
 	}
 	loaded.PR.AuthorLogin = authorLogin
@@ -330,16 +325,7 @@ func renderPRBody(loaded task.Task) string {
 	if decisions := prVisibleDecisions(loaded.Decisions); len(decisions) > 0 {
 		b.WriteString("\n## Key Decisions\n\n")
 		for _, decision := range decisions {
-			fmt.Fprintf(&b, "- `%s` %s -> %s\n", decision.ID, decision.Question, decision.Chosen)
-			if decision.Rationale != "" {
-				fmt.Fprintf(&b, "  - Rationale: %s\n", decision.Rationale)
-			}
-			if decision.Reversibility != "" {
-				fmt.Fprintf(&b, "  - Reversibility: %s\n", decision.Reversibility)
-			}
-			if decision.NeedsHumanReview {
-				fmt.Fprintf(&b, "  - Human review suggested: true\n")
-			}
+			renderPRDecision(&b, decision)
 		}
 	}
 	if len(loaded.DiscussionItems) > 0 {
@@ -426,4 +412,46 @@ func isResolvedAttemptRisk(risk task.Risk) bool {
 		}
 	}
 	return false
+}
+
+// finalizeWithoutDiff records the PR outcome for an accepted task whose
+// worktree carries no diff.
+func finalizeWithoutDiff(loaded *task.Task, openPR bool) error {
+	if loaded.PR.URL != "" {
+		loaded.PR.Status = "open"
+		return nil
+	}
+	if !openPR {
+		loaded.PR.Status = "not_requested"
+		return nil
+	}
+	return fmt.Errorf("accepted task has no git diff to commit and no existing PR")
+}
+
+// commitAcceptedDiff stages and commits the accepted change. git add is skipped
+// for already-staged deletions, which the index still commits.
+func commitAcceptedDiff(ctx context.Context, repo vcs.Repo, loaded task.Task, statusPorcelain string) error {
+	if addPaths := addEligiblePorcelainPaths(statusPorcelain); len(addPaths) > 0 {
+		if err := vcs.AddPaths(ctx, repo, addPaths); err != nil {
+			return err
+		}
+	}
+	message := fmt.Sprintf("galley: %s", strutil.FirstNonEmpty(loaded.ID, "accepted task"))
+	if err := vcs.Commit(ctx, repo, message); err != nil {
+		return &finalizeFailure{Err: err}
+	}
+	return nil
+}
+
+func renderPRDecision(b *strings.Builder, decision task.Decision) {
+	fmt.Fprintf(b, "- `%s` %s -> %s\n", decision.ID, decision.Question, decision.Chosen)
+	if decision.Rationale != "" {
+		fmt.Fprintf(b, "  - Rationale: %s\n", decision.Rationale)
+	}
+	if decision.Reversibility != "" {
+		fmt.Fprintf(b, "  - Reversibility: %s\n", decision.Reversibility)
+	}
+	if decision.NeedsHumanReview {
+		fmt.Fprintf(b, "  - Human review suggested: true\n")
+	}
 }

@@ -55,9 +55,19 @@ type DiffArtifacts struct {
 	Err      error
 }
 
-func CaptureDiffArtifacts(ctx context.Context, workDir, baseSHA, attemptDir string, opts workspace.Options) (DiffArtifacts, error) {
-	snapshot, err := workspace.CaptureSnapshotFromBase(ctx, workDir, baseSHA, opts)
+// DiffCapture locates the attempt whose diff evidence is captured.
+type DiffCapture struct {
+	WorkDir    string
+	BaseSHA    string
+	AttemptDir string
+	Opts       workspace.Options
+}
+
+func CaptureDiffArtifacts(ctx context.Context, req DiffCapture) (DiffArtifacts, error) {
+	attemptDir := req.AttemptDir
+	snapshot, err := workspace.CaptureSnapshotFromBase(ctx, req.WorkDir, req.BaseSHA, req.Opts)
 	if err != nil {
+		//nolint:nilerr // the capture error is reported through DiffArtifacts.Err
 		return DiffArtifacts{Snapshot: snapshot, Err: err}, nil
 	}
 	dirty := snapshot.BranchDiff != "" || snapshot.StagedDiff != "" || snapshot.UnstagedDiff != ""

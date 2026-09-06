@@ -46,11 +46,11 @@ func LoadEnvironmentUpdate(runDir string) (*EnvironmentUpdate, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
-		return nil, err
+		return nil, fmt.Errorf("read environment update: %w", err)
 	}
 	var update EnvironmentUpdate
 	if err := json.Unmarshal(data, &update); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode environment update: %w", err)
 	}
 	return &update, nil
 }
@@ -73,20 +73,7 @@ func LoadRunEvidence(runDir, runID string) (*Result, *EnvironmentUpdate) {
 	update, uerr := LoadEnvironmentUpdate(runDir)
 	if uerr != nil {
 		fmt.Fprintf(os.Stderr, "galley: could not load setup environment update for run %s: %v\n", runID, uerr)
-		if res == nil {
-			res = &Result{
-				Status:   StatusFailed,
-				Commands: []CommandAttempt{},
-			}
-		}
-		if res.Error == "" {
-			res.Error = "environment_update.json could not be loaded: " + uerr.Error()
-		} else {
-			res.Error += "; environment_update.json could not be loaded: " + uerr.Error()
-		}
-		if res.RepairGuidance == "" {
-			res.RepairGuidance = "Inspect the run directory and restore readable setup evidence before trusting setup readiness."
-		}
+		res = recordEnvironmentUpdateFailure(res, uerr)
 	}
 	return res, update
 }
@@ -100,11 +87,11 @@ func LoadResult(runDir string) (*Result, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
-		return nil, err
+		return nil, fmt.Errorf("read setup result: %w", err)
 	}
 	var res Result
 	if err := json.Unmarshal(data, &res); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode setup result: %w", err)
 	}
 	return &res, nil
 }
@@ -118,4 +105,22 @@ func WriteEnvironmentUpdate(runDir string, update *EnvironmentUpdate) error {
 		return fmt.Errorf("create setup run dir: %w", err)
 	}
 	return jsonio.Write(runartifact.Path(runDir, runartifact.SetupEnvironmentUpdateFilename), update)
+}
+
+// recordEnvironmentUpdateFailure folds an unreadable environment_update.json
+// into the setup result so readers cannot mistake it for a healthy setup.
+func recordEnvironmentUpdateFailure(res *Result, uerr error) *Result {
+	if res == nil {
+		res = &Result{Status: StatusFailed, Commands: []CommandAttempt{}}
+	}
+	detail := "environment_update.json could not be loaded: " + uerr.Error()
+	if res.Error == "" {
+		res.Error = detail
+	} else {
+		res.Error += "; " + detail
+	}
+	if res.RepairGuidance == "" {
+		res.RepairGuidance = "Inspect the run directory and restore readable setup evidence before trusting setup readiness."
+	}
+	return res
 }

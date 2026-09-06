@@ -39,14 +39,17 @@ func renameUnderMarkerFallback(src, dst string) error {
 	if _, err := os.Lstat(dst); err == nil {
 		return os.ErrExist
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
+		return fmt.Errorf("stat destination %s: %w", dst, err)
 	}
-	return os.Rename(src, dst)
+	if err := os.Rename(src, dst); err != nil {
+		return fmt.Errorf("rename %s to %s: %w", src, dst, err)
+	}
+	return nil
 }
 
 func linkAndUnlinkNoReplace(src, dst string) error {
 	if err := os.Link(src, dst); err != nil {
-		return err
+		return fmt.Errorf("link %s to %s: %w", src, dst, err)
 	}
 	if err := os.Remove(src); err != nil {
 		rollbackErr := os.Remove(dst)

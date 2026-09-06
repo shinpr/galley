@@ -162,7 +162,7 @@ func WriteGrokCompletionMetadata(path string, data []byte) error {
 	}
 	body, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("encode grok completion metadata: %w", err)
 	}
 	if err := os.WriteFile(path, append(body, '\n'), 0o600); err != nil {
 		return fmt.Errorf("write grok completion metadata: %w", err)

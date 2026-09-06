@@ -18,7 +18,7 @@ func moveToWorkflowState(root, currentPath string, state task.WorkflowState, upd
 			return err
 		}
 	}
-	if err := os.MkdirAll(filepath.Dir(nextPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(nextPath), 0o700); err != nil {
 		return fmt.Errorf("create task state dir %s: %w", filepath.Dir(nextPath), err)
 	}
 	if err := renameNoOverwrite(currentPath, nextPath); err != nil {
@@ -73,7 +73,7 @@ func RecoverUnreadableClaimToFailed(root, runningPath string, primary error) err
 func QuarantineUnreadableClaim(root, runningPath string, primary error) error {
 	failed := task.TaskStatePath(root, task.WorkflowStateFailed, filepath.Base(runningPath))
 	if err := os.MkdirAll(filepath.Dir(failed), 0o700); err != nil {
-		return err
+		return fmt.Errorf("create failed state dir %s: %w", filepath.Dir(failed), err)
 	}
 	return fileutil.WithExclusiveMarker(runningPath+".lock", func() error {
 		for suffix := 0; ; suffix++ {
@@ -85,7 +85,7 @@ func QuarantineUnreadableClaim(root, runningPath string, primary error) error {
 				if _, err := os.Lstat(candidate); err == nil {
 					return os.ErrExist
 				} else if !errors.Is(err, os.ErrNotExist) {
-					return err
+					return fmt.Errorf("stat task state destination: %w", err)
 				}
 				if err := jsonio.Write(candidate+".error.json", map[string]string{"source": runningPath, "error": fmt.Sprint(primary)}); err != nil {
 					return err

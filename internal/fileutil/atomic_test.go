@@ -187,10 +187,10 @@ func TestWithExclusiveMarkerReportsCleanupFailure(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "task.lock")
 	err := WithExclusiveMarker(marker, func() error {
 		if err := os.Remove(marker); err != nil {
-			return err
+			return fmt.Errorf("remove marker: %w", err)
 		}
 		if err := os.Mkdir(marker, 0o700); err != nil {
-			return err
+			return fmt.Errorf("recreate marker as dir: %w", err)
 		}
 		return os.WriteFile(filepath.Join(marker, "blocker"), []byte("x"), 0o600)
 	})
@@ -224,37 +224,15 @@ func TestWriteFileNoOverwriteAtomicPublicationIsAtomic(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for {
-				data, err := os.ReadFile(path)
-				if err == nil {
-					if !bytes.Equal(data, payload) {
-						readResult <- fmt.Errorf(
-							"partial publication observed: got %d bytes, want %d",
-							len(data), len(payload),
-						)
-					}
-					return
-				}
-				if !errors.Is(err, os.ErrNotExist) {
-					if isTransientPublicationReadError(err) {
-						continue
-					}
-					readResult <- fmt.Errorf("unexpected read error: %w", err)
-					return
-				}
-			}
+			readResult <- pollForCompletePublication(path, payload)
 		}()
 
 		if err := WriteFileNoOverwriteAtomic(path, payload, 0o600); err != nil {
 			t.Fatalf("iter %d write: %v", i, err)
 		}
 		wg.Wait()
-		select {
-		case err := <-readResult:
-			if err != nil {
-				t.Fatalf("iter %d: %v", i, err)
-			}
-		default:
+		if err := <-readResult; err != nil {
+			t.Fatalf("iter %d: %v", i, err)
 		}
 
 		// After successful publication the reservation lock must be gone
@@ -282,15 +260,7 @@ func TestWriteFileAtomicReplacesContentsAndMode(t *testing.T) {
 	if string(data) != "new" {
 		t.Fatalf("contents got %q, want new", data)
 	}
-	if runtime.GOOS != "windows" {
-		info, err := os.Stat(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := info.Mode().Perm(); got != 0o600 {
-			t.Fatalf("mode got %o, want 600", got)
-		}
-	}
+	assertFileMode(t, path, 0o600)
 }
 
 func isTransientPublicationReadError(err error) bool {
@@ -301,4 +271,37 @@ func isTransientPublicationReadError(err error) bool {
 	// violations to a racing reader. That still preserves the publication
 	// contract: the reader has not observed partial YAML bytes.
 	return errors.Is(err, syscall.Errno(32)) || errors.Is(err, syscall.Errno(33))
+}
+
+// pollForCompletePublication reads path until it exists and reports whether the
+// full payload was observed; a non-atomic publication surfaces as a short read.
+func pollForCompletePublication(path string, payload []byte) error {
+	for {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			if !bytes.Equal(data, payload) {
+				return fmt.Errorf("partial publication observed: got %d bytes, want %d", len(data), len(payload))
+			}
+			return nil
+		}
+		if errors.Is(err, os.ErrNotExist) || isTransientPublicationReadError(err) {
+			continue
+		}
+		return fmt.Errorf("unexpected read error: %w", err)
+	}
+}
+
+// assertFileMode checks POSIX permission bits. Windows does not carry them.
+func assertFileMode(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != want {
+		t.Fatalf("mode got %o, want %o", got, want)
+	}
 }

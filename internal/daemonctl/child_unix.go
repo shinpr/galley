@@ -3,6 +3,7 @@
 package daemonctl
 
 import (
+	"fmt"
 	"os"
 	"syscall"
 )
@@ -19,5 +20,8 @@ func TerminateChildProcess(p *os.Process) error {
 	if p == nil {
 		return nil
 	}
-	return p.Signal(syscall.SIGTERM)
+	if err := p.Signal(syscall.SIGTERM); err != nil {
+		return fmt.Errorf("signal child %d: %w", p.Pid, err)
+	}
+	return nil
 }

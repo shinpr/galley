@@ -1,9 +1,10 @@
 package runner
 
 import (
-	"github.com/shinpr/galley/internal/proc"
 	"strings"
 	"testing"
+
+	"github.com/shinpr/galley/internal/proc"
 )
 
 func TestConfigureClaudeProviderGLMInjectsEndpointAndTokenViaEnvOnly(t *testing.T) {

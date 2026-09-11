@@ -17,13 +17,15 @@ Distinguish observed facts from inferences. Ask only when available evidence can
 
 ### Outcome and Requirements
 
-- Define one observable outcome.
+- Define one observable outcome: the user-facing value the change delivers or restores. Behaviors that must all hold for that value to exist belong to one outcome, however many components, layers, or files they touch.
 - Keep only requirements that serve that outcome in the current task.
 - Preserve user-stated exclusions and existing contracts affected by the change.
 - Treat desired future work, possible reuse, optional hardening, and unrelated findings as out of scope unless the user makes them current requirements.
 - Leave repository-local reversible implementation choices to the executor.
 
 The task is not ready when execution would require a new product requirement or an unapproved durable choice that changes a public/shared contract, responsibility, dependency direction, persistence model, technology dependency, or irreversible data behavior.
+
+The executor implements every statement the task carries, so context gathered while authoring becomes work once it is written down. Keep a statement when you can name the executor action or verification result it changes, and leave the rest of the authoring evidence outside the task.
 
 ### Impact and Edit Scope
 
@@ -64,8 +66,6 @@ A wider check does not replace focused proof of the changed behavior. A focused 
 
 State a primary false-green condition only when a plausible implementation or test could pass while the criterion remains false. Add integration/E2E work, fixtures, screenshots, external services, or generated skeletons only when a cheaper check cannot observe the required boundary.
 
-For behavior-changing criteria, add only proof details not already clear from the criterion, such as the primary false-green condition, evidence boundary, required state transition, or acceptance-relevant residual; record any residual in `risks`.
-
 Use commands from the resolved quality/environment profiles, CI, package scripts, or repository documentation. Do not duplicate profile-owned required checks in every acceptance criterion; cite the focused evidence and let the profile enforce its repository checks.
 
 ## Reference Files
@@ -94,4 +94,4 @@ Make and record low-risk reversible repository-local choices instead of returnin
 - [ ] The executor does not need to invent a product requirement or durable design decision
 - [ ] Scope follows the responsible path and preserves affected contracts
 - [ ] Every acceptance criterion has falsifiable evidence at the required boundary
-- [ ] Decisions, risks, files, and verification add only execution-relevant information
+- [ ] Every acceptance criterion, decision, risk, and file names the executor action or verification result it changes

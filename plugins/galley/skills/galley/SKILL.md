@@ -1,6 +1,6 @@
 ---
 name: galley
-description: Authors and validates Galley task YAML, profiles, daemon handoff, run evidence, and queueing. Use when the user asks to create/repair/queue a Galley task, configure profiles/daemon/PR automation, or diagnose a Galley run.
+description: Authors and validates Galley task YAML, acceptance criteria, profiles, daemon handoff, and queueing. Use whenever the request mentions Galley or touches a Galley task, profile, daemon, or run.
 ---
 
 # Galley

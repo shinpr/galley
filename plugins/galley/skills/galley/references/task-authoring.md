@@ -8,12 +8,14 @@ A task is ready when the executor can implement one observable outcome without c
 
 Determine the stopping point from the user's request:
 
-- acceptance criteria only: present the criteria and stop;
+- acceptance criteria only: present the goal and acceptance criteria from the output contract below, then stop;
 - task authoring: create and validate a draft, then stop;
 - queueing: create and queue the task;
 - queueing with daemon startup: queue the task, start the requested background daemon, and return after startup succeeds.
 
 ## Authoring Flow
+
+Advance to the next step only when the current step's required output exists. Before presenting or queueing, verify the result against the `references/authoring-quality.md` Completion Check and the Output Contract below.
 
 ### 1. Gather Decision-Relevant Evidence
 
@@ -79,6 +81,8 @@ Fill the task as follows:
 - `files`: local evidence the executor must read, with a safe workspace destination and commit policy;
 - `executor`: explicit task overrides only.
 
+The task file carries decided values only.
+
 Use the generated execution policy and worktree values unless the user selected different values.
 
 ### 5. Validate, Queue, and Report
@@ -99,17 +103,15 @@ galley task queue <task-file>
 
 `task queue` validates before publishing the task. Repair and retry only when it rejects the draft.
 
-When queueing is not yet authorized, validate first and present only:
-
-- goal and acceptance criteria;
-- expected edit scope and preserved boundaries;
-- explicit executor or policy overrides;
-- copied input files and commit policy, when any;
-- external effects that differ from the existing approved profile.
+When queueing is not yet authorized, validate first and present the Output Contract below.
 
 Ask once whether to queue that validated task. An affirmative reply to this concrete summary authorizes queueing and any daemon action included in the same summary.
 
 After queueing, use `references/handoff-and-queueing.md` for the requested daemon action. Do not continue into implementation or monitoring unless the user requested it.
+
+## Output Contract
+
+Present the task for review with these fields, omitting a field that has no content: goal, acceptance criteria, expected edit scope, explicit executor or policy overrides, copied input files with their commit policy, and external effects that differ from the approved profile.
 
 ## Field Notes
 

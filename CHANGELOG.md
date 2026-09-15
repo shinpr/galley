@@ -8,7 +8,7 @@ This project follows semantic versioning.
 
 ### Changed
 
-- Packaged Claude, Codex, and Grok Galley plugins are now versioned as `0.1.35`; asking Galley for acceptance criteria now returns one task covering the value the change delivers or restores, stated as decided criteria you can queue as they are, without authoring notes, background findings, or follow-up questions to answer first. The Galley skill also applies whenever a request involves Galley.
+- Packaged Claude, Codex, and Grok Galley plugins are now versioned as `0.1.36`; task authoring produces one queue-ready outcome from decided criteria, keeps authoring-only context and follow-up work outside the task, and retains only criteria whose implementation is needed for that outcome or an affected existing contract. The skill also applies whenever a request involves Galley.
 
 ## v0.12.9 - 2026-09-06
 

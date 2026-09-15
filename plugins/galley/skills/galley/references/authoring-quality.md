@@ -94,4 +94,5 @@ Make and record low-risk reversible repository-local choices instead of returnin
 - [ ] The executor does not need to invent a product requirement or durable design decision
 - [ ] Scope follows the responsible path and preserves affected contracts
 - [ ] Every acceptance criterion has falsifiable evidence at the required boundary
-- [ ] Every acceptance criterion, decision, risk, and file names the executor action or verification result it changes
+- [ ] Every acceptance criterion requires only implementation needed for the one observable outcome or an affected existing contract
+- [ ] Every decision, risk, and file names the executor action or verification result it changes

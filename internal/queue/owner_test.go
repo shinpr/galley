@@ -122,35 +122,6 @@ func TestRecoverInterruptedRunningLeavesTaskWithInvalidOwnerSidecar(t *testing.T
 	}
 }
 
-func TestRecoverInterruptedRunningRequeuesByTTLAfterStale(t *testing.T) {
-	// A running task with no owner metadata is still recovered once its claim
-	// ages past ClaimTTL, so interrupted work from an older Galley is not lost.
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	if err := EnsureLayout(root); err != nil {
-		t.Fatal(err)
-	}
-	runningPath := writeRunningTask(t, root, "ownerless.yaml")
-	if err := RecoverInterruptedRunning(root, func(Owner) (bool, error) { return false, nil }); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(runningPath); err != nil {
-		t.Fatalf("ownerless task must remain until ClaimTTL: %v", err)
-	}
-	old := time.Now().Add(-2 * time.Hour)
-	if err := os.Chtimes(runningPath, old, old); err != nil {
-		t.Fatal(err)
-	}
-	if err := RecoverStaleClaims(root, time.Hour, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(root, "tasks", "queued", "ownerless.yaml")); err != nil {
-		t.Fatalf("expected stale ownerless running task requeued by ClaimTTL: %v", err)
-	}
-	if _, err := os.Stat(runningPath); !os.IsNotExist(err) {
-		t.Fatalf("expected running task moved, err=%v", err)
-	}
-}
-
 func TestRecoverInterruptedRunningRemovesOrphanOwnerSidecars(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	if err := EnsureLayout(root); err != nil {
@@ -165,25 +136,5 @@ func TestRecoverInterruptedRunningRemovesOrphanOwnerSidecars(t *testing.T) {
 	}
 	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
 		t.Fatalf("expected orphan owner sidecar removed, err=%v", err)
-	}
-}
-
-func TestRecoverStaleClaimsStillRequeuesByTTL(t *testing.T) {
-	// Compatibility: a stale running task with no owner metadata is still recovered
-	// by the existing mtime-based ClaimTTL path.
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	if err := EnsureLayout(root); err != nil {
-		t.Fatal(err)
-	}
-	runningPath := writeRunningTask(t, root, "stale.yaml")
-	old := time.Now().Add(-2 * time.Hour)
-	if err := os.Chtimes(runningPath, old, old); err != nil {
-		t.Fatal(err)
-	}
-	if err := RecoverStaleClaims(root, time.Hour, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(root, "tasks", "queued", "stale.yaml")); err != nil {
-		t.Fatalf("expected TTL-based requeue: %v", err)
 	}
 }

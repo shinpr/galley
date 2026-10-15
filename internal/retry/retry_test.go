@@ -61,7 +61,7 @@ func TestDo_SuccessAfterTransientFailures(t *testing.T) {
 	if calls != 3 {
 		t.Fatalf("fn called %d times, want 3", calls)
 	}
-	wantSleeps := []time.Duration{baseDelays[0], baseDelays[1]}
+	wantSleeps := []time.Duration{1 * time.Second, 2 * time.Second}
 	if len(*recorded) != len(wantSleeps) {
 		t.Fatalf("sleep called %d times, want %d", len(*recorded), len(wantSleeps))
 	}
@@ -89,13 +89,13 @@ func TestDo_ExhaustionReturnsLastError(t *testing.T) {
 	if err != lastErr {
 		t.Fatalf("Do returned %v, want %v (identical to fn's last return)", err, lastErr)
 	}
-	if calls != MaxAttempts {
-		t.Fatalf("fn called %d times, want %d", calls, MaxAttempts)
+	if calls != 6 {
+		t.Fatalf("fn called %d times, want 6", calls)
 	}
-	if len(*recorded) != MaxAttempts-1 {
-		t.Fatalf("sleep called %d times, want %d", len(*recorded), MaxAttempts-1)
+	wantSchedule := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second}
+	if len(*recorded) != len(wantSchedule) {
+		t.Fatalf("sleep called %d times, want %d", len(*recorded), len(wantSchedule))
 	}
-	wantSchedule := baseDelays[:]
 	for i, d := range wantSchedule {
 		if (*recorded)[i] != d {
 			t.Fatalf("sleep[%d] = %v, want %v", i, (*recorded)[i], d)
@@ -220,8 +220,8 @@ func TestJitterDefaultStaysInRange(t *testing.T) {
 	// not depend on a specific value, only on the documented bound.
 	for i := 0; i < 256; i++ {
 		v := jitter()
-		if v < 1-JitterRatio || v > 1+JitterRatio {
-			t.Fatalf("jitter()=%v out of [%v,%v]", v, 1-JitterRatio, 1+JitterRatio)
+		if v < 0.75 || v > 1.25 {
+			t.Fatalf("jitter()=%v out of [0.75,1.25]", v)
 		}
 	}
 }

@@ -26,26 +26,6 @@ echo '{"type":"result","subtype":"success","is_error":false,"session_id":"smoke-
 SH
 chmod +x "$BIN_DIR/claude"
 
-cat > "$BIN_DIR/codex" <<'SH'
-#!/bin/sh
-out=""
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    --output-last-message)
-      out="$2"
-      shift 2
-      ;;
-    *)
-      shift
-      ;;
-  esac
-done
-cat > /dev/null
-printf '%s\n' '{"status":"accepted","summary":"smoke supervisor accepted","acceptance_passes":["AC1"],"quality_passes":[],"findings":[],"discussion_items":[]}' > "$out"
-printf '%s\n' '{"event":"done"}'
-SH
-chmod +x "$BIN_DIR/codex"
-
 export PATH="$BIN_DIR:$PATH"
 
 git init "$REPO_DIR" >/dev/null

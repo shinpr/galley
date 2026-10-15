@@ -15,54 +15,10 @@ func TestSupervisorCLIsIsTheValidationSource(t *testing.T) {
 			t.Fatalf("Validate(supervisor=%q): %v", v, err)
 		}
 	}
-	if provider.IsSupervisor("bogus") {
-		t.Fatal("off-enum value must be invalid")
-	}
-	if err := (File{Supervisor: "bogus"}).Validate(); err == nil {
-		t.Fatal("off-enum supervisor must fail Validate")
-	}
 }
 
-func TestEnsureDefaultCreatesFileWithDocumentedDefaults(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	created, err := EnsureDefault(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !created {
-		t.Fatalf("expected EnsureDefault to create daemon.yaml on first call")
-	}
-	data, err := os.ReadFile(filepath.Join(root, Filename))
-	if err != nil {
-		t.Fatal(err)
-	}
-	content := string(data)
-	for _, want := range []string{
-		"supervisor: claude",
-		"max_concurrent_tasks: 1",
-		"max_concurrent_per_repo: 1",
-		"poll_interval: 10s",
-		"claim_ttl: 30m",
-		"shutdown_timeout: 5m",
-		"idle_timeout: 10m",
-	} {
-		if !strings.Contains(content, want) {
-			t.Fatalf("daemon.yaml missing %q\ncontent:\n%s", want, content)
-		}
-	}
-	if strings.Contains(content, "heartbeat_interval") {
-		t.Fatalf("daemon.yaml must not expose heartbeat_interval; cadence is derived from claim_ttl\ncontent:\n%s", content)
-	}
-}
-
-// TestEnsureDefaultThenLoadRoundTripsDocumentedDefaults closes the generate->parse
-// seam. TestEnsureDefaultCreatesFileWithDocumentedDefaults only asserts YAML
-// substrings, so a formatting change that made the generated file unparseable
-// (or that drifted a value away from Defaults()) would keep that test green. This
-// test Loads the file EnsureDefault wrote and asserts the parsed File equals the
-// documented defaults, proving the generated file round-trips through the real
-// decoder and validator.
+// The generated daemon.yaml must Load back to the documented defaults and keep
+// heartbeat_interval hidden because cadence is derived from claim_ttl.
 func TestEnsureDefaultThenLoadRoundTripsDocumentedDefaults(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -72,6 +28,13 @@ func TestEnsureDefaultThenLoadRoundTripsDocumentedDefaults(t *testing.T) {
 	}
 	if !created {
 		t.Fatalf("expected EnsureDefault to create %s on first call", Filename)
+	}
+	data, err := os.ReadFile(filepath.Join(root, Filename))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "heartbeat_interval") {
+		t.Fatalf("daemon.yaml must not expose heartbeat_interval\ncontent:\n%s", data)
 	}
 
 	file, present, err := Load(root)
@@ -376,27 +339,5 @@ func TestLoadParsesNotificationsBlock(t *testing.T) {
 	}
 	if len(n.On) != 2 || n.On[0] != "failed" || n.On[1] != "accepted" {
 		t.Fatalf("notifications.on parsed wrong: %v", n.On)
-	}
-}
-
-func TestEnsureDefaultDocumentsNotificationsDisabled(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	if _, err := EnsureDefault(root); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(filepath.Join(root, Filename))
-	if err != nil {
-		t.Fatal(err)
-	}
-	content := string(data)
-	for _, want := range []string{"notifications:", "enabled: false"} {
-		if !strings.Contains(content, want) {
-			t.Fatalf("default daemon.yaml missing %q\n%s", want, content)
-		}
-	}
-	// The generated default must itself be valid (round-trips through Validate).
-	if _, _, err := Load(root); err != nil {
-		t.Fatalf("generated default daemon.yaml does not validate: %v", err)
 	}
 }

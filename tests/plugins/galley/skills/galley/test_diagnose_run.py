@@ -23,7 +23,8 @@ def main():
         result = subprocess.run([sys.executable, str(SCRIPT), str(root)], capture_output=True, text=True)
         assert result.returncode == 0, result.stderr
         for name in names:
-            assert name in result.stdout, f"missing {name}: {result.stdout}"
+            native = str(pathlib.PurePath(name))
+            assert native in result.stdout, f"missing {native}: {result.stdout}"
         assert "provider failed" in result.stdout
     print("diagnose_run: passed")
 

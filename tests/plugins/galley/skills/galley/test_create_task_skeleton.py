@@ -7,7 +7,7 @@ emitting opt-in-only runtime fields such as `outputs` in the default skeleton.
 
 Run directly:
 
-    python3 plugins/galley/skills/galley/scripts/test_create_task_skeleton.py
+    python3 tests/plugins/galley/skills/galley/test_create_task_skeleton.py
 
 Exit status 0 means the contract holds; any non-zero exit means the contract
 regressed and the message names the missing or unexpected field.
@@ -15,7 +15,6 @@ regressed and the message names the missing or unexpected field.
 
 from __future__ import annotations
 
-import importlib.util
 import pathlib
 import re
 import subprocess
@@ -26,14 +25,8 @@ import tempfile
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[5]
 GENERATOR = REPO_ROOT / "plugins" / "galley" / "skills" / "galley" / "scripts" / "create_task_skeleton.py"
 
-spec = importlib.util.spec_from_file_location("create_task_skeleton", GENERATOR)
-if spec is None or spec.loader is None:
-    raise RuntimeError(f"unable to load {GENERATOR}")
-create_task_skeleton = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(create_task_skeleton)
 
-
-def generate_skeleton(tmpdir: pathlib.Path, *extra_args: str, root: pathlib.Path | None = None) -> str:
+def generate_skeleton(tmpdir: pathlib.Path, *extra_args: str) -> str:
     output_dir = tmpdir / "draft"
     output_dir.mkdir(parents=True, exist_ok=True)
     fake_cwd = tmpdir / "repo"
@@ -47,8 +40,6 @@ def generate_skeleton(tmpdir: pathlib.Path, *extra_args: str, root: pathlib.Path
         "--output-dir",
         str(output_dir),
     ]
-    if root is not None:
-        command.extend(["--root", str(root)])
     command.extend(extra_args)
     proc = subprocess.run(command, capture_output=True, text=True)
     if proc.returncode != 0:

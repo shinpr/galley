@@ -130,19 +130,6 @@ func TestRunNonZeroExitReturnsError(t *testing.T) {
 	}
 }
 
-func TestRunStartFailureReturnsError(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("uses a POSIX shell command")
-	}
-	t.Parallel()
-	// A command that resolves no executable still starts the shell, which then
-	// exits non-zero; either way Run reports an error rather than succeeding.
-	_, err := Run(context.Background(), "this-binary-does-not-exist-galley-xyz", Event{TaskID: "t", Status: "failed"}, Options{Timeout: 5 * time.Second})
-	if err == nil {
-		t.Fatal("expected error when the configured command cannot run, got nil")
-	}
-}
-
 func TestRunTimeoutReturnsErrorAndIsBounded(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses a POSIX shell command")

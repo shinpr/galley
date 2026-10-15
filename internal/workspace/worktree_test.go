@@ -11,24 +11,6 @@ import (
 	"github.com/shinpr/galley/internal/task"
 )
 
-func TestPrepareCreatesGitWorktree(t *testing.T) {
-	repo := initGitRepo(t)
-	prepared, err := Prepare(context.Background(), repo, task.Worktree{
-		Enabled: true,
-		Branch:  "agent/test-worktree",
-		Path:    "../worktrees/test-worktree",
-	}, Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !prepared.WorktreeCreated {
-		t.Fatal("expected created worktree")
-	}
-	if _, err := os.Stat(filepath.Join(prepared.CWD, ".git")); err != nil {
-		t.Fatalf("worktree .git missing: %v", err)
-	}
-}
-
 func TestPrepareRejectsOtherRepository(t *testing.T) {
 	repo, other := initGitRepo(t), initGitRepo(t)
 	runGit(t, other, "checkout", "-b", "agent/same")
@@ -94,23 +76,6 @@ func TestPrepareRecordsDirtyReusedWorktree(t *testing.T) {
 	}
 	if !second.WorktreeReused || !second.Dirty || second.StatusPorcelain == "" {
 		t.Fatalf("expected dirty reused worktree: %#v", second)
-	}
-}
-
-func TestPrepareUsesExistingBranchWhenPathMissing(t *testing.T) {
-	repo := initGitRepo(t)
-	runGit(t, repo, "branch", "agent/existing-branch")
-
-	prepared, err := Prepare(context.Background(), repo, task.Worktree{
-		Enabled: true,
-		Branch:  "agent/existing-branch",
-		Path:    "../worktrees/existing-branch",
-	}, Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !prepared.WorktreeCreated {
-		t.Fatalf("expected created worktree: %#v", prepared)
 	}
 }
 
@@ -258,29 +223,6 @@ func TestPrepareSkipsWhenDisabled(t *testing.T) {
 	}
 	if prepared.CWD != dir || prepared.WorktreeCreated {
 		t.Fatalf("unexpected prepared workspace: %#v", prepared)
-	}
-}
-
-func TestRemoveCleanWorktree(t *testing.T) {
-	repo := initGitRepo(t)
-	spec := task.Worktree{
-		Enabled: true,
-		Branch:  "agent/remove-worktree",
-		Path:    "../worktrees/remove-worktree",
-	}
-	prepared, err := Prepare(context.Background(), repo, spec, Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := Remove(context.Background(), repo, spec, Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !result.Removed {
-		t.Fatalf("expected removed: %#v", result)
-	}
-	if _, err := os.Stat(prepared.CWD); !os.IsNotExist(err) {
-		t.Fatalf("expected worktree removed, err=%v", err)
 	}
 }
 

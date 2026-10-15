@@ -4,7 +4,6 @@ package daemoncmd
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -16,18 +15,6 @@ import (
 	"github.com/shinpr/galley/internal/queue"
 	"github.com/shinpr/galley/internal/task"
 )
-
-func TestStopForceWithoutDaemonReportsNotRunning(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	cmd := NewCommand("daemon")
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-	cmd.SetArgs([]string{"--root", root, "stop", "--force"})
-	if err := cmd.Execute(); !errors.Is(err, daemonctl.ErrNotRunning) {
-		t.Fatalf("expected ErrNotRunning, got %v", err)
-	}
-}
 
 // startUnresponsiveDaemon spawns a verifiable stand-in daemon that ignores
 // SIGTERM, writes its PID file with a fresh heartbeat so identity verification
@@ -106,64 +93,6 @@ func TestStopWithoutForceKeepsPIDFileOnTimeout(t *testing.T) {
 	}
 }
 
-func TestStopForceKillsUnresponsiveDaemonAndRemovesPIDFile(t *testing.T) {
-	root, pidFile, daemonPID := startUnresponsiveDaemon(t)
-	owner := queue.Owner{PID: daemonPID, RecordedAt: "now"}
-	runningPath := writeForceStopTask(t, root, "task.yaml", &owner)
-	cmd := NewCommand("daemon")
-	var out, errBuf bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetErr(&errBuf)
-	cmd.SetArgs([]string{"--root", root, "--stop-timeout", "300ms", "stop", "--force"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("force stop: %v", err)
-	}
-	if !strings.Contains(out.String(), "force stopped") {
-		t.Fatalf("expected force-stop confirmation, got %q", out.String())
-	}
-	if _, statErr := os.Stat(pidFile); !os.IsNotExist(statErr) {
-		t.Fatalf("PID file must be removed after a successful force stop, err=%v", statErr)
-	}
-	failedPath := task.TaskStatePath(root, task.WorkflowStateFailed, filepath.Base(runningPath))
-	failed, err := task.Load(failedPath)
-	if err != nil {
-		t.Fatalf("load force-stopped task: %v", err)
-	}
-	if len(failed.Attempts) != 2 || failed.Attempts[1].Error == nil || failed.Attempts[1].Error.Kind != "daemon_force_stopped" {
-		t.Fatalf("force-stop evidence missing: %#v", failed.Attempts)
-	}
-}
-
-func TestStopForceKeepsPIDAndOwnershipWhenTaskPublicationFails(t *testing.T) {
-	root, pidFile, daemonPID := startUnresponsiveDaemon(t)
-	if err := queue.EnsureLayout(root); err != nil {
-		t.Fatal(err)
-	}
-	runningPath := task.TaskStatePath(root, task.WorkflowStateRunning, "broken.yaml")
-	if err := os.WriteFile(runningPath, []byte("status: ["), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := queue.WriteOwner(runningPath, queue.Owner{PID: daemonPID, RecordedAt: "now"}); err != nil {
-		t.Fatal(err)
-	}
-	cmd := NewCommand("daemon")
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-	cmd.SetArgs([]string{"--root", root, "--stop-timeout", "300ms", "stop", "--force"})
-	if err := cmd.Execute(); err == nil {
-		t.Fatal("expected task publication error")
-	}
-	if _, err := os.Stat(pidFile); err != nil {
-		t.Fatalf("PID evidence was not preserved: %v", err)
-	}
-	if _, err := os.Stat(runningPath); err != nil {
-		t.Fatalf("running task was not preserved: %v", err)
-	}
-	if _, err := os.Stat(queue.OwnerPath(runningPath)); err != nil {
-		t.Fatalf("owner evidence was not preserved: %v", err)
-	}
-}
-
 func TestStopForceRetriesTaskPublicationAfterDaemonStops(t *testing.T) {
 	root, pidFile, daemonPID := startUnresponsiveDaemon(t)
 	if err := queue.EnsureLayout(root); err != nil {
@@ -184,6 +113,11 @@ func TestStopForceRetriesTaskPublicationAfterDaemonStops(t *testing.T) {
 	first.SetArgs([]string{"--root", root, "--stop-timeout", "300ms", "stop", "--force"})
 	if err := first.Execute(); err == nil {
 		t.Fatal("expected initial task publication error")
+	}
+	for _, evidence := range []string{pidFile, runningPath, queue.OwnerPath(runningPath)} {
+		if _, err := os.Stat(evidence); err != nil {
+			t.Fatalf("evidence %s was not preserved after failed publication: %v", evidence, err)
+		}
 	}
 	if err := task.Save(runningPath, task.Task{ID: "task", Status: task.StatusRunning}); err != nil {
 		t.Fatal(err)

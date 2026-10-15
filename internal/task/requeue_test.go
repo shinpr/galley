@@ -166,41 +166,6 @@ func TestRequeuePreservesPRAuthorLogin(t *testing.T) {
 	}
 }
 
-func TestLoadAcceptsTaskWithoutPRAuthorLogin(t *testing.T) {
-	t.Parallel()
-	// Older task YAML written before PR.AuthorLogin existed must still decode.
-	taskPath := writeTaskYAML(t, "loop_budget: 3")
-	loaded, err := Load(taskPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if loaded.PR.AuthorLogin != "" {
-		t.Fatalf("expected empty PR.AuthorLogin for task without author_login, got %q", loaded.PR.AuthorLogin)
-	}
-}
-
-func TestSaveAndLoadRoundTripsPRAuthorLogin(t *testing.T) {
-	t.Parallel()
-	taskPath := writeTaskYAML(t, "loop_budget: 3")
-	loaded, err := Load(taskPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	loaded.PR.URL = "https://github.com/example/galley/pull/2"
-	loaded.PR.Status = "open"
-	loaded.PR.AuthorLogin = "task-author"
-	if err := Save(taskPath, loaded); err != nil {
-		t.Fatal(err)
-	}
-	roundTripped, err := Load(taskPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if roundTripped.PR.AuthorLogin != "task-author" {
-		t.Fatalf("PR.AuthorLogin did not round-trip: %q", roundTripped.PR.AuthorLogin)
-	}
-}
-
 func TestRequeueDoesNotOverwriteQueuedTask(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

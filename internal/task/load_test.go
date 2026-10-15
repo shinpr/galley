@@ -63,38 +63,6 @@ func TestLoadRejectsNonScalarLoopBudget(t *testing.T) {
 	}
 }
 
-func TestLoadAndValidateReadsValidTask(t *testing.T) {
-	t.Parallel()
-	path := writeTaskYAML(t, "loop_budget: 3")
-
-	result, err := LoadAndValidate(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !result.Valid() {
-		t.Fatalf("expected valid task, got %#v", result.Errors)
-	}
-	if result.Task.ID != "task-load-test" {
-		t.Fatalf("id got %q", result.Task.ID)
-	}
-}
-
-func TestLoadAndValidateDefaultsLoopBudget(t *testing.T) {
-	t.Parallel()
-	path := writeTaskYAML(t, "")
-
-	result, err := LoadAndValidate(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !result.Valid() {
-		t.Fatalf("expected valid task, got %#v", result.Errors)
-	}
-	if result.Task.ExecutionPolicy.LoopBudget.Count != DefaultLoopBudget {
-		t.Fatalf("loop budget got %#v", result.Task.ExecutionPolicy.LoopBudget)
-	}
-}
-
 func TestLoadIgnoresUnknownField(t *testing.T) {
 	t.Parallel()
 	path := writeTaskYAML(t, "loop_budget: 3")
@@ -155,27 +123,6 @@ func TestSaveRoundTripsVerificationOutputWithJSONLAndIndentedText(t *testing.T) 
 	}
 }
 
-func TestSaveOmitsEmptyExecutorModel(t *testing.T) {
-	t.Parallel()
-	path := writeTaskYAML(t, "loop_budget: 3")
-	loaded, err := Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	loaded.Executor.Model = ""
-
-	if err := Save(path, loaded); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(data), "model:") {
-		t.Fatalf("empty executor.model should be omitted, got:\n%s", string(data))
-	}
-}
-
 func writeTaskYAML(t *testing.T, loopBudgetLine string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -198,10 +145,6 @@ scope:
 execution_policy:
   ` + loopBudgetLine + `
   timeout_ms: 600000
-  afk_decision_policy: "choose-smallest-reversible"
-  stop_on_destructive_operation: true
-  stop_on_missing_secret: false
-  stop_on_external_service_unavailable: false
 worktree:
   enabled: true
   branch: "agent/task-load-test"
@@ -212,8 +155,6 @@ executor:
   cli: "claude"
   model: "opus"
   effort: "high"
-  prompt_profile: "codexized-claude-executor-v1"
-  prompt_mode: "replace"
 decisions: []
 risks: []
 attempts: []

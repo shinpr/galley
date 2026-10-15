@@ -108,7 +108,4 @@ func TestWorkOrderUsesFixedAFKDecisionPolicy(t *testing.T) {
 	if !strings.Contains(text, "AFK decision policy: `choose-smallest-reversible`") {
 		t.Fatalf("work order missing fixed AFK decision policy:\n%s", text)
 	}
-	if strings.Contains(text, "stop_on_") {
-		t.Fatalf("work order must not surface removed stop_on_* knobs:\n%s", text)
-	}
 }

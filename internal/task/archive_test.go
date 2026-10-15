@@ -30,6 +30,9 @@ func TestArchiveMovesReviewedTask(t *testing.T) {
 	if result.Task.Status != "archived" {
 		t.Fatalf("status got %q", result.Task.Status)
 	}
+	if result.Mode != "current_schema" {
+		t.Fatalf("mode got %q", result.Mode)
+	}
 	archivedPath := filepath.Join(root, "tasks", "archived", "task.yaml")
 	if result.To != archivedPath {
 		t.Fatalf("to got %q", result.To)

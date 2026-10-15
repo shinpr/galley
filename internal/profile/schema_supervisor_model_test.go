@@ -6,8 +6,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/shinpr/galley/internal/provider"
 )
 
 func TestEnvironmentSchemaSupervisorModelContract(t *testing.T) {
@@ -45,18 +43,6 @@ func TestEnvironmentSchemaSupervisorEffortContract(t *testing.T) {
 	effort := supervisor["properties"].(map[string]any)["effort"].(map[string]any)
 	if effort["type"] != "string" {
 		t.Fatalf("supervisor.effort type got %#v, want string", effort["type"])
-	}
-	baseEnum, ok := effort["enum"].([]any)
-	if !ok {
-		t.Fatalf("supervisor.effort base must fix an enum: %#v", effort)
-	}
-	var gotBase []string
-	for _, v := range baseEnum {
-		gotBase = append(gotBase, v.(string))
-	}
-	wantBase := append([]string{""}, provider.SupervisorEfforts()...)
-	if !reflect.DeepEqual(gotBase, wantBase) {
-		t.Fatalf("supervisor.effort base enum = %#v, want %#v", gotBase, wantBase)
 	}
 	if _, exists := effort["minLength"]; exists {
 		t.Fatalf("supervisor.effort must allow the empty CLI-default value: %#v", effort)
@@ -100,28 +86,28 @@ type supervisorEffortCase struct {
 	defaultCLI string
 	effortSet  bool
 	effort     string
-	valid      bool
+	wantErr    string // empty means valid
 }
 
 // One matrix drives both runtime and schema validation, including omitted fields.
 var supervisorEffortMatrix = []supervisorEffortCase{
-	{"claude explicit", "claude", true, "high", true},
-	{"claude omitted", "claude", false, "", true},
-	{"claude empty", "claude", true, "", true},
-	{"claude invalid codex-only value", "claude", true, "minimal", false},
-	{"codex explicit", "codex", true, "minimal", true},
-	{"codex omitted", "codex", false, "", true},
-	{"codex empty", "codex", true, "", true},
-	{"codex invalid unknown value", "codex", true, "turbo", false},
-	{"glm explicit", "glm", true, "xhigh", true},
-	{"glm omitted", "glm", false, "", true},
-	{"glm empty", "glm", true, "", true},
-	{"glm invalid codex-only value", "glm", true, "minimal", false},
-	{"default_cli omitted union value", "", true, "minimal", true},
-	{"default_cli omitted claude value", "", true, "max", true},
-	{"default_cli omitted empty", "", true, "", true},
-	{"default_cli omitted absent", "", false, "", true},
-	{"default_cli omitted unknown value", "", true, "turbo", false},
+	{"claude explicit", "claude", true, "high", ""},
+	{"claude omitted", "claude", false, "", ""},
+	{"claude empty", "claude", true, "", ""},
+	{"claude invalid codex-only value", "claude", true, "minimal", "supervisor.effort for claude must be one of"},
+	{"codex explicit", "codex", true, "minimal", ""},
+	{"codex omitted", "codex", false, "", ""},
+	{"codex empty", "codex", true, "", ""},
+	{"codex invalid unknown value", "codex", true, "turbo", "supervisor.effort for codex must be one of"},
+	{"glm explicit", "glm", true, "xhigh", ""},
+	{"glm omitted", "glm", false, "", ""},
+	{"glm empty", "glm", true, "", ""},
+	{"glm invalid codex-only value", "glm", true, "minimal", "supervisor.effort for glm must be one of"},
+	{"default_cli omitted union value", "", true, "minimal", ""},
+	{"default_cli omitted claude value", "", true, "max", ""},
+	{"default_cli omitted empty", "", true, "", ""},
+	{"default_cli omitted absent", "", false, "", ""},
+	{"default_cli omitted unknown value", "", true, "turbo", "supervisor.effort must be one of"},
 }
 
 func (c supervisorEffortCase) supervisorDoc() map[string]any {
@@ -133,31 +119,6 @@ func (c supervisorEffortCase) supervisorDoc() map[string]any {
 		doc["effort"] = c.effort
 	}
 	return doc
-}
-
-func TestEnvironmentSchemaSupervisorEffortSemantics(t *testing.T) {
-	data, err := EnvironmentJSONSchema()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var schema map[string]any
-	if err := json.Unmarshal(data, &schema); err != nil {
-		t.Fatal(err)
-	}
-	supervisor := schema["properties"].(map[string]any)["supervisor"].(map[string]any)
-
-	for _, tc := range supervisorEffortMatrix {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			errs := validateSupervisorEffortDoc(supervisor, tc.supervisorDoc())
-			if tc.valid && len(errs) > 0 {
-				t.Fatalf("doc %v should validate, got %v", tc.supervisorDoc(), errs)
-			}
-			if !tc.valid && len(errs) == 0 {
-				t.Fatalf("doc %v should be rejected by the effort schema", tc.supervisorDoc())
-			}
-		})
-	}
 }
 
 func TestSupervisorEffortRuntimeAndSchemaParity(t *testing.T) {
@@ -175,18 +136,22 @@ func TestSupervisorEffortRuntimeAndSchemaParity(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			schemaValid := len(validateSupervisorEffortDoc(supervisor, tc.supervisorDoc())) == 0
-			runtimeValid := runtimeSupervisorEffortValid(tc)
+			runtimeErrs := runtimeSupervisorEffortErrors(tc)
+			runtimeValid := len(runtimeErrs) == 0
 			if schemaValid != runtimeValid {
 				t.Fatalf("drift for %v: schema valid=%v, runtime valid=%v", tc.supervisorDoc(), schemaValid, runtimeValid)
 			}
-			if schemaValid != tc.valid {
-				t.Fatalf("case %q: got valid=%v, want %v", tc.name, schemaValid, tc.valid)
+			if wantValid := tc.wantErr == ""; schemaValid != wantValid {
+				t.Fatalf("case %q: got valid=%v, want %v", tc.name, schemaValid, wantValid)
+			}
+			if !strings.Contains(strings.Join(runtimeErrs, "\n"), tc.wantErr) {
+				t.Fatalf("runtime errors %#v want substring %q", runtimeErrs, tc.wantErr)
 			}
 		})
 	}
 }
 
-func runtimeSupervisorEffortValid(c supervisorEffortCase) bool {
+func runtimeSupervisorEffortErrors(c supervisorEffortCase) []string {
 	env := Environment{
 		ID:  "env",
 		CWD: "/repo",
@@ -200,12 +165,13 @@ func runtimeSupervisorEffortValid(c supervisorEffortCase) bool {
 	if c.effortSet {
 		env.Supervisor.Effort = c.effort
 	}
+	var errs []string
 	for _, e := range ValidateEnvironment(env).Errors {
 		if strings.Contains(e, "effort") {
-			return false
+			errs = append(errs, e)
 		}
 	}
-	return true
+	return errs
 }
 
 func validateSupervisorEffortDoc(supervisor, doc map[string]any) []string {

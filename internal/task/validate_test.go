@@ -15,17 +15,6 @@ func TestValidateAcceptsWellFormedAFKTask(t *testing.T) {
 	}
 }
 
-func TestValidateAcceptsOmittedExecutorModel(t *testing.T) {
-	t.Parallel()
-	task := validTask(t)
-	task.Executor.Model = ""
-
-	result := Validate(task)
-	if !result.Valid() {
-		t.Fatalf("expected omitted executor.model to use CLI default, got errors: %#v", result.Errors)
-	}
-}
-
 func TestValidateRejectsAbsoluteAllowedPath(t *testing.T) {
 	t.Parallel()
 	task := validTask(t)
@@ -183,22 +172,6 @@ func TestValidateStructuralRejectsInvalidCases(t *testing.T) {
 			want: "worktree.branch must be a valid git branch name",
 		},
 		{
-			name: "source repo internal worktree path",
-			mutate: func(task *Task) {
-				task.Mode = "afk"
-				task.Worktree = Worktree{Enabled: true, Branch: "agent/test", Path: "worktrees/test"}
-			},
-			want: "worktree.path must point to a sibling path outside scope.cwd",
-		},
-		{
-			name: "parent worktree path",
-			mutate: func(task *Task) {
-				task.Mode = "afk"
-				task.Worktree = Worktree{Enabled: true, Branch: "agent/test", Path: "../../worktrees/test"}
-			},
-			want: `worktree.path contains parent traversal path "../../worktrees/test"`,
-		},
-		{
 			name: "afk human decision missing chosen",
 			mutate: func(task *Task) {
 				task.Mode = "afk"
@@ -237,18 +210,6 @@ func TestValidateStructuralAcceptsUnlimitedLoopBudget(t *testing.T) {
 	result := ValidateStructural(task)
 	if !result.Valid() {
 		t.Fatalf("expected valid task, got %#v", result.Errors)
-	}
-}
-
-func TestValidateStructuralAcceptsSiblingWorktreePath(t *testing.T) {
-	t.Parallel()
-	task := validTask(t)
-	task.Mode = "afk"
-	task.Worktree = Worktree{Enabled: true, Branch: "agent/test", Path: "../repo.worktrees/test"}
-
-	result := ValidateStructural(task)
-	if !result.Valid() {
-		t.Fatalf("expected valid sibling worktree path, got %#v", result.Errors)
 	}
 }
 

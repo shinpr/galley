@@ -57,81 +57,6 @@ func TestResolveProfileFilesKeepsExplicitOverride(t *testing.T) {
 	}
 }
 
-func TestRunOnceBranchesNewWorktreeFromEnvironmentPRBaseOriginRef(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	remote := filepath.Join(t.TempDir(), "remote.git")
-	runDaemonGit(t, t.TempDir(), "init", "--bare", remote)
-	runDaemonGit(t, repo, "remote", "add", "origin", remote)
-	baseSHA := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "HEAD")))
-	runDaemonGit(t, repo, "push", "origin", "HEAD:refs/heads/feature-base")
-	if err := os.WriteFile(filepath.Join(repo, "advance.txt"), []byte("advance\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	runDaemonGit(t, repo, "add", "advance.txt")
-	runDaemonGit(t, repo, "commit", "-m", "advance")
-	headSHA := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "HEAD")))
-	if baseSHA == headSHA {
-		t.Fatal("setup failed: baseSHA and headSHA should differ")
-	}
-	writeRepoEnvironmentProfile(t, root, repo, "feature-base")
-
-	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
-	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
-	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeDaemonTask(t, taskPath, repo)
-
-	if err := runTestDaemon(context.Background(), Options{
-		Root:               root,
-		SystemPromptFile:   promptPath,
-		JSONSchemaFile:     schemaPath,
-		Supervisor:         "claude",
-		ClaudeBin:          claudeBin,
-		Once:               true,
-		MaxConcurrentTasks: 1,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	doneTask, err := task.Load(filepath.Join(root, "tasks", "done", "task.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	worktreePath := taskWorktreePath(repo, doneTask.Worktree.Path)
-	got := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", worktreePath, "rev-parse", "HEAD")))
-	if got != baseSHA {
-		t.Fatalf("worktree HEAD got %q, want origin/feature-base SHA %q (source HEAD=%q)", got, baseSHA, headSHA)
-	}
-	matches, err := filepath.Glob(filepath.Join(root, "runs", "*", "profiles.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(matches) != 1 {
-		t.Fatalf("expected 1 profiles.json, got %d", len(matches))
-	}
-	var payload struct {
-		Bundle struct {
-			Environment *struct {
-				PR struct {
-					Base string `json:"base,omitempty"`
-				} `json:"pr"`
-			} `json:"environment,omitempty"`
-		} `json:"bundle"`
-	}
-	data, err := os.ReadFile(matches[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(data, &payload); err != nil {
-		t.Fatalf("decode profiles.json: %v", err)
-	}
-	if payload.Bundle.Environment == nil || payload.Bundle.Environment.PR.Base != "feature-base" {
-		t.Fatalf("profiles.json bundle.environment.pr.base got %#v", payload.Bundle)
-	}
-}
-
 func TestRunOnceBranchesNewWorktreeFromLocalHeadsFallback(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
@@ -337,6 +262,21 @@ func TestRunOnceRefreshesStaleOriginRefBeforeWorktreeCreation(t *testing.T) {
 	refreshed := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", repo, "rev-parse", "refs/remotes/origin/feature-stale")))
 	if refreshed != shaB {
 		t.Fatalf("refs/remotes/origin/feature-stale not refreshed; got %q want %q", refreshed, shaB)
+	}
+	var payload struct {
+		Bundle struct {
+			Environment *struct {
+				PR struct {
+					Base string `json:"base,omitempty"`
+				} `json:"pr"`
+			} `json:"environment,omitempty"`
+		} `json:"bundle"`
+	}
+	if err := json.Unmarshal(mustReadSingleGlob(t, filepath.Join(root, "runs", "*", "profiles.json")), &payload); err != nil {
+		t.Fatalf("decode profiles.json: %v", err)
+	}
+	if payload.Bundle.Environment == nil || payload.Bundle.Environment.PR.Base != "feature-stale" {
+		t.Fatalf("profiles.json bundle.environment.pr.base got %#v", payload.Bundle)
 	}
 }
 

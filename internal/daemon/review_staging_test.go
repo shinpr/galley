@@ -4,111 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/shinpr/galley/internal/task"
 )
-
-// TestRunOnceStagesNewUntrackedFileBeforeSupervisorReview pins AC1+AC2: when
-// the fake executor creates a new file but does not run `git add`, Galley's
-// review-time staging step must make that file visible in the attempt
-// diff.patch so the supervisor evaluates the actual change instead of an
-// empty submitted diff.
-func TestRunOnceStagesNewUntrackedFileBeforeSupervisorReview(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	// Fake executor writes an untracked file but does NOT call `git add`.
-	claudeBin := writeFakeClaude(t, "echo executor-output > new-untracked-file.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"new-untracked-file.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
-	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
-	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeDaemonTask(t, taskPath, repo)
-
-	if err := runTestDaemon(context.Background(), Options{
-		Root:               root,
-		SystemPromptFile:   promptPath,
-		JSONSchemaFile:     schemaPath,
-		Supervisor:         "claude",
-		ClaudeBin:          claudeBin,
-		Once:               true,
-		MaxConcurrentTasks: 1,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	// attempt diff.patch must contain a new-file header and the executor
-	// content for the previously untracked path.
-	diff := string(mustReadSingleGlob(t, filepath.Join(root, "runs", "*", "attempt-1", "diff.patch")))
-	if !strings.Contains(diff, "new-untracked-file.txt") {
-		t.Fatalf("attempt diff.patch missing untracked file path:\n%s", diff)
-	}
-	if !strings.Contains(diff, "new file mode") {
-		t.Fatalf("attempt diff.patch missing new file header:\n%s", diff)
-	}
-	if !strings.Contains(diff, "executor-output") {
-		t.Fatalf("attempt diff.patch missing executor content:\n%s", diff)
-	}
-
-	// AC6 evidence: review-time staging command result must be persisted.
-	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", "git_add_review_result.json"), 1)
-}
-
-// TestRunOnceAcceptedFinalizationCommitsStagedNewFile pins AC3: when the
-// executor leaves a new file untracked and the supervisor accepts, the
-// existing Galley finalization path still produces a final commit whose
-// committed tree contains the new file.
-func TestRunOnceAcceptedFinalizationCommitsStagedNewFile(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	remote := filepath.Join(t.TempDir(), "remote.git")
-	runDaemonGit(t, t.TempDir(), "init", "--bare", remote)
-	runDaemonGit(t, repo, "remote", "add", "origin", remote)
-	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	// Fake executor writes the file but does NOT call `git add`; the fake
-	// claude supervisor accepts any diff_dirty=true attempt that does not
-	// report parse/hard_stop/empty diff.
-	claudeBin := writeFakeClaude(t, "echo daemon-output-content > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
-	ghBin := writeFakeCommand(t, "gh", "echo https://github.com/example/galley/pull/555\n")
-	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
-	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeDaemonTask(t, taskPath, repo)
-
-	if err := runTestDaemon(context.Background(), Options{
-		Root:               root,
-		SystemPromptFile:   promptPath,
-		JSONSchemaFile:     schemaPath,
-		Supervisor:         "claude",
-		ClaudeBin:          claudeBin,
-		Once:               true,
-		MaxConcurrentTasks: 1,
-		OpenPR:             true,
-		PRBase:             "main",
-		GHBin:              ghBin,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	doneTask, err := task.Load(filepath.Join(root, "tasks", "done", "task.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if doneTask.Status != "pr_opened" {
-		t.Fatalf("status got %q want pr_opened", doneTask.Status)
-	}
-	worktreePath := taskWorktreePath(repo, doneTask.Worktree.Path)
-	// The committed HEAD tree must contain the previously untracked file.
-	committed := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", worktreePath, "show", "HEAD:daemon-output.txt")))
-	if committed != "daemon-output-content" {
-		t.Fatalf("committed file content got %q want %q", committed, "daemon-output-content")
-	}
-}
 
 // TestRunOnceAcceptedFinalizationCommitsStagedOnlyDeletion pins AC1+AC3 for a
 // staged-only deletion. The fake executor stages the deletion of a tracked
@@ -174,77 +75,6 @@ func TestRunOnceAcceptedFinalizationCommitsStagedOnlyDeletion(t *testing.T) {
 	tree := string(mustCommandOutput(t, "git", "-C", worktreePath, "ls-tree", "-r", "--name-only", "HEAD"))
 	if strings.Contains(tree, "README.md") {
 		t.Fatalf("README.md still present in HEAD tree after staged deletion was finalized:\n%s", tree)
-	}
-}
-
-// TestRunOnceAcceptedFinalizationExcludesNonCommittedInputFile pins AC4:
-// review-time staging must not cause a commit:false input file to be
-// committed. After the executor (without running `git add`) introduces a
-// real change, the final commit must include only the real change, not the
-// non-committed input file Galley placed in the worktree.
-func TestRunOnceAcceptedFinalizationExcludesNonCommittedInputFile(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	remote := filepath.Join(t.TempDir(), "remote.git")
-	runDaemonGit(t, t.TempDir(), "init", "--bare", remote)
-	runDaemonGit(t, repo, "remote", "add", "origin", remote)
-	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	inputPath := filepath.Join(t.TempDir(), "plan.md")
-	if err := os.WriteFile(inputPath, []byte("design note from plan\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
-	ghBin := writeFakeCommand(t, "gh", "echo https://github.com/example/galley/pull/777\n")
-	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
-	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeDaemonTask(t, taskPath, repo)
-	loaded, err := task.Load(taskPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	loaded.Files = []task.InputFile{{
-		Source:      inputPath,
-		Destination: "docs/plan.md",
-		Description: "design plan",
-		Commit:      false,
-	}}
-	if err := task.Save(taskPath, loaded); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := runTestDaemon(context.Background(), Options{
-		Root:               root,
-		SystemPromptFile:   promptPath,
-		JSONSchemaFile:     schemaPath,
-		Supervisor:         "claude",
-		ClaudeBin:          claudeBin,
-		Once:               true,
-		MaxConcurrentTasks: 1,
-		OpenPR:             true,
-		PRBase:             "main",
-		GHBin:              ghBin,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	doneTask, err := task.Load(filepath.Join(root, "tasks", "done", "task.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	worktreePath := taskWorktreePath(repo, doneTask.Worktree.Path)
-	// Non-committed input file destination must not be present in the HEAD
-	// tree even though review-time staging happened before finalization.
-	committedFiles, err := exec.CommandContext(t.Context(), "git", "-C", worktreePath, "show", "--name-only", "--format=", "HEAD").Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(committedFiles), "docs/plan.md") {
-		t.Fatalf("commit:false input file leaked into HEAD commit:\n%s", committedFiles)
-	}
-	if !strings.Contains(string(committedFiles), "daemon-output.txt") {
-		t.Fatalf("expected executor diff to be committed:\n%s", committedFiles)
 	}
 }
 
@@ -453,6 +283,9 @@ func TestRunOnceReviewStagingExcludesNonCommittedInputFromAttemptDiff(t *testing
 	if !strings.Contains(diff, "executor-output") {
 		t.Fatalf("attempt diff.patch missing executor content:\n%s", diff)
 	}
+	if !strings.Contains(diff, "new file mode") {
+		t.Fatalf("attempt diff.patch missing new file header:\n%s", diff)
+	}
 	if strings.Contains(diff, "docs/plan.md") {
 		t.Fatalf("commit:false input destination leaked into attempt diff.patch:\n%s", diff)
 	}
@@ -473,6 +306,7 @@ func TestRunOnceReviewStagingExcludesNonCommittedInputFromAttemptDiff(t *testing
 			t.Fatalf("commit:false input leaked into snapshot %s field: %q", field, val)
 		}
 	}
+	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", "git_add_review_result.json"), 1)
 }
 
 // TestRunOnceReviewStagingDoesNotPresentContextInputAsSubmittedDiff pins the

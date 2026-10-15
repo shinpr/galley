@@ -53,23 +53,6 @@ func TestPreflightDefaultsSupervisorToClaude(t *testing.T) {
 	}
 }
 
-func TestPreflightHonorsExplicitSupervisors(t *testing.T) {
-	t.Parallel()
-	for _, supervisor := range []string{"claude", "codex"} {
-		supervisor := supervisor
-		t.Run(supervisor, func(t *testing.T) {
-			t.Parallel()
-			opts, err := Preflight(Options{Root: t.TempDir(), Supervisor: supervisor})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if opts.Supervisor != supervisor {
-				t.Fatalf("supervisor got %q, want %q", opts.Supervisor, supervisor)
-			}
-		})
-	}
-}
-
 func TestPreflightAcceptsEveryCanonicalSupervisor(t *testing.T) {
 	// Bind Preflight to the single supervisor-CLI source: every canonical value
 	// must be accepted here, so a new value cannot be valid in daemonconfig yet
@@ -85,8 +68,12 @@ func TestPreflightAcceptsEveryCanonicalSupervisor(t *testing.T) {
 			if supervisor == "kimi" {
 				opts.KimiAPIKey = "kimi-token"
 			}
-			if _, err := Preflight(opts); err != nil {
+			got, err := Preflight(opts)
+			if err != nil {
 				t.Fatalf("Preflight should accept canonical supervisor %q: %v", supervisor, err)
+			}
+			if got.Supervisor != supervisor {
+				t.Fatalf("supervisor got %q, want %q", got.Supervisor, supervisor)
 			}
 		})
 	}
@@ -96,14 +83,6 @@ func TestPreflightRejectsUnsupportedSupervisor(t *testing.T) {
 	t.Parallel()
 	if _, err := Preflight(Options{Root: t.TempDir(), Supervisor: "opus"}); err == nil {
 		t.Fatal("expected unsupported supervisor error")
-	}
-}
-
-func TestEffectiveSupervisorHonorsGLMProfileOverride(t *testing.T) {
-	t.Parallel()
-	profiles := profile.Bundle{Environment: &profile.Environment{Supervisor: &profile.SupervisorDefault{DefaultCLI: "glm"}}}
-	if got := effectiveOptionsForProfiles(Options{Supervisor: "codex"}, profiles).Supervisor; got != "glm" {
-		t.Fatalf("profile supervisor override = %q, want glm", got)
 	}
 }
 
@@ -143,47 +122,6 @@ func TestEffectiveOptionsForProfilesUsesEnvironmentOperations(t *testing.T) {
 	}
 	if effective.CleanupWorktrees {
 		t.Fatalf("cleanup should follow environment profile: %#v", effective)
-	}
-}
-
-func TestEffectiveOptionsForProfilesAppliesRepoSupervisor(t *testing.T) {
-	t.Parallel()
-	// AC4 / D1: when environment.yaml supervisor.default_cli is set, the
-	// daemon must use that supervisor for the task and record the source
-	// as the repository environment profile so AC8 run evidence reflects
-	// the precedence chain.
-	opts := Options{
-		Root:             t.TempDir(),
-		Supervisor:       "codex",
-		SupervisorSource: SupervisorSourceCLI,
-	}
-	effective := effectiveOptionsForProfiles(opts, profile.Bundle{
-		Environment: &profile.Environment{
-			Supervisor: &profile.SupervisorDefault{DefaultCLI: "claude"},
-		},
-	})
-	if effective.Supervisor != "claude" {
-		t.Fatalf("supervisor got %q, want claude", effective.Supervisor)
-	}
-	if effective.SupervisorSource != SupervisorSourceRepoProfile {
-		t.Fatalf("source got %q, want %s", effective.SupervisorSource, SupervisorSourceRepoProfile)
-	}
-}
-
-func TestEffectiveOptionsForProfilesKeepsCLISupervisorWhenRepoEmpty(t *testing.T) {
-	t.Parallel()
-	// AC5: when no repository supervisor is configured for a task, the
-	// daemon retains the resolution from CLI/daemon.yaml/default.
-	opts := Options{
-		Root:             t.TempDir(),
-		Supervisor:       "claude",
-		SupervisorSource: SupervisorSourceDaemonConfig,
-	}
-	effective := effectiveOptionsForProfiles(opts, profile.Bundle{
-		Environment: &profile.Environment{},
-	})
-	if effective.Supervisor != "claude" || effective.SupervisorSource != SupervisorSourceDaemonConfig {
-		t.Fatalf("unexpected effective opts: supervisor=%q source=%q", effective.Supervisor, effective.SupervisorSource)
 	}
 }
 

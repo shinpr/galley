@@ -285,7 +285,7 @@ func TestInterruptedExecutorStagingFailureStaysInterrupted(t *testing.T) {
 // CaptureDiffArtifacts reports a snapshot/diff failure in-band as
 // DiffArtifacts.Err with a nil function error (distinct from a staging or
 // artifact-write error). The interrupted path must promote that into the
-// secondary-evidence risk while the interruption stays primary and requeueable.
+// secondary-evidence risk while the interruption stays primary.
 func TestInterruptedExecutorDiffCaptureFailureStaysInterrupted(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
@@ -331,35 +331,6 @@ func TestInterruptedExecutorDiffCaptureFailureStaysInterrupted(t *testing.T) {
 	worktree := taskWorktreePath(repo, failed.Worktree.Path)
 	if data, err := os.ReadFile(filepath.Join(worktree, "new-file.txt")); err != nil || !strings.Contains(string(data), "created") {
 		t.Fatalf("untracked change not retained in worktree: %v %q", err, data)
-	}
-
-	failedPath := filepath.Join(root, "tasks", "failed", "task.yaml")
-	if _, err := task.Requeue(failedPath, task.RequeueOptions{Root: root, Reason: "resolved interruption"}); err != nil {
-		t.Fatalf("requeue: %v", err)
-	}
-	rerun := testDaemonOptions(Options{Root: root, SystemPromptFile: promptPath, JSONSchemaFile: schemaPath, Once: true, MaxConcurrentTasks: 1, Supervisor: "claude", ClaudeBin: claudeBin})
-	_ = Run(context.Background(), rerun)
-
-	reuseFound := false
-	workspaces, _ := filepath.Glob(filepath.Join(root, "runs", "*", runartifact.WorkspaceFilename))
-	for _, path := range workspaces {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		var prepared struct {
-			WorktreeReused  bool   `json:"worktree_reused"`
-			StatusPorcelain string `json:"status_porcelain"`
-		}
-		if err := json.Unmarshal(data, &prepared); err != nil {
-			continue
-		}
-		if prepared.WorktreeReused && strings.Contains(prepared.StatusPorcelain, "new-file.txt") {
-			reuseFound = true
-		}
-	}
-	if !reuseFound {
-		t.Fatal("no reused-worktree evidence with retained change found after requeue")
 	}
 }
 

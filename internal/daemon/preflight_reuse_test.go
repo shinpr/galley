@@ -109,32 +109,3 @@ func TestReuseCompletedPreflightsRejectsMismatchedExecutorIdentity(t *testing.T)
 		t.Fatalf("skeleton should not reuse mismatched identity: (%+v, %v, %v)", res, reused, err)
 	}
 }
-
-func TestReuseCompletedPreflightsDerivesSetupCLIFromProvider(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	taskID := "task-legacy-provider"
-	priorRun := filepath.Join(root, "runs", taskID+"-1")
-	currentRun := filepath.Join(root, "runs", taskID+"-2")
-	// Legacy evidence only recorded Provider; model/effort were not stamped.
-	// Derive CLI from Provider, but still require model/effort to match, so a
-	// fully resolved current identity without matching blanks will not reuse.
-	legacy := &setuppreflight.Result{
-		Status:   setuppreflight.StatusReady,
-		Provider: "claude",
-	}
-	if err := writeSetupReuseTestResult(t, priorRun, legacy); err != nil {
-		t.Fatal(err)
-	}
-	// Match when current also has empty model/effort (only CLI resolved).
-	matchEmpty := task.Executor{CLI: "claude"}
-	if res, reused, err := reuseReadySetup(preflightReuseQuery{Root: root, TaskID: taskID, RunDir: currentRun, Effective: matchEmpty, InputKey: "test"}); err != nil || !reused || res == nil {
-		t.Fatalf("expected provider-derived CLI match with empty model/effort: (%+v, %v, %v)", res, reused, err)
-	}
-	// Mismatch when current carries resolved model/effort that legacy lacks.
-	currentRun2 := filepath.Join(root, "runs", taskID+"-3")
-	full := task.Executor{CLI: "claude", Model: "m", Effort: "high"}
-	if res, reused, err := reuseReadySetup(preflightReuseQuery{Root: root, TaskID: taskID, RunDir: currentRun2, Effective: full, InputKey: "test"}); err != nil || reused || res != nil {
-		t.Fatalf("legacy provider-only evidence must not match full identity: (%+v, %v, %v)", res, reused, err)
-	}
-}

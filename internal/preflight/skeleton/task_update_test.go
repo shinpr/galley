@@ -1,10 +1,9 @@
-package daemon
+package skeleton
 
 import (
 	"strings"
 	"testing"
 
-	skeletonpreflight "github.com/shinpr/galley/internal/preflight/skeleton"
 	"github.com/shinpr/galley/internal/task"
 )
 
@@ -17,7 +16,7 @@ func TestApplyAcceptanceSkeletonResultToTaskPreservesDuplicatePathOutputs(t *tes
 		},
 		Preflight: &task.Preflight{AcceptanceSkeleton: &task.AcceptanceSkeletonConfig{Enabled: true}},
 	}
-	res := &skeletonpreflight.Result{Outputs: []skeletonpreflight.Output{
+	res := &Result{Outputs: []Output{
 		{
 			ACID:                   "AC1",
 			Path:                   "internal/foo/foo_test.go",
@@ -38,7 +37,7 @@ func TestApplyAcceptanceSkeletonResultToTaskPreservesDuplicatePathOutputs(t *tes
 		},
 	}}
 
-	skeletonpreflight.ApplyToTask(&loaded, res)
+	ApplyToTask(&loaded, res)
 
 	outputs := loaded.Preflight.AcceptanceSkeleton.Outputs
 	if len(outputs) != 2 {
@@ -83,8 +82,8 @@ func TestApplyAcceptanceSkeletonResultToTaskReplacesPreviousSkeletonBlock(t *tes
 			}},
 			Preflight: &task.Preflight{AcceptanceSkeleton: &task.AcceptanceSkeletonConfig{Enabled: true}},
 		}
-		res := &skeletonpreflight.Result{Outputs: []skeletonpreflight.Output{{ACID: "AC1", Path: "new_test.go", Purpose: "new"}}}
-		skeletonpreflight.ApplyToTask(&loaded, res)
+		res := &Result{Outputs: []Output{{ACID: "AC1", Path: "new_test.go", Purpose: "new"}}}
+		ApplyToTask(&loaded, res)
 		got := loaded.AcceptanceCriteria[0].Verification
 		if strings.Contains(got, "stale") || strings.Count(got, "Acceptance skeleton:") != 1 || !strings.Contains(got, "new_test.go") {
 			t.Fatalf("unexpected verification for %q:\n%s", existing, got)

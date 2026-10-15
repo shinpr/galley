@@ -192,14 +192,14 @@ func TestRunExecutorRequestCarriesEnvironmentCommandsAndDiscoveredSignals(t *tes
 	}
 }
 
-func TestParseResultTextExtractsAndNormalizesResult(t *testing.T) {
+func TestResolveExecutorResultExtractsAndNormalizesClaudeStdoutResult(t *testing.T) {
 	t.Parallel()
-	text := `prefix {"status":"ready","commands":[{"run":"  go test ./...  ","source":"discovered","exit_code":0,"stdout_excerpt":"  ok  "}],"successful_commands":[{"run":"go test ./..."}],"readiness_evidence":"ready","source":"discovered"} suffix`
-	res, ok := parseResultText(text)
-	if !ok {
-		t.Fatal("expected parseResultText to find result JSON")
+	text := "noise prefix\n" + `{"status":"ready","commands":[{"run":"  go test ./...  ","source":"discovered","exit_code":0,"stdout_excerpt":"  ok  "}],"successful_commands":[{"run":"go test ./..."}],"readiness_evidence":"ready","source":"discovered"}` + "\nnoise suffix"
+	res, err := ResolveExecutorResult(Options{Task: task.Task{Executor: task.Executor{CLI: "claude"}}, RunDir: t.TempDir()}, text)
+	if err != nil {
+		t.Fatalf("ResolveExecutorResult: %v", err)
 	}
-	if res.Status != StatusReady || len(res.Commands) != 1 {
+	if res.Status != StatusReady || len(res.Commands) != 1 || res.Commands[0].Source != SourceDiscovered {
 		t.Fatalf("unexpected result: %#v", res)
 	}
 	if res.Commands[0].StdoutExcerpt != "ok" {

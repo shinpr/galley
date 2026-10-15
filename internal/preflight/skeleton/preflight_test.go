@@ -1,4 +1,4 @@
-package daemon
+package skeleton
 
 import (
 	"context"
@@ -6,10 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
-	skeletonpreflight "github.com/shinpr/galley/internal/preflight/skeleton"
 	"github.com/shinpr/galley/internal/task"
 )
 
@@ -32,7 +32,7 @@ func preflightTestTask(acIDs ...string) task.Task {
 	}
 }
 
-func runPreflightWithOptions(t *testing.T, tk task.Task, opts skeletonpreflight.Options) (*skeletonpreflight.Result, string, error) {
+func runPreflightWithOptions(t *testing.T, tk task.Task, opts Options) (*Result, string, error) {
 	t.Helper()
 	work := t.TempDir()
 	runDir := t.TempDir()
@@ -45,7 +45,7 @@ type preflightDirs struct {
 	RunDir string
 }
 
-func runPreflightInWorkdir(t *testing.T, tk task.Task, opts skeletonpreflight.Options, dirs preflightDirs) (*skeletonpreflight.Result, error) {
+func runPreflightInWorkdir(t *testing.T, tk task.Task, opts Options, dirs preflightDirs) (*Result, error) {
 	work, runDir := dirs.Work, dirs.RunDir
 	t.Helper()
 	if err := exec.CommandContext(t.Context(), "git", "-C", work, "rev-parse", "--git-dir").Run(); err != nil {
@@ -56,7 +56,19 @@ func runPreflightInWorkdir(t *testing.T, tk task.Task, opts skeletonpreflight.Op
 	opts.Task = tk
 	opts.WorkDir = work
 	opts.RunDir = runDir
-	return skeletonpreflight.Run(context.Background(), opts)
+	return Run(context.Background(), opts)
+}
+
+func writeFakeCommand(t *testing.T, name, body string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses POSIX shell fake creator binaries")
+	}
+	commandPath := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(commandPath, []byte("#!/bin/sh\n"+body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return commandPath
 }
 
 func fakeCreator(t *testing.T, manifest string, fileWrites string) string {
@@ -73,7 +85,7 @@ func TestAcceptanceSkeletonPreflightBuiltInCreatorHappyPath(t *testing.T) {
 	claudeBin := fakeCreator(t, manifest, `mkdir -p internal/foo
 printf 'package foo_test\n\n// TODO(galley-skeleton): implement AC1 assertion.\n' > internal/foo/foo_test.go`)
 
-	res, runDir, err := runPreflightWithOptions(t, preflightTestTask("AC1"), skeletonpreflight.Options{ClaudeBin: claudeBin})
+	res, runDir, err := runPreflightWithOptions(t, preflightTestTask("AC1"), Options{ClaudeBin: claudeBin})
 	if err != nil {
 		t.Fatalf("preflight error: %v", err)
 	}
@@ -117,7 +129,7 @@ func TestAcceptanceSkeletonPreflightMissingDeclaredFileFails(t *testing.T) {
 	t.Parallel()
 	manifest := resultManifest(`[{\"ac_id\":\"AC1\",\"path\":\"internal/foo/foo_test.go\",\"kind\":\"go-test\",\"purpose\":\"p\",\"satisfies\":\"s\",\"integration_point\":\"i\",\"implementation_required\":true}]`)
 	claudeBin := fakeCreator(t, manifest, "")
-	res, _, err := runPreflightWithOptions(t, preflightTestTask("AC1"), skeletonpreflight.Options{ClaudeBin: claudeBin})
+	res, _, err := runPreflightWithOptions(t, preflightTestTask("AC1"), Options{ClaudeBin: claudeBin})
 	if err == nil {
 		t.Fatal("expected error for missing creator-declared file")
 	}
@@ -133,7 +145,7 @@ func TestAcceptanceSkeletonPreflightRejectsUndeclaredCreatorChanges(t *testing.T
 printf 'package foo_test\n' > internal/foo/foo_test.go
 printf 'package foo_test\n' > internal/foo/extra_test.go`)
 
-	res, _, err := runPreflightWithOptions(t, preflightTestTask("AC1"), skeletonpreflight.Options{ClaudeBin: claudeBin})
+	res, _, err := runPreflightWithOptions(t, preflightTestTask("AC1"), Options{ClaudeBin: claudeBin})
 	if err == nil {
 		t.Fatal("expected error for undeclared creator file")
 	}
@@ -155,7 +167,7 @@ func TestAcceptanceSkeletonPreflightRequiresDeclaredOutputChangedByCreator(t *te
 	manifest := resultManifest(`[{\"ac_id\":\"AC1\",\"path\":\"internal/foo/foo_test.go\",\"kind\":\"go-test\",\"purpose\":\"verify AC1\",\"satisfies\":\"AC1 behavior\",\"integration_point\":\"executor completes this test\",\"implementation_required\":true}]`)
 	claudeBin := fakeCreator(t, manifest, "")
 
-	res, err := runPreflightInWorkdir(t, preflightTestTask("AC1"), skeletonpreflight.Options{ClaudeBin: claudeBin}, preflightDirs{Work: work, RunDir: runDir})
+	res, err := runPreflightInWorkdir(t, preflightTestTask("AC1"), Options{ClaudeBin: claudeBin}, preflightDirs{Work: work, RunDir: runDir})
 	if err == nil {
 		t.Fatal("expected error for unchanged declared output")
 	}
@@ -172,7 +184,7 @@ func TestAcceptanceSkeletonPreflightRejectsRunDirOutput(t *testing.T) {
 	manifest := resultManifest(`[{\"ac_id\":\"AC1\",\"path\":\"` + outputPath + `\",\"kind\":\"go-test\",\"purpose\":\"verify AC1\",\"satisfies\":\"AC1 behavior\",\"integration_point\":\"executor completes this test\",\"implementation_required\":true}]`)
 	claudeBin := fakeCreator(t, manifest, "")
 
-	res, err := runPreflightInWorkdir(t, preflightTestTask("AC1"), skeletonpreflight.Options{ClaudeBin: claudeBin}, preflightDirs{Work: work, RunDir: runDir})
+	res, err := runPreflightInWorkdir(t, preflightTestTask("AC1"), Options{ClaudeBin: claudeBin}, preflightDirs{Work: work, RunDir: runDir})
 	if err == nil {
 		t.Fatal("expected error for run evidence output")
 	}
@@ -192,7 +204,7 @@ func TestAcceptanceSkeletonPreflightRejectsSymlinkDirectoryEscape(t *testing.T) 
 	manifest := resultManifest(`[{\"ac_id\":\"AC1\",\"path\":\"tests/foo_test.go\",\"kind\":\"go-test\",\"purpose\":\"verify AC1\",\"satisfies\":\"AC1 behavior\",\"integration_point\":\"executor completes this test\",\"implementation_required\":true}]`)
 	claudeBin := fakeCreator(t, manifest, `printf 'package foo_test\n' > tests/foo_test.go`)
 
-	res, err := runPreflightInWorkdir(t, preflightTestTask("AC1"), skeletonpreflight.Options{ClaudeBin: claudeBin}, preflightDirs{Work: work, RunDir: runDir})
+	res, err := runPreflightInWorkdir(t, preflightTestTask("AC1"), Options{ClaudeBin: claudeBin}, preflightDirs{Work: work, RunDir: runDir})
 	if err == nil {
 		t.Fatal("expected error for symlink directory escape")
 	}
@@ -212,7 +224,7 @@ func TestAcceptanceSkeletonPreflightIgnoresRunDirInsideWorktreeSnapshot(t *testi
 	claudeBin := fakeCreator(t, manifest, `mkdir -p internal/foo
 printf 'package foo_test\n' > internal/foo/foo_test.go`)
 
-	res, err := runPreflightInWorkdir(t, preflightTestTask("AC1"), skeletonpreflight.Options{ClaudeBin: claudeBin}, preflightDirs{Work: work, RunDir: runDir})
+	res, err := runPreflightInWorkdir(t, preflightTestTask("AC1"), Options{ClaudeBin: claudeBin}, preflightDirs{Work: work, RunDir: runDir})
 	if err != nil {
 		t.Fatalf("preflight error: %v", err)
 	}
@@ -238,7 +250,7 @@ func TestAcceptanceSkeletonPreflightRejectsUnsafePath(t *testing.T) {
 			manifest := resultManifest(`[{\"ac_id\":\"AC1\",\"path\":\"` + tc.path + `\",\"kind\":\"go-test\",\"purpose\":\"p\",\"satisfies\":\"s\",\"integration_point\":\"i\",\"implementation_required\":true}]`)
 			claudeBin := fakeCreator(t, manifest, `mkdir -p secret
 printf 'package foo\n' > secret/foo_test.go`)
-			res, _, err := runPreflightWithOptions(t, preflightTestTask("AC1"), skeletonpreflight.Options{ClaudeBin: claudeBin})
+			res, _, err := runPreflightWithOptions(t, preflightTestTask("AC1"), Options{ClaudeBin: claudeBin})
 			if err == nil {
 				t.Fatalf("expected error for %s", tc.name)
 			}
@@ -258,7 +270,7 @@ func TestAcceptanceSkeletonPreflightAcceptsDuplicateOutputPaths(t *testing.T) {
 	claudeBin := fakeCreator(t, manifest, `mkdir -p internal/foo
 printf 'package foo_test\n\n// TODO(galley-skeleton): implement AC1 and AC2 assertions.\n' > internal/foo/foo_test.go`)
 
-	res, runDir, err := runPreflightWithOptions(t, preflightTestTask("AC1", "AC2"), skeletonpreflight.Options{ClaudeBin: claudeBin})
+	res, runDir, err := runPreflightWithOptions(t, preflightTestTask("AC1", "AC2"), Options{ClaudeBin: claudeBin})
 	if err != nil {
 		t.Fatalf("preflight error: %v", err)
 	}
@@ -272,9 +284,9 @@ printf 'package foo_test\n\n// TODO(galley-skeleton): implement AC1 and AC2 asse
 	if len(res.Baseline.SkeletonHashes) != 1 {
 		t.Fatalf("baseline should dedupe the shared path, got %+v", res.Baseline.SkeletonHashes)
 	}
-	persisted, lerr := skeletonpreflight.LoadResult(runDir)
+	persisted, lerr := LoadResult(runDir)
 	if lerr != nil {
-		t.Fatalf("LoadPreflightResult: %v", lerr)
+		t.Fatalf("LoadResult:%v", lerr)
 	}
 	if persisted == nil || len(persisted.Outputs) != 2 {
 		t.Fatalf("persisted preflight_result.json did not preserve duplicate outputs: %+v", persisted)
@@ -284,9 +296,9 @@ printf 'package foo_test\n\n// TODO(galley-skeleton): implement AC1 and AC2 asse
 
 // assertPerACMetadataPreserved pins that two ACs sharing one skeleton path each
 // keep their own metadata rather than collapsing into a single entry.
-func assertPerACMetadataPreserved(t *testing.T, outputs []skeletonpreflight.Output, wantPath string) {
+func assertPerACMetadataPreserved(t *testing.T, outputs []Output, wantPath string) {
 	t.Helper()
-	byAC := map[string]skeletonpreflight.Output{}
+	byAC := map[string]Output{}
 	for _, out := range outputs {
 		byAC[out.ACID] = out
 	}
@@ -325,16 +337,16 @@ func TestAcceptanceSkeletonPreflightRejectsInvalidManifestFields(t *testing.T) {
 			t.Parallel()
 			manifest := resultManifest(`[` + tc.output + `]`)
 			claudeBin := fakeCreator(t, manifest, `printf 'package foo\n' > foo_test.go`)
-			res, runDir, err := runPreflightWithOptions(t, preflightTestTask("AC1"), skeletonpreflight.Options{ClaudeBin: claudeBin})
+			res, runDir, err := runPreflightWithOptions(t, preflightTestTask("AC1"), Options{ClaudeBin: claudeBin})
 			if err == nil {
 				t.Fatalf("expected error for %s", tc.name)
 			}
 			if res == nil || res.Error == nil || res.Error.Phase != "acceptance_skeleton_provider" || !strings.Contains(res.Error.Message, tc.wantText) {
 				t.Fatalf("error = %+v", res)
 			}
-			persisted, lerr := skeletonpreflight.LoadResult(runDir)
+			persisted, lerr := LoadResult(runDir)
 			if lerr != nil {
-				t.Fatalf("LoadPreflightResult: %v", lerr)
+				t.Fatalf("LoadResult:%v", lerr)
 			}
 			if persisted == nil || persisted.Status != "failed" {
 				t.Fatalf("persisted preflight_result.json = %+v", persisted)

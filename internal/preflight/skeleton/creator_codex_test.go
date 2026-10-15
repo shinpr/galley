@@ -1,4 +1,4 @@
-package daemon
+package skeleton
 
 import (
 	"encoding/json"
@@ -8,15 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	skeletonpreflight "github.com/shinpr/galley/internal/preflight/skeleton"
 	"github.com/shinpr/galley/internal/task"
 )
 
-// fakeCodexCreator returns a fake `codex` binary that acts as the acceptance
-// skeleton creator. It parses `--output-last-message` from argv, discards the
-// combined stdin prompt, runs the caller-supplied file writes, and writes the
-// manifest JSON to the capture file the way the real Codex CLI writes its
-// final assistant message (R2).
+// fakeCodexCreator runs fileWrites, then writes manifest to the
+// --output-last-message file as the real Codex CLI does.
 func fakeCodexCreator(t *testing.T, manifest, fileWrites string) string {
 	t.Helper()
 	return writeFakeCommand(t, "codex", `out=""
@@ -75,7 +71,7 @@ func TestAcceptanceSkeletonPreflightCodexProviderHappyPath(t *testing.T) {
 	codexBin := fakeCodexCreator(t, manifest, `mkdir -p internal/foo
 printf 'package foo_test\n\n// TODO(galley-skeleton): implement AC1 assertion.\n' > internal/foo/foo_test.go`)
 
-	res, runDir, err := runPreflightWithOptions(t, codexPreflightTask("AC1"), skeletonpreflight.Options{CodexBin: codexBin})
+	res, runDir, err := runPreflightWithOptions(t, codexPreflightTask("AC1"), Options{CodexBin: codexBin})
 	if err != nil {
 		t.Fatalf("preflight error: %v", err)
 	}
@@ -100,10 +96,8 @@ printf 'package foo_test\n\n// TODO(galley-skeleton): implement AC1 assertion.\n
 	}
 }
 
-// TestAcceptanceSkeletonPreflightCodexFallsBackToStdout proves the best-effort
-// fallback path: if Codex exits successfully but does not write a valid
-// --output-last-message capture file, Galley can still recover the creator
-// manifest from the Codex JSON stdout stream.
+// TestAcceptanceSkeletonPreflightCodexFallsBackToStdout proves a missing
+// last-message capture still recovers the manifest from Codex JSON stdout.
 func TestAcceptanceSkeletonPreflightCodexFallsBackToStdout(t *testing.T) {
 	manifest := codexCreatorManifest(`[{"ac_id":"AC1","path":"internal/foo/foo_test.go","kind":"integration","purpose":"verify AC1","satisfies":"AC1 observable behavior","integration_point":"executor completes this test before acceptance","implementation_required":true}]`)
 	codexBin := writeFakeCommand(t, "codex", `while [ "$#" -gt 0 ]; do
@@ -122,7 +116,7 @@ printf 'package foo_test\n\n// TODO(galley-skeleton): implement AC1 assertion.\n
 printf '%s\n' '{"event":"assistant_message","message":'`+strconv.Quote(manifest)+`'}'
 `)
 
-	res, runDir, err := runPreflightWithOptions(t, codexPreflightTask("AC1"), skeletonpreflight.Options{CodexBin: codexBin})
+	res, runDir, err := runPreflightWithOptions(t, codexPreflightTask("AC1"), Options{CodexBin: codexBin})
 	if err != nil {
 		t.Fatalf("preflight error: %v", err)
 	}
@@ -137,10 +131,8 @@ printf '%s\n' '{"event":"assistant_message","message":'`+strconv.Quote(manifest)
 	}
 }
 
-// TestAcceptanceSkeletonPreflightPropagatesModelAndEffort proves AC4: the
-// creator command plan carries the task executor model and effort settings for
-// both providers, so creator runs and implementation runs share the task's
-// executor backend configuration.
+// TestAcceptanceSkeletonPreflightPropagatesModelAndEffort proves the creator
+// command plan carries the task executor model and effort for each provider.
 func TestAcceptanceSkeletonPreflightPropagatesModelAndEffort(t *testing.T) {
 	claudeOutputs := `[{\"ac_id\":\"AC1\",\"path\":\"internal/foo/foo_test.go\",\"kind\":\"go-test\",\"purpose\":\"verify AC1\",\"satisfies\":\"AC1 behavior\",\"integration_point\":\"executor completes this test\",\"implementation_required\":true}]`
 	codexOutputs := `[{"ac_id":"AC1","path":"internal/foo/foo_test.go","kind":"go-test","purpose":"verify AC1","satisfies":"AC1 behavior","integration_point":"executor completes this test","implementation_required":true}]`
@@ -152,7 +144,7 @@ printf 'package foo_test\n' > internal/foo/foo_test.go`
 		cli       string
 		model     string
 		effort    string
-		opts      skeletonpreflight.Options
+		opts      Options
 		wantInSeq [][2]string
 	}{
 		{
@@ -160,7 +152,7 @@ printf 'package foo_test\n' > internal/foo/foo_test.go`
 			cli:    "claude",
 			model:  "opus",
 			effort: "high",
-			opts:   skeletonpreflight.Options{ClaudeBin: fakeCreator(t, resultManifest(claudeOutputs), fileWrite)},
+			opts:   Options{ClaudeBin: fakeCreator(t, resultManifest(claudeOutputs), fileWrite)},
 			// Claude exposes --model and --effort flags directly.
 			wantInSeq: [][2]string{{"--model", "opus"}, {"--effort", "high"}},
 		},
@@ -169,7 +161,7 @@ printf 'package foo_test\n' > internal/foo/foo_test.go`
 			cli:    "codex",
 			model:  "gpt-5-codex",
 			effort: "high",
-			opts:   skeletonpreflight.Options{CodexBin: fakeCodexCreator(t, codexCreatorManifest(codexOutputs), fileWrite)},
+			opts:   Options{CodexBin: fakeCodexCreator(t, codexCreatorManifest(codexOutputs), fileWrite)},
 			// Codex exposes --model and the -c model_reasoning_effort override.
 			wantInSeq: [][2]string{{"--model", "gpt-5-codex"}, {"-c", `model_reasoning_effort="high"`}},
 		},

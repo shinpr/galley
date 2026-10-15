@@ -37,6 +37,26 @@ func TestPersistedExecutorIdentityMatchesOnlyTheSameResolvedValues(t *testing.T)
 	}
 }
 
+// Legacy evidence recorded only Provider: derive the CLI from it, but still require empty model/effort.
+func TestLegacyProviderOnlyResultMatchesOnlyProviderCLIWithEmptyModelAndEffort(t *testing.T) {
+	t.Parallel()
+	runDir := t.TempDir()
+	legacy := []byte(`{"status":"ready","commands":[],"source":"discovered","provider":"claude"}`)
+	if err := os.WriteFile(runartifact.Path(runDir, runartifact.SetupResultFilename), legacy, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadResult(runDir)
+	if err != nil || loaded == nil {
+		t.Fatalf("LoadResult = (%+v, %v)", loaded, err)
+	}
+	if !loaded.MatchesExecutor(task.Executor{CLI: "claude"}) {
+		t.Fatal("provider-derived CLI must match a current identity with empty model/effort")
+	}
+	if loaded.MatchesExecutor(task.Executor{CLI: "claude", Model: "m", Effort: "high"}) {
+		t.Fatal("legacy provider-only evidence must not match a fully resolved identity")
+	}
+}
+
 // persistAndLoadExecutorIdentity writes setup_result.json for exec and reloads it,
 // requiring every identity key to persist even when its resolved value is empty.
 func persistAndLoadExecutorIdentity(t *testing.T, exec task.Executor) *Result {

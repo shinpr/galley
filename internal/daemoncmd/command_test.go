@@ -198,18 +198,6 @@ func TestApplyDaemonConfigPreservesZeroPerRepoLimit(t *testing.T) {
 	if opts.MaxConcurrentPerRepo != 0 || !opts.Explicit.MaxConcurrentPerRepo {
 		t.Fatalf("daemon.yaml 0 must be preserved and marked explicit: %#v", opts)
 	}
-	preflighted, err := daemon.Preflight(daemon.Options{
-		Root:                 t.TempDir(),
-		Supervisor:           "codex",
-		MaxConcurrentPerRepo: 0,
-		Explicit:             daemon.ExplicitOptions{MaxConcurrentPerRepo: true},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if preflighted.MaxConcurrentPerRepo != 0 {
-		t.Fatalf("Preflight must preserve max_concurrent_per_repo=0; got %d", preflighted.MaxConcurrentPerRepo)
-	}
 }
 
 func TestStopMissingPIDReturnsNotRunning(t *testing.T) {

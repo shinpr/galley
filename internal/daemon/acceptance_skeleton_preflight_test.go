@@ -69,7 +69,6 @@ func resultManifest(outputs string) string {
 }
 
 func TestAcceptanceSkeletonPreflightBuiltInCreatorHappyPath(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test-secret")
 	manifest := resultManifest(`[{\"ac_id\":\"AC1\",\"path\":\"internal/foo/foo_test.go\",\"kind\":\"go-test\",\"purpose\":\"verify AC1\",\"satisfies\":\"AC1 user-visible behavior\",\"integration_point\":\"executor completes this test before acceptance\",\"implementation_required\":true}]`)
 	claudeBin := fakeCreator(t, manifest, `mkdir -p internal/foo
 printf 'package foo_test\n\n// TODO(galley-skeleton): implement AC1 assertion.\n' > internal/foo/foo_test.go`)
@@ -96,7 +95,6 @@ printf 'package foo_test\n\n// TODO(galley-skeleton): implement AC1 assertion.\n
 	}
 	var plan struct {
 		Argv []string `json:"argv"`
-		Env  []string `json:"env"`
 	}
 	data, readErr := os.ReadFile(filepath.Join(runDir, "preflight_creator_command_plan.json"))
 	if readErr != nil {
@@ -109,11 +107,9 @@ printf 'package foo_test\n\n// TODO(galley-skeleton): implement AC1 assertion.\n
 	if !strings.Contains(joinedArgv, "--plugin-dir") || !strings.Contains(joinedArgv, "claude-guard-plugin") {
 		t.Fatalf("creator command plan missing guard plugin: %+v", plan.Argv)
 	}
-	if len(plan.Env) != 0 {
-		t.Fatalf("creator command plan persisted environment: %+v", plan.Env)
-	}
-	if strings.Contains(string(data), "sk-ant-test-secret") || strings.Contains(string(data), "ANTHROPIC_API_KEY") {
-		t.Fatalf("creator command plan persisted secret env: %s", data)
+	// EnvAppend can carry provider credentials, so persisted plans must omit it.
+	if strings.Contains(string(data), "GALLEY_CLAUDE_GUARD_MODE") {
+		t.Fatalf("creator command plan persisted EnvAppend: %s", data)
 	}
 }
 

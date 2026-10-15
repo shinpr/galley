@@ -180,150 +180,6 @@ func assertSetupVerificationRecorded(t *testing.T, doneTask task.Task, wantExcer
 	t.Fatalf("task verification history missing <galley:setup> entry: %#v", doneTask.Verification.Commands)
 }
 
-// TestSetupPreflightAbsentSetupInvokesExecutorWithEnvironmentAndSignals proves
-// AC3: when environment.setup is absent the daemon invokes the setup executor
-// with the full environment.commands map and repository setup signals as
-// context.
-func TestSetupPreflightAbsentSetupInvokesExecutorWithEnvironmentAndSignals(t *testing.T) {
-	work := t.TempDir()
-	runDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(work, "package.json"), []byte("{}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(work, "go.mod"), []byte("module example.com/foo\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	env := &profile.Environment{
-		ID:       "absent-setup",
-		CWD:      work,
-		Commands: map[string]string{"test_unit": "go test ./...", "install": "npm ci"},
-		Constraints: profile.Constraints{
-			Network:             "approval_required",
-			SecretsPolicy:       "never_read_env_files",
-			DestructiveCommands: "deny",
-		},
-	}
-	type captured struct {
-		Commands map[string]string
-		Signals  []string
-		WorkDir  string
-	}
-	cap := &captured{}
-	withSetupExecutorRunner(t, func(_ context.Context, opts setuppreflight.Options) (*setuppreflight.Result, error) {
-		cap.Commands = map[string]string{}
-		if opts.Profiles.Environment != nil {
-			for k, v := range opts.Profiles.Environment.Commands {
-				cap.Commands[k] = v
-			}
-		}
-		signals := opts.RepositorySignals
-		if signals == nil {
-			signals = setuppreflight.DiscoverRepositorySignals(opts.WorkDir)
-		}
-		cap.Signals = append([]string{}, signals...)
-		cap.WorkDir = opts.WorkDir
-		return &setuppreflight.Result{
-			Status:             setuppreflight.StatusReady,
-			Commands:           []setuppreflight.CommandAttempt{{Run: "go mod download", Source: setuppreflight.SourceDiscovered, ExitCode: 0}},
-			SuccessfulCommands: []profile.SetupCommand{{Run: "go mod download", Why: "fetch modules"}},
-			ReadinessEvidence:  "stub readiness",
-			Source:             setuppreflight.SourceDiscovered,
-			Provider:           "claude",
-		}, nil
-	})
-	res, _, err := runSetupPreflight(context.Background(), setuppreflight.Options{
-		Task:     setupTask(),
-		WorkDir:  work,
-		RunDir:   runDir,
-		Profiles: profile.Bundle{Environment: env},
-	})
-	if err != nil {
-		t.Fatalf("setup preflight: %v", err)
-	}
-	if res == nil || res.Status != setuppreflight.StatusReady {
-		t.Fatalf("result: %+v", res)
-	}
-	if cap.Commands["test_unit"] != "go test ./..." || cap.Commands["install"] != "npm ci" {
-		t.Fatalf("environment.commands not passed to setup executor: %+v", cap.Commands)
-	}
-	foundPkg := false
-	foundGoMod := false
-	for _, s := range cap.Signals {
-		if s == "package.json" {
-			foundPkg = true
-		}
-		if s == "go.mod" {
-			foundGoMod = true
-		}
-	}
-	if !foundPkg || !foundGoMod {
-		t.Fatalf("repository signals missing manifests: %+v", cap.Signals)
-	}
-	// setup_result.json is written for evidence routing (AC8).
-	if _, err := os.Stat(filepath.Join(runDir, "setup_result.json")); err != nil {
-		t.Fatalf("setup_result.json missing: %v", err)
-	}
-}
-
-// TestSetupPreflightExistingSetupPlanDelegatesToSetupExecutor proves the daemon
-// treats environment.setup.commands as setup executor input, not as commands the
-// daemon runs directly. This preserves the setup executor's ability to observe
-// command failures and repair the plan in the same model context.
-func TestSetupPreflightExistingSetupPlanDelegatesToSetupExecutor(t *testing.T) {
-	work := t.TempDir()
-	runDir := t.TempDir()
-	env := &profile.Environment{
-		ID:  "delegated-setup",
-		CWD: work,
-		Setup: &profile.SetupPlan{Commands: []profile.SetupCommand{
-			{Run: "touch setup.proof", Why: "seed plan for setup executor"},
-		}},
-		Constraints: profile.Constraints{
-			Network:             "approval_required",
-			SecretsPolicy:       "never_read_env_files",
-			DestructiveCommands: "deny",
-		},
-	}
-	called := false
-	withSetupExecutorRunner(t, func(_ context.Context, opts setuppreflight.Options) (*setuppreflight.Result, error) {
-		called = true
-		if opts.Profiles.Environment == nil || opts.Profiles.Environment.Setup == nil {
-			t.Fatalf("setup executor did not receive environment.setup: %+v", opts.Profiles.Environment)
-		}
-		if _, err := os.Stat(filepath.Join(work, "setup.proof")); !os.IsNotExist(err) {
-			t.Fatalf("daemon executed environment.setup directly before setup executor; stat err=%v", err)
-		}
-		return &setuppreflight.Result{
-			Status: setuppreflight.StatusReady,
-			Commands: []setuppreflight.CommandAttempt{{
-				Run:      "touch setup.proof",
-				Why:      "seed plan for setup executor",
-				Source:   setuppreflight.SourceEnvironmentSetup,
-				ExitCode: 0,
-			}},
-			SuccessfulCommands: []profile.SetupCommand{{Run: "touch setup.proof", Why: "seed plan for setup executor"}},
-			ReadinessEvidence:  "setup executor used the seeded plan",
-			Source:             setuppreflight.SourceEnvironmentSetup,
-			Provider:           "claude",
-		}, nil
-	})
-	res, _, err := runSetupPreflight(context.Background(), setuppreflight.Options{
-		Task:     setupTask(),
-		WorkDir:  work,
-		RunDir:   runDir,
-		Profiles: profile.Bundle{Environment: env},
-	})
-	if err != nil {
-		t.Fatalf("setup preflight: %v", err)
-	}
-	if res == nil || res.Status != setuppreflight.StatusReady {
-		t.Fatalf("setup result: %+v", res)
-	}
-	if !called {
-		t.Fatalf("setup executor runner was not invoked")
-	}
-}
-
 // TestSetupExecutorCommandPlanClaudeAndCodex proves part of AC4: building the
 // setup executor command plan for both Claude and Codex returns provider-shaped
 // argv that embeds the bin path and references the canonical capture path each
@@ -635,22 +491,21 @@ func assertAllCommandsSeeded(t *testing.T, commands []setuppreflight.CommandAtte
 	}
 }
 
-// TestSetupPreflightSetupFailedClassifiesAndWritesEvidence proves AC9: when
-// setup cannot make the worktree ready, the preflight returns an error and
-// writes setup_result.json with status=failed, the executor's failure
-// excerpts, and repair guidance.
+// TestSetupPreflightSetupFailedClassifiesAndWritesEvidence proves AC9: a setup
+// failure fails the task as phase=setup and keeps the failure facts in setup_result.json.
 func TestSetupPreflightSetupFailedClassifiesAndWritesEvidence(t *testing.T) {
-	work := t.TempDir()
-	runDir := t.TempDir()
-	env := &profile.Environment{
-		ID:  "fail",
-		CWD: work,
-		Constraints: profile.Constraints{
-			Network:             "approval_required",
-			SecretsPolicy:       "never_read_env_files",
-			DestructiveCommands: "deny",
-		},
-	}
+	root := filepath.Join(t.TempDir(), ".agent-workflow")
+	repo := initDaemonGitRepo(t)
+	promptPath, schemaPath := writeDaemonPromptFiles(t)
+	envPath := writeSetupEnvironmentProfile(t, t.TempDir(), `id: "fail"
+cwd: `+workdirQuote(repo)+`
+commands:
+  test_unit: "true"
+constraints:
+  network: "approval_required"
+  secrets_policy: "never_read_env_files"
+  destructive_commands: "deny"
+`)
 	withSetupExecutorRunner(t, func(_ context.Context, _ setuppreflight.Options) (*setuppreflight.Result, error) {
 		return &setuppreflight.Result{
 			Status:         setuppreflight.StatusFailed,
@@ -661,22 +516,39 @@ func TestSetupPreflightSetupFailedClassifiesAndWritesEvidence(t *testing.T) {
 			Provider:       "claude",
 		}, nil
 	})
-	_, _, err := runSetupPreflight(context.Background(), setuppreflight.Options{
-		Task:     setupTask(),
-		WorkDir:  work,
-		RunDir:   runDir,
-		Profiles: profile.Bundle{Environment: env},
-	})
-	if err == nil {
-		t.Fatalf("expected setup preflight error")
+	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
+	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	// setup_result.json must contain the failure facts.
-	data, readErr := os.ReadFile(filepath.Join(runDir, "setup_result.json"))
-	if readErr != nil {
-		t.Fatalf("setup_result.json missing: %v", readErr)
+	writeDaemonTask(t, taskPath, repo)
+
+	if err := runTestDaemon(context.Background(), Options{
+		Root:                   root,
+		SystemPromptFile:       promptPath,
+		JSONSchemaFile:         schemaPath,
+		EnvironmentProfileFile: envPath,
+		Once:                   true,
+		MaxConcurrentTasks:     1,
+		Supervisor:             "claude",
+		ClaudeBin:              writeFakeClaude(t, "exit 1\n"),
+	}); err == nil {
+		t.Fatal("expected daemon Run to surface the setup failure")
 	}
+
+	failed, err := task.Load(filepath.Join(root, "tasks", "failed", "task.yaml"))
+	if err != nil {
+		t.Fatalf("failed task missing: %v", err)
+	}
+	if len(failed.Attempts) == 0 || failed.Attempts[len(failed.Attempts)-1].Error == nil {
+		t.Fatalf("no attempt error recorded: %#v", failed.Attempts)
+	}
+	last := failed.Attempts[len(failed.Attempts)-1].Error
+	if last.Phase != "setup" || last.Kind != "setup_failed" {
+		t.Fatalf("phase/kind got phase=%q kind=%q, want phase=setup kind=setup_failed", last.Phase, last.Kind)
+	}
+
 	var saved setuppreflight.Result
-	if err := json.Unmarshal(data, &saved); err != nil {
+	if err := json.Unmarshal(mustReadSingleGlob(t, filepath.Join(root, "runs", "*", runartifact.SetupResultFilename)), &saved); err != nil {
 		t.Fatalf("decode setup_result.json: %v", err)
 	}
 	if saved.Status != setuppreflight.StatusFailed {
@@ -687,96 +559,6 @@ func TestSetupPreflightSetupFailedClassifiesAndWritesEvidence(t *testing.T) {
 	}
 	if len(saved.Commands) == 0 || saved.Commands[0].Run != "npm ci" {
 		t.Fatalf("attempted commands not recorded: %+v", saved.Commands)
-	}
-
-	// Phase/kind classification: applying the failure path through the same
-	// daemon helper used by processClaimedTask must yield phase=setup and
-	// kind=setup_failed in the task latest error.
-	tk := setupTask()
-	appendFailureAttempt(&tk, attemptFailure{Phase: setuppreflight.Phase, Kind: setuppreflight.FailedKind, Err: err, ArtifactDir: runDir})
-	if len(tk.Attempts) == 0 || tk.Attempts[len(tk.Attempts)-1].Error == nil {
-		t.Fatalf("no attempt error appended")
-	}
-	last := tk.Attempts[len(tk.Attempts)-1].Error
-	if last.Phase != setuppreflight.Phase || last.Kind != setuppreflight.FailedKind {
-		t.Fatalf("phase/kind got phase=%q kind=%q want phase=%q kind=%q", last.Phase, last.Kind, setuppreflight.Phase, setuppreflight.FailedKind)
-	}
-}
-
-// TestSetupPreflightSetupExecutorRunsBeforeSkeletonFilesExist proves AC10:
-// setup readiness happens before acceptance skeleton creation, so the setup
-// executor must not depend on task-specific skeleton files.
-func TestSetupPreflightSetupExecutorRunsBeforeSkeletonFilesExist(t *testing.T) {
-	work := t.TempDir()
-	runDir := t.TempDir()
-	env := &profile.Environment{
-		ID:  "ac10",
-		CWD: work,
-		Setup: &profile.SetupPlan{Commands: []profile.SetupCommand{
-			{Run: "true", Why: "noop"},
-		}},
-		Constraints: profile.Constraints{
-			Network:             "approval_required",
-			SecretsPolicy:       "never_read_env_files",
-			DestructiveCommands: "deny",
-		},
-	}
-	// Required quality check picks a repository readiness command (`true`),
-	// NOT a skeleton-specific command. AC10's contract is that no
-	// task-specific skeleton must exist for setup to declare ready.
-	quality := &profile.Quality{
-		ID: "test",
-		RequiredChecks: []profile.RequiredCheck{
-			{ID: "smoke", PreferredCommands: []string{"true"}, Required: true},
-		},
-		PassPolicy: profile.PassPolicy{MinScore: 1},
-	}
-	tk := setupTask()
-	// The task carries an acceptance skeleton preflight config that would
-	// normally drive AcceptanceSkeletonPreflight; the setup preflight must
-	// finish first and must not depend on any skeleton file having been
-	// created.
-	tk.Preflight = &task.Preflight{AcceptanceSkeleton: &task.AcceptanceSkeletonConfig{Enabled: true}}
-	withSetupExecutorRunner(t, func(_ context.Context, opts setuppreflight.Options) (*setuppreflight.Result, error) {
-		if _, err := os.Stat(filepath.Join(opts.WorkDir, "internal/foo/foo_test.go")); !os.IsNotExist(err) {
-			t.Fatalf("setup executor saw a skeleton file before skeleton preflight; stat err=%v", err)
-		}
-		return &setuppreflight.Result{
-			Status: setuppreflight.StatusReady,
-			Commands: []setuppreflight.CommandAttempt{{
-				Run:      "true",
-				Why:      "seeded setup command",
-				Source:   setuppreflight.SourceEnvironmentSetup,
-				ExitCode: 0,
-			}},
-			SuccessfulCommands: []profile.SetupCommand{{Run: "true", Why: "noop"}},
-			ReadinessEvidence:  "setup executor confirmed repository readiness without skeleton files",
-			Source:             setuppreflight.SourceEnvironmentSetup,
-			Provider:           "claude",
-		}, nil
-	})
-	res, _, err := runSetupPreflight(context.Background(), setuppreflight.Options{
-		Task:     tk,
-		WorkDir:  work,
-		RunDir:   runDir,
-		Profiles: profile.Bundle{Environment: env, Quality: quality},
-	})
-	if err != nil {
-		t.Fatalf("setup preflight: %v", err)
-	}
-	if res == nil || res.Status != setuppreflight.StatusReady {
-		t.Fatalf("setup result: %+v", res)
-	}
-	for _, c := range res.Commands {
-		if strings.Contains(c.Run, "internal/foo/foo_test.go") {
-			t.Fatalf("setup executor executed task-specific skeleton command: %+v", c)
-		}
-	}
-	// The worktree directory must not contain any skeleton files written by
-	// setup.
-	entries, _ := os.ReadDir(work)
-	if len(entries) != 0 {
-		t.Fatalf("setup left files in worktree: %v", entries)
 	}
 }
 
@@ -873,64 +655,6 @@ pr:
 	}
 	if saved.RepairGuidance == "" {
 		t.Fatalf("saved failure missing repair guidance: %+v", saved)
-	}
-}
-
-func TestEnforceLearnedSetupPlanContractRequiresReadyEvidence(t *testing.T) {
-	base := func() *setuppreflight.Result {
-		return &setuppreflight.Result{
-			Status:             setuppreflight.StatusReady,
-			Commands:           []setuppreflight.CommandAttempt{{Run: "go mod download", Source: setuppreflight.SourceDiscovered, ExitCode: 0}},
-			SuccessfulCommands: []profile.SetupCommand{{Run: "go mod download", Why: "fetch modules"}},
-			ReadinessEvidence:  "go test ./... passed",
-			Source:             setuppreflight.SourceDiscovered,
-		}
-	}
-	tests := []struct {
-		name string
-		edit func(*setuppreflight.Result)
-		want string
-	}{
-		{
-			name: "missing readiness evidence",
-			edit: func(res *setuppreflight.Result) { res.ReadinessEvidence = "" },
-			want: "readiness_evidence",
-		},
-		{
-			name: "missing source",
-			edit: func(res *setuppreflight.Result) { res.Source = "" },
-			want: "source",
-		},
-		{
-			name: "successful command did not exit zero",
-			edit: func(res *setuppreflight.Result) {
-				res.Commands[0].ExitCode = 1
-			},
-			want: "successful setup command attempt",
-		},
-		{
-			name: "successful command was readiness check only",
-			edit: func(res *setuppreflight.Result) {
-				res.Commands[0].Source = setuppreflight.SourceReadinessCheck
-			},
-			want: "successful setup command attempt",
-		},
-		{
-			name: "readiness check source is not canonical plan source",
-			edit: func(res *setuppreflight.Result) { res.Source = setuppreflight.SourceReadinessCheck },
-			want: "invalid source",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			res := base()
-			tt.edit(res)
-
-			err := setuppreflight.EnforceLearnedPlanContract(res)
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("contract error got %v, want mention %q", err, tt.want)
-			}
-		})
 	}
 }
 

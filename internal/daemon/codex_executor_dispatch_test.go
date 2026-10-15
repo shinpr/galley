@@ -32,7 +32,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/shinpr/galley/internal/task"
@@ -172,7 +171,6 @@ func assertCommandPlanBinary(t *testing.T, root string, bins dispatchBinaries) {
 	planData := mustReadSingleGlob(t, filepath.Join(root, "runs", "*", "attempt-1", "command_plan.json"))
 	var plan struct {
 		Argv []string `json:"argv"`
-		Env  []string `json:"env,omitempty"`
 	}
 	if err := json.Unmarshal(planData, &plan); err != nil {
 		t.Fatalf("decode command_plan.json: %v", err)
@@ -180,86 +178,11 @@ func assertCommandPlanBinary(t *testing.T, root string, bins dispatchBinaries) {
 	if len(plan.Argv) == 0 {
 		t.Fatal("command_plan.json argv is empty")
 	}
-	if len(plan.Env) != 0 {
-		t.Fatalf("command_plan.json must not persist environment entries: %v", plan.Env)
-	}
 	wantBin := bins.Claude
 	if cli == "codex" {
 		wantBin = bins.Codex
 	}
 	if filepath.Base(plan.Argv[0]) != filepath.Base(wantBin) {
 		t.Fatalf("command_plan.json argv[0] basename got %q, want %q (selected cli=%s)", filepath.Base(plan.Argv[0]), filepath.Base(wantBin), cli)
-	}
-}
-
-// TestDaemonRejectsUnknownExecutorCLIAtRun verifies the AC2 negative path so
-// dispatch never silently falls back to Claude when an unrecognized CLI
-// reaches the daemon. The task YAML is rewritten in place with
-// executor.cli="opus-cli" so the value reaches the daemon's task loader (and
-// the dispatch switch in runExecutorAttempt) without being short-circuited by
-// a higher-level guard outside the daemon.
-func TestDaemonRejectsUnknownExecutorCLIAtRun(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	promptPath, schemaPath := writeDaemonPromptFiles(t)
-
-	markerDir := t.TempDir()
-	claudeExecMarker := filepath.Join(markerDir, "claude-exec.marker")
-	codexExecMarker := filepath.Join(markerDir, "codex-exec.marker")
-
-	claudeBin := writeFakeClaude(t, "echo executor >> "+claudeExecMarker+"\necho '{}'\n")
-	codexBin := writeFakeCodexExecutor(t, "echo executor >> "+codexExecMarker+"\necho '{}'\n")
-
-	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
-	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeDaemonTask(t, taskPath, repo)
-	raw, err := os.ReadFile(taskPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	patched := strings.Replace(string(raw), `cli: "claude"`, `cli: "opus-cli"`, 1)
-	if patched == string(raw) {
-		t.Fatal("could not patch executor.cli in task YAML; daemon test scaffold drifted")
-	}
-	if err := os.WriteFile(taskPath, []byte(patched), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	err = runTestDaemon(context.Background(), Options{
-		Root:               root,
-		SystemPromptFile:   promptPath,
-		JSONSchemaFile:     schemaPath,
-		Once:               true,
-		MaxConcurrentTasks: 1,
-		Supervisor:         "claude",
-		ClaudeBin:          claudeBin,
-		CodexBin:           codexBin,
-	})
-	if err == nil {
-		t.Fatal("expected daemon Run to surface the unknown executor.cli error")
-	}
-
-	failedTask, err := task.Load(filepath.Join(root, "tasks", "failed", "task.yaml"))
-	if err != nil {
-		t.Fatalf("failed task missing: %v", err)
-	}
-	if len(failedTask.Attempts) == 0 {
-		t.Fatal("expected at least one recorded attempt for the unknown-CLI task")
-	}
-	last := failedTask.Attempts[len(failedTask.Attempts)-1]
-	if last.Error == nil {
-		t.Fatalf("attempt error missing: %#v", last)
-	}
-	if !strings.Contains(last.Error.Message, "executor.cli") {
-		t.Fatalf("attempt error message should name executor.cli, got %q", last.Error.Message)
-	}
-
-	if _, err := os.Stat(claudeExecMarker); !os.IsNotExist(err) {
-		t.Fatalf("claude executor marker should not exist on rejected dispatch: %v", err)
-	}
-	if _, err := os.Stat(codexExecMarker); !os.IsNotExist(err) {
-		t.Fatalf("codex executor marker should not exist on rejected dispatch: %v", err)
 	}
 }

@@ -1,11 +1,17 @@
 package setup
 
 import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"unicode/utf8"
 
 	"github.com/shinpr/galley/internal/profile"
+	"github.com/shinpr/galley/internal/task"
 )
 
 func TestEnforceLearnedPlanContractRequiresReadyEvidence(t *testing.T) {
@@ -79,6 +85,38 @@ func TestEnforceLearnedPlanContractRequiresReadyEvidence(t *testing.T) {
 			},
 			want: "invalid source",
 		},
+		{
+			name: "missing source",
+			res: &Result{
+				Status:             StatusReady,
+				SuccessfulCommands: []profile.SetupCommand{{Run: "go test ./..."}},
+				Commands:           []CommandAttempt{{Run: "go test ./...", Source: SourceDiscovered, ExitCode: 0}},
+				ReadinessEvidence:  "tests passed",
+			},
+			want: "no source",
+		},
+		{
+			name: "successful command exited non-zero",
+			res: &Result{
+				Status:             StatusReady,
+				SuccessfulCommands: []profile.SetupCommand{{Run: "go test ./..."}},
+				Commands:           []CommandAttempt{{Run: "go test ./...", Source: SourceDiscovered, ExitCode: 1}},
+				ReadinessEvidence:  "tests passed",
+				Source:             SourceDiscovered,
+			},
+			want: "no successful setup command attempt",
+		},
+		{
+			name: "readiness check is not a plan source",
+			res: &Result{
+				Status:             StatusReady,
+				SuccessfulCommands: []profile.SetupCommand{{Run: "go test ./..."}},
+				Commands:           []CommandAttempt{{Run: "go test ./...", Source: SourceDiscovered, ExitCode: 0}},
+				ReadinessEvidence:  "tests passed",
+				Source:             SourceReadinessCheck,
+			},
+			want: "invalid source",
+		},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -109,6 +147,48 @@ func TestEnforceLearnedPlanContractAcceptsReadyResult(t *testing.T) {
 	}
 	if err := EnforceLearnedPlanContract(res); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRunExecutorRequestCarriesEnvironmentCommandsAndDiscoveredSignals(t *testing.T) {
+	t.Parallel()
+	work, runDir := t.TempDir(), t.TempDir()
+	for _, name := range []string{"package.json", "go.mod"} {
+		if err := os.WriteFile(filepath.Join(work, name), []byte("{}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	commands := map[string]string{"test_unit": "go test ./...", "install": "npm ci"}
+	// A missing Grok binary stops after the request is written to the prompt file.
+	_, _ = RunExecutor(context.Background(), Options{
+		Task:     task.Task{ID: "setup-request", Executor: task.Executor{CLI: "grok"}},
+		WorkDir:  work,
+		RunDir:   runDir,
+		Profiles: profile.Bundle{Environment: &profile.Environment{ID: "request", Commands: commands}},
+		GrokBin:  filepath.Join(t.TempDir(), "missing-grok"),
+	})
+	prompt, err := os.ReadFile(filepath.Join(runDir, "grok.setup.prompt.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, workOrder, ok := strings.Cut(string(prompt), "# Work Order\n\n")
+	if !ok {
+		t.Fatalf("setup prompt has no work order:\n%s", prompt)
+	}
+	var request struct {
+		Environment struct {
+			Commands map[string]string `json:"commands"`
+		} `json:"environment"`
+		RepositorySignals []string `json:"repository_signals"`
+	}
+	if err := json.Unmarshal([]byte(workOrder), &request); err != nil {
+		t.Fatalf("decode setup request: %v\n%s", err, workOrder)
+	}
+	if !reflect.DeepEqual(request.Environment.Commands, commands) {
+		t.Fatalf("request environment.commands = %#v, want %#v", request.Environment.Commands, commands)
+	}
+	if want := []string{"package.json", "go.mod"}; !reflect.DeepEqual(request.RepositorySignals, want) {
+		t.Fatalf("request repository_signals = %#v, want %#v", request.RepositorySignals, want)
 	}
 }
 

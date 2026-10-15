@@ -1,42 +1,5 @@
 package daemon
 
-// Acceptance skeleton for issue 70 (decouple PR comment polling from execution).
-//
-// AC1: "While a normal daemon is running a long executor attempt, PR comment
-// polling shall continue on the configured poll interval without waiting for
-// that executor attempt to finish."
-//
-// Behavior under test (trigger -> process -> observable result):
-//   - Trigger: a normal (non --once) daemon claims a queued task whose executor
-//     attempt blocks for longer than several poll intervals, while an actionable
-//     open-PR task exists in tasks/done.
-//   - Process: the refactored normal-daemon scheduler runs the maintenance
-//     runner (PR comment polling + cleanup) on its own ticker, independent of
-//     the long-running execution runner.
-//   - Observable result: `gh api .../comments` polling for the done open-PR task
-//     runs (and repeats on the poll interval) while the executor attempt is still
-//     in progress, instead of being blocked until the executor exits.
-//
-// @lane: integration
-// @category: core-functionality
-// @dependency: daemon scheduler, queue, fake executor (claude), fake gh
-// @complexity: high
-// @roi: score=100 business_value=10 user_frequency=10 legal=false defect_detection=10
-//   (primary acceptance behavior of the feature; currently unprotected because the
-//   existing daemon cycle runs polling, cleanup, then execution serially and
-//   processAvailable waits on the executor goroutine before the next cycle.)
-// @timing: implement alongside the daemon scheduler refactor.
-//
-// Skeleton constraints (must stay satisfied):
-//   - Completion: this skeleton carries a real act+assert body rather than a
-//     placeholder; it must not be reduced back to an unimplemented stub.
-//   - Mixed-state timing: use a cancelable context and a short PollInterval so
-//     the maintenance runner ticks several times during the blocking executor
-//     attempt.
-//   - Assertion: prove at least two comment-poll invocations are recorded while
-//     the executor-start marker still exists and before the executor attempt is
-//     released, so polling is shown to run independently of execution.
-
 import (
 	"bytes"
 	"context"
@@ -50,6 +13,8 @@ import (
 	"github.com/shinpr/galley/internal/task"
 )
 
+// AC1: a normal daemon keeps polling PR comments on its interval while a long
+// executor attempt is still running.
 func TestNormalDaemonPollsPRCommentsWhileExecutorAttemptIsRunning(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)

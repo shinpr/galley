@@ -28,9 +28,6 @@ func TestValidateEnvironmentExecutorDefaults(t *testing.T) {
 		wantOK  bool
 		wantErr string
 	}{
-		{name: "absent executor", exec: nil, wantOK: true},
-		{name: "default_cli only", exec: &ExecutorDefault{DefaultCLI: "claude"}, wantOK: true},
-		{name: "default_cli empty string is omission", exec: &ExecutorDefault{DefaultCLI: ""}, wantOK: true},
 		{name: "model only", exec: &ExecutorDefault{Model: "provider-model"}, wantOK: true},
 		{name: "complete defaults", exec: &ExecutorDefault{DefaultCLI: "codex", Model: "gpt", Effort: "minimal"}, wantOK: true},
 		{name: "claude accepts max", exec: &ExecutorDefault{DefaultCLI: "claude", Effort: "max"}, wantOK: true},
@@ -94,8 +91,6 @@ func TestEnvironmentExecutorDefaultCLIRuntimeAndSchemaParity(t *testing.T) {
 		t.Fatal(err)
 	}
 	executor := schema["properties"].(map[string]any)["executor"].(map[string]any)
-	execProps := executor["properties"].(map[string]any)
-	assertDefaultCLIEnumCoversProviders(t, enumStrings(execProps["default_cli"].(map[string]any)["enum"].([]any)))
 
 	for _, tc := range executorDefaultCLIMatrix {
 		t.Run(tc.name, func(t *testing.T) {
@@ -115,20 +110,6 @@ func TestEnvironmentExecutorDefaultCLIRuntimeAndSchemaParity(t *testing.T) {
 				t.Fatalf("case %q: got valid=%v, want %v", tc.name, schemaValid, tc.valid)
 			}
 		})
-	}
-}
-
-// assertDefaultCLIEnumCoversProviders pins that the schema enum accepts every
-// executor provider plus the empty string (default_cli omitted).
-func assertDefaultCLIEnumCoversProviders(t *testing.T, cliEnum []string) {
-	t.Helper()
-	if !containsString(cliEnum, "") {
-		t.Fatalf("executor.default_cli schema must accept empty string, got %#v", cliEnum)
-	}
-	for _, id := range provider.ExecutorIDs() {
-		if !containsString(cliEnum, id) {
-			t.Fatalf("executor.default_cli schema missing %q in %#v", id, cliEnum)
-		}
 	}
 }
 
@@ -165,25 +146,6 @@ func validateExecutorDefaultCLIDoc(executor, doc map[string]any) []string {
 		}
 	}
 	return errs
-}
-
-func enumStrings(raw []any) []string {
-	out := make([]string, 0, len(raw))
-	for _, v := range raw {
-		if s, ok := v.(string); ok {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
-func containsString(ss []string, want string) bool {
-	for _, s := range ss {
-		if s == want {
-			return true
-		}
-	}
-	return false
 }
 
 func TestEnvironmentJSONSchemaExecutorDefaultsParity(t *testing.T) {

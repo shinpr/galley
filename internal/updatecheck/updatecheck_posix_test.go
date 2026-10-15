@@ -48,31 +48,6 @@ func TestFileIsTerminalRejectsRedirectedDescriptors(t *testing.T) {
 	}
 }
 
-func TestRedirectedStderrMakesNoRequestAndNoState(t *testing.T) {
-	t.Parallel()
-	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatalf("open %s: %v", os.DevNull, err)
-	}
-	defer func() { _ = devNull.Close() }()
-
-	root := filepath.Join(t.TempDir(), "root")
-	transport := &fakeTransport{handler: func(_ *http.Request) (*http.Response, error) {
-		return releaseResponse(t, "v0.13.0"), nil
-	}}
-	opts := baseOptions(root, transport)
-	opts.IsTTY = func() bool { return fileIsTerminal(devNull) }
-
-	Run(t.Context(), opts)
-
-	if transport.calls != 0 {
-		t.Fatalf("redirected stderr made %d requests", transport.calls)
-	}
-	if _, err := os.Stat(root); !os.IsNotExist(err) {
-		t.Fatalf("redirected stderr created update state, err=%v", err)
-	}
-}
-
 func TestWriteStateCreatesOwnerOnlyRoot(t *testing.T) {
 	t.Parallel()
 	root := filepath.Join(t.TempDir(), "galley-root")

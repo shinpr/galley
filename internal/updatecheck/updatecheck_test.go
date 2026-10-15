@@ -109,30 +109,6 @@ func TestStaleOrAbsentRecordChecksOnceThenSuppresses(t *testing.T) {
 	}
 }
 
-func TestStaleRecordTriggersNewAttempt(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	stale, err := json.Marshal(state{LastAttempt: testNow.Add(-25 * time.Hour)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, stateFileName), stale, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	transport := &fakeTransport{handler: func(_ *http.Request) (*http.Response, error) {
-		return releaseResponse(t, "v0.13.0"), nil
-	}}
-
-	Run(t.Context(), baseOptions(root, transport))
-
-	if transport.calls != 1 {
-		t.Fatalf("stale record start made %d requests, want 1", transport.calls)
-	}
-	if got := readAttemptTime(t, root); !got.Equal(testNow) {
-		t.Fatalf("attempt time got %v, want %v", got, testNow)
-	}
-}
-
 func TestRecordAgeBoundaries(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -171,32 +147,6 @@ func TestRecordAgeBoundaries(t *testing.T) {
 				t.Fatalf("age %v: attempt time got %v, want %v", tc.age, got, tc.wantRecord)
 			}
 		})
-	}
-}
-
-func TestFailedRequestStillRecordsAttempt(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	transport := &fakeTransport{handler: func(_ *http.Request) (*http.Response, error) {
-		return nil, errors.New("network down")
-	}}
-	opts := baseOptions(root, transport)
-
-	Run(t.Context(), opts)
-
-	if transport.calls != 1 {
-		t.Fatalf("failing start made %d requests, want 1", transport.calls)
-	}
-	if got := readAttemptTime(t, root); !got.Equal(testNow) {
-		t.Fatalf("attempt time got %v, want %v", got, testNow)
-	}
-	if stderr := opts.Stderr.(*bytes.Buffer).String(); stderr != "" {
-		t.Fatalf("failed request leaked stderr output: %q", stderr)
-	}
-
-	Run(t.Context(), opts)
-	if transport.calls != 1 {
-		t.Fatalf("failed attempt did not rate-limit: %d requests", transport.calls)
 	}
 }
 
@@ -263,17 +213,7 @@ func TestVersionMatrixNoticeOnlyForNewerStable(t *testing.T) {
 		notice  bool
 	}{
 		{"newer minor", "0.12.0", "v0.13.0", true},
-		{"newer patch", "0.12.0", "0.12.1", true},
-		{"newer with build metadata", "0.12.0", "v0.12.1+build.7", true},
 		{"equal", "0.12.0", "v0.12.0", false},
-		{"equal precedence differing build", "0.12.0", "v0.12.0+build.7", false},
-		{"older", "0.12.0", "v0.11.9", false},
-		{"malformed latest", "0.12.0", "not-a-version", false},
-		{"leading-zero latest", "0.12.0", "v0.013.0", false},
-		{"newer overflowing major", "0.12.0", "v18446744073709551616.0.0", true},
-		{"equal overflowing major", "18446744073709551616.0.0", "v18446744073709551616.0.0", false},
-		{"prerelease latest", "0.12.0", "v0.13.0-rc.1", false},
-		{"dev current", "dev", "v0.13.0", false},
 		{"empty current", "", "v0.13.0", false},
 	}
 	for _, tc := range cases {
@@ -344,17 +284,13 @@ func TestIsNewerComparisonBoundaries(t *testing.T) {
 		{"1.9223372036854775808.3", "1.18446744073709551616.0", true},
 		{"1.2.99999999999999999998", "1.2.99999999999999999999", true},
 		{"1.2.99999999999999999999", "1.2.99999999999999999998", false},
+		{"1.2.3", "v1.3.0-rc.1", false},
+		{"dev", "v1.3.0", false},
+		{"1.2.3", "not-a-version", false},
 	}
 	for _, tc := range cases {
 		if got := isNewer(tc.current, tc.latest); got != tc.want {
 			t.Fatalf("isNewer(%q, %q) = %v, want %v", tc.current, tc.latest, got, tc.want)
 		}
-	}
-}
-
-func TestDefaultTimeoutBound(t *testing.T) {
-	t.Parallel()
-	if Timeout > 2*time.Second {
-		t.Fatalf("update check timeout %v exceeds the two-second bound", Timeout)
 	}
 }

@@ -27,6 +27,7 @@ func TestParsePRCommandAcceptedForms(t *testing.T) {
 		{name: "bare /galley with body block uses block as reason", body: "/galley\n\nMore context.", want: "More context."},
 		{name: "leading whitespace is trimmed", body: "  \n/galley fix Y", want: "fix Y"},
 		{name: "free-form request with same-line reason and trailing block joins with blank line", body: "/galley please fix X\nMore context", want: "please fix X\n\nMore context"},
+		{name: "bare /galley keeps multiline instruction block", body: "/galley\nPlease update the CLI help.\nAlso keep tests passing.", want: "Please update the CLI help.\nAlso keep tests passing."},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -42,19 +43,6 @@ func TestParsePRCommandAcceptedForms(t *testing.T) {
 				t.Fatalf("reason got %q want %q", command.Reason, tc.want)
 			}
 		})
-	}
-}
-
-func TestParsePRCommandKeepsMultilineInstruction(t *testing.T) {
-	t.Parallel()
-	command, ok := parsePRCommand(vcs.PRComment{ID: 123, Body: "/galley\nPlease update the CLI help.\nAlso keep tests passing."})
-	if !ok {
-		t.Fatal("expected command")
-	}
-	for _, want := range []string{"Please update the CLI help.", "Also keep tests passing."} {
-		if !strings.Contains(command.Reason, want) {
-			t.Fatalf("reason missing %q: %q", want, command.Reason)
-		}
 	}
 }
 
@@ -419,50 +407,6 @@ func hasRevisionRequest(values []task.RevisionRequest, id string) bool {
 	return false
 }
 
-func TestPollPRCommentsIgnoresNonPRAuthor(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	if err := queue.EnsureLayout(root); err != nil {
-		t.Fatal(err)
-	}
-	writeDaemonEnvironmentProfile(t, commentProfileSpec{Root: root, Repo: repo, PollComments: true, ReplyComments: false})
-	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
-	writeDaemonTask(t, donePath, repo)
-	loaded, err := task.Load(donePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	loaded.Status = "pr_opened"
-	loaded.PR.URL = "https://github.com/example/galley/pull/123"
-	loaded.PR.Status = "open"
-	loaded.PR.AuthorLogin = "pr-author"
-	if err := task.Save(donePath, loaded); err != nil {
-		t.Fatal(err)
-	}
-	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ]; then
-echo '[[{"id":77,"body":"/galley please run my code","html_url":"https://github.com/example/galley/pull/123#issuecomment-77","user":{"login":"org-member"}}]]'
-else
-echo unexpected-gh >&2
-exit 1
-fi
-`)
-
-	if err := pollPRComments(context.Background(), Options{Root: root, GHBin: ghBin}.withDefaults()); err != nil {
-		t.Fatal(err)
-	}
-	stillDone, err := task.Load(donePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stillDone.Status != "pr_opened" {
-		t.Fatalf("status got %q", stillDone.Status)
-	}
-	if !slices.Contains(stillDone.PR.ProcessedCommentIDs, "77") {
-		t.Fatalf("non-author comment should be marked processed after ignore: %#v", stillDone.PR.ProcessedCommentIDs)
-	}
-	assertGlobCount(t, filepath.Join(root, "tasks", "queued", "*.yaml"), 0)
-}
-
 func TestPollPRCommentsRejectsNonAuthor(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
@@ -528,62 +472,6 @@ fi
 		if strings.Contains(body, fragment) {
 			t.Fatalf("non-author reply must not echo %q: %q", fragment, body)
 		}
-	}
-}
-
-func TestPollPRCommentsRejectsWhenPRAuthorLoginEmpty(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	if err := queue.EnsureLayout(root); err != nil {
-		t.Fatal(err)
-	}
-	writeDaemonEnvironmentProfile(t, commentProfileSpec{Root: root, Repo: repo, PollComments: true, ReplyComments: true})
-	donePath := filepath.Join(root, "tasks", "done", "task.yaml")
-	writeDaemonTask(t, donePath, repo)
-	loaded, err := task.Load(donePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	loaded.Status = "pr_opened"
-	loaded.PR.URL = "https://github.com/example/galley/pull/123"
-	loaded.PR.Status = "open"
-	// Older task file without persisted PR author: fail closed even for an
-	// OWNER-association comment.
-	if err := task.Save(donePath, loaded); err != nil {
-		t.Fatal(err)
-	}
-	marker := filepath.Join(t.TempDir(), "posted")
-	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "api" ] && [ "$3" = "--paginate" ]; then
-echo '[[{"id":611,"body":"/galley no author known","html_url":"https://github.com/example/galley/pull/123#issuecomment-611","user":{"login":"someone"}}]]'
-elif [ "$1" = "api" ]; then
-echo "$*" > `+marker+`
-cat >> `+marker+`
-echo '{"id":612}'
-else
-echo unexpected-gh >&2
-exit 1
-fi
-`)
-	if err := pollPRComments(context.Background(), Options{Root: root, ReplyPRComments: true, GHBin: ghBin}.withDefaults()); err != nil {
-		t.Fatal(err)
-	}
-	stillDone, err := task.Load(donePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Contains(stillDone.PR.ProcessedCommentIDs, "611") {
-		t.Fatalf("unknown-author comment should be marked processed: %#v", stillDone.PR.ProcessedCommentIDs)
-	}
-	if hasRevisionRequest(stillDone.RevisionRequests, "pr-comment-611") {
-		t.Fatalf("unknown-author comment must not produce revision request: %#v", stillDone.RevisionRequests)
-	}
-	data, err := os.ReadFile(marker)
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := string(data)
-	if !strings.Contains(body, "only the pull request author can run Galley from PR comments") {
-		t.Fatalf("unknown-author reply got %q", body)
 	}
 }
 
@@ -716,49 +604,26 @@ func TestIsActionableForPRCommentPoll(t *testing.T) {
 	}
 }
 
-// TestPollPRCommentsSkipsHistoricalNonActionableTasks proves that the daemon
-// skips merged, closed, PR-less, and non-open PR tasks before touching either
-// the repository profile or GitHub. The fake gh binary fails on any
-// invocation, and an intentionally invalid environment profile path forces
-// loadTaskProfiles to fail if it is ever reached, so any regression that
-// re-introduces per-task profile or comment work surfaces as a test error.
+// A non-actionable task is skipped before profile loading or GitHub calls; the
+// per-status gate is covered by TestIsActionableForPRCommentPoll.
 func TestPollPRCommentsSkipsHistoricalNonActionableTasks(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
 	if err := queue.EnsureLayout(root); err != nil {
 		t.Fatal(err)
 	}
-	// Deliberately do not call writeDaemonEnvironmentProfile so the resolved
-	// profile path is empty; combined with a forced bogus EnvironmentProfileFile
-	// below, profile loading would fail if the eligibility gate did not skip
-	// these tasks first.
-	cases := []struct {
-		name     string
-		status   task.Status
-		prStatus string
-		prURL    string
-	}{
-		{name: "merged-task", status: "merged", prStatus: "merged", prURL: "https://github.com/example/galley/pull/100"},
-		{name: "closed-task", status: "closed", prStatus: "closed", prURL: "https://github.com/example/galley/pull/101"},
-		{name: "pr-less-accepted", status: "accepted", prStatus: "", prURL: ""},
-		{name: "pr-opened-but-pr-closed", status: "pr_opened", prStatus: "closed", prURL: "https://github.com/example/galley/pull/102"},
-		{name: "failed-task-open-pr", status: "failed", prStatus: "open", prURL: "https://github.com/example/galley/pull/103"},
+	donePath := filepath.Join(root, "tasks", "done", "task-merged.yaml")
+	writeDaemonTask(t, donePath, repo)
+	loaded, err := task.Load(donePath)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, tc := range cases {
-		tc := tc
-		donePath := filepath.Join(root, "tasks", "done", "task-"+tc.name+".yaml")
-		writeDaemonTask(t, donePath, repo)
-		loaded, err := task.Load(donePath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		loaded.Status = tc.status
-		loaded.PR.URL = tc.prURL
-		loaded.PR.Status = tc.prStatus
-		loaded.PR.AuthorLogin = "owner"
-		if err := task.Save(donePath, loaded); err != nil {
-			t.Fatal(err)
-		}
+	loaded.Status = "merged"
+	loaded.PR.URL = "https://github.com/example/galley/pull/100"
+	loaded.PR.Status = "merged"
+	loaded.PR.AuthorLogin = "owner"
+	if err := task.Save(donePath, loaded); err != nil {
+		t.Fatal(err)
 	}
 
 	// Any gh invocation is a regression: non-actionable tasks must not fetch

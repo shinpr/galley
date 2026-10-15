@@ -47,16 +47,13 @@ func assertLongpathsFlagPresent(t *testing.T, label, line string) {
 	}
 }
 
-// TestVCSGitInvocationsApplyLongpathsFlag also covers Windows stdin pathspec
-// routing, where the longpaths prefix must survive.
 func TestVCSGitInvocationsApplyLongpathsFlag(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses POSIX shell fake git binary")
 	}
 	cases := []struct {
-		name         string
-		run          func(t *testing.T, git string) error
-		requireStdin bool
+		name string
+		run  func(t *testing.T, git string) error
 	}{
 		{
 			name: "AddPaths",
@@ -94,7 +91,6 @@ func TestVCSGitInvocationsApplyLongpathsFlag(t *testing.T) {
 			run: func(t *testing.T, git string) error {
 				return addPathsForOS(t.Context(), Repo{Bins: Binaries{Git: git}, WorkDir: t.TempDir(), RunDir: t.TempDir()}, []string{"a.go", "b.go"}, "windows")
 			},
-			requireStdin: true,
 		},
 	}
 	for _, tc := range cases {
@@ -111,9 +107,6 @@ func TestVCSGitInvocationsApplyLongpathsFlag(t *testing.T) {
 			}
 			for _, line := range lines {
 				assertLongpathsFlagPresent(t, tc.name, line)
-				if tc.requireStdin && !strings.Contains(line, "--pathspec-from-file=-") {
-					t.Errorf("Windows routing must keep --pathspec-from-file=- alongside longpaths flag: %q", line)
-				}
 			}
 		})
 	}

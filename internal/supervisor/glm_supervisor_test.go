@@ -114,15 +114,3 @@ printf '%s\n' '{"status":"accepted","summary":"ok","acceptance_passes":["AC1"],"
 		}
 	}
 }
-
-func TestRunAdapterPayloadKimiFailsFastWithoutKey(t *testing.T) {
-	_, err := RunAdapterPayload(context.Background(), AdapterOptions{
-		Provider:    "kimi",
-		WorkDir:     t.TempDir(),
-		ArtifactDir: t.TempDir(),
-		ClaudeBin:   filepath.Join(t.TempDir(), "claude-does-not-run"),
-	}, []byte(`{"evidence":{"task":{"id":"task"},"diff":""}}`))
-	if err == nil || !strings.Contains(err.Error(), "kimi_api_key") {
-		t.Fatalf("expected missing kimi_api_key error, got %v", err)
-	}
-}

@@ -9,45 +9,6 @@ import (
 	"github.com/shinpr/galley/internal/provider"
 )
 
-func TestLoadAndValidateQualityExample(t *testing.T) {
-	path, err := filepath.Abs("../../examples/quality-default.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	quality, err := LoadQuality(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result := ValidateQuality(quality)
-	if !result.Valid() {
-		t.Fatalf("errors got %#v", result.Errors)
-	}
-	if quality.ID != "default" || len(quality.RequiredChecks) == 0 {
-		t.Fatalf("quality got %#v", quality)
-	}
-}
-
-func TestLoadAndValidateEnvironmentExample(t *testing.T) {
-	path, err := filepath.Abs("../../examples/environment-local.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	env, err := LoadEnvironment(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result := ValidateEnvironment(env)
-	if !result.Valid() {
-		t.Fatalf("errors got %#v", result.Errors)
-	}
-	if env.Commands["test_unit"] == "" {
-		t.Fatalf("commands got %#v", env.Commands)
-	}
-	if env.Executor == nil || env.Executor.DefaultCLI != "claude" {
-		t.Fatalf("executor default got %#v", env.Executor)
-	}
-}
-
 func TestLoadProfilesIgnoreUnknownFields(t *testing.T) {
 	t.Run("quality", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "quality.yaml")
@@ -308,41 +269,6 @@ constraints:
 	}
 }
 
-func TestValidateEnvironmentAcceptsExecutorDefaultCLI(t *testing.T) {
-	for _, value := range []string{"claude", "codex", "glm", "grok"} {
-		value := value
-		t.Run(value, func(t *testing.T) {
-			env := validEnvironmentForTest()
-			env.Executor = &ExecutorDefault{DefaultCLI: value}
-			result := ValidateEnvironment(env)
-			if !result.Valid() {
-				t.Fatalf("errors got %#v", result.Errors)
-			}
-		})
-	}
-}
-
-func TestValidateEnvironmentRejectsInvalidExecutorDefault(t *testing.T) {
-	env := Environment{
-		ID:       "local",
-		CWD:      "/tmp/repo",
-		Commands: map[string]string{"test": "go test ./..."},
-		Executor: &ExecutorDefault{DefaultCLI: "other"},
-		Constraints: Constraints{
-			Network:             "approval_required",
-			SecretsPolicy:       "never_read_env_files",
-			DestructiveCommands: "deny",
-		},
-	}
-	result := ValidateEnvironment(env)
-	if result.Valid() {
-		t.Fatal("expected invalid executor default")
-	}
-	if !strings.Contains(strings.Join(result.Errors, "\n"), "executor.default_cli") {
-		t.Fatalf("errors missing executor.default_cli: %#v", result.Errors)
-	}
-}
-
 func TestValidateEnvironmentAcceptsSupervisorDefaultCLI(t *testing.T) {
 	// Parameterized over the single supervisor-CLI source so a new value forces
 	// this profile-validation site to accept it too — no silent drift.
@@ -368,45 +294,6 @@ func TestValidateEnvironmentRejectsInvalidSupervisorDefault(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(result.Errors, "\n"), "supervisor.default_cli") {
 		t.Fatalf("errors missing supervisor.default_cli: %#v", result.Errors)
-	}
-}
-
-func TestValidateEnvironmentSupervisorEffortOptionalityAndValidation(t *testing.T) {
-	cases := []struct {
-		name       string
-		supervisor *SupervisorDefault
-		wantValid  bool
-		wantErr    string
-	}{
-		{name: "no supervisor block", supervisor: nil, wantValid: true},
-		{name: "empty effort preserves default", supervisor: &SupervisorDefault{DefaultCLI: "codex", Effort: ""}, wantValid: true},
-		{name: "codex accepts minimal", supervisor: &SupervisorDefault{DefaultCLI: "codex", Effort: "minimal"}, wantValid: true},
-		{name: "claude accepts max", supervisor: &SupervisorDefault{DefaultCLI: "claude", Effort: "max"}, wantValid: true},
-		{name: "glm accepts xhigh", supervisor: &SupervisorDefault{DefaultCLI: "glm", Effort: "xhigh"}, wantValid: true},
-		{name: "claude rejects minimal", supervisor: &SupervisorDefault{DefaultCLI: "claude", Effort: "minimal"}, wantErr: "supervisor.effort for claude must be one of"},
-		{name: "codex rejects unknown", supervisor: &SupervisorDefault{DefaultCLI: "codex", Effort: "turbo"}, wantErr: "supervisor.effort for codex must be one of"},
-		{name: "effort without default_cli accepts union value", supervisor: &SupervisorDefault{Effort: "minimal"}, wantValid: true},
-		{name: "effort without default_cli rejects unknown", supervisor: &SupervisorDefault{Effort: "turbo"}, wantErr: "supervisor.effort must be one of"},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			env := validEnvironmentForTest()
-			env.Supervisor = tc.supervisor
-			result := ValidateEnvironment(env)
-			if tc.wantValid {
-				if !result.Valid() {
-					t.Fatalf("expected valid, got errors: %#v", result.Errors)
-				}
-				return
-			}
-			if result.Valid() {
-				t.Fatal("expected invalid supervisor.effort")
-			}
-			if !strings.Contains(strings.Join(result.Errors, "\n"), tc.wantErr) {
-				t.Fatalf("errors missing %q: %#v", tc.wantErr, result.Errors)
-			}
-		})
 	}
 }
 

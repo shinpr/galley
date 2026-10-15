@@ -94,18 +94,12 @@ func TestRepeatedStopCommandsUseOneStopOperation(t *testing.T) {
 	}
 }
 
-func TestTimedOutStopIntentPreventsAnotherSignal(t *testing.T) {
+func TestReplacementDaemonClaimsIndependentStopIntent(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "galley-daemon.pid")
 	target := daemonctl.PIDFile{PID: 42, StartedAt: "first", TokenHash: "token"}
 	path, leader, err := claimStopIntent(pidFile, target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !leader {
-		t.Fatal("first caller must own the stop intent")
-	}
-	if _, leader, err := claimStopIntent(pidFile, target); err != nil || leader {
-		t.Fatalf("second claim = leader:%v err:%v, want follower", leader, err)
+	if err != nil || !leader {
+		t.Fatalf("first claim = leader:%v err:%v, want leader", leader, err)
 	}
 
 	replacement := target

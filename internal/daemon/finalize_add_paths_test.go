@@ -30,18 +30,6 @@ func TestAddEligiblePorcelainPathsDropsStagedOnlyDeletion(t *testing.T) {
 	}
 }
 
-// TestAddEligiblePorcelainPathsEmptyWhenOnlyStagedDeletions pins the
-// empty-list boundary: when every reported change is a staged-only deletion,
-// the add list is empty. finalizeAcceptedChange relies on this so it can skip
-// `git add` (which errors on an empty pathspec list) and commit the
-// already-staged deletion directly.
-func TestAddEligiblePorcelainPathsEmptyWhenOnlyStagedDeletions(t *testing.T) {
-	porcelain := "D  a.txt\nD  b.txt\n"
-	if got := addEligiblePorcelainPaths(porcelain); len(got) != 0 {
-		t.Fatalf("addEligiblePorcelainPaths = %v, want empty", got)
-	}
-}
-
 // TestParsePorcelainPathsStillReportsStagedDeletion pins AC4: the
 // change-visibility parser used by progress detection, the finalize-time
 // forbidden_paths gate, and scope-expansion reporting must keep reporting

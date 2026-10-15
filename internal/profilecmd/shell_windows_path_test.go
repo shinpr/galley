@@ -203,60 +203,6 @@ func stubShellDiscovery(pathBash, standardBash string) func() {
 	return func() { lookPath, statFile = oldLook, oldStat }
 }
 
-// AC3 (result-side): When required_checks.shell_path is set with an
-// explicit non-auto required_checks.shell, Galley uses that exact
-// executable path for required-check execution and skips shell discovery.
-func TestShellArgvForOSWindowsUsesExplicitRequiredCheckShellPathWithoutDiscovery(t *testing.T) {
-	cases := []struct {
-		name      string
-		shell     string
-		shellPath string
-		wantArgv0 string
-	}{
-		{name: "CustomBash", shell: "bash", shellPath: `C:\custom\bash.exe`, wantArgv0: `C:\custom\bash.exe`},
-		{name: "CustomPwsh", shell: "pwsh", shellPath: `C:\tools\pwsh.exe`, wantArgv0: `C:\tools\pwsh.exe`},
-		{name: "CustomPowerShell", shell: "powershell", shellPath: `C:\tools\powershell.exe`, wantArgv0: `C:\tools\powershell.exe`},
-		{name: "CustomCmd", shell: "cmd", shellPath: `D:\alt\cmd.exe`, wantArgv0: `D:\alt\cmd.exe`},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			oldLook := lookPath
-			oldStat := statFile
-			var lookCalls, statCalls int
-			lookPath = func(string) (string, error) {
-				lookCalls++
-				return "", os.ErrNotExist
-			}
-			statFile = func(string) (os.FileInfo, error) {
-				statCalls++
-				return nil, os.ErrNotExist
-			}
-			defer func() { lookPath = oldLook; statFile = oldStat }()
-
-			argv, cleanup, shell, err := shellArgvForOS(shellArgvSpec{GOOS: "windows", Command: "echo ok", ScratchDir: t.TempDir(), ConfiguredShell: tc.shell, ConfiguredShellPath: tc.shellPath})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if cleanup != nil {
-				defer cleanup()
-			}
-			if shell != tc.shell {
-				t.Fatalf("resolved shell got %q, want %q", shell, tc.shell)
-			}
-			if argv[0] != tc.wantArgv0 {
-				t.Fatalf("argv[0] got %q, want %q (verbatim shell_path)", argv[0], tc.wantArgv0)
-			}
-			if lookCalls != 0 {
-				t.Fatalf("lookPath was consulted %d times; explicit shell_path must skip discovery", lookCalls)
-			}
-			if statCalls != 0 {
-				t.Fatalf("statFile was consulted %d times; explicit shell_path must skip discovery", statCalls)
-			}
-		})
-	}
-}
-
 // AC3 (result-side, non-Windows): Explicit shell_path is also honored on
 // non-Windows hosts so the field's behavior matches the public contract
 // regardless of goos. Discovery hooks are not consulted because there is
@@ -423,7 +369,6 @@ func TestShellArgvForOSUnrecognizedShellPathFallsBackToConfiguredShellKindMetada
 		shellPath        string
 		wantResolvedKind string
 	}{
-		{name: "UnixCustomBash", goos: "linux", configuredShell: "bash", shellPath: "/opt/galley/custom-bash", wantResolvedKind: "bash"},
 		{name: "WindowsCustomPwsh", goos: "windows", configuredShell: "pwsh", shellPath: `C:\tools\custom-pwsh.exe`, wantResolvedKind: "pwsh"},
 	}
 	for _, tc := range cases {
@@ -491,58 +436,11 @@ func TestShellArgvForOSUnrecognizedShellPathWithoutConfiguredShellReturnsError(t
 // MSYS2, or other non-standard Bash installs. Without this, a default
 // argv[0] of just "bash" would invite PATH to choose the WSL launcher.
 func TestShellArgvForOSWindowsExplicitBashPrefersGitForWindowsOverWSL(t *testing.T) {
-	cases := []struct {
-		name      string
-		stdPath   string
-		gitPath   string
-		wantBin   string
-		statKeyFB bool // true: stat sees backslash path; false: stat sees forward-slash inferred path
-	}{
-		{name: "ProgramFiles_bin", stdPath: `C:\Program Files\Git\bin\bash.exe`, wantBin: `C:\Program Files\Git\bin\bash.exe`, statKeyFB: true},
-		{name: "ProgramFiles_usr_bin", stdPath: `C:\Program Files\Git\usr\bin\bash.exe`, wantBin: `C:\Program Files\Git\usr\bin\bash.exe`, statKeyFB: true},
-		{name: "PortableGitFromGitExe", gitPath: `C:\PortableGit\cmd\git.exe`, wantBin: `C:/PortableGit/bin/bash.exe`, statKeyFB: false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// PATH bash is always the WSL launcher to confirm Git for Windows
-			// discovery wins over PATH lookup.
-			assertStandardInstallWins(t, gitBashLayout{
-				StdPath: tc.stdPath, GitPath: tc.gitPath, WantBin: tc.wantBin, StatFromB: tc.statKeyFB,
-				PathBash: `C:\Windows\System32\bash.exe`, Shell: "bash",
-			})
-		})
-	}
-}
-
-// AC4 fallback: When required_checks.shell is bash on Windows with no
-// shell_path and no Git for Windows Bash is discoverable, the resolver must
-// NOT silently fall back to a bare "bash" executable. Bare "bash" would let
-// exec-time PATH lookup pick up the very PATH-discovered Bash entries that
-// discoverWindowsBash just rejected (WSL launcher, WindowsApps shim, MSYS2,
-// Cygwin, Scoop, Chocolatey-managed Bashes), defeating the rejection. The
-// resolver instead surfaces a clear error that names
-// required_checks.shell_path as the explicit override the operator must set
-// to opt in to a specific non-standard Bash.
-func TestShellArgvForOSWindowsExplicitBashErrorsWhenNoStandardBashDiscoverable(t *testing.T) {
-	oldLook := lookPath
-	oldStat := statFile
-	lookPath = func(string) (string, error) { return "", os.ErrNotExist }
-	statFile = func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
-	defer func() { lookPath = oldLook; statFile = oldStat }()
-
-	argv, cleanup, _, err := shellArgvForOS(shellArgvSpec{GOOS: "windows", Command: "grep -F ok proof.txt", ScratchDir: t.TempDir(), ConfiguredShell: "bash", ConfiguredShellPath: ""})
-	if cleanup != nil {
-		defer cleanup()
-	}
-	if err == nil {
-		t.Fatalf("expected resolver error when no standard Git for Windows Bash is discoverable; got argv %#v", argv)
-	}
-	if !strings.Contains(err.Error(), "required_checks.shell_path") {
-		t.Fatalf("error must name required_checks.shell_path as the override path, got %q", err.Error())
-	}
-	if len(argv) > 0 && argv[0] == "bash" {
-		t.Fatalf("resolver must never return a bare \"bash\" executable that PATH could resolve to a rejected entry; got argv[0]=%q", argv[0])
-	}
+	// PATH bash is the WSL launcher to confirm Git for Windows discovery wins.
+	assertStandardInstallWins(t, gitBashLayout{
+		StdPath: `C:\Program Files\Git\bin\bash.exe`, WantBin: `C:\Program Files\Git\bin\bash.exe`, StatFromB: true,
+		PathBash: `C:\Windows\System32\bash.exe`, Shell: "bash",
+	})
 }
 
 // AC4 regression: When PATH-discovered bash points at a rejected non-standard

@@ -40,53 +40,24 @@ func TestApplyReviewProgressReplacesPassLists(t *testing.T) {
 	}
 }
 
-func TestReconcileReviewProgressResetsWhenReviewContractChanges(t *testing.T) {
-	profiles := profile.Bundle{Quality: &profile.Quality{ReviewDimensions: []profile.ReviewDimension{{ID: "quality-a", Pass: "original"}}}}
-	loaded := task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "original", Verification: "verify"}}}
-	ApplyReviewProgress(&loaded, profiles, Verdict{
-		AcceptancePasses: []string{"AC1"},
-		QualityPasses:    []string{"quality-a"},
-	})
-
-	loaded.AcceptanceCriteria[0].Text = "changed"
-	ReconcileReviewProgress(&loaded, profiles)
-
-	if loaded.ReviewProgress == nil {
-		t.Fatal("review progress is nil")
-	}
-	if len(loaded.ReviewProgress.Acceptance) != 0 || len(loaded.ReviewProgress.Quality) != 0 {
-		t.Fatalf("stale passes retained: %#v", loaded.ReviewProgress)
-	}
-	if loaded.AcceptanceCriteria[0].Status != "pending" {
-		t.Fatalf("AC1 status = %q", loaded.AcceptanceCriteria[0].Status)
-	}
-}
-
-func TestReconcileReviewProgressDropsPassesWhenQualityContractChanges(t *testing.T) {
-	t.Parallel()
-	profiles := profile.Bundle{Quality: &profile.Quality{
-		ReviewDimensions: []profile.ReviewDimension{{ID: "quality-a", Pass: "original"}},
-	}}
-	loaded := task.Task{AcceptanceCriteria: []task.AcceptanceCriterion{{ID: "AC1", Text: "original", Verification: "verify"}}}
-	ApplyReviewProgress(&loaded, profiles, Verdict{
-		AcceptancePasses: []string{"AC1"},
-		QualityPasses:    []string{"quality-a"},
-	})
-
-	profiles.Quality.ReviewDimensions[0].Pass = "changed"
-	ReconcileReviewProgress(&loaded, profiles)
-
-	if len(loaded.ReviewProgress.Acceptance) != 0 || len(loaded.ReviewProgress.Quality) != 0 {
-		t.Fatalf("passes retained after quality contract change: %#v", loaded.ReviewProgress)
-	}
-}
-
 func TestReconcileReviewProgressDropsPassesWhenReviewInputsChange(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name   string
 		mutate func(*task.Task, *profile.Bundle)
 	}{
+		{
+			name: "acceptance text",
+			mutate: func(value *task.Task, _ *profile.Bundle) {
+				value.AcceptanceCriteria[0].Text = "changed"
+			},
+		},
+		{
+			name: "quality contract",
+			mutate: func(_ *task.Task, profiles *profile.Bundle) {
+				profiles.Quality.ReviewDimensions[0].Pass = "changed"
+			},
+		},
 		{
 			name: "task file",
 			mutate: func(value *task.Task, _ *profile.Bundle) {
@@ -119,19 +90,26 @@ func TestReconcileReviewProgressDropsPassesWhenReviewInputsChange(t *testing.T) 
 					Outputs: []task.AcceptanceSkeletonOutputDef{{ACID: "AC1", Path: "ac1_test.go", Purpose: "verify AC1", ImplementationRequired: true}},
 				}},
 			}
-			profiles := profile.Bundle{Environment: &profile.Environment{
-				Commands:    map[string]string{"tests": "go test ./..."},
-				Constraints: profile.Constraints{Network: "allowed"},
-			}}
+			profiles := profile.Bundle{
+				Environment: &profile.Environment{
+					Commands:    map[string]string{"tests": "go test ./..."},
+					Constraints: profile.Constraints{Network: "allowed"},
+				},
+				Quality: &profile.Quality{ReviewDimensions: []profile.ReviewDimension{{ID: "quality-a", Pass: "original"}}},
+			}
 			ApplyReviewProgress(&loaded, profiles, Verdict{
 				AcceptancePasses: []string{"AC1"},
+				QualityPasses:    []string{"quality-a"},
 			})
 
 			tt.mutate(&loaded, &profiles)
 			ReconcileReviewProgress(&loaded, profiles)
 
-			if len(loaded.ReviewProgress.Acceptance) != 0 {
+			if len(loaded.ReviewProgress.Acceptance) != 0 || len(loaded.ReviewProgress.Quality) != 0 {
 				t.Fatalf("passes retained after %s change: %#v", tt.name, loaded.ReviewProgress)
+			}
+			if loaded.AcceptanceCriteria[0].Status != "pending" {
+				t.Fatalf("AC1 status = %q", loaded.AcceptanceCriteria[0].Status)
 			}
 		})
 	}

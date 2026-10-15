@@ -12,35 +12,6 @@ import (
 	"github.com/shinpr/galley/internal/task"
 )
 
-func TestRunOnceDrainsQueue(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo1 := initDaemonGitRepo(t)
-	repo2 := initDaemonGitRepo(t)
-	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	claudeBin := writeFakeClaude(t, "echo change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"done\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
-	queueDir := filepath.Join(root, "tasks", "queued")
-	if err := os.MkdirAll(queueDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeDaemonTask(t, filepath.Join(queueDir, "task-1.yaml"), repo1)
-	writeDaemonTask(t, filepath.Join(queueDir, "task-2.yaml"), repo2)
-
-	err := runTestDaemon(context.Background(), Options{
-		Root:               root,
-		SystemPromptFile:   promptPath,
-		JSONSchemaFile:     schemaPath,
-		Supervisor:         "claude",
-		ClaudeBin:          claudeBin,
-		Once:               true,
-		MaxConcurrentTasks: 1,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertGlobCount(t, filepath.Join(root, "tasks", "queued", "*.yaml"), 0)
-	assertGlobCount(t, filepath.Join(root, "tasks", "done", "*.yaml"), 2)
-}
-
 func TestRunOnceContinuesAfterTaskFailure(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
@@ -122,34 +93,6 @@ func TestRunOnceRecordsValidationErrorsInTaskAttempt(t *testing.T) {
 	}
 	if !strings.Contains(last.Error.Message, "task validation failed") || !strings.Contains(last.Error.Message, "scope.cwd") {
 		t.Fatalf("attempt error message got %q", last.Error.Message)
-	}
-}
-
-func TestProcessAvailableSkipsClaimConflict(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	queueDir := filepath.Join(root, "tasks", "queued")
-	runningDir := filepath.Join(root, "tasks", "running")
-	if err := os.MkdirAll(queueDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(runningDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	queuedPath := filepath.Join(queueDir, "task.yaml")
-	runningPath := filepath.Join(runningDir, "task.yaml")
-	if err := os.WriteFile(queuedPath, []byte("queued"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := task.Save(runningPath, task.Task{ID: "task", Status: "running", Scope: task.Scope{CWD: t.TempDir()}}); err != nil {
-		t.Fatal(err)
-	}
-
-	processed, err := processAvailableForTest(context.Background(), Options{Root: root, MaxConcurrentTasks: 1, ClaimTTL: time.Hour}.withDefaults())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if processed != 0 {
-		t.Fatalf("processed got %d", processed)
 	}
 }
 

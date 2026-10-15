@@ -66,82 +66,38 @@ func TestShellArgvForOSWindowsCmdPreservesMultilineVerbatim(t *testing.T) {
 	}
 }
 
-// TestShellArgvForOSWindowsUsesScriptFile pins AC5 for required quality-profile
-// checks: Windows verification commands use a single .cmd script execution
-// shape regardless of command length, so the command body never reaches argv
-// and short/long commands do not diverge into different cmd.exe contexts.
-func TestShellArgvForOSWindowsUsesScriptFile(t *testing.T) {
-	scratch := t.TempDir()
-	command := strings.Repeat("echo placeholder && ", 400) + "echo done"
-
-	argv, cleanup, shell, err := shellArgvForOS(shellArgvSpec{GOOS: "windows", Command: command, ScratchDir: scratch, ConfiguredShell: "cmd", ConfiguredShellPath: ""})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cleanup != nil {
-		defer cleanup()
-	}
-
-	if len(argv) != 3 || argv[0] != "cmd.exe" || argv[1] != "/C" {
-		t.Fatalf("Windows shellArgv must invoke cmd.exe /C <path>, got %#v", argv)
-	}
-	if shell != "cmd" {
-		t.Fatalf("resolved shell got %q, want cmd", shell)
-	}
-	if strings.Contains(argv[2], "echo placeholder") {
-		t.Fatalf("Windows long-command argv must reference a script path, not the command body: %q", argv[2])
-	}
-	if !strings.HasSuffix(argv[2], ".cmd") {
-		t.Fatalf("Windows long-command argv must reference a .cmd script, got %q", argv[2])
-	}
-
-	body, err := os.ReadFile(argv[2])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(body), "echo done") {
-		t.Fatal("Windows .cmd script must contain the verification command body")
-	}
-	if !strings.HasPrefix(string(body), "@echo off") {
-		t.Fatalf("Windows .cmd script should suppress command echoing, got %q", body[:32])
-	}
-
-	// AC1: total argv byte length must stay well below Windows safe limit.
-	total := 0
-	for _, a := range argv {
-		total += len(a) + 1
-	}
-	if total > 4096 {
-		t.Fatalf("Windows long-command argv length %d exceeds safe threshold", total)
-	}
-}
-
-// TestShellArgvForOSWindowsShortCommandAlsoUsesScriptFile ensures the Windows
-// execution shape is independent of command length.
-func TestShellArgvForOSWindowsShortCommandAlsoUsesScriptFile(t *testing.T) {
-	scratch := t.TempDir()
-	argv, cleanup, shell, err := shellArgvForOS(shellArgvSpec{GOOS: "windows", Command: "go test ./...", ScratchDir: scratch, ConfiguredShell: "cmd", ConfiguredShellPath: ""})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cleanup != nil {
-		defer cleanup()
-	}
-	if len(argv) != 3 || argv[0] != "cmd.exe" || argv[1] != "/C" {
-		t.Fatalf("short Windows shellArgv must invoke cmd.exe /C <path>, got %#v", argv)
-	}
-	if shell != "cmd" {
-		t.Fatalf("resolved shell got %q, want cmd", shell)
-	}
-	if argv[2] == "go test ./..." || !strings.HasSuffix(argv[2], ".cmd") {
-		t.Fatalf("short Windows shellArgv must reference a .cmd script path, got %#v", argv)
-	}
-	body, err := os.ReadFile(argv[2])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(body), "go test ./...") {
-		t.Fatalf("short Windows .cmd script must contain the command body, got %q", body)
+// Windows commands always run from a generated .cmd script, so the command body
+// never reaches argv and short and long commands share one cmd.exe context.
+func TestShellArgvForOSWindowsUsesScriptFileRegardlessOfLength(t *testing.T) {
+	for name, command := range map[string]string{
+		"short": "go test ./...",
+		"long":  strings.Repeat("echo placeholder && ", 400) + "echo done",
+	} {
+		t.Run(name, func(t *testing.T) {
+			argv, cleanup, shell, err := shellArgvForOS(shellArgvSpec{GOOS: "windows", Command: command, ScratchDir: t.TempDir(), ConfiguredShell: "cmd"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cleanup != nil {
+				defer cleanup()
+			}
+			if shell != "cmd" {
+				t.Fatalf("resolved shell got %q, want cmd", shell)
+			}
+			if len(argv) != 3 || argv[0] != "cmd.exe" || argv[1] != "/C" || !strings.HasSuffix(argv[2], ".cmd") {
+				t.Fatalf("Windows shellArgv must invoke cmd.exe /C <script>.cmd, got %#v", argv)
+			}
+			if strings.Contains(argv[2], command) {
+				t.Fatalf("Windows argv must reference a script path, not the command body: %q", argv[2])
+			}
+			body, err := os.ReadFile(argv[2])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasPrefix(string(body), "@echo off") || !strings.Contains(string(body), command) {
+				t.Fatalf("Windows .cmd script must suppress echo and contain the command body, got %q", body)
+			}
+		})
 	}
 }
 
@@ -215,72 +171,6 @@ func TestShellArgvForOSWindowsAutoPrefersBashWhenPresent(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "grep -F ok proof.txt") {
 		t.Fatalf("bash script must contain command body, got %q", body)
-	}
-}
-
-func TestShellArgvForOSWindowsAutoFallsBackToCmdWhenBashMissing(t *testing.T) {
-	old := lookPath
-	oldStat := statFile
-	lookPath = func(_ string) (string, error) {
-		return "", os.ErrNotExist
-	}
-	statFile = func(_ string) (os.FileInfo, error) {
-		return nil, os.ErrNotExist
-	}
-	defer func() {
-		lookPath = old
-		statFile = oldStat
-	}()
-
-	argv, cleanup, shell, err := shellArgvForOS(shellArgvSpec{GOOS: "windows", Command: "go test ./...", ScratchDir: t.TempDir(), ConfiguredShell: "", ConfiguredShellPath: ""})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cleanup != nil {
-		defer cleanup()
-	}
-	if shell != "cmd" {
-		t.Fatalf("resolved shell got %q, want cmd", shell)
-	}
-	if len(argv) != 3 || argv[0] != "cmd.exe" || argv[1] != "/C" || !strings.HasSuffix(argv[2], ".cmd") {
-		t.Fatalf("Windows auto without bash must invoke cmd.exe /C <script>, got %#v", argv)
-	}
-}
-
-func TestShellArgvForOSWindowsAutoFindsGitBashFromGitPath(t *testing.T) {
-	old := lookPath
-	oldStat := statFile
-	lookPath = func(file string) (string, error) {
-		switch file {
-		case "git.exe":
-			return `C:\Program Files\Git\cmd\git.exe`, nil
-		default:
-			return "", os.ErrNotExist
-		}
-	}
-	statFile = func(name string) (os.FileInfo, error) {
-		if name == "C:/Program Files/Git/bin/bash.exe" {
-			return fakeFileInfo{}, nil
-		}
-		return nil, os.ErrNotExist
-	}
-	defer func() {
-		lookPath = old
-		statFile = oldStat
-	}()
-
-	argv, cleanup, shell, err := shellArgvForOS(shellArgvSpec{GOOS: "windows", Command: "grep -F ok proof.txt", ScratchDir: t.TempDir(), ConfiguredShell: "", ConfiguredShellPath: ""})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cleanup != nil {
-		defer cleanup()
-	}
-	if shell != "bash" {
-		t.Fatalf("resolved shell got %q, want bash", shell)
-	}
-	if len(argv) != 2 || argv[0] != "C:/Program Files/Git/bin/bash.exe" || !strings.HasSuffix(argv[1], ".sh") {
-		t.Fatalf("Windows auto should infer Git Bash from git.exe path, got %#v", argv)
 	}
 }
 

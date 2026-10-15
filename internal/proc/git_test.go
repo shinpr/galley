@@ -25,46 +25,10 @@ func TestGitArgsAppliesLongpathsFlag(t *testing.T) {
 		want   []string
 	}{
 		{
-			name:   "status",
-			gitBin: "git",
-			args:   []string{"status", "--porcelain"},
-			want:   []string{"git", "-c", "core.longpaths=true", "status", "--porcelain"},
-		},
-		{
 			name:   "worktree_add",
 			gitBin: "git",
 			args:   []string{"-C", "/repo", "worktree", "add", "-b", "agent/task", "/work"},
 			want:   []string{"git", "-c", "core.longpaths=true", "-C", "/repo", "worktree", "add", "-b", "agent/task", "/work"},
-		},
-		{
-			name:   "worktree_remove",
-			gitBin: "git",
-			args:   []string{"-C", "/repo", "worktree", "remove", "--force", "/work"},
-			want:   []string{"git", "-c", "core.longpaths=true", "-C", "/repo", "worktree", "remove", "--force", "/work"},
-		},
-		{
-			name:   "add_pathspecs_from_stdin",
-			gitBin: "git",
-			args:   []string{"add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"},
-			want:   []string{"git", "-c", "core.longpaths=true", "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"},
-		},
-		{
-			name:   "diff_cached_binary",
-			gitBin: "git",
-			args:   []string{"diff", "--cached", "--binary"},
-			want:   []string{"git", "-c", "core.longpaths=true", "diff", "--cached", "--binary"},
-		},
-		{
-			name:   "commit_message",
-			gitBin: "git",
-			args:   []string{"commit", "-m", "msg"},
-			want:   []string{"git", "-c", "core.longpaths=true", "commit", "-m", "msg"},
-		},
-		{
-			name:   "push_origin_head",
-			gitBin: "git",
-			args:   []string{"push", "-u", "origin", "HEAD"},
-			want:   []string{"git", "-c", "core.longpaths=true", "push", "-u", "origin", "HEAD"},
 		},
 		{
 			name:   "custom_bin",

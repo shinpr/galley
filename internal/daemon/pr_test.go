@@ -81,10 +81,6 @@ func TestPRTitleTruncatesOnWordBoundary(t *testing.T) {
 		assertMultibyteGoalWithoutWhitespaceFallsBackToRuneCut(t)
 	})
 
-	t.Run("short goal stays untouched", func(t *testing.T) {
-		assertShortGoalStaysUntouched(t)
-	})
-
 	// 4-byte UTF-8 runes such as emoji (🎉 = U+1F389, 4 bytes) can push a
 	// rune-budgeted title above GitHub's 256-byte hard limit. Regression
 	// guard for the byte budget enforcement: 200 emoji is 800 bytes, which
@@ -161,19 +157,6 @@ func assertMultibyteGoalWithoutWhitespaceFallsBackToRuneCut(t *testing.T) {
 	}
 }
 
-func assertShortGoalStaysUntouched(t *testing.T) {
-	t.Helper()
-	t.Parallel()
-	goal := "Tighten PR body status rendering"
-	title := prTitle(task.Task{Goal: goal})
-	if title != goal {
-		t.Fatalf("short goal should stay untouched, got %q", title)
-	}
-	if strings.HasSuffix(title, prTitleEllipsis) {
-		t.Fatalf("short goal should not gain ellipsis: %q", title)
-	}
-}
-
 func assert4ByteRunesStayWithinByteBudget(t *testing.T) {
 	t.Helper()
 	t.Parallel()
@@ -223,38 +206,14 @@ func assertAsciiPlus4ByteRunesBreakOnWhitespaceUnderByteBudget(t *testing.T) {
 	}
 }
 
-func TestRenderPRBodyShowsSupervisorAcceptedStatus(t *testing.T) {
+func TestApplyAcceptedAcceptanceCriteriaUsesPassList(t *testing.T) {
 	t.Parallel()
 	loaded := task.Task{
 		ID:   "T1",
 		Goal: "Ship it",
 		AcceptanceCriteria: []task.AcceptanceCriterion{
-			{ID: "AC1", Text: "Behavior", Verification: "go test ./...", Status: "pending"},
+			{ID: "AC1", Text: "Behavior", Verification: "go test ./...", Status: "not_satisfied"},
 			{ID: "AC2", Text: "Docs", Verification: "grep docs", Status: "not_satisfied"},
-		},
-	}
-	// Simulate the executor's earlier draft pending status moving through the
-	// existing per-attempt merge code path.
-	loaded.AcceptanceCriteria[0].Status = "not_satisfied"
-
-	loaded.ReviewProgress = &task.ReviewProgress{Acceptance: []string{"AC1", "AC2"}}
-	applyAcceptedAcceptanceCriteria(&loaded)
-
-	body := renderPRBody(loaded)
-	if !strings.Contains(body, "`AC1` Behavior") || !strings.Contains(body, "Status: satisfied") {
-		t.Fatalf("expected satisfied AC status in PR body, got:\n%s", body)
-	}
-	if strings.Contains(body, "Status: pending") || strings.Contains(body, "Status: not_satisfied") {
-		t.Fatalf("PR body still shows draft/stale AC status:\n%s", body)
-	}
-}
-
-func TestApplyAcceptedAcceptanceCriteriaUsesPassList(t *testing.T) {
-	t.Parallel()
-	loaded := task.Task{
-		AcceptanceCriteria: []task.AcceptanceCriterion{
-			{ID: "AC1", Status: "not_satisfied"},
-			{ID: "AC2", Status: "not_satisfied"},
 		},
 	}
 	loaded.ReviewProgress = &task.ReviewProgress{Acceptance: []string{"AC1"}}
@@ -264,6 +223,13 @@ func TestApplyAcceptedAcceptanceCriteriaUsesPassList(t *testing.T) {
 	}
 	if loaded.AcceptanceCriteria[1].Status != "partially_satisfied" {
 		t.Fatalf("AC2 status got %q want partially_satisfied", loaded.AcceptanceCriteria[1].Status)
+	}
+	body := renderPRBody(loaded)
+	if !strings.Contains(body, "- `AC1` Behavior\n  - Verification: go test ./...\n  - Status: satisfied\n") {
+		t.Fatalf("expected satisfied AC1 status in PR body, got:\n%s", body)
+	}
+	if strings.Contains(body, "Status: not_satisfied") {
+		t.Fatalf("PR body still shows stale AC status:\n%s", body)
 	}
 }
 

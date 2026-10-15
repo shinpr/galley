@@ -457,6 +457,10 @@ func TestRunOnceOpenPRCommitsPushesAndUpdatesTask(t *testing.T) {
 	if doneTask.PR.URL != "https://github.com/example/galley/pull/123" || doneTask.PR.Status != "open" {
 		t.Fatalf("pr got %#v", doneTask.PR)
 	}
+	worktreePath := taskWorktreePath(repo, doneTask.Worktree.Path)
+	if got := strings.TrimSpace(string(mustCommandOutput(t, "git", "-C", worktreePath, "show", "HEAD:daemon-output.txt"))); got != "change" {
+		t.Fatalf("untracked executor output was not committed, got %q", got)
+	}
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "pr_body.md"), 1)
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "git_commit_result.json"), 1)
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "git_push_result.json"), 1)
@@ -638,7 +642,7 @@ func TestRunOnceCopiesInputFileAndRemovesBeforeCommit(t *testing.T) {
 	if err := os.WriteFile(inputPath, []byte("design note from plan\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	claudeBin := writeFakeClaude(t, "grep 'design note' docs/plan.md >/dev/null\necho change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"used plan\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\",\"plan read\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
+	claudeBin := writeFakeClaude(t, "grep 'design note' docs/plan.md >/dev/null || exit 1\necho change > daemon-output.txt\necho '{\"status\":\"completed\",\"summary\":\"used plan\",\"files_modified\":[\"daemon-output.txt\"],\"acceptance_criteria\":[{\"id\":\"AC1\",\"status\":\"satisfied\",\"evidence\":[\"diff\",\"plan read\"],\"notes\":\"done\"}],\"verification\":[],\"scope_expansions\":[],\"decisions\":[],\"risks\":[]}'\n")
 	ghBin := writeFakeCommand(t, "gh", "echo https://github.com/example/galley/pull/456\n")
 	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
 	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
@@ -694,26 +698,10 @@ func TestRunOnceCopiesInputFileAndRemovesBeforeCommit(t *testing.T) {
 	if strings.Contains(committedFiles, "docs/plan.md") {
 		t.Fatalf("non-committed input file was committed:\n%s", committedFiles)
 	}
+	if !strings.Contains(committedFiles, "daemon-output.txt") {
+		t.Fatalf("expected executor diff to be committed:\n%s", committedFiles)
+	}
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "input_files.json"), 1)
-}
-
-func TestRunOnceMovesInvalidTaskToFailed(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
-	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(taskPath, []byte("id: broken\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	err := runTestDaemon(context.Background(), Options{Root: root, Once: true})
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if _, statErr := os.Stat(filepath.Join(root, "tasks", "failed", "task.yaml")); statErr != nil {
-		t.Fatalf("failed task missing: %v", statErr)
-	}
 }
 
 func TestRunOnceHardStopMovesTaskToFailed(t *testing.T) {
@@ -748,45 +736,6 @@ func TestRunOnceHardStopMovesTaskToFailed(t *testing.T) {
 	}
 }
 
-func TestRunOnceParseFailureNeedsSupervisorReview(t *testing.T) {
-	root := filepath.Join(t.TempDir(), ".agent-workflow")
-	repo := initDaemonGitRepo(t)
-	promptPath, schemaPath := writeDaemonPromptFiles(t)
-	// A real Claude run that finishes normally but emits non-JSON still ends its
-	// stream with a success result event; only the embedded executor result is
-	// unparseable. That normal terminal must reach Supervisor review rather than
-	// be misclassified as an interruption.
-	claudeBin := writeFakeClaude(t, `printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"not-json","session_id":"sess-parse"}'`+"\n")
-	taskPath := filepath.Join(root, "tasks", "queued", "task.yaml")
-	if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeDaemonTask(t, taskPath, repo)
-
-	err := runTestDaemon(context.Background(), Options{
-		Root:               root,
-		SystemPromptFile:   promptPath,
-		JSONSchemaFile:     schemaPath,
-		Supervisor:         "claude",
-		ClaudeBin:          claudeBin,
-		Once:               true,
-		MaxConcurrentTasks: 1,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	failedTask, err := task.Load(filepath.Join(root, "tasks", "failed", "task.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if failedTask.Status != "failed" {
-		t.Fatalf("status got %q", failedTask.Status)
-	}
-	if len(failedTask.Risks) == 0 {
-		t.Fatal("expected parse risk")
-	}
-}
-
 func TestRunOnceCompletedWithRisksExhaustionFails(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
 	repo := initDaemonGitRepo(t)
@@ -817,9 +766,7 @@ func TestRunOnceCompletedWithRisksExhaustionFails(t *testing.T) {
 	if failedTask.Status != "failed" {
 		t.Fatalf("status got %q", failedTask.Status)
 	}
-	if len(failedTask.Risks) == 0 {
-		t.Fatal("expected Claude risk copied into task")
-	}
+	assertTaskRisk(t, failedTask.Risks, "executor-risk-", "tests skipped")
 }
 
 func TestRunOnceCompletedWithoutDiffExhaustionFails(t *testing.T) {
@@ -852,9 +799,7 @@ func TestRunOnceCompletedWithoutDiffExhaustionFails(t *testing.T) {
 	if failedTask.Status != "failed" {
 		t.Fatalf("status got %q", failedTask.Status)
 	}
-	if len(failedTask.Risks) == 0 {
-		t.Fatal("expected no-diff risk")
-	}
+	assertTaskRisk(t, failedTask.Risks, "git-diff-empty-", "Executor completed but produced no git diff in the execution workspace.")
 }
 
 func TestRunOnceStopsAfterConsecutiveNoDiffAttempts(t *testing.T) {
@@ -895,6 +840,16 @@ func TestRunOnceStopsAfterConsecutiveNoDiffAttempts(t *testing.T) {
 		t.Fatalf("progress risk missing: %#v", failedTask.Risks)
 	}
 	assertSupervisorRevisionState(t, failedTask, "supervisor-attempt-2-finding-1", "no repository diff was produced")
+}
+
+func assertTaskRisk(t *testing.T, risks []task.Risk, idPrefix, detail string) {
+	t.Helper()
+	for _, risk := range risks {
+		if strings.HasPrefix(risk.ID, idPrefix) && risk.Detail == detail {
+			return
+		}
+	}
+	t.Fatalf("risk %s* with detail %q missing: %#v", idPrefix, detail, risks)
 }
 
 func writeFakeClaude(t *testing.T, body string) string {

@@ -15,6 +15,7 @@ func TestInsideAnyLogicalPathNormalizesSeparatorsAndPreservesCase(t *testing.T) 
 		{name: "sibling", path: "internal-task/file.go", prefixes: []string{"internal"}, want: false},
 		{name: "case differs", path: "Secrets/key.go", prefixes: []string{"secrets"}, want: false},
 		{name: "root", path: "anything", prefixes: []string{"."}, want: true},
+		{name: "exact", path: "internal/task", prefixes: []string{"internal/task"}, want: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -33,5 +34,8 @@ func TestInsideAnyProtectedPathFoldsCase(t *testing.T) {
 	}
 	if InsideAnyProtectedPath("secrets-old/key.go", []string{"secrets"}) {
 		t.Fatal("protected paths must preserve segment boundaries")
+	}
+	if !InsideAnyProtectedPath(`.env\local`, []string{".env"}) {
+		t.Fatal("protected paths must normalize backslash separators")
 	}
 }

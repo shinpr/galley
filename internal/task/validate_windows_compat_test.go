@@ -88,67 +88,9 @@ func TestValidateRelativePathDetectsBackslashParentTraversal(t *testing.T) {
 	}
 }
 
-// TestPathAllowedByScopeNormalizesSeparators ensures the allowed-path
-// containment check accepts YAML-authored forward-slash entries when the
-// candidate path uses native Windows separators (and vice versa) so user
-// authored `internal/task` allowed paths keep matching nested files no
-// matter how the path was rendered before reaching the validator.
-func TestPathAllowedByScopeNormalizesSeparators(t *testing.T) {
-	t.Parallel()
-	allowed := []string{"internal/task"}
-	cases := []struct {
-		path string
-		want bool
-	}{
-		{path: "internal/task/files.go", want: true},
-		{path: "internal\\task\\files.go", want: true},
-		{path: "internal/task", want: true},
-		{path: "internal/task-extra/file.go", want: false}, // same-root sibling must not match.
-		{path: "internal-task/file.go", want: false},
-	}
-	for _, tc := range cases {
-		if got := pathAllowedByScope(tc.path, allowed); got != tc.want {
-			t.Fatalf("pathAllowedByScope(%q, %v) = %v, want %v", tc.path, allowed, got, tc.want)
-		}
-	}
-}
-
-// TestPathForbiddenByScopeNormalizesSeparators mirrors the allowed-path test
-// for the forbidden side so duplicate-destination protection on scope edges
-// is consistent across separator variants.
-func TestPathForbiddenByScopeNormalizesSeparators(t *testing.T) {
-	t.Parallel()
-	forbidden := []string{".env"}
-	if !pathForbiddenByScope(".env", forbidden) {
-		t.Fatalf("expected pathForbiddenByScope to match exact .env")
-	}
-	if !pathForbiddenByScope(".env/local", forbidden) {
-		t.Fatalf("expected pathForbiddenByScope to match .env/local")
-	}
-	if !pathForbiddenByScope(".env\\local", forbidden) {
-		t.Fatalf("expected pathForbiddenByScope to match .env\\local via separator normalization")
-	}
-	if !pathForbiddenByScope(".ENV/local", forbidden) {
-		t.Fatalf("expected pathForbiddenByScope to reject case-changed protected path")
-	}
-}
-
-// windowsAbsoluteForms enumerates the host-foreign absolute path shapes that
-// must be rejected on every OS. `filepath.IsAbs` does not recognize these on
-// non-Windows hosts, so without isLogicalAbsolutePath a YAML author could
-// smuggle absolute paths through scope/files/preflight fields when the
-// daemon ran on Linux or macOS. The list intentionally covers:
-//   - slash-rooted Windows forms (`\foo`, `\\server\share`) that survive
-//     backslash→slash normalization as `/...`;
-//   - drive-qualified absolutes in both separator styles (`C:\foo`, `C:/foo`,
-//     lowercase drive `d:\bar`).
-var windowsAbsoluteForms = []string{
-	"C:\\workspace\\notes.md",
-	"C:/workspace/notes.md",
-	"d:\\downloads\\file.txt",
-	"\\\\server\\share\\file",
-	"\\foo",
-}
+// windowsAbsolutePath is a host-foreign absolute form; isLogicalAbsolutePath's
+// own test owns the full set of recognized shapes.
+const windowsAbsolutePath = "C:\\workspace\\notes.md"
 
 // TestValidateRelativePathRejectsWindowsAbsoluteFormsOnNonWindowsHost proves
 // that scope.allowed_paths, scope.forbidden_paths, files[].source,
@@ -216,21 +158,15 @@ func TestValidateRelativePathRejectsWindowsAbsoluteFormsOnNonWindowsHost(t *test
 
 	for _, m := range mutators {
 		m := m
-		for _, p := range windowsAbsoluteForms {
-			p := p
-			t.Run(m.name+"/"+p, func(t *testing.T) {
-				t.Parallel()
-				task := validTask(t)
-				m.mutate(&task, p)
-				result := ValidateStructural(task)
-				if result.Valid() {
-					t.Fatalf("expected %s field with Windows absolute %q to be rejected on this host, got valid result", m.name, p)
-				}
-				if !containsAny(result.Errors, m.wantSub) {
-					t.Fatalf("expected error containing %q for %s = %q, got %#v", m.wantSub, m.name, p, result.Errors)
-				}
-			})
-		}
+		t.Run(m.name, func(t *testing.T) {
+			t.Parallel()
+			task := validTask(t)
+			m.mutate(&task, windowsAbsolutePath)
+			result := ValidateStructural(task)
+			if !containsAny(result.Errors, m.wantSub) {
+				t.Fatalf("expected error containing %q for %s, got %#v", m.wantSub, m.name, result.Errors)
+			}
+		})
 	}
 }
 
@@ -240,20 +176,11 @@ func TestValidateRelativePathRejectsWindowsAbsoluteFormsOnNonWindowsHost(t *test
 // hosts, not fall through to validateWorktreePath's sibling-path check.
 func TestValidateWorktreePathRejectsWindowsAbsoluteForms(t *testing.T) {
 	t.Parallel()
-	for _, p := range windowsAbsoluteForms {
-		p := p
-		t.Run(p, func(t *testing.T) {
-			t.Parallel()
-			task := validTask(t)
-			task.Worktree.Path = p
-			result := ValidateStructural(task)
-			if result.Valid() {
-				t.Fatalf("expected worktree.path %q to be rejected as absolute on this host", p)
-			}
-			if !containsAny(result.Errors, "worktree.path must be relative") {
-				t.Fatalf("expected worktree absolute error for %q, got %#v", p, result.Errors)
-			}
-		})
+	task := validTask(t)
+	task.Worktree.Path = windowsAbsolutePath
+	result := ValidateStructural(task)
+	if !containsAny(result.Errors, "worktree.path must be relative") {
+		t.Fatalf("expected worktree absolute error, got %#v", result.Errors)
 	}
 }
 

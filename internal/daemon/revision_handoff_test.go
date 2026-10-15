@@ -8,24 +8,6 @@ import (
 	"github.com/shinpr/galley/internal/task"
 )
 
-func TestNextSupervisorRevisionContainsOnlyLatestFindings(t *testing.T) {
-	t.Parallel()
-	verdict := supervisor.Verdict{
-		Status:   "needs_revision",
-		Summary:  "one issue remains",
-		Findings: []string{"Fix the queue transition and verify the stopped-daemon case."},
-	}
-
-	revision := nextSupervisorRevision(2, verdict)
-	if len(revision.Requests) != 1 {
-		t.Fatalf("revision requests = %#v", revision.Requests)
-	}
-	request := revision.Requests[0]
-	if request.ID != "supervisor-attempt-2-finding-1" || request.Text != verdict.Findings[0] {
-		t.Fatalf("latest request = %#v", request)
-	}
-}
-
 func TestSupervisorRevisionReplacementPreservesHumanRequests(t *testing.T) {
 	t.Parallel()
 	loaded := task.Task{RevisionRequests: []task.RevisionRequest{
@@ -42,7 +24,7 @@ func TestSupervisorRevisionReplacementPreservesHumanRequests(t *testing.T) {
 	if len(updated.RevisionRequests) != 2 {
 		t.Fatalf("revision requests = %#v", updated.RevisionRequests)
 	}
-	if updated.RevisionRequests[0].ID != "pr-comment-1" || updated.RevisionRequests[1].Text != "latest finding" {
+	if updated.RevisionRequests[0].ID != "pr-comment-1" || updated.RevisionRequests[1].ID != "supervisor-attempt-2-finding-1" || updated.RevisionRequests[1].Text != "latest finding" {
 		t.Fatalf("revision requests = %#v", updated.RevisionRequests)
 	}
 	workOrder := task.RenderWorkOrder(updated)

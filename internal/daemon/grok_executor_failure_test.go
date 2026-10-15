@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -78,5 +79,13 @@ func assertGrokFailureClassification(t *testing.T, tc grokFailureCase) {
 	if len(failed.Attempts) == 0 || failed.Attempts[0].Error == nil || failed.Attempts[0].Error.Kind != tc.WantKind {
 		t.Fatalf("attempt classification = %#v; want %s", failed.Attempts, tc.WantKind)
 	}
-	assertGlobCount(t, filepath.Join(root, "runs", "*", "attempt-1", runartifact.RunResultFilename), 1)
+	var runResult struct {
+		IdleTimedOut bool `json:"idle_timed_out"`
+	}
+	if err := json.Unmarshal(mustReadSingleGlob(t, filepath.Join(root, "runs", "*", "attempt-1", runartifact.RunResultFilename)), &runResult); err != nil {
+		t.Fatalf("decode run_result.json: %v", err)
+	}
+	if want := tc.WantKind == "idle_timeout"; runResult.IdleTimedOut != want {
+		t.Fatalf("run_result.json idle_timed_out = %v, want %v", runResult.IdleTimedOut, want)
+	}
 }

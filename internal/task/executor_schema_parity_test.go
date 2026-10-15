@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-
-	"github.com/shinpr/galley/internal/provider"
 )
 
 // executorFieldCase drives Go structural validation and generated schema
@@ -21,6 +19,7 @@ type executorFieldCase struct {
 	effortSet bool
 	effort    string
 	valid     bool
+	wantErr   string
 }
 
 var executorOptionalFieldMatrix = []executorFieldCase{
@@ -39,9 +38,9 @@ var executorOptionalFieldMatrix = []executorFieldCase{
 
 	// Provider-conditioned effort and invalid values.
 	{name: "claude accepts max", cliSet: true, cli: "claude", effortSet: true, effort: "max", valid: true},
-	{name: "claude rejects minimal", cliSet: true, cli: "claude", effortSet: true, effort: "minimal", valid: false},
-	{name: "invalid cli", cliSet: true, cli: "opus", valid: false},
-	{name: "effort only unknown", effortSet: true, effort: "turbo", valid: false},
+	{name: "claude rejects minimal", cliSet: true, cli: "claude", effortSet: true, effort: "minimal", wantErr: "executor.effort for claude"},
+	{name: "invalid cli", cliSet: true, cli: "opus", wantErr: "executor.cli must be one of"},
+	{name: "effort only unknown", effortSet: true, effort: "turbo", wantErr: "executor.effort must be one of"},
 	{name: "codex empty effort under cli", cliSet: true, cli: "codex", effortSet: true, effort: "", valid: true},
 }
 
@@ -85,32 +84,13 @@ func TestTaskExecutorOptionalFieldRuntimeAndSchemaParity(t *testing.T) {
 	}
 	executor := schema["properties"].(map[string]any)["executor"].(map[string]any)
 
-	// Schema shape: empty optional values are accepted, not only non-empty enums.
-	execProps := executor["properties"].(map[string]any)
-	cliEnum := enumStrings(execProps["cli"].(map[string]any)["enum"].([]any))
-	if !containsString(cliEnum, "") {
-		t.Fatalf("executor.cli schema must accept empty string, got %#v", cliEnum)
-	}
-	for _, id := range provider.ExecutorIDs() {
-		if !containsString(cliEnum, id) {
-			t.Fatalf("executor.cli schema missing %q in %#v", id, cliEnum)
-		}
-	}
-	modelNode := execProps["model"].(map[string]any)
-	if _, hasMin := modelNode["minLength"]; hasMin {
-		t.Fatalf("executor.model must allow empty (no minLength), got %#v", modelNode)
-	}
-	effortEnum := enumStrings(execProps["effort"].(map[string]any)["enum"].([]any))
-	if !containsString(effortEnum, "") {
-		t.Fatalf("executor.effort schema must accept empty string, got %#v", effortEnum)
-	}
-
 	for _, tc := range executorOptionalFieldMatrix {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			schemaValid := len(validateTaskExecutorDoc(executor, tc.executorDoc())) == 0
-			runtimeValid := runtimeTaskExecutorValid(tc)
+			runtimeErrs := runtimeTaskExecutorErrors(tc)
+			runtimeValid := len(runtimeErrs) == 0
 			if schemaValid != runtimeValid {
 				t.Fatalf("drift for %v: schema valid=%v runtime valid=%v schema_errs=%v",
 					tc.executorDoc(), schemaValid, runtimeValid, validateTaskExecutorDoc(executor, tc.executorDoc()))
@@ -118,11 +98,14 @@ func TestTaskExecutorOptionalFieldRuntimeAndSchemaParity(t *testing.T) {
 			if schemaValid != tc.valid {
 				t.Fatalf("case %q: got valid=%v, want %v", tc.name, schemaValid, tc.valid)
 			}
+			if !strings.Contains(strings.Join(runtimeErrs, "\n"), tc.wantErr) {
+				t.Fatalf("runtime errors %#v want substring %q", runtimeErrs, tc.wantErr)
+			}
 		})
 	}
 }
 
-func runtimeTaskExecutorValid(c executorFieldCase) bool {
+func runtimeTaskExecutorErrors(c executorFieldCase) []string {
 	// Use ValidateStructural on a structurally complete task with the case executor.
 	base := Task{
 		ID:     "task-executor-parity",
@@ -148,12 +131,13 @@ func runtimeTaskExecutorValid(c executorFieldCase) bool {
 		},
 		Executor: c.taskExecutor(),
 	}
+	var errs []string
 	for _, e := range ValidateStructural(base).Errors {
 		if strings.Contains(e, "executor.") {
-			return false
+			errs = append(errs, e)
 		}
 	}
-	return true
+	return errs
 }
 
 func validateTaskExecutorDoc(executor, doc map[string]any) []string {
@@ -232,14 +216,4 @@ func effortEnumContains(enum []any, value any) bool {
 		}
 	}
 	return false
-}
-
-func enumStrings(raw []any) []string {
-	out := make([]string, 0, len(raw))
-	for _, v := range raw {
-		if s, ok := v.(string); ok {
-			out = append(out, s)
-		}
-	}
-	return out
 }

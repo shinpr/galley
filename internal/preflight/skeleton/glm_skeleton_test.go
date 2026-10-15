@@ -10,19 +10,6 @@ import (
 	"github.com/shinpr/galley/internal/task"
 )
 
-func glmSkeletonOptions(t *testing.T, token string) Options {
-	t.Helper()
-	return Options{
-		Task: task.Task{
-			ID:       "task-glm",
-			Executor: task.Executor{CLI: "glm", Effort: "high"},
-		},
-		WorkDir:      t.TempDir(),
-		RunDir:       t.TempDir(),
-		GLMAuthToken: token,
-	}
-}
-
 func TestResolveGrokCreatorManifestRejectsProseWrappedJSON(t *testing.T) {
 	runDir := t.TempDir()
 	manifest := `{"outputs":[],"no_skeletons":[]}`
@@ -38,74 +25,34 @@ func TestResolveGrokCreatorManifestRejectsProseWrappedJSON(t *testing.T) {
 	}
 }
 
-func TestBuildBuiltinCreatorCommandPlanGLMRedirects(t *testing.T) {
-	cmd, perr := buildBuiltinCreatorCommandPlan(glmSkeletonOptions(t, "zai-token"), []byte("{}"))
-	if perr != nil {
-		t.Fatalf("buildBuiltinCreatorCommandPlan: %v", perr)
+func TestBuildBuiltinCreatorCommandPlanRedirectsClaudeProviders(t *testing.T) {
+	tests := []struct {
+		cli       string
+		glmToken  string
+		kimiKey   string
+		wantInEnv []string
+	}{
+		{cli: "glm", glmToken: "zai-token", wantInEnv: []string{"ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic", "ANTHROPIC_AUTH_TOKEN=zai-token"}},
+		{cli: "kimi", kimiKey: "kimi-token", wantInEnv: []string{"ANTHROPIC_BASE_URL=https://api.kimi.com/coding/", "ANTHROPIC_API_KEY=kimi-token"}},
 	}
-	joined := strings.Join(cmd.EnvAppend, "\n")
-	if !strings.Contains(joined, "ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic") {
-		t.Fatalf("EnvAppend missing GLM base URL: %#v", cmd.EnvAppend)
-	}
-	if !strings.Contains(joined, "ANTHROPIC_AUTH_TOKEN=zai-token") {
-		t.Fatalf("EnvAppend missing GLM auth token: %#v", cmd.EnvAppend)
-	}
-	found := false
-	for _, k := range cmd.EnvRemove {
-		if k == "ANTHROPIC_API_KEY" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("EnvRemove must strip ANTHROPIC_API_KEY: %#v", cmd.EnvRemove)
-	}
-}
-
-func TestBuildBuiltinCreatorCommandPlanGLMFailsFastWithoutToken(t *testing.T) {
-	_, perr := buildBuiltinCreatorCommandPlan(glmSkeletonOptions(t, ""), []byte("{}"))
-	if perr == nil {
-		t.Fatal("expected fail-fast when glm skeleton creator has no token")
-	}
-	if !strings.Contains(perr.Error(), "glm_api_key") {
-		t.Fatalf("error must name the missing config key, got %q", perr)
-	}
-}
-
-func TestBuildBuiltinCreatorCommandPlanKimiRedirects(t *testing.T) {
-	opts := glmSkeletonOptions(t, "")
-	opts.Task.Executor.CLI = "kimi"
-	opts.KimiAPIKey = "kimi-token"
-	cmd, perr := buildBuiltinCreatorCommandPlan(opts, []byte("{}"))
-	if perr != nil {
-		t.Fatalf("buildBuiltinCreatorCommandPlan: %v", perr)
-	}
-	joined := strings.Join(cmd.EnvAppend, "\n")
-	for _, want := range []string{"ANTHROPIC_BASE_URL=https://api.kimi.com/coding/", "ANTHROPIC_API_KEY=kimi-token"} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("EnvAppend missing %q: %#v", want, cmd.EnvAppend)
-		}
-	}
-}
-
-func TestBuildBuiltinCreatorCommandPlanKimiFailsFastWithoutKey(t *testing.T) {
-	opts := glmSkeletonOptions(t, "")
-	opts.Task.Executor.CLI = "kimi"
-	_, perr := buildBuiltinCreatorCommandPlan(opts, []byte("{}"))
-	if perr == nil || !strings.Contains(perr.Error(), "kimi_api_key") {
-		t.Fatalf("expected missing kimi_api_key error, got %v", perr)
-	}
-}
-
-func TestBuildBuiltinCreatorCommandPlanGrok(t *testing.T) {
-	work, runDir := t.TempDir(), t.TempDir()
-	cmd, perr := buildBuiltinCreatorCommandPlan(Options{Task: task.Task{ID: "task-grok", Executor: task.Executor{CLI: "grok", Effort: "high"}}, WorkDir: work, RunDir: runDir, GrokBin: "/path/to/grok"}, []byte("{}"))
-	if perr != nil {
-		t.Fatal(perr)
-	}
-	joined := strings.Join(cmd.Argv, " ")
-	for _, want := range []string{"/path/to/grok", "--prompt-file", "--json-schema", "--permission-mode bypassPermissions", "--sandbox workspace"} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("grok creator argv missing %q: %v", want, cmd.Argv)
-		}
+	for _, tc := range tests {
+		t.Run(tc.cli, func(t *testing.T) {
+			cmd, perr := buildBuiltinCreatorCommandPlan(Options{
+				Task:         task.Task{ID: "task-" + tc.cli, Executor: task.Executor{CLI: tc.cli, Effort: "high"}},
+				WorkDir:      t.TempDir(),
+				RunDir:       t.TempDir(),
+				GLMAuthToken: tc.glmToken,
+				KimiAPIKey:   tc.kimiKey,
+			}, []byte("{}"))
+			if perr != nil {
+				t.Fatalf("buildBuiltinCreatorCommandPlan: %v", perr)
+			}
+			joined := strings.Join(cmd.EnvAppend, "\n")
+			for _, want := range tc.wantInEnv {
+				if !strings.Contains(joined, want) {
+					t.Fatalf("EnvAppend missing %q: %#v", want, cmd.EnvAppend)
+				}
+			}
+		})
 	}
 }

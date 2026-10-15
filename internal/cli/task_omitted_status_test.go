@@ -6,8 +6,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-
-	taskpkg "github.com/shinpr/galley/internal/task"
 )
 
 func writeMinimalOmittedStatusTaskYAML(t *testing.T, id string) string {
@@ -16,7 +14,7 @@ func writeMinimalOmittedStatusTaskYAML(t *testing.T, id string) string {
 	path := filepath.Join(dir, "task.yaml")
 	body := strings.Join([]string{
 		`id: ` + strconv.Quote(id),
-		`goal: "Omitted status display and queue persistence."`,
+		`goal: "Omitted status display."`,
 		`acceptance_criteria:`,
 		`  - id: "AC1"`,
 		`    text: "observable"`,
@@ -83,57 +81,4 @@ func TestTaskShowAndListDisplayOmittedStatusAsDraft(t *testing.T) {
 	if !strings.Contains(listOut, "draft\tdraft\t"+id) {
 		t.Fatalf("task list must display omitted status as draft:\n%s", listOut)
 	}
-}
-
-func TestTaskQueuePersistsQueuedStatusFromOmittedStatusDraft(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	const id = "task-omitted-status-queue"
-	src := writeMinimalOmittedStatusTaskYAML(t, id)
-
-	stdout, stderr, err := executeCommand("task", "queue", "--root", root, "--reason", "persist queued status", src)
-	if err != nil {
-		t.Fatalf("task queue: %v\nstdout=%q stderr=%q", err, stdout, stderr)
-	}
-	if !strings.Contains(stdout, "queued: "+id) {
-		t.Fatalf("queue output missing queued id: %q", stdout)
-	}
-
-	// Queue may rename by source basename; also accept the standard task.yaml path.
-	queuedPath := resolveQueuedTaskPath(t, root, src)
-
-	loaded, err := taskpkg.Load(queuedPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if loaded.Status != taskpkg.StatusQueued {
-		t.Fatalf("queued task status got %q, want %q", loaded.Status, taskpkg.StatusQueued)
-	}
-	raw, err := os.ReadFile(queuedPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(raw), "status: queued") && !strings.Contains(string(raw), `status: "queued"`) {
-		t.Fatalf("queued YAML must persist status queued:\n%s", raw)
-	}
-}
-
-// resolveQueuedTaskPath finds the queued file. Queue may rename by source
-// basename, so the standard task.yaml path is accepted as well.
-func resolveQueuedTaskPath(t *testing.T, root, src string) string {
-	t.Helper()
-	queuedDir := filepath.Join(root, "tasks", "queued")
-	byBasename := filepath.Join(queuedDir, filepath.Base(src))
-	statErr := error(nil)
-	if _, statErr = os.Stat(byBasename); statErr == nil {
-		return byBasename
-	}
-	entries, readErr := os.ReadDir(queuedDir)
-	if readErr != nil {
-		t.Fatalf("queued dir: %v (stat %s: %v)", readErr, byBasename, statErr)
-	}
-	if len(entries) != 1 {
-		t.Fatalf("expected one queued file, got %#v (stat %s: %v)", entries, byBasename, statErr)
-	}
-	return filepath.Join(queuedDir, entries[0].Name())
 }

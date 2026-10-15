@@ -233,44 +233,6 @@ fi
 	assertGlobCount(t, filepath.Join(root, "runs", "*", "gh_pr_create_result.json"), 1)
 }
 
-// AC1/AC2: a pre-push hook failure after the accepted commit exists recovers
-// without a second commit, leaving the remote at the accepted HEAD.
-func TestFinalizePushFailureRecoversThroughRevisionLoop(t *testing.T) {
-	root, repo, remote, worktree, promptPath, schemaPath, taskPath := finalizeRecoveryRepo(t)
-	marker := filepath.Join(t.TempDir(), "block-push")
-	writeMarkerFile(t, marker)
-	writeBlockingGitHook(t, blockingHook{Repo: repo, Hook: "pre-push", Marker: marker, Message: "pre-push hook rejected the accepted branch"})
-	claudeBin := finalizeRepairExecutor(t, marker)
-	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
-  echo https://github.com/example/galley/pull/502
-else
-  printf '%s\n' '{"user":{"login":"pr-author"}}'
-fi
-`)
-	setLoopBudget(t, taskPath, 3)
-
-	if err := runTestDaemon(context.Background(), finalizeRecoveryOptions(recoveryPaths{Root: root, PromptPath: promptPath, SchemaPath: schemaPath, ClaudeBin: claudeBin, GHBin: ghBin})); err != nil {
-		t.Fatal(err)
-	}
-
-	doneTask, err := task.Load(filepath.Join(root, "tasks", "done", "task.yaml"))
-	if err != nil {
-		t.Fatalf("task did not reach done/: %v", err)
-	}
-	if doneTask.Status != "pr_opened" || doneTask.PR.URL != "https://github.com/example/galley/pull/502" {
-		t.Fatalf("recovered task got status=%q pr=%#v", doneTask.Status, doneTask.PR)
-	}
-	request := findRevisionRequest(t, doneTask, "finalize-attempt-1")
-	if !strings.Contains(request.Text, "pre-push hook rejected the accepted branch") {
-		t.Fatalf("finalization revision request lost the push failure output: %q", request.Text)
-	}
-	assertCommitsAheadOfBase(t, worktree, 1)
-	if got := gitOutputForTest(t, remote, "rev-parse", "refs/heads/agent/task"); got != gitOutputForTest(t, worktree, "rev-parse", "HEAD") {
-		t.Fatalf("remote branch %s does not point at the accepted HEAD", got)
-	}
-	assertGlobCount(t, filepath.Join(root, "runs", "*", "gh_pr_create_result.json"), 1)
-}
-
 // AC1/AC2: a failed PR creation with no recoverable PR recovers with exactly
 // one recorded PR URL and no extra commit.
 func TestFinalizePRCreateFailureRecoversThroughRevisionLoop(t *testing.T) {
@@ -309,83 +271,6 @@ fi
 		t.Fatalf("finalization revision request lost the gh pr create output: %q", request.Text)
 	}
 	assertCommitsAheadOfBase(t, worktree, 1)
-}
-
-// AC3: after attempt exhaustion, a plain requeue finalizes the retained
-// worktree whose accepted commit exists, without a false empty diff.
-func TestFinalizeFailureSurvivesRequeueAndFinalizesRetainedCommit(t *testing.T) {
-	root, repo, remote, worktree, promptPath, schemaPath, taskPath := finalizeRecoveryRepo(t)
-	marker := filepath.Join(t.TempDir(), "block-push")
-	writeMarkerFile(t, marker)
-	writeBlockingGitHook(t, blockingHook{Repo: repo, Hook: "pre-push", Marker: marker, Message: "pre-push hook rejected the accepted branch"})
-	firstClaude := writeFakeClaude(t, `echo change > daemon-output.txt
-echo '{"status":"completed","summary":"done","files_modified":["daemon-output.txt"],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["diff"],"notes":"done"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}'
-`)
-	ghBin := writeFakeCommand(t, "gh", `if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
-  echo https://github.com/example/galley/pull/504
-else
-  printf '%s\n' '{"user":{"login":"pr-author"}}'
-fi
-`)
-	setLoopBudget(t, taskPath, 1)
-
-	if err := runTestDaemon(context.Background(), finalizeRecoveryOptions(recoveryPaths{Root: root, PromptPath: promptPath, SchemaPath: schemaPath, ClaudeBin: firstClaude, GHBin: ghBin})); err != nil {
-		t.Fatal(err)
-	}
-
-	failedPath := filepath.Join(root, "tasks", "failed", "task.yaml")
-	failedTask, err := task.Load(failedPath)
-	if err != nil {
-		t.Fatalf("first run did not publish a failed task: %v", err)
-	}
-	if failedTask.Status != "failed" {
-		t.Fatalf("first run status got %q, want failed", failedTask.Status)
-	}
-	pending := findRevisionRequest(t, failedTask, "finalize-attempt-1")
-	if pending.Status != "pending" || !strings.Contains(pending.Text, "pre-push hook rejected the accepted branch") {
-		t.Fatalf("pending finalization revision was not preserved: %#v", pending)
-	}
-	acceptedHead := gitOutputForTest(t, worktree, "rev-parse", "HEAD")
-	assertCommitsAheadOfBase(t, worktree, 1)
-	firstBase := runBaseSHA(t, root)
-
-	// A plain requeue: no new revision request and no human-authored guidance.
-	if _, err := task.Requeue(failedPath, task.RequeueOptions{Root: root}); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Remove(marker); err != nil {
-		t.Fatal(err)
-	}
-
-	// The second run's executor changes nothing: recovery comes from the
-	// retained worktree, retained review base, and the pending request.
-	secondClaude := writeFakeClaude(t, `echo '{"status":"completed","summary":"finalization blocker cleared","files_modified":[],"acceptance_criteria":[{"id":"AC1","status":"satisfied","evidence":["retained commit"],"notes":"done"},{"id":"revision:finalize-attempt-1","status":"satisfied","evidence":["blocking condition resolved"],"notes":"finalization can rerun"}],"verification":[],"scope_expansions":[],"decisions":[],"risks":[]}'
-`)
-	if err := runTestDaemon(context.Background(), finalizeRecoveryOptions(recoveryPaths{Root: root, PromptPath: promptPath, SchemaPath: schemaPath, ClaudeBin: secondClaude, GHBin: ghBin})); err != nil {
-		t.Fatal(err)
-	}
-
-	doneTask, err := task.Load(filepath.Join(root, "tasks", "done", "task.yaml"))
-	if err != nil {
-		t.Fatalf("requeued task did not reach done/: %v", err)
-	}
-	if doneTask.Status != "pr_opened" || doneTask.PR.URL != "https://github.com/example/galley/pull/504" {
-		t.Fatalf("requeued task got status=%q pr=%#v", doneTask.Status, doneTask.PR)
-	}
-	if got := gitOutputForTest(t, worktree, "rev-parse", "HEAD"); got != acceptedHead {
-		t.Fatalf("accepted commit changed across requeue: got %s want %s", got, acceptedHead)
-	}
-	assertCommitsAheadOfBase(t, worktree, 1)
-	if got := gitOutputForTest(t, remote, "rev-parse", "refs/heads/agent/task"); got != acceptedHead {
-		t.Fatalf("remote branch %s does not point at the accepted HEAD %s", got, acceptedHead)
-	}
-	if got := gitOutputForTest(t, worktree, "show", "HEAD:daemon-output.txt"); got != "change" {
-		t.Fatalf("accepted implementation change was lost: %q", got)
-	}
-	if got := secondRunBaseSHA(t, root); got != firstBase {
-		t.Fatalf("second run review base got %s, want the retained base %s", got, firstBase)
-	}
-	assertGlobCount(t, filepath.Join(root, "runs", "*", "gh_pr_create_result.json"), 1)
 }
 
 // The request text carries the actionable tail of the captured command

@@ -9,62 +9,46 @@ import (
 	"testing"
 )
 
-// AC3 (profile-side): Setting required_checks.shell_path with an explicit
-// non-auto required_checks.shell must round-trip through the Environment
-// struct and pass ValidateEnvironment.
-func TestValidateEnvironmentAcceptsRequiredCheckShellPathWithExplicitShellKind(t *testing.T) {
-	kinds := []struct {
-		shell string
-		path  string
-	}{
-		{"sh", "/opt/galley/sh"},
-		{"bash", "/opt/galley/bash"},
-		{"cmd", `C:\custom\cmd.exe`},
-		{"powershell", `C:\custom\powershell.exe`},
-		{"pwsh", `C:\custom\pwsh.exe`},
-	}
-	for _, tc := range kinds {
-		tc := tc
-		t.Run("struct/"+tc.shell, func(t *testing.T) {
+// An unrecognized shell_path basename is valid when an explicit shell kind
+// supplies the invocation style.
+func TestValidateEnvironmentAcceptsUnrecognizedShellPathWithExplicitShellKind(t *testing.T) {
+	const shellPath = "/opt/galley/custom-bash"
+	for _, shell := range []string{"sh", "bash", "cmd", "powershell", "pwsh"} {
+		shell := shell
+		t.Run(shell, func(t *testing.T) {
 			env := validEnvironmentForTest()
-			env.RequiredChecks = RequiredCheckEnvironment{Shell: tc.shell, ShellPath: tc.path}
+			env.RequiredChecks = RequiredCheckEnvironment{Shell: shell, ShellPath: shellPath}
 			result := ValidateEnvironment(env)
 			if !result.Valid() {
 				t.Fatalf("errors got %#v", result.Errors)
 			}
 		})
-		t.Run("yaml/"+tc.shell, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "environment.yaml")
-			body := fmt.Sprintf(`id: "local"
+	}
+}
+
+func TestLoadEnvironmentDecodesRequiredCheckShellAndShellPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "environment.yaml")
+	body := `id: "local"
 cwd: "/tmp/repo"
 commands:
   test: "go test ./..."
 required_checks:
-  shell: %q
-  shell_path: %q
+  shell: "bash"
+  shell_path: "/opt/galley/custom-bash"
 constraints:
   network: "approval_required"
   secrets_policy: "never_read_env_files"
   destructive_commands: "deny"
-`, tc.shell, tc.path)
-			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			env, err := LoadEnvironment(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if env.RequiredChecks.ShellPath != tc.path {
-				t.Fatalf("YAML decode lost shell_path: got %q want %q", env.RequiredChecks.ShellPath, tc.path)
-			}
-			if env.RequiredChecks.Shell != tc.shell {
-				t.Fatalf("YAML decode lost shell: got %q want %q", env.RequiredChecks.Shell, tc.shell)
-			}
-			result := ValidateEnvironment(env)
-			if !result.Valid() {
-				t.Fatalf("errors got %#v", result.Errors)
-			}
-		})
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env, err := LoadEnvironment(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.RequiredChecks.Shell != "bash" || env.RequiredChecks.ShellPath != "/opt/galley/custom-bash" {
+		t.Fatalf("YAML decode lost required_checks: %#v", env.RequiredChecks)
 	}
 }
 
@@ -125,26 +109,16 @@ func TestEnvironmentJSONSchemaAllowsShellPathStandaloneStructurally(t *testing.T
 	}
 }
 
-// AC1 (profile-side): When required_checks.shell_path uses a recognized
-// shell executable basename, the profile is valid even without
-// required_checks.shell. Galley will infer the invocation style from the
-// executable name. Both forward-slash Unix paths and backslash Windows
-// paths are accepted, plus the optional .exe suffix.
+// A recognized shell_path basename stands alone and overrides any configured
+// shell kind; basename recognition itself is pinned by TestInferRequiredCheckShellKind.
 func TestValidateEnvironmentAcceptsRecognizedShellPathWithoutExplicitShellKind(t *testing.T) {
 	cases := []struct {
 		name      string
 		shell     string
 		shellPath string
 	}{
-		{name: "UnixBashStandalone", shell: "", shellPath: "/opt/galley/bash"},
-		{name: "UnixShStandalone", shell: "", shellPath: "/opt/galley/sh"},
-		{name: "WindowsBashStandalone", shell: "", shellPath: `C:\Program Files\Git\bin\bash.exe`},
-		{name: "WindowsCmdStandalone", shell: "", shellPath: `C:\Windows\System32\cmd.exe`},
-		{name: "WindowsPowerShellStandalone", shell: "", shellPath: `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`},
-		{name: "WindowsPwshStandalone", shell: "", shellPath: `C:\Program Files\PowerShell\7\pwsh.exe`},
-		{name: "AutoShellRecognizedBasename", shell: "auto", shellPath: "/opt/galley/bash"},
-		{name: "MixedSeparatorBashExe", shell: "", shellPath: "C:/tools/Git/bin/bash.exe"},
-		{name: "UppercaseExtension", shell: "", shellPath: `C:\tools\pwsh.EXE`},
+		{name: "Standalone", shell: "", shellPath: "/opt/galley/bash"},
+		{name: "OverridesDisagreeingShell", shell: "cmd", shellPath: `C:\tools\Git\bin\bash.exe`},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -153,24 +127,9 @@ func TestValidateEnvironmentAcceptsRecognizedShellPathWithoutExplicitShellKind(t
 			env.RequiredChecks = RequiredCheckEnvironment{Shell: tc.shell, ShellPath: tc.shellPath}
 			result := ValidateEnvironment(env)
 			if !result.Valid() {
-				t.Fatalf("recognized shell_path must validate without explicit shell, errors got %#v", result.Errors)
+				t.Fatalf("recognized shell_path must validate, errors got %#v", result.Errors)
 			}
 		})
-	}
-}
-
-// AC5 (profile-side): When required_checks.shell_path uses a recognized
-// shell executable basename, the configured required_checks.shell is allowed
-// to disagree without rejection because shell_path is the more specific
-// selection and shell is only fallback kind metadata. Resolver behavior
-// validates that the inferred kind wins; profile validation only rejects
-// when no usable kind can be determined.
-func TestValidateEnvironmentAcceptsShellPathInferredKindOverridingConfiguredShell(t *testing.T) {
-	env := validEnvironmentForTest()
-	env.RequiredChecks = RequiredCheckEnvironment{Shell: "cmd", ShellPath: `C:\tools\Git\bin\bash.exe`}
-	result := ValidateEnvironment(env)
-	if !result.Valid() {
-		t.Fatalf("recognized shell_path with disagreeing configured shell must validate, errors got %#v", result.Errors)
 	}
 }
 

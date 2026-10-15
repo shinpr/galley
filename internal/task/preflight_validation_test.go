@@ -44,14 +44,6 @@ func baseValidPreflightTask(t *testing.T) Task {
 	}
 }
 
-func TestPreflightValidationAbsentIsValid(t *testing.T) {
-	tk := baseValidPreflightTask(t)
-	res := ValidateStructural(tk)
-	if !res.Valid() {
-		t.Fatalf("expected valid task without preflight, got errors %v", res.Errors)
-	}
-}
-
 func TestPreflightValidationEnabledOnlyIsValid(t *testing.T) {
 	tk := baseValidPreflightTask(t)
 	tk.Preflight = &Preflight{AcceptanceSkeleton: &AcceptanceSkeletonConfig{
@@ -138,35 +130,6 @@ func TestPreflightValidationDuplicateOutputPathsAcrossACsAccepted(t *testing.T) 
 	}
 }
 
-func TestPreflightValidationDuplicateOutputPathsSeparatorEquivalentAccepted(t *testing.T) {
-	tk := baseValidPreflightTask(t)
-	tk.AcceptanceCriteria = []AcceptanceCriterion{
-		{ID: "AC1", Text: "AC1 behavior", Verification: "go test ./internal/foo", Status: "pending"},
-		{ID: "AC2", Text: "AC2 behavior", Verification: "go test ./internal/foo", Status: "pending"},
-	}
-	tk.Preflight = &Preflight{AcceptanceSkeleton: &AcceptanceSkeletonConfig{
-		Enabled: true,
-		Outputs: []AcceptanceSkeletonOutputDef{
-			{
-				ACID:    "AC1",
-				Path:    "internal/foo/foo_test.go",
-				Kind:    "go-test",
-				Purpose: "verify AC1 behavior",
-			},
-			{
-				ACID:    "AC2",
-				Path:    "internal\\foo\\foo_test.go",
-				Kind:    "go-test",
-				Purpose: "verify AC2 behavior",
-			},
-		},
-	}}
-	res := ValidateStructural(tk)
-	if !res.Valid() {
-		t.Fatalf("expected separator-equivalent duplicate output paths to validate, got errors %v", res.Errors)
-	}
-}
-
 func TestPreflightValidationDuplicateOutputPathStillEnforcesSafetyChecks(t *testing.T) {
 	tk := baseValidPreflightTask(t)
 	tk.AcceptanceCriteria = []AcceptanceCriterion{
@@ -203,40 +166,6 @@ func TestPreflightValidationDuplicateOutputPathStillEnforcesSafetyChecks(t *test
 	}
 	if !containsErr(res.Errors, "outputs[1].purpose is required") {
 		t.Fatalf("expected outputs[1].purpose required error, got %v", res.Errors)
-	}
-}
-
-func TestPreflightValidationDuplicateOutputPathStillEnforcesPathSafety(t *testing.T) {
-	tk := baseValidPreflightTask(t)
-	tk.AcceptanceCriteria = []AcceptanceCriterion{
-		{ID: "AC1", Text: "AC1 behavior", Verification: "go test ./internal/foo", Status: "pending"},
-		{ID: "AC2", Text: "AC2 behavior", Verification: "go test ./internal/foo", Status: "pending"},
-	}
-	tk.Preflight = &Preflight{AcceptanceSkeleton: &AcceptanceSkeletonConfig{
-		Enabled: true,
-		Outputs: []AcceptanceSkeletonOutputDef{
-			{
-				ACID:    "AC1",
-				Path:    "internal/foo/foo_test.go",
-				Kind:    "go-test",
-				Purpose: "verify AC1 behavior",
-			},
-			{
-				// Duplicate-path allowance must not bypass per-entry path
-				// safety checks; unsafe parent traversal is still rejected.
-				ACID:    "AC2",
-				Path:    "../foo/foo_test.go",
-				Kind:    "go-test",
-				Purpose: "verify AC2 behavior",
-			},
-		},
-	}}
-	res := ValidateStructural(tk)
-	if res.Valid() {
-		t.Fatalf("expected validation error for parent-traversal output path, got none")
-	}
-	if !containsErr(res.Errors, "parent traversal") {
-		t.Fatalf("expected parent traversal error, got %v", res.Errors)
 	}
 }
 

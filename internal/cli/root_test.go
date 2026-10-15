@@ -292,11 +292,29 @@ func TestTaskShowByIDWithDots(t *testing.T) {
 	}
 }
 
+// Accepted terminal statuses, including PR cleanup moves to closed or merged, keep
+// prior failed attempts under prior_attempt_* instead of the active failure framing.
 func TestTaskShowAcceptedTerminalSuppressesPriorFailure(t *testing.T) {
+	for _, tc := range []struct {
+		status   taskpkg.Status
+		prStatus string
+	}{
+		{"pr_opened", "open"},
+		{"closed", "closed"},
+		{"merged", "merged"},
+	} {
+		t.Run(string(tc.status), func(t *testing.T) {
+			assertAcceptedTerminalShowsPriorAttempt(t, tc.status, tc.prStatus)
+		})
+	}
+}
+
+func assertAcceptedTerminalShowsPriorAttempt(t *testing.T, status taskpkg.Status, prStatus string) {
+	t.Helper()
 	root := t.TempDir()
-	setupTaskInState(t, taskInState{Root: root, State: "done", Status: "pr_opened"}, func(loaded *taskpkg.Task) {
+	setupTaskInState(t, taskInState{Root: root, State: "done", Status: status}, func(loaded *taskpkg.Task) {
 		loaded.PR.URL = "https://example.test/pr/1"
-		loaded.PR.Status = "open"
+		loaded.PR.Status = prStatus
 		loaded.Attempts = []taskpkg.Attempt{{
 			Number:            3,
 			ClaudeStatus:      "failed",
@@ -328,7 +346,7 @@ func TestTaskShowAcceptedTerminalSuppressesPriorFailure(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"status: pr_opened",
+		"status: " + string(status),
 		"prior_attempt_attempt: 3",
 		"prior_attempt_claude_status: failed",
 		"prior_attempt_supervisor_verdict: accepted",
@@ -351,60 +369,8 @@ func TestTaskShowAcceptedTerminalSuppressesPriorFailure(t *testing.T) {
 	if err := json.Unmarshal([]byte(jsonStdout), &payload); err != nil {
 		t.Fatalf("parse json: %v\n%s", err, jsonStdout)
 	}
-	if payload.Task.Status != "pr_opened" {
-		t.Fatalf("json output must reflect accepted terminal status, got %q", payload.Task.Status)
-	}
-}
-
-// TestTaskShowAcceptedTerminalCoversPRLifecycleStatuses guards the case where
-// the daemon's PR cleanup loop moves an accepted task from pr_opened to closed
-// or merged: prior failed attempts must remain under the prior_attempt_* prefix
-// instead of regressing to the active "failed" framing.
-func TestTaskShowAcceptedTerminalCoversPRLifecycleStatuses(t *testing.T) {
-	for _, terminalStatus := range []taskpkg.Status{"closed", "merged"} {
-		t.Run(string(terminalStatus), func(t *testing.T) {
-			root := t.TempDir()
-			setupTaskInState(t, taskInState{Root: root, State: "done", Status: terminalStatus}, func(loaded *taskpkg.Task) {
-				loaded.PR.URL = "https://example.test/pr/2"
-				loaded.PR.Status = string(terminalStatus)
-				loaded.Attempts = []taskpkg.Attempt{{
-					Number:            2,
-					ClaudeStatus:      "failed",
-					SupervisorVerdict: "accepted",
-					Summary:           "executor retried after transient error",
-					Error: &taskpkg.AttemptError{
-						Phase:   "executor",
-						Kind:    "executor_failed",
-						Message: "earlier transient executor failure",
-					},
-				}}
-			})
-
-			stdout, stderr, err := executeCommand("task", "show", "--root", root, "task-cli-test")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if stderr != "" {
-				t.Fatalf("stderr got %q", stderr)
-			}
-			for _, forbidden := range []string{
-				"latest_claude_status: failed",
-				"latest_error_phase: executor",
-			} {
-				if strings.Contains(stdout, forbidden) {
-					t.Fatalf("%s task output leaked active failure framing %q:\n%s", terminalStatus, forbidden, stdout)
-				}
-			}
-			for _, want := range []string{
-				"status: " + string(terminalStatus),
-				"prior_attempt_claude_status: failed",
-				"prior_attempt_error_phase: executor",
-			} {
-				if !strings.Contains(stdout, want) {
-					t.Fatalf("expected %q in %s task output, got:\n%s", want, terminalStatus, stdout)
-				}
-			}
-		})
+	if payload.Task.Status != string(status) {
+		t.Fatalf("json output must reflect accepted terminal status %q, got %q", status, payload.Task.Status)
 	}
 }
 
@@ -421,6 +387,9 @@ func TestTaskArchiveText(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "archived: task-cli-test") || !strings.Contains(stdout, "moved:") {
 		t.Fatalf("stdout got %q", stdout)
+	}
+	if strings.Contains(stdout, "mode:") {
+		t.Fatalf("current-schema archive must not print a fallback mode: %q", stdout)
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(filepath.Dir(donePath)), "archived", "task.yaml")); err != nil {
 		t.Fatalf("archived task missing: %v", err)
@@ -458,6 +427,8 @@ func TestTaskArchiveRemovesManagedWorktree(t *testing.T) {
 	}
 	var payload struct {
 		To              string `json:"to"`
+		Mode            string `json:"mode"`
+		Warning         string `json:"warning"`
 		WorktreeCleanup *struct {
 			Path           string `json:"path"`
 			Removed        bool   `json:"removed"`
@@ -466,6 +437,9 @@ func TestTaskArchiveRemovesManagedWorktree(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
 		t.Fatalf("parse json: %v\n%s", err, stdout)
+	}
+	if payload.Mode != "current_schema" || payload.Warning != "" {
+		t.Fatalf("archive mode=%q warning=%q, want current_schema without warning", payload.Mode, payload.Warning)
 	}
 	if payload.WorktreeCleanup == nil {
 		t.Fatalf("json output missing worktree_cleanup: %s", stdout)

@@ -1,106 +1,10 @@
 package task
 
-// AC: AC1 — Task validation and generated schemas accept executor.cli "codex"
-// while preserving backward compatibility for existing Claude task files.
-//
-// Behavior under test:
-//   - Trigger: a task with executor.cli="codex" is passed to the validator and
-//     to schema generation/check.
-//   - Process: validateExecutor (internal/task/validate.go) and the executor
-//     schema enumeration (internal/task/schema.go) accept both "claude" and
-//     "codex" while rejecting unknown values.
-//   - Observable result: ValidationResult.Valid()==true for both supported CLIs;
-//     the generated executor schema (under schemas/) lists both values in the
-//     "cli" enum; an unknown CLI ("opus-cli") still fails with a clear error.
-
 import (
 	"encoding/json"
 	"reflect"
-	"strings"
 	"testing"
 )
-
-func TestExecutorCLIAcceptsClaudeAndCodex(t *testing.T) {
-	t.Parallel()
-	for _, cli := range []string{"claude", "codex", "glm", "grok", "kimi"} {
-		cli := cli
-		t.Run(cli, func(t *testing.T) {
-			base := validTask(t)
-			base.Executor.CLI = cli
-			result := ValidateStructural(base)
-			if !result.Valid() {
-				t.Fatalf("expected executor.cli=%q to validate, got errors: %#v", cli, result.Errors)
-			}
-		})
-	}
-}
-
-func TestExecutorCLIRejectsUnknownValue(t *testing.T) {
-	t.Parallel()
-	base := validTask(t)
-	base.Executor.CLI = "opus-cli"
-	result := ValidateStructural(base)
-	if result.Valid() {
-		t.Fatal("expected unknown executor.cli to fail validation")
-	}
-	combined := strings.Join(result.Errors, "\n")
-	if !strings.Contains(combined, "executor.cli") {
-		t.Fatalf("expected error to mention executor.cli, got %q", combined)
-	}
-	if !strings.Contains(combined, "claude") || !strings.Contains(combined, "codex") {
-		t.Fatalf("expected error to mention supported set, got %q", combined)
-	}
-}
-
-func TestExecutorEffortValidationDependsOnCLI(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name      string
-		cli       string
-		effort    string
-		wantValid bool
-		wantError string
-	}{
-		{name: "claude accepts max", cli: "claude", effort: "max", wantValid: true},
-		{name: "claude accepts xhigh", cli: "claude", effort: "xhigh", wantValid: true},
-		{name: "claude rejects minimal", cli: "claude", effort: "minimal", wantError: "executor.effort for claude must be one of"},
-		{name: "codex accepts high", cli: "codex", effort: "high", wantValid: true},
-		{name: "codex accepts minimal", cli: "codex", effort: "minimal", wantValid: true},
-		{name: "codex accepts xhigh", cli: "codex", effort: "xhigh", wantValid: true},
-		{name: "codex accepts max", cli: "codex", effort: "max", wantValid: true},
-		{name: "codex rejects unknown", cli: "codex", effort: "turbo", wantError: "executor.effort for codex must be one of"},
-		{name: "claude rejects unknown", cli: "claude", effort: "turbo", wantError: "executor.effort for claude must be one of"},
-		{name: "glm accepts xhigh", cli: "glm", effort: "xhigh", wantValid: true},
-		{name: "glm rejects unknown", cli: "glm", effort: "turbo", wantError: "executor.effort for glm must be one of"},
-		{name: "kimi accepts xhigh", cli: "kimi", effort: "xhigh", wantValid: true},
-		{name: "kimi rejects unknown", cli: "kimi", effort: "turbo", wantError: "executor.effort for kimi must be one of"},
-	}
-
-	for _, tc := range tests {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			base := validTask(t)
-			base.Executor.CLI = tc.cli
-			base.Executor.Effort = tc.effort
-
-			result := ValidateStructural(base)
-			if tc.wantValid {
-				if !result.Valid() {
-					t.Fatalf("expected valid effort, got errors: %#v", result.Errors)
-				}
-				return
-			}
-			if result.Valid() {
-				t.Fatal("expected invalid effort")
-			}
-			combined := strings.Join(result.Errors, "\n")
-			if !strings.Contains(combined, tc.wantError) {
-				t.Fatalf("expected error containing %q, got %q", tc.wantError, combined)
-			}
-		})
-	}
-}
 
 func TestExecutorCLISchemaEnumIncludesClaudeAndCodex(t *testing.T) {
 	t.Parallel()

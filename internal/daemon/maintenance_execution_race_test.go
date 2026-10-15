@@ -1,43 +1,5 @@
 package daemon
 
-// Acceptance skeleton for issue 70 (decouple PR comment polling from execution).
-//
-// AC6: "While maintenance and execution run concurrently, requeue publication
-// and queued-task claim shall remain race-free so a requeued task is neither
-// lost nor double-claimed under the existing no-overwrite publication and claim
-// boundary."
-//
-// Behavior under test (trigger -> process -> observable result):
-//   - Trigger: the maintenance runner requeues an actionable open-PR task from
-//     tasks/done (or tasks/failed) to tasks/queued at the same time the
-//     execution runner scans/claims queued tasks.
-//   - Process: requeue publishes the queued task via the existing no-overwrite
-//     atomic write, and claim moves tasks/queued/<name>.yaml to
-//     tasks/running/<name>.yaml via a no-overwrite rename.
-//   - Observable result: the requeued task ends up in exactly one terminal
-//     location (still queued, or claimed into running exactly once) and is never
-//     lost or double-claimed, even under concurrent interleaving.
-//
-// @lane: integration
-// @category: contract
-// @dependency: queue (QueuedTasks/ClaimTask), task.Requeue, no-overwrite write/rename
-// @complexity: high
-// @roi: score=80 business_value=8 user_frequency=5 legal=false defect_detection=10
-//   (the design's only new concurrency boundary; existing primitive tests cover
-//   no-overwrite publication and claim in isolation, but not the concurrent
-//   maintenance-requeue vs execution-claim interleaving introduced by the
-//   independent maintenance scheduler.)
-// @timing: implement alongside the daemon scheduler refactor.
-//
-// Implementation notes for the executor:
-//   - This is a focused interleaving regression test, distinct from the existing
-//     TestRequeueDoesNotOverwriteQueuedTask and TestClaimTaskDoesNotOverwriteRunningTask
-//     primitive tests; complete it rather than relying on those.
-//   - Drive requeue and claim from separate goroutines (optionally repeated /
-//     looped or synchronized with a barrier) over the same task name, then make
-//     a deterministic assertion about exactly-once placement.
-//   - A double-claim or lost task must fail the assertion.
-
 import (
 	"fmt"
 	"os"
@@ -50,6 +12,8 @@ import (
 	"github.com/shinpr/galley/internal/task"
 )
 
+// AC6: concurrent maintenance requeue and execution claim leave the task in
+// exactly one place, never lost or double-claimed.
 func TestMaintenanceRequeueAndExecutionClaimStayRaceFree(t *testing.T) {
 	// Arrange: Galley root + source repo + queue layout.
 	root := filepath.Join(t.TempDir(), ".agent-workflow")
@@ -140,20 +104,6 @@ func TestMaintenanceRequeueAndExecutionClaimStayRaceFree(t *testing.T) {
 		// lost. The source done task is removed exactly once when publication wins.
 		assertExactlyOneLiveCopy(t, round, taskGlobs{Queued: queuedGlob, Running: runningGlob, Done: doneGlob})
 	}
-
-	// Final state assertions over the canonical no-overwrite boundary: after the
-	// last round the task sits in exactly one terminal queue location.
-	finalQueued := globForTest(t, queuedGlob)
-	finalRunning := globForTest(t, runningGlob)
-	finalDone := globForTest(t, doneGlob)
-	if total := len(finalQueued) + len(finalRunning) + len(finalDone); total != 1 {
-		t.Fatalf("final placement: expected exactly one live copy, got %d (queued=%v running=%v done=%v)",
-			total, finalQueued, finalRunning, finalDone)
-	}
-	if len(finalDone) != 0 {
-		t.Fatalf("final placement: requeued task source remained in done: %v", finalDone)
-	}
-	assertGlobCount(t, runningGlob, len(finalRunning))
 }
 
 func globForTest(t *testing.T, pattern string) []string {

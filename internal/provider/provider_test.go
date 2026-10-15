@@ -60,50 +60,39 @@ func TestEffortsForTransportAndID(t *testing.T) {
 	}
 }
 
-func TestSupervisorEffortsUnionCoversEveryProviderValue(t *testing.T) {
+// A role's effort union must hold every value its providers accept, so profile
+// validation before the effective CLI is known never rejects a valid value.
+func TestRoleEffortsUnionCoversEveryProviderValue(t *testing.T) {
 	t.Parallel()
-	union := SupervisorEfforts()
-	seen := map[string]bool{}
-	for _, e := range union {
-		if seen[e] {
-			t.Fatalf("SupervisorEfforts has duplicate %q: %v", e, union)
-		}
-		seen[e] = true
+	tests := []struct {
+		name    string
+		union   []string
+		include func(Descriptor) bool
+	}{
+		{name: "supervisor", union: SupervisorEfforts(), include: func(d Descriptor) bool { return d.Supervisor }},
+		{name: "executor", union: ExecutorEfforts(), include: func(d Descriptor) bool { return d.Executor }},
 	}
-	// Every supervisor provider's effort value must appear in the union so
-	// profile validation without a fixed default_cli never rejects a value the
-	// effective supervisor would accept.
-	for _, descriptor := range descriptors {
-		if !descriptor.Supervisor {
-			continue
-		}
-		for _, e := range EffortsForTransport(descriptor.Transport) {
-			if !seen[e] {
-				t.Fatalf("union %v missing %q from %s", union, e, descriptor.ID)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			seen := map[string]bool{}
+			for _, e := range tt.union {
+				if seen[e] {
+					t.Fatalf("union has duplicate %q: %v", e, tt.union)
+				}
+				seen[e] = true
 			}
-		}
-	}
-}
-
-func TestExecutorEffortsUnionCoversEveryProviderValue(t *testing.T) {
-	t.Parallel()
-	union := ExecutorEfforts()
-	seen := map[string]bool{}
-	for _, e := range union {
-		if seen[e] {
-			t.Fatalf("ExecutorEfforts has duplicate %q: %v", e, union)
-		}
-		seen[e] = true
-	}
-	for _, descriptor := range descriptors {
-		if !descriptor.Executor {
-			continue
-		}
-		for _, e := range EffortsForTransport(descriptor.Transport) {
-			if !seen[e] {
-				t.Fatalf("union %v missing %q from %s", union, e, descriptor.ID)
+			for _, descriptor := range descriptors {
+				if !tt.include(descriptor) {
+					continue
+				}
+				for _, e := range EffortsForTransport(descriptor.Transport) {
+					if !seen[e] {
+						t.Fatalf("union %v missing %q from %s", tt.union, e, descriptor.ID)
+					}
+				}
 			}
-		}
+		})
 	}
 }
 

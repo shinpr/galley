@@ -13,6 +13,8 @@ import (
 
 	"github.com/shinpr/galley/internal/daemonctl"
 	"github.com/shinpr/galley/internal/proc"
+	"github.com/shinpr/galley/internal/queue"
+	"github.com/shinpr/galley/internal/task"
 )
 
 // spawnTrackedChild registers a real process group; reap controls whether a
@@ -67,14 +69,11 @@ func spawnTrackedChild(t *testing.T, root string, reap bool, ownerOverride ...da
 	return child.Process.Pid, pgid, done
 }
 
-// TestStopForceCleansRegisteredChildProcessGroupBeforeRemovingPIDFile exercises
-// AC-004 at the command level: galley daemon stop --force must SIGKILL a
-// daemon-owned child process group recorded in the registry, wait until that
-// group is confirmed gone, and only then remove the PID file. The test asserts
-// the child is dead by the time the command returns and that the PID file is
-// absent afterwards.
-func TestStopForceCleansRegisteredChildProcessGroupBeforeRemovingPIDFile(t *testing.T) {
-	root, pidFile, _ := startUnresponsiveDaemon(t)
+// TestStopForceKillsLiveDaemonChildrenAndFailsOwnedTask covers AC-004: force stop
+// reaps registered child groups and fails owned tasks before removing the PID file.
+func TestStopForceKillsLiveDaemonChildrenAndFailsOwnedTask(t *testing.T) {
+	root, pidFile, daemonPID := startUnresponsiveDaemon(t)
+	runningPath := writeForceStopTask(t, root, "task.yaml", &queue.Owner{PID: daemonPID, RecordedAt: "now"})
 	childPID, _, _ := spawnTrackedChild(t, root, true)
 	owner, err := daemonctl.ReadPIDFile(pidFile)
 	if err != nil {
@@ -92,8 +91,6 @@ func TestStopForceCleansRegisteredChildProcessGroupBeforeRemovingPIDFile(t *test
 	if !strings.Contains(out.String(), "force stopped") {
 		t.Fatalf("expected force-stop confirmation, got %q", out.String())
 	}
-	// The command must not have returned until the registered child group was
-	// confirmed gone.
 	if alive, _ := daemonctl.Alive(childPID); alive {
 		t.Fatal("registered child still alive after force stop returned")
 	}
@@ -102,6 +99,13 @@ func TestStopForceCleansRegisteredChildProcessGroupBeforeRemovingPIDFile(t *test
 	}
 	if _, statErr := os.Stat(proc.OwnedChildRegistryPath(root, owner.PID, owner.ProcessStartedAt)); !os.IsNotExist(statErr) {
 		t.Fatalf("child registry must be cleared after successful cleanup, stat err=%v", statErr)
+	}
+	failed, err := task.Load(task.TaskStatePath(root, task.WorkflowStateFailed, filepath.Base(runningPath)))
+	if err != nil {
+		t.Fatalf("load force-stopped task: %v", err)
+	}
+	if len(failed.Attempts) != 2 || failed.Attempts[1].Error == nil || failed.Attempts[1].Error.Kind != "daemon_force_stopped" {
+		t.Fatalf("force-stop evidence missing: %#v", failed.Attempts)
 	}
 }
 

@@ -4,8 +4,8 @@ package daemonctl
 
 import (
 	"errors"
-	"os"
 	"os/exec"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -54,17 +54,12 @@ func TestTerminateChildProcessUnixUsesSIGTERM(t *testing.T) {
 		if !errors.As(waitErr, &exitErr) {
 			t.Fatalf("wait err = %v, want *exec.ExitError", waitErr)
 		}
-		state, ok := exitErr.Sys().(interface{ Signal() os.Signal })
+		status, ok := exitErr.Sys().(syscall.WaitStatus)
 		if !ok {
-			// Fall through: not all platforms expose Signal() but the
-			// non-zero exit alone is sufficient evidence the helper
-			// delivered termination.
-			return
+			t.Fatalf("exit Sys() = %T, want syscall.WaitStatus", exitErr.Sys())
 		}
-		// The Unix path uses SIGTERM, not SIGKILL. The observable invariant
-		// on macOS and Linux is signal exit rather than the exact value.
-		if _, signaled := state.Signal().(interface{ Signal() }); signaled {
-			t.Fatalf("unexpected non-signal exit state")
+		if !status.Signaled() || status.Signal() != syscall.SIGTERM {
+			t.Fatalf("exit status signaled=%v signal=%v, want SIGTERM", status.Signaled(), status.Signal())
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("sleep did not exit within 5s after TerminateChildProcess")

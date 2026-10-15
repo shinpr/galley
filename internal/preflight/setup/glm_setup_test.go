@@ -1,94 +1,55 @@
 package setup
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/shinpr/galley/internal/task"
 )
 
-func glmSetupOptions(t *testing.T, token string) Options {
-	t.Helper()
-	return Options{
-		Task: task.Task{
-			ID:       "task-glm",
-			Executor: task.Executor{CLI: "glm", Effort: "high"},
-		},
-		WorkDir:      t.TempDir(),
-		RunDir:       t.TempDir(),
-		GLMAuthToken: token,
+func TestBuildExecutorCommandPlanRoutesClaudeTransportProviders(t *testing.T) {
+	tests := []struct {
+		cli       string
+		claudeBin string
+		glmToken  string
+		kimiKey   string
+		wantInEnv []string
+		exactEnv  bool
+	}{
+		{cli: "claude", claudeBin: "/path/to/claude", wantInEnv: []string{"GALLEY_CLAUDE_GUARD_MODE=setup_executor"}, exactEnv: true},
+		{cli: "glm", glmToken: "zai-token", wantInEnv: []string{"ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic", "ANTHROPIC_AUTH_TOKEN=zai-token"}},
+		{cli: "kimi", kimiKey: "kimi-token", wantInEnv: []string{"ANTHROPIC_BASE_URL=https://api.kimi.com/coding/", "ANTHROPIC_API_KEY=kimi-token"}},
 	}
-}
-
-func TestBuildExecutorCommandPlanGLMRedirects(t *testing.T) {
-	cmd, provider, err := BuildExecutorCommandPlan(glmSetupOptions(t, "zai-token"), []byte("{}"))
-	if err != nil {
-		t.Fatalf("BuildExecutorCommandPlan: %v", err)
-	}
-	if provider != "claude" {
-		t.Fatalf("provider = %q, want claude (glm rides the Claude binary)", provider)
-	}
-	assertGLMEnv(t, cmd.EnvAppend, cmd.EnvRemove)
-	if cmd.Argv[0] != "claude" {
-		t.Fatalf("argv[0] = %q, want claude", cmd.Argv[0])
-	}
-}
-
-func TestBuildExecutorCommandPlanGLMFailsFastWithoutToken(t *testing.T) {
-	_, _, err := BuildExecutorCommandPlan(glmSetupOptions(t, ""), []byte("{}"))
-	if err == nil {
-		t.Fatal("expected fail-fast when glm setup executor has no token")
-	}
-	if !strings.Contains(err.Error(), "glm_api_key") {
-		t.Fatalf("error must name the missing config key, got %q", err)
-	}
-}
-
-func TestBuildExecutorCommandPlanKimiRedirects(t *testing.T) {
-	opts := glmSetupOptions(t, "")
-	opts.Task.Executor.CLI = "kimi"
-	opts.KimiAPIKey = "kimi-token"
-	cmd, provider, err := BuildExecutorCommandPlan(opts, []byte("{}"))
-	if err != nil {
-		t.Fatalf("BuildExecutorCommandPlan: %v", err)
-	}
-	if provider != "claude" || cmd.Argv[0] != "claude" {
-		t.Fatalf("Kimi must use Claude transport, provider=%q argv=%#v", provider, cmd.Argv)
-	}
-	joined := strings.Join(cmd.EnvAppend, "\n")
-	for _, want := range []string{"ANTHROPIC_BASE_URL=https://api.kimi.com/coding/", "ANTHROPIC_API_KEY=kimi-token"} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("EnvAppend missing %q: %#v", want, cmd.EnvAppend)
-		}
-	}
-}
-
-func TestBuildExecutorCommandPlanKimiFailsFastWithoutKey(t *testing.T) {
-	opts := glmSetupOptions(t, "")
-	opts.Task.Executor.CLI = "kimi"
-	_, _, err := BuildExecutorCommandPlan(opts, []byte("{}"))
-	if err == nil || !strings.Contains(err.Error(), "kimi_api_key") {
-		t.Fatalf("expected missing kimi_api_key error, got %v", err)
-	}
-}
-
-// assertGLMEnv verifies the shared GLM redirect was applied to a command plan.
-func assertGLMEnv(t *testing.T, envAppend, envRemove []string) {
-	t.Helper()
-	joined := strings.Join(envAppend, "\n")
-	if !strings.Contains(joined, "ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic") {
-		t.Fatalf("EnvAppend missing GLM base URL: %#v", envAppend)
-	}
-	if !strings.Contains(joined, "ANTHROPIC_AUTH_TOKEN=zai-token") {
-		t.Fatalf("EnvAppend missing GLM auth token: %#v", envAppend)
-	}
-	found := false
-	for _, k := range envRemove {
-		if k == "ANTHROPIC_API_KEY" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("EnvRemove must strip ANTHROPIC_API_KEY: %#v", envRemove)
+	for _, tc := range tests {
+		t.Run(tc.cli, func(t *testing.T) {
+			cmd, provider, err := BuildExecutorCommandPlan(Options{
+				Task:         task.Task{ID: "task-" + tc.cli, Executor: task.Executor{CLI: tc.cli, Effort: "high"}},
+				WorkDir:      t.TempDir(),
+				RunDir:       t.TempDir(),
+				ClaudeBin:    tc.claudeBin,
+				GLMAuthToken: tc.glmToken,
+				KimiAPIKey:   tc.kimiKey,
+			}, []byte("{}"))
+			if err != nil {
+				t.Fatalf("BuildExecutorCommandPlan: %v", err)
+			}
+			wantBin := tc.claudeBin
+			if wantBin == "" {
+				wantBin = "claude"
+			}
+			if provider != "claude" || cmd.Argv[0] != wantBin {
+				t.Fatalf("%s must use Claude transport, provider=%q argv=%#v", tc.cli, provider, cmd.Argv)
+			}
+			if tc.exactEnv && !slices.Equal(cmd.EnvAppend, tc.wantInEnv) {
+				t.Fatalf("EnvAppend = %#v, want exactly %#v", cmd.EnvAppend, tc.wantInEnv)
+			}
+			joined := strings.Join(cmd.EnvAppend, "\n")
+			for _, want := range tc.wantInEnv {
+				if !strings.Contains(joined, want) {
+					t.Fatalf("EnvAppend missing %q: %#v", want, cmd.EnvAppend)
+				}
+			}
+		})
 	}
 }

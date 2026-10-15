@@ -88,6 +88,7 @@ jobs:
           fi
           "$python_bin" tests/plugins/galley/skills/galley/test_create_task_skeleton.py
           "$python_bin" tests/plugins/galley/skills/galley/test_update_task_executor.py
+          "$python_bin" tests/plugins/galley/skills/galley/test_diagnose_run.py
 
       - name: Validate JSON files
         run: |

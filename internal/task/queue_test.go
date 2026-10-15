@@ -135,6 +135,35 @@ func TestQueuePreservesOmittedExecutorModel(t *testing.T) {
 	}
 }
 
+func TestQueuePersistsQueuedStatusFromOmittedStatus(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	path := writeTaskYAML(t, "loop_budget: 3")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	omitted := strings.Replace(string(data), "\nstatus: \"queued\"\n", "\n", 1)
+	if omitted == string(data) {
+		t.Fatalf("fixture must drop top-level status:\n%s", data)
+	}
+	if err := os.WriteFile(path, []byte(omitted), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Queue(path, QueueOptions{Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	queued, err := Load(result.To)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queued.Status != StatusQueued {
+		t.Fatalf("persisted status got %q, want %q", queued.Status, StatusQueued)
+	}
+}
+
 func TestQueueCopiesExternalDraftIntoRoot(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -267,7 +296,7 @@ func TestQueueDuplicateTaskIDSkipsMalformedExistingTask(t *testing.T) {
 
 func TestQueueRejectsNonAuthoringStatuses(t *testing.T) {
 	t.Parallel()
-	for _, status := range []Status{"ready", "queued", "running", "needs_supervisor_review", "accepted", "pr_opened", "failed"} {
+	for _, status := range []Status{"queued", "running", "needs_supervisor_review", "accepted", "pr_opened", "failed"} {
 		t.Run(string(status), func(t *testing.T) {
 			t.Parallel()
 			path := writeTaskYAML(t, "loop_budget: 3")

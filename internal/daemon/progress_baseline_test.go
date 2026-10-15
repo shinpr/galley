@@ -17,112 +17,68 @@ func sha256Hex(t *testing.T, data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// TestProgressBaselineReportsCleanWhenSkeletonUnchanged verifies that
-// across repeated attempts, when the dirty diff contains only baseline-
-// matching skeleton files, hasNonSkeletonProgress reports no progress so the
-// existing consecutive-no-diff escalation can fire (AC-014).
-func TestProgressBaselineReportsCleanWhenSkeletonUnchanged(t *testing.T) {
+// Only diffs beyond baseline-matching skeleton files count as progress, so the
+// consecutive-no-diff escalation still fires on skeleton-only attempts (AC-013, AC-014).
+func TestHasNonSkeletonProgress(t *testing.T) {
 	t.Parallel()
-	work := t.TempDir()
-	body := []byte("// galley skeleton placeholder\n")
-	rel := "internal/foo/foo_test.go"
-	if err := os.MkdirAll(filepath.Join(work, "internal/foo"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(work, rel), body, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	snapshot := workspace.Snapshot{
-		Dirty:           true,
-		StatusPorcelain: "?? " + rel + "\n",
-	}
-	preflight := &skeletonpreflight.Result{
-		Baseline: skeletonpreflight.Baseline{
-			SkeletonHashes: []skeletonpreflight.SkeletonHash{{Path: rel, SHA256: sha256Hex(t, body)}},
+	const skeleton = "internal/foo/foo_test.go"
+	placeholder := "// galley skeleton placeholder\n"
+	for _, tc := range []struct {
+		name         string
+		worktreeBody string
+		baselineBody string
+		snapshot     workspace.Snapshot
+		want         bool
+	}{
+		{
+			name:         "skeleton unchanged from baseline",
+			worktreeBody: placeholder,
+			baselineBody: placeholder,
+			snapshot:     workspace.Snapshot{Dirty: true, StatusPorcelain: "?? " + skeleton + "\n"},
+			want:         false,
 		},
-	}
-	got, err := hasNonSkeletonProgress(snapshot, work, preflight)
-	if err != nil {
-		t.Fatalf("hasNonSkeletonProgress error: %v", err)
-	}
-	if got {
-		t.Fatalf("hasNonSkeletonProgress = true; want false for skeleton-only baseline-matching diff")
-	}
-}
-
-// TestProgressBaselineDetectsChangedSkeletonContent verifies that when
-// the executor edits a skeleton file (so its content no longer matches the
-// post-preflight baseline hash), the attempt is reported as progress (AC-013).
-func TestProgressBaselineDetectsChangedSkeletonContent(t *testing.T) {
-	t.Parallel()
-	work := t.TempDir()
-	rel := "internal/foo/foo_test.go"
-	if err := os.MkdirAll(filepath.Join(work, "internal/foo"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	original := []byte("// galley skeleton placeholder\n")
-	edited := []byte("// galley skeleton placeholder\nfunc TestThing(t *testing.T) {}\n")
-	if err := os.WriteFile(filepath.Join(work, rel), edited, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	snapshot := workspace.Snapshot{
-		Dirty:           true,
-		StatusPorcelain: " M " + rel + "\n",
-	}
-	preflight := &skeletonpreflight.Result{
-		Baseline: skeletonpreflight.Baseline{
-			SkeletonHashes: []skeletonpreflight.SkeletonHash{{Path: rel, SHA256: sha256Hex(t, original)}},
+		{
+			name:         "skeleton content edited",
+			worktreeBody: placeholder + "func TestThing(t *testing.T) {}\n",
+			baselineBody: placeholder,
+			snapshot:     workspace.Snapshot{Dirty: true, StatusPorcelain: " M " + skeleton + "\n"},
+			want:         true,
 		},
-	}
-	got, err := hasNonSkeletonProgress(snapshot, work, preflight)
-	if err != nil {
-		t.Fatalf("hasNonSkeletonProgress error: %v", err)
-	}
-	if !got {
-		t.Fatalf("hasNonSkeletonProgress = false; want true for changed skeleton content")
-	}
-}
-
-// TestProgressBaselineDetectsNonSkeletonFile verifies that any change to
-// a non-skeleton file counts as progress regardless of the baseline.
-func TestProgressBaselineDetectsNonSkeletonFile(t *testing.T) {
-	t.Parallel()
-	work := t.TempDir()
-	skel := "internal/foo/foo_test.go"
-	if err := os.MkdirAll(filepath.Join(work, "internal/foo"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	body := []byte("// skeleton\n")
-	if err := os.WriteFile(filepath.Join(work, skel), body, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	snapshot := workspace.Snapshot{
-		Dirty:           true,
-		StatusPorcelain: " M internal/foo/foo.go\n?? " + skel + "\n",
-	}
-	preflight := &skeletonpreflight.Result{
-		Baseline: skeletonpreflight.Baseline{
-			SkeletonHashes: []skeletonpreflight.SkeletonHash{{Path: skel, SHA256: sha256Hex(t, body)}},
+		{
+			name:         "non-skeleton file changed",
+			worktreeBody: placeholder,
+			baselineBody: placeholder,
+			snapshot:     workspace.Snapshot{Dirty: true, StatusPorcelain: " M internal/foo/foo.go\n?? " + skeleton + "\n"},
+			want:         true,
 		},
-	}
-	got, err := hasNonSkeletonProgress(snapshot, work, preflight)
-	if err != nil {
-		t.Fatalf("hasNonSkeletonProgress error: %v", err)
-	}
-	if !got {
-		t.Fatalf("hasNonSkeletonProgress = false; want true for non-skeleton diff")
-	}
-}
-
-// TestProgressBaselineNoDiffReportsClean verifies that a clean snapshot
-// remains clean — the helper must not fabricate progress when nothing changed.
-func TestProgressBaselineNoDiffReportsClean(t *testing.T) {
-	t.Parallel()
-	got, err := hasNonSkeletonProgress(workspace.Snapshot{Dirty: false}, t.TempDir(), nil)
-	if err != nil {
-		t.Fatalf("hasNonSkeletonProgress error: %v", err)
-	}
-	if got {
-		t.Fatalf("hasNonSkeletonProgress = true on clean snapshot")
+		{
+			name:     "clean snapshot",
+			snapshot: workspace.Snapshot{Dirty: false},
+			want:     false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			work := t.TempDir()
+			var preflight *skeletonpreflight.Result
+			if tc.baselineBody != "" {
+				if err := os.MkdirAll(filepath.Join(work, filepath.Dir(skeleton)), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(work, skeleton), []byte(tc.worktreeBody), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				preflight = &skeletonpreflight.Result{Baseline: skeletonpreflight.Baseline{
+					SkeletonHashes: []skeletonpreflight.SkeletonHash{{Path: skeleton, SHA256: sha256Hex(t, []byte(tc.baselineBody))}},
+				}}
+			}
+			got, err := hasNonSkeletonProgress(tc.snapshot, work, preflight)
+			if err != nil {
+				t.Fatalf("hasNonSkeletonProgress error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("hasNonSkeletonProgress = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

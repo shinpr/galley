@@ -2,10 +2,12 @@ package daemon
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -320,6 +322,42 @@ func TestCleanupWorktreesLogsAdditionalTaskFailures(t *testing.T) {
 		t.Fatalf("stderr must name the second failing task, got %q", stderr)
 	}
 	assertGHNotInvoked(t, marker)
+}
+
+// captureStderr temporarily redirects os.Stderr to a pipe and returns the
+// captured bytes after the callback exits.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stderr
+	os.Stderr = w
+
+	var (
+		mu     sync.Mutex
+		buf    strings.Builder
+		doneCh = make(chan struct{})
+	)
+	go func() {
+		data, _ := io.ReadAll(r)
+		mu.Lock()
+		buf.Write(data)
+		mu.Unlock()
+		close(doneCh)
+	}()
+
+	fn()
+
+	os.Stderr = orig
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	<-doneCh
+	mu.Lock()
+	defer mu.Unlock()
+	return buf.String()
 }
 
 func pointWorktreeAtSourceRepo(t *testing.T, taskPath, repo string) {

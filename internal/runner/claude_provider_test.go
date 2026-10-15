@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -31,17 +32,43 @@ func TestConfigureClaudeProviderKimiUsesDedicatedEndpointAndAPIKey(t *testing.T)
 	}
 }
 
-func TestConfigureClaudeProviderFailsFastWithoutConfiguredCredential(t *testing.T) {
-	for _, provider := range []string{"glm", "kimi"} {
-		provider := provider
-		t.Run(provider, func(t *testing.T) {
-			plan := proc.Command{Argv: []string{"claude", "-p"}}
-			err := ConfigureClaudeProvider(&plan, ClaudeProviderOptions{Provider: provider})
-			if err == nil {
-				t.Fatal("expected missing credential error")
+func TestConfigureClaudeProviderTrimsCredentialAndFailsFastWhenBlank(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		provider string
+		raw      string
+		wantEnv  string
+	}{
+		{provider: "glm", raw: ""},
+		{provider: "glm", raw: "   "},
+		{provider: "glm", raw: "  tok-123  ", wantEnv: "ANTHROPIC_AUTH_TOKEN=tok-123"},
+		{provider: "kimi", raw: ""},
+		{provider: "kimi", raw: "   "},
+		{provider: "kimi", raw: "  tok-123  ", wantEnv: "ANTHROPIC_API_KEY=tok-123"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.provider+"/"+strconv.Quote(tt.raw), func(t *testing.T) {
+			t.Parallel()
+			opts := ClaudeProviderOptions{Provider: tt.provider, Credentials: ClaudeCredentials{GLMAuthToken: tt.raw}}
+			if tt.provider == "kimi" {
+				opts.Credentials = ClaudeCredentials{KimiAPIKey: tt.raw}
 			}
-			if !strings.Contains(err.Error(), provider+"_api_key") {
-				t.Fatalf("error must name %s_api_key, got %q", provider, err)
+			plan := proc.Command{Argv: []string{"claude", "-p"}}
+			err := ConfigureClaudeProvider(&plan, opts)
+			if validateErr := ValidateClaudeProvider(opts); (validateErr == nil) != (err == nil) {
+				t.Fatalf("ValidateClaudeProvider = %v; ConfigureClaudeProvider = %v", validateErr, err)
+			}
+			if tt.wantEnv == "" {
+				if err == nil || !strings.Contains(err.Error(), tt.provider+"_api_key") {
+					t.Fatalf("error must name %s_api_key, got %v", tt.provider, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !containsEnvName(plan.EnvAppend, tt.wantEnv) {
+				t.Fatalf("EnvAppend %#v missing %q", plan.EnvAppend, tt.wantEnv)
 			}
 		})
 	}

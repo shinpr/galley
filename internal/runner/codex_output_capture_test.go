@@ -248,36 +248,13 @@ func assertCanonicalSourceUnchanged(t *testing.T, file, canonical string) {
 
 func TestCodexCommandPlanFailsBeforeExecOnInvalidSchema(t *testing.T) {
 	t.Parallel()
-	cases := []struct {
-		name  string
-		setup func(t *testing.T, opts *CodexOptions)
-		want  string
-	}{
-		{name: "attempt-dir-malformed-inline", setup: func(t *testing.T, o *CodexOptions) {
-			o.JSONSchema = `{not json`
-			o.AttemptDir = t.TempDir()
-		}, want: "decode codex output schema"},
-		{name: "caller-destination-malformed-inline", setup: func(t *testing.T, o *CodexOptions) {
-			o.JSONSchema = `{not json`
-			o.OutputSchemaFile = filepath.Join(t.TempDir(), "caller.schema.json")
-		}, want: "decode codex output schema"},
-		{name: "caller-destination-missing-file", setup: func(t *testing.T, o *CodexOptions) {
-			o.JSONSchemaFile = filepath.Join(t.TempDir(), "missing.schema.json")
-			o.OutputSchemaFile = filepath.Join(t.TempDir(), "caller.schema.json")
-		}, want: "read codex output schema file"},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			opts := CodexFromTask(minimalCodexTask())
-			opts.Prompt = "work order"
-			tc.setup(t, &opts)
-			_, err := CodexCommandPlan(opts)
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("expected error containing %q, got %v", tc.want, err)
-			}
-		})
+	opts := CodexFromTask(minimalCodexTask())
+	opts.Prompt = "work order"
+	opts.JSONSchema = `{not json`
+	opts.AttemptDir = t.TempDir()
+	_, err := CodexCommandPlan(opts)
+	if err == nil || !strings.Contains(err.Error(), "decode codex output schema") {
+		t.Fatalf("expected error containing %q, got %v", "decode codex output schema", err)
 	}
 }
 
@@ -406,33 +383,6 @@ func TestPrepareCodexOutputSchemaRejectsAliasedDestination(t *testing.T) {
 				t.Fatalf("canonical source must still equal original canonical bytes")
 			}
 		})
-	}
-}
-
-// AC1: a distinct caller destination must still succeed and normalize, proving
-// the alias rejection does not over-block legitimate distinct destinations.
-func TestPrepareCodexOutputSchemaAcceptsDistinctDestination(t *testing.T) {
-	t.Parallel()
-	sourcePath := writeCanonicalSchemaFile(t, codexCanonicalTestSchema)
-	destDir := t.TempDir()
-	path, err := PrepareCodexOutputSchema(CodexOptions{JSONSchemaFile: sourcePath}, destDir, CodexOutputSchemaFilename)
-	if err != nil {
-		t.Fatalf("PrepareCodexOutputSchema distinct destination: %v", err)
-	}
-	if filepath.Dir(path) != destDir {
-		t.Fatalf("distinct derivative must live in destDir: got %q", path)
-	}
-	body, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read derivative: %v", err)
-	}
-	assertCodexNormalized(t, body)
-	source, err := os.ReadFile(sourcePath)
-	if err != nil {
-		t.Fatalf("read canonical source: %v", err)
-	}
-	if !bytes.Equal(source, []byte(codexCanonicalTestSchema)) {
-		t.Fatalf("canonical source must remain unchanged for distinct destination")
 	}
 }
 

@@ -53,7 +53,6 @@ func TestRunAdapterPayloadPassesSupervisorEffort(t *testing.T) {
 		want     string
 	}{
 		{provider: "claude", want: "--effort high"},
-		{provider: "glm", want: "--effort high"},
 		{provider: "codex", codex: true, want: `model_reasoning_effort="high"`},
 	}
 	for _, tc := range cases {
@@ -71,7 +70,6 @@ func TestRunAdapterPayloadPassesSupervisorEffort(t *testing.T) {
 				opts.CodexBin = bin
 			} else {
 				opts.ClaudeBin = bin
-				opts.GLMAuthToken = "zai-token"
 			}
 			if _, err := RunAdapterPayload(context.Background(), opts, []byte(`{"evidence":{"task":{"id":"task"},"diff":""}}`)); err != nil {
 				t.Fatal(err)

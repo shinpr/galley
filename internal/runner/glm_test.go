@@ -50,24 +50,3 @@ func TestConfigureClaudeProviderGLMInjectsEndpointAndTokenViaEnvOnly(t *testing.
 		}
 	}
 }
-
-func TestValidateClaudeProviderGLMTrimsAndValidates(t *testing.T) {
-	t.Parallel()
-	if err := ValidateClaudeProvider(ClaudeProviderOptions{
-		Provider:    "glm",
-		Credentials: ClaudeCredentials{GLMAuthToken: "  tok-123  "},
-	}); err != nil {
-		t.Fatalf("ValidateClaudeProvider rejected a trimmed token: %v", err)
-	}
-	for _, raw := range []string{"", "   "} {
-		err := ValidateClaudeProvider(ClaudeProviderOptions{
-			Provider:    "glm",
-			Credentials: ClaudeCredentials{GLMAuthToken: raw},
-		})
-		if err == nil {
-			t.Fatalf("ValidateClaudeProvider(%q) expected error", raw)
-		} else if !strings.Contains(err.Error(), "glm_api_key") {
-			t.Fatalf("error must name the config key, got %q", err)
-		}
-	}
-}

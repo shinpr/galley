@@ -3,6 +3,8 @@ package supervisor
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -73,11 +75,18 @@ func TestVerdictJSONContainsOnlyRuntimeInputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := string(data)
-	for _, field := range []string{"status", "summary", "acceptance_passes", "quality_passes", "findings", "discussion_items"} {
-		if !strings.Contains(got, `"`+field+`"`) {
-			t.Fatalf("verdict JSON missing %q: %s", field, got)
-		}
+	var decoded map[string]any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(decoded))
+	for key := range decoded {
+		got = append(got, key)
+	}
+	sort.Strings(got)
+	want := []string{"acceptance_passes", "discussion_items", "findings", "quality_passes", "status", "summary"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("verdict JSON keys = %v; want %v", got, want)
 	}
 }
 
@@ -93,6 +102,7 @@ func TestNewAdapterRequestSerializesErrorsAsStrings(t *testing.T) {
 		Task: task.Task{Scope: task.Scope{
 			CWD: "/source/repo",
 		}},
+		PreflightResult: map[string]any{"status": "completed", "outputs": []map[string]any{{"ac_id": "AC1"}}},
 	})
 	data, err := json.Marshal(request)
 	if err != nil {
@@ -105,6 +115,7 @@ func TestNewAdapterRequestSerializesErrorsAsStrings(t *testing.T) {
 		`"diff_error":"diff failed"`,
 		`"diff_dirty":true`,
 		`"source_cwd":"/source/repo"`,
+		`"preflight_result":{"outputs":[{"ac_id":"AC1"}],"status":"completed"}`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("request JSON missing %s: %s", want, text)

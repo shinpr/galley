@@ -19,6 +19,8 @@ func TestAppendProviderModelEffortArgs(t *testing.T) {
 		{provider.TransportCodex, "m", "high", []string{"base", "--model", "m", "-c", `model_reasoning_effort="high"`}},
 		{provider.TransportGrok, "m", "high", []string{"base", "--model", "m", "--reasoning-effort", "high"}},
 		{provider.TransportClaude, "", "", []string{"base"}},
+		{provider.TransportCodex, "", "", []string{"base"}},
+		{provider.TransportGrok, "", "", []string{"base"}},
 	}
 	for _, tt := range tests {
 		got := AppendProviderModelEffortArgs([]string{"base"}, tt.transport, tt.model, tt.effort)

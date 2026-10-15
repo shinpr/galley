@@ -41,6 +41,9 @@ func TestClaudeArgvReplacePrompt(t *testing.T) {
 	if !reflect.DeepEqual(argv, want) {
 		t.Fatalf("argv mismatch\n got: %#v\nwant: %#v", argv, want)
 	}
+	if command.Stdin != "" {
+		t.Fatalf("non-Windows command should not set stdin, got %q", command.Stdin)
+	}
 }
 
 func TestClaudeCommandPlanIncludesWorkDirAndWarnings(t *testing.T) {
@@ -258,38 +261,6 @@ func TestClaudeCommandPlanWindowsRequiresAttemptDirForEmbeddedSystemPrompt(t *te
 	}
 	if !strings.Contains(err.Error(), "attempt dir is required") {
 		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-// TestClaudeCommandPlanNonWindowsPreservesArgvShape pins AC4: on macOS/Linux
-// the Claude command plan keeps the historical argv shape so existing field
-// evidence continues to apply.
-func TestClaudeCommandPlanNonWindowsPreservesArgvShape(t *testing.T) {
-	t.Parallel()
-	command, err := ClaudeCommandPlanForOS(ClaudeOptions{
-		Bin:          "claude",
-		SystemPrompt: "system body",
-		JSONSchema:   `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object"}`,
-		Prompt:       "do the work",
-	}, "linux")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if !containsArg(command.Argv, "--system-prompt") {
-		t.Fatalf("non-Windows argv must keep --system-prompt: %#v", command.Argv)
-	}
-	if !containsArg(command.Argv, "--json-schema") {
-		t.Fatalf("non-Windows argv must keep --json-schema: %#v", command.Argv)
-	}
-	if got := argAfter(t, command.Argv, "--json-schema"); got != `{"type":"object"}` {
-		t.Fatalf("non-Windows argv must pass Claude-compatible schema, got %q", got)
-	}
-	if command.Argv[len(command.Argv)-1] != "do the work" {
-		t.Fatalf("non-Windows argv must end with work order prompt: %#v", command.Argv)
-	}
-	if command.Stdin != "" {
-		t.Fatalf("non-Windows command should not set stdin, got %q", command.Stdin)
 	}
 }
 

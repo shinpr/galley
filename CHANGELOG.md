@@ -6,8 +6,11 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.12.10 - 2026-10-23
+
 ### Changed
 
+- Updated `golang.org/x/sys` to `v0.49.0` and `golang.org/x/term` to `v0.47.0`.
 - Packaged Claude, Codex, and Grok Galley plugins are now versioned as `0.1.36`; task authoring produces one queue-ready outcome from decided criteria, keeps authoring-only context and follow-up work outside the task, and retains only criteria whose implementation is needed for that outcome or an affected existing contract. The skill also applies whenever a request involves Galley.
 
 ## v0.12.9 - 2026-09-06

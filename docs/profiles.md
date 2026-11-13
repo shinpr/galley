@@ -84,7 +84,7 @@ Supported fields:
 - `review_dimensions[].weight`: non-negative relative weight for reporting.
 - `review_dimensions[].required`: whether the dimension is mandatory.
 - `review_dimensions[].pass`: observable pass condition for the dimension.
-- When review dimensions are configured, the supervisor records passed IDs in `quality_passes`. Other dimensions remain open. Passed dimensions persist in `task.review_progress`; later attempts cover unfinished dimensions and revisit a passed dimension when the executor reports a current-attempt change that may affect it.
+- When review dimensions are configured, the supervisor records passed IDs in `quality_passes`. Other dimensions remain open. Passed dimensions persist in `task.review_progress`; later attempts cover unfinished dimensions and revisit a passed dimension when the attempt changed a file that can affect it (see [How Review Converges](supervision.md#how-review-converges)).
 - `evidence_requirements.file_line_references`: ask for file/line evidence in review output.
 - `evidence_requirements.command_outputs`: ask for command output evidence.
 - `pass_policy.required_dimensions_must_pass`: instruct the supervisor to require all mandatory dimensions.

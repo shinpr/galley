@@ -85,27 +85,3 @@ func TestLoadAndValidateAcceptsMinimalDraft(t *testing.T) {
 		t.Fatal("worktree should be enabled after defaults")
 	}
 }
-
-func TestWorkOrderUsesFixedAFKDecisionPolicy(t *testing.T) {
-	t.Parallel()
-	tk := Task{
-		ID:   "task-wo-001",
-		Mode: "afk",
-		Goal: "goal",
-		AcceptanceCriteria: []AcceptanceCriterion{{
-			ID: "AC1", Text: "text", Verification: "verify", Status: "pending",
-		}},
-		Scope: Scope{
-			CWD: "/tmp/repo", AllowedPaths: []string{"."}, Permission: "edit",
-		},
-		ExecutionPolicy: ExecutionPolicy{
-			LoopBudget: LoopBudget{Count: 3, Set: true},
-			TimeoutMS:  1000,
-		},
-		Worktree: Worktree{Enabled: true, Branch: "agent/task-wo-001", Path: "../repo.worktrees/task"},
-	}
-	text := RenderWorkOrder(tk)
-	if !strings.Contains(text, "AFK decision policy: `choose-smallest-reversible`") {
-		t.Fatalf("work order missing fixed AFK decision policy:\n%s", text)
-	}
-}

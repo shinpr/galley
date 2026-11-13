@@ -69,59 +69,17 @@ Inspect existing repo signals:
 
 Checkpoint: choose test file placement and lane names that match the repository.
 
-## Step 3: Classify ACs Behavior-First
+## Step 3: Select The Required Proof
 
-For each AC, determine whether the behavior is user-observable or contract-observable.
+For each AC, identify its observable result and the narrowest boundary where a failure of that result is detectable. An outcome delivered through an application, CLI, or service entry point includes the production composition that delivers it, such as routing, wiring, state ownership, and adapters; a test that substitutes that composition does not prove it. An AC scoped to one component or function keeps that boundary. Calculation, parsing, and branching rules whose cases one boundary test cannot cover belong to unit tests.
 
-Use EARS-style cues when present:
+Inspect the assertions and setup of existing tests, not only their names. When an existing test already proves the AC's behavior at that boundary, emit a `no_skeletons` reason that names it. Otherwise create one skeleton for each uncovered behavior claim, and add another only for a distinct failure that the first cannot detect.
 
-| Cue | Skeleton shape |
-| --- | --- |
-| When | trigger event, then assert outcome |
-| While | arrange state, then assert behavior under that state |
-| If/then | cover true and false branches when both affect behavior |
-| No cue | direct behavior verification |
+Redirect behavior that ordinary tests cannot observe:
 
-Include high-value candidates:
-
-- Business logic correctness.
-- State transitions and persistence.
-- User-visible functionality.
-- User-visible or caller-visible error handling.
-- Contract behavior across module/service boundaries.
-
-Redirect low-signal candidates:
-
-- Implementation details become lower-level tests only when behavior can be observed through a public boundary.
 - External live services become contract or fixture tests unless the environment profile shows a runnable local stack.
-- Performance targets become skeleton comments for later specialized verification when ordinary tests cannot prove them.
+- Performance targets become skeleton comments for later specialized verification.
 - UI layout details become assertions about information availability and interaction behavior.
-
-Checkpoint: each emitted skeleton maps to observable behavior through a public or user-facing boundary.
-
-## Step 4: Enumerate Candidates
-
-For each valid AC, enumerate candidate skeletons:
-
-- Happy path when behavior exists.
-- Error path when the error is observable.
-- Edge case when business impact is meaningful.
-- Multi-step journey when state crosses multiple interaction boundaries.
-
-Annotate each candidate with:
-
-- Business value: 0-10. Use 10 for a primary acceptance behavior, 5 for supporting behavior, and 0 for implementation detail rather than observable value.
-- User frequency: 0-10. Use 10 for behavior on the main workflow, 5 for occasional or admin workflow behavior, and 0 for rare setup or maintenance-only behavior.
-- Legal/compliance requirement: true/false.
-- Defect detection value: 0-10. Use 10 when the test would catch a likely severe regression, 5 for meaningful edge coverage, and 0 when an existing test already catches the same failure.
-- ROI score: `business_value * user_frequency + legal_requirement * 10 + defect_detection`.
-- Candidate lane.
-
-Checkpoint: enumerate at least one observable happy-path candidate per AC, plus error or edge candidates where the AC or domain makes them meaningful. Apply the path-constraint fallback from the tool policy when placement is impossible.
-
-## Step 5: Select Lanes And Budget
-
-Use repository evidence and environment profile to select the highest-value skeletons.
 
 Lane definitions:
 
@@ -130,20 +88,11 @@ Lane definitions:
 - `fixture-e2e`: browser or CLI journey with deterministic fixtures, mocked backend, or fixture-driven state.
 - `service-integration-e2e`: end-to-end journey requiring a runnable local stack, real database persistence, transactional consistency, real queue/event behavior, or contract with a local service stub.
 
-Default selection:
+Choose the lane by what the test must observe. Use `service-integration-e2e` only when the environment/profile/repo shows a realistic local stack and the behavior requires it. Apply the path-constraint fallback from the tool policy when placement is impossible.
 
-- Prefer the lowest lane that proves the behavior.
-- Reserve one fixture E2E skeleton for a user-facing multi-step journey.
-- Add service-integration E2E only when the environment/profile/repo shows a realistic local stack and the behavior requires service-stack evidence beyond fixtures.
-- Keep integration skeletons to roughly three per feature unless the task explicitly asks for broader coverage.
-- Keep fixture E2E skeletons to roughly three per feature.
-- Keep service-integration E2E skeletons to one or two high-ROI journeys.
+Checkpoint: each skeleton maps to an uncovered AC behavior at the boundary where its failure is observable.
 
-Deduplicate against existing tests. When existing tests already cover the AC's primary observable behavior, emit a `no_skeletons` reason for that AC. Create an additional skeleton only when a distinct uncovered observable edge has high ROI.
-
-Checkpoint: final skeleton set gives maximum AC coverage with minimum maintenance cost.
-
-## Step 6: Create Skeleton Files
+## Step 4: Create Skeleton Files
 
 Create files that match local conventions and `allowed_paths`. If the repository's conventional test location is outside `allowed_paths`, place the skeleton in the closest allowed test location and record that placement choice in the skeleton comments.
 
@@ -152,11 +101,7 @@ Each skeleton should include:
 - Original AC ID and AC text.
 - Behavior statement: trigger/process/observable result.
 - Lane annotation: `@lane: unit | integration | fixture-e2e | service-integration-e2e`.
-- Category annotation: `@category: core-functionality | edge-case | error-handling | persistence | contract`.
 - Dependencies: `@dependency: none | component names | full-ui (mocked backend) | full-system`.
-- Complexity: `@complexity: low | medium | high`.
-- ROI annotation with score and factors.
-- Implementation timing: alongside implementation, UI phase, or final local-stack phase.
 - Arrange/Act/Assert structure using the project's test idioms.
 - Explicit placeholders for production APIs, fixtures, mocks, and assertions the executor must complete.
 
@@ -177,7 +122,6 @@ Before final output, verify:
 - Every emitted skeleton maps to at least one AC.
 - Every AC is represented by an output or by a concrete `no_skeletons` reason when required coverage is impractical.
 - Test lanes match repository and environment evidence.
-- Skeleton count stays within the selected budgets.
 
 # Output Contract
 

@@ -48,9 +48,11 @@ type Evidence struct {
 	DiffDirty             bool
 	Diff                  string
 	DiffError             error
-	Attempt               int
-	AttemptsLeft          int
-	PreflightResult       any
+	// AttemptChangedFiles is nil when Galley could not capture the attempt's changes.
+	AttemptChangedFiles *[]string
+	Attempt             int
+	AttemptsLeft        int
+	PreflightResult     any
 	// SetupResult carries the setup executor preflight outcome (authored or
 	// learned) so reviewers see the readiness facts that gated the executor.
 	SetupResult any

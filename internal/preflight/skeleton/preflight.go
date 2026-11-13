@@ -158,7 +158,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		return preflightFailure(opts, "acceptance_skeleton_preflight", err.Error())
 	}
 
-	before, snapErr := snapshotPreflightFiles(ctx, opts.WorkDir, opts.RunDir, opts.GitBin)
+	before, snapErr := SnapshotWorktreeFiles(ctx, opts.WorkDir, opts.RunDir, opts.GitBin)
 	if snapErr != nil {
 		return preflightFailure(opts, "acceptance_skeleton_preflight", snapErr.Error())
 	}
@@ -167,7 +167,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	if perr != nil {
 		return preflightFailure(opts, perr.phase, perr.message)
 	}
-	after, snapErr := snapshotPreflightFiles(ctx, opts.WorkDir, opts.RunDir, opts.GitBin)
+	after, snapErr := SnapshotWorktreeFiles(ctx, opts.WorkDir, opts.RunDir, opts.GitBin)
 	if snapErr != nil {
 		return preflightFailure(opts, "acceptance_skeleton_preflight", snapErr.Error())
 	}
@@ -183,7 +183,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	if perr != nil {
 		return preflightFailure(opts, perr.phase, perr.message)
 	}
-	if perr := run.validateCreatorWorkspaceChanges(diffPreflightSnapshots(before, after), declarations); perr != nil {
+	if perr := run.validateCreatorWorkspaceChanges(ChangedWorktreeFiles(before, after), declarations); perr != nil {
 		return preflightFailure(opts, perr.phase, perr.message)
 	}
 	if perr := run.checkOutputExistence(outputs); perr != nil {

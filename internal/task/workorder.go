@@ -43,19 +43,8 @@ func RenderWorkOrderWithProfiles(t Task, profiles profile.Bundle) string {
 	fmt.Fprintf(&b, "\n## Execution Policy\n\n")
 	fmt.Fprintf(&b, "- loop budget: `%v`\n", t.ExecutionPolicy.LoopBudget)
 	fmt.Fprintf(&b, "- timeout ms: `%d`\n", t.ExecutionPolicy.TimeoutMS)
-	if t.Mode == "afk" {
-		fmt.Fprintf(&b, "- AFK decision policy: `%s`\n", DefaultAFKDecisionPolicy)
-	}
 	renderProfileContext(&b, profiles)
 	renderPreflightObligations(&b, t)
-
-	fmt.Fprintf(&b, "\n## Required Behavior\n\n")
-	fmt.Fprintf(&b, "- Read relevant files before editing.\n")
-	fmt.Fprintf(&b, "- Treat allowed paths as the expected implementation scope. Make an outside-allowed edit only when the governing task contract requires it; keep it minimal and record it as a scope expansion.\n")
-	fmt.Fprintf(&b, "- Treat forbidden paths as protected.\n")
-	fmt.Fprintf(&b, "- If requirements are ambiguous, choose the smallest reversible implementation, record the decision, and continue.\n")
-	fmt.Fprintf(&b, "- Run the highest-value verification available in this environment.\n")
-	fmt.Fprintf(&b, "- Return exactly one JSON object matching the configured schema.\n")
 
 	return b.String()
 }

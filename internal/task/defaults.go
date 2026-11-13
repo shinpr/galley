@@ -8,9 +8,6 @@ const DefaultLoopBudget = 10
 // DefaultMode is the sole supported task execution mode.
 const DefaultMode = "afk"
 
-// DefaultAFKDecisionPolicy is the fixed ambiguity policy rendered in AFK work orders.
-const DefaultAFKDecisionPolicy = "choose-smallest-reversible"
-
 // DefaultExecutorCLI is the fallback implementation backend.
 const DefaultExecutorCLI = "claude"
 

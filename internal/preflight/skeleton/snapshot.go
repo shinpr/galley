@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -41,8 +43,12 @@ type preflightFileFingerprint struct {
 	Hash string
 }
 
-func snapshotPreflightFiles(ctx context.Context, root, excludeRoot, gitBin string) (map[string]preflightFileFingerprint, error) {
-	files := map[string]preflightFileFingerprint{}
+// WorktreeSnapshot fingerprints the Git-visible files of a worktree by native relative path.
+type WorktreeSnapshot map[string]preflightFileFingerprint
+
+// SnapshotWorktreeFiles fingerprints every Git-visible file under root except excludeRoot.
+func SnapshotWorktreeFiles(ctx context.Context, root, excludeRoot, gitBin string) (WorktreeSnapshot, error) {
+	files := WorktreeSnapshot{}
 	if root == "" {
 		return files, fmt.Errorf("workdir is required for preflight snapshot")
 	}
@@ -62,39 +68,54 @@ func snapshotPreflightFiles(ctx context.Context, root, excludeRoot, gitBin strin
 		if excludeRel != "" && (rel == excludeRel || strings.HasPrefix(rel, excludeRel+string(filepath.Separator))) {
 			continue
 		}
-		path := filepath.Join(root, rel)
-		info, err := os.Lstat(path)
+		fp, exists, err := fingerprintWorktreeFile(root, rel)
 		if err != nil {
 			return nil, fmt.Errorf("snapshot preflight file %s: %w", rel, err)
 		}
-		if info.Mode()&os.ModeSymlink == 0 {
-			if err := ensureRealPathInsideWorktree(root, path); err != nil {
-				return nil, fmt.Errorf("snapshot preflight file %s: %w", rel, err)
-			}
+		if exists {
+			files[rel] = fp
 		}
-		fp := preflightFileFingerprint{Mode: info.Mode(), Size: info.Size()}
-		switch {
-		case info.Mode().IsRegular():
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return nil, fmt.Errorf("snapshot preflight file %s: %w", rel, err)
-			}
-			sum := sha256.Sum256(data)
-			fp.Kind = "file"
-			fp.Hash = hex.EncodeToString(sum[:])
-		case info.Mode()&os.ModeSymlink != 0:
-			target, err := os.Readlink(path)
-			if err != nil {
-				return nil, fmt.Errorf("snapshot preflight file %s: %w", rel, err)
-			}
-			fp.Kind = "symlink"
-			fp.Hash = target
-		default:
-			fp.Kind = info.Mode().String()
-		}
-		files[rel] = fp
 	}
 	return files, nil
+}
+
+// fingerprintWorktreeFile reports exists=false for a deleted tracked file, so
+// ChangedWorktreeFiles sees the deletion as an absent snapshot entry.
+func fingerprintWorktreeFile(root, rel string) (preflightFileFingerprint, bool, error) {
+	path := filepath.Join(root, rel)
+	info, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return preflightFileFingerprint{}, false, nil
+	}
+	if err != nil {
+		return preflightFileFingerprint{}, false, fmt.Errorf("lstat: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		if err := ensureRealPathInsideWorktree(root, path); err != nil {
+			return preflightFileFingerprint{}, false, err
+		}
+	}
+	fp := preflightFileFingerprint{Mode: info.Mode(), Size: info.Size()}
+	switch {
+	case info.Mode().IsRegular():
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return preflightFileFingerprint{}, false, fmt.Errorf("read: %w", err)
+		}
+		sum := sha256.Sum256(data)
+		fp.Kind = "file"
+		fp.Hash = hex.EncodeToString(sum[:])
+	case info.Mode()&os.ModeSymlink != 0:
+		target, err := os.Readlink(path)
+		if err != nil {
+			return preflightFileFingerprint{}, false, fmt.Errorf("readlink: %w", err)
+		}
+		fp.Kind = "symlink"
+		fp.Hash = target
+	default:
+		fp.Kind = info.Mode().String()
+	}
+	return fp, true, nil
 }
 
 func cleanContainedRel(root, path string) string {
@@ -112,7 +133,8 @@ func cleanContainedRel(root, path string) string {
 	return rel
 }
 
-func diffPreflightSnapshots(before, after map[string]preflightFileFingerprint) []string {
+// ChangedWorktreeFiles returns the sorted paths created, modified, or deleted between two snapshots.
+func ChangedWorktreeFiles(before, after WorktreeSnapshot) []string {
 	changed := map[string]bool{}
 	for path, afterFP := range after {
 		beforeFP, ok := before[path]

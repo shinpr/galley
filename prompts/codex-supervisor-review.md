@@ -6,9 +6,7 @@ Return exactly one JSON object matching the supervisor verdict schema.
 
 The common Galley Supervisor Contract above is the complete decision policy. This Codex section supplies runtime behavior and output guidance.
 
-Important evidence fields include `source_cwd` for the original repository, `worktree_cwd` for the execution/review workspace, `diff`, `task`, `profiles`, executor result, and verification evidence. `task.files` lists implementation source materials Galley placed in the workspace, including destination path and whether the file should be committed. Use `worktree_cwd` as the repository cwd when inspecting files.
-
-When `task.files` is present, classify supplied files as requirement basis, execution plan, test or quality basis, or context evidence. Verify that changed behavior and evidence reflect the obligations defined by requirement, plan, and test/quality materials when they affect the changed behavior; their obligations can define contracts even when the task YAML only calls them input files.
+Important evidence fields include `source_cwd` for the original repository, `worktree_cwd` for the execution/review workspace, `diff`, `task`, `profiles`, executor result, and verification evidence. `task.files` lists implementation source materials Galley placed in the workspace, including destination path and whether the file should be committed. `attempt_changed_files` lists the Galley-captured files whose content this executor attempt changed. Use `worktree_cwd` as the repository cwd when inspecting files.
 
 # Review Procedure
 
@@ -22,26 +20,15 @@ Build the final verdict object in the following order. Its acceptance and qualit
 
 ## Step 1. Establish The Active Review Set
 
-Read the task, persisted review progress, pending revision requests, profiles, executor result, errors, cumulative diff, verification evidence, and task input files. Derive the open acceptance and quality item IDs and identify passed items implicated by the current-attempt change report as regression candidates.
+Read the task, persisted review progress, pending revision requests, profiles, executor result, errors, cumulative diff, verification evidence, and task input files. Derive the open acceptance and quality item IDs and identify passed items implicated by `attempt_changed_files` as regression candidates.
 
 Use repository tools in read-only mode and `worktree_cwd` as the repository cwd. Inspect changed files relevant to the active review set plus the nearby contracts needed to decide them. For code changes, relevant contracts commonly include entry points, consumers, adapters, data-shape definitions, external interfaces, and focused tests or checks.
 
 Start a draft verdict object with `acceptance_passes` and `quality_passes` copied from `task.review_progress`, plus empty `findings` and `discussion_items` arrays. Leave `status` for Step 4 after both phase gates pass.
 
-## Failure Necessity Standard
-
-Use this standard before recording an acceptance or quality failure:
-
-1. State the minimum sufficient outcome required by the exact acceptance criterion, required quality statement, or existing contract.
-2. Identify repository evidence showing that the current implementation fails that outcome, or a reachable supported-use condition that would make it false.
-3. State the lowest-lifecycle-cost observable repair and verification that close the failure while keeping the implementation correct and maintainable. Require a specific mechanism when the governing source requires it.
-4. Remove each requested mechanism, guarantee, and verification case in turn. Retain it when its removal makes the required outcome fail again or leaves a distinct material production regression undetected.
-
-A material risk is a concrete failure of a scoped acceptance item, active quality statement, or existing public contract with a distinct observable consequence. Treat related paths and logically reachable conditions as investigation leads until repository evidence proves that consequence.
-
 ## Step 2. Review Acceptance And Generate Its Results
 
-Review regression candidates first, then every open acceptance item. For each item, inspect the complete acceptance contract, apply the Failure Necessity Standard to each proposed failure, and immediately update its result in the draft verdict:
+Review regression candidates first, then every open acceptance item. For each item, inspect the complete acceptance contract, apply the common Failure Necessity Standard to each proposed failure, and immediately update its result in the draft verdict:
 
 - keep or add the exact item ID in `acceptance_passes` when the minimum sufficient outcome holds; or
 - remove the item ID from `acceptance_passes` when repository evidence shows the minimum sufficient outcome fails, and record a candidate finding beginning with that ID in brackets when another executor attempt can fix it.
@@ -50,7 +37,7 @@ Continue until every active acceptance item has a result, including after findin
 
 ## Step 3. Review Quality And Generate Its Results
 
-Review quality regression candidates first, then every open quality item. For each item, inspect its `pass` statement against every applicable changed surface or contract area and apply the Failure Necessity Standard to each proposed failure. Keep or add its exact criterion ID in `quality_passes` when the pass statement holds. Remove it from `quality_passes` when repository evidence shows it fails, and record a candidate finding beginning with that ID in brackets when another executor attempt can fix the failure. Then continue through the remaining quality items.
+Review quality regression candidates first, then every open quality item. For each item, inspect its `pass` statement against every applicable changed surface or contract area and apply the common Failure Necessity Standard to each proposed failure. Keep or add its exact criterion ID in `quality_passes` when the pass statement holds. Remove it from `quality_passes` when repository evidence shows it fails, and record a candidate finding beginning with that ID in brackets when another executor attempt can fix the failure. Then continue through the remaining quality items.
 
 After every active quality item has been inspected, verify that each active quality ID is either in `quality_passes` or represented by a verified finding or terminal summary beginning with that ID. The quality phase passes only after this check.
 
@@ -60,7 +47,7 @@ Verify candidate findings against supporting and contradicting repository eviden
 
 Align the final pass arrays with the consolidated findings. Remove an item from its pass array when its minimum sufficient outcome still fails; retain it only when repository evidence supports that result. Put bounded uncertainty that requires no executor action in `discussion_items` when the work is accepted.
 
-This step is complete when every retained finding records the concrete failure and trigger or material-risk evidence, the minimum required post-fix behavior, and verification that proves closure. Every retained repair obligation must satisfy the Failure Necessity Standard.
+This step is complete when every retained finding records the concrete failure and trigger or material-risk evidence, the minimum required post-fix behavior, and verification that proves closure. Every retained repair obligation must satisfy the common Failure Necessity Standard.
 
 Choose `status` from the current acceptance and quality passes, verified findings, pass policy, and next actor. For `needs_revision`, return the complete current repair batch in `findings`. Preserve already valid work and keep the requested changes independently actionable.
 
@@ -76,12 +63,6 @@ Use the common Status Policy.
 
 Passing tests are required evidence when configured. Passing tests support acceptance only when implementation semantics, external contracts, data-shape consistency, data integrity, security boundaries, and compatibility match the common acceptance contract.
 
-Treat executor `hard_stop` as a claim to review, not as an automatic final state. Return `hard_stop` only when the blocker is external or genuinely unrecoverable by another executor attempt, such as a missing credential, destructive requirement, requirement to change paths listed in `task.scope.forbidden_paths`, unavailable external system, or an active task contract that remains contradictory after human amendments. If the executor stopped because of uncertainty, reluctance, insufficient investigation, local tool confusion, or a solvable implementation/verification problem, return `needs_revision` with a finding that states the alternative path and verification needed to complete it. Use the executor's `hard_stop.reason`, `attempted`, and `needed_to_continue` as evidence for that finding.
-
-# Finding Policy
-
-Use the common Finding Policy. Keep `findings` empty when there are no concrete problems.
-
 # Revision Request Rules
 
 Use the common Contract Rules to determine the active task contract and revision-request authority.
@@ -92,11 +73,4 @@ Use the common Contract Rules to determine the active task contract and revision
 
 # Output Contract
 
-Return one JSON object as the entire response body.
-
-Follow the common supervisor output contract and schema. Provider-specific field guidance:
-
-- `acceptance_passes`: the current passed task AC and `revision:<request.id>` IDs.
-- `quality_passes`: the current passed configured quality-dimension IDs.
-- `findings`: actionable repair-contract strings beginning with every affected acceptance or quality ID in brackets. An empty array means no repair-required problem remains.
-- `discussion_items`: accepted-work reviewer notes as strings. Use an empty array unless the verdict is accepted and useful non-gating context remains.
+Return one JSON object as the entire response body, following the common supervisor output contract and schema.

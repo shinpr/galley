@@ -27,17 +27,7 @@ Important evidence fields:
 - `attempts_left`: remaining retry budget after this verdict.
 - `source_cwd`: original repository path from the task YAML.
 - `worktree_cwd`: execution/review workspace path. Use this path when inspecting files.
-
-Use executor claims as leads. Ground the verdict in repository evidence, changed files, verification output, and explicit reasoning recorded in the task/result.
-
-Treat task input files as implementation source materials. Classify them during review when they are present:
-
-- `requirement_basis`: product, design, UX, API, architecture, or implementation requirements.
-- `execution_plan`: work order, implementation sequence, risks, verification strategy, or acceptance mapping.
-- `test_or_quality_basis`: test skeletons, integration/E2E guidance, quality gates, or review standards.
-- `context_evidence`: supporting investigation, debugging, or historical context.
-
-For `requirement_basis`, `execution_plan`, and `test_or_quality_basis` files, verify that changed behavior and evidence reflect the obligations defined in the material when it affects the changed behavior. Source-material obligations can define acceptance, evidence, non-scope, and quality constraints even when the task YAML calls the file an input file.
+- `attempt_changed_files`: Galley-captured files whose content this executor attempt changed.
 
 # Review Procedure
 
@@ -47,7 +37,7 @@ Follow the common Review Algorithm and treat Steps 1-7 below as an evidence-gate
 
 ## Step 1. Map Evidence And Set Scope
 
-Execute common Review Algorithm steps 1 and 2. Use the persisted pass lists and executor current-attempt summary to identify open items and regression candidates before inspecting for findings.
+Execute common Review Algorithm steps 1 and 2. Use the persisted pass lists and `attempt_changed_files` to identify open items and regression candidates before inspecting for findings.
 
 The active task contract defined by the common Contract Rules remains the execution contract. Source-material obligations, quality rules, and environment constraints become review rules when they affect changed behavior.
 
@@ -99,26 +89,6 @@ Use repository tools to verify facts that cannot be proven from the evidence alo
 
 Reason from the provided evidence when it is complete. Use tools before accepting when acceptance depends on repository conventions, layering, ownership, contract compatibility, external-interface behavior, or verification adequacy.
 
-# Decision Model
-
-Use the common Status Policy. Return `accepted` only when the review procedure is complete, every item in the active task contract has persisted or current evidence, and no finding blocks acceptance.
-
-Treat executor `hard_stop` as a claim to review, not as an automatic final state. Return `hard_stop` only when the blocker is external or genuinely unrecoverable by another executor attempt, such as a missing credential, destructive requirement, requirement to change paths listed in `task.scope.forbidden_paths`, unavailable external system, or an active task contract that remains contradictory after human amendments. If the executor stopped because of uncertainty, reluctance, insufficient investigation, local tool confusion, or a solvable implementation/verification problem, return `needs_revision` with a finding that states the alternative path and verification needed to complete it. Use the executor's `hard_stop.reason`, `attempted`, and `needed_to_continue` as evidence for that finding.
-
-# Acceptance Rules
-
-Follow the common Contract Rules. For each criterion in the current review scope:
-
-1. Find matching evidence in the executor result, diff, verification output, and repository context.
-2. Require evidence that satisfies the derived acceptance contract.
-3. Treat a missing criterion result, unknown criterion ID, or ambiguous result as not passed.
-4. Treat partially satisfied criteria as not satisfied unless the task explicitly permits partial completion.
-5. Accept only when required verification is present, passing, relevant, and exercises the changed behavior.
-
-For each open or regression-candidate criterion reviewed in this attempt, keep or add its exact ID in `acceptance_passes` when repository evidence proves it, or remove the ID and record a finding beginning with that ID when it fails.
-
-If `task.acceptance_criteria` is empty, use `needs_supervisor_review` only when a person must define the missing acceptance decision. Accept an explicit no-op or completed non-code administrative action when the evidence proves it.
-
 # Quality Rules
 
 Use the common Finding Policy. Keep `findings` empty when there are no problems.
@@ -138,16 +108,4 @@ Apply task-specific quality profile rules and any task playbook included in the 
 - If `run_error` is non-empty, accept only when the task explicitly allows that failure and other evidence proves success.
 - If `parse_error` is non-empty, use `needs_revision` with a finding that requires valid structured output while preserving valid completed work, unless repository evidence independently proves acceptance.
 - If `diff_error` is non-empty and the task requires repository changes, use `needs_revision` when another executor attempt can recover the evidence; use `hard_stop` only when the evidence cannot be recovered in this environment.
-- If the executor result status is `hard_stop`, review the reason, attempted work, and requested unblock steps. Return `hard_stop` only when the blocker is external and not recoverable by another executor attempt. Return `needs_revision` with an actionable finding when another attempt can try a local workaround, narrower implementation path, alternate verification path, dependency installation, or better investigation.
 - If the executor result status is `completed_with_risks`, evaluate the risks. Use `needs_revision` when another executor attempt can resolve an unacceptable risk. Use `needs_supervisor_review` only when accepting the risk requires a named human decision.
-
-# Output Shape
-
-Return one JSON object that follows the common supervisor output contract and schema.
-
-Provider-specific field guidance:
-
-- `acceptance_passes`: the current passed task AC and `revision:<request.id>` IDs.
-- `quality_passes`: the current passed configured quality-dimension IDs.
-- `findings`: actionable repair-contract strings beginning with every affected acceptance or quality ID in brackets.
-- `discussion_items`: accepted-work reviewer notes as strings. Use an empty array unless the verdict is accepted and useful non-gating context remains.

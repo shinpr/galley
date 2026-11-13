@@ -6,6 +6,13 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.12.12 - 2026-11-13
+
+### Changed
+
+- Executors, supervisors, and the acceptance-skeleton creator now create less work the task did not ask for. Attached input files bind only the parts that specify the task's goal and acceptance criteria, so release or approval steps in a plan stay context. The skeleton creator picks each test by the narrowest boundary where an acceptance criterion's failure is observable, instead of by ROI scores and per-lane quotas. Each behavior gets one owning test. Reusing or consolidating existing code counts as in scope when that code has the same contract and change reason and the result costs less to maintain. The Claude executor prompt also states that the executor owns how the codebase is built.
+- The supervisor chooses which passed items to recheck from the files Galley saw the executor attempt change (`attempt_changed_files` in the supervisor request). It rechecks every passed item when Galley cannot record those changes. Claude and Codex supervisors now apply one shared set of review rules; some rules previously reached only one of them. Work orders drop guidance the executor prompts already carry, including the `choose-smallest-reversible` policy line.
+
 ## v0.12.11 - 2026-11-13
 
 ### Changed

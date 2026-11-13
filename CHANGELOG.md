@@ -6,6 +6,12 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## v0.12.11 - 2026-11-13
+
+### Changed
+
+- Updated Go to `1.26.11`, `golang.org/x/sys` to `v0.50.0`, `golang.org/x/term` to `v0.48.0`, `go.yaml.in/yaml/v3` to `v3.0.6`, and `github.com/spf13/pflag` to `v1.1.0`.
+
 ## v0.12.10 - 2026-10-23
 
 ### Changed

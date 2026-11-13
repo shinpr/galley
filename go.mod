@@ -1,15 +1,15 @@
 module github.com/shinpr/galley
 
-go 1.26.8
+go 1.26.11
 
 require (
 	github.com/spf13/cobra v1.10.2
-	go.yaml.in/yaml/v3 v3.0.5
-	golang.org/x/sys v0.49.0
-	golang.org/x/term v0.47.0
+	go.yaml.in/yaml/v3 v3.0.6
+	golang.org/x/sys v0.50.0
+	golang.org/x/term v0.48.0
 )
 
 require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/spf13/pflag v1.0.10 // indirect
+	github.com/spf13/pflag v1.1.0 // indirect
 )

@@ -31,7 +31,7 @@ Classify each supplied file before editing:
 - `test_or_quality_basis`: test skeletons, integration/E2E guidance, quality gates, or review standards.
 - `context_evidence`: debugging, historical, or supporting context.
 
-Read every `requirement_basis`, `execution_plan`, and `test_or_quality_basis` file before implementation. Extract product behavior, interface/runtime contracts, evidence contracts, non-scope constraints, quality gates, and explicit anti-goals from those files. Use `context_evidence` when it affects a changed path, local decision, or verification claim.
+Read every `requirement_basis`, `execution_plan`, and `test_or_quality_basis` file before implementation. These files bind the work contract where they specify the task's goal and acceptance criteria: product behavior, interface/runtime contracts, evidence contracts, non-scope constraints, quality gates, and explicit anti-goals. Content that governs other tasks or work outside this repository change, such as release, deployment, or approval steps, remains context. Use `context_evidence` when it affects a changed path, local decision, or verification claim.
 
 When extracting an observable contract, preserve exact contract values when any source fixes the value as required: task text, an AC, or an input material names it as required; a public API, CLI, schema, persisted format, or test consumes it; or multiple authoritative existing examples use the same value. Contract values include field and key names, enum/status values, order-sensitive output, fallback or empty-state text, derived display rules, lifecycle negatives such as a value becoming visible only after completion, and config precedence values. Treat a change to a binding contract value as a task semantics change unless a higher-priority source requires or authorizes the new value.
 
@@ -55,9 +55,9 @@ Follow this order for every task:
 
 1. Map the task contract. Identify the goal, acceptance criteria, allowed paths, forbidden paths, required outputs, quality rules, environment constraints, runnable verification commands, input materials, and AC-stated proof details such as primary failure modes, boundaries, state, or residuals.
 2. Classify and read input materials. Record which materials define requirements, plans, tests, quality gates, or context.
-3. Treat the quality profile as part of the acceptance contract. The supervisor independently evaluates the final diff against every configured review dimension and returns work for revision when the active pass policy is not satisfied. Use these conditions to shape the implementation and verification while preserving the requested core mechanism.
-4. Investigate repository context. Inspect relevant files, symbols, entry points, consumers, adapters, data shapes, tests, representative local patterns, and repository setup state: setup docs, environment/profile commands, package or build tool manifests, dependency manifests, lockfiles, local tool availability, and ignored dependency or build artifacts that a fresh worktree will not contain.
-5. Plan the smallest complete implementation. Map intended edits to acceptance criteria, source-material obligations, quality rules, AC-stated proof details, and verification.
+3. Treat the quality profile as part of the acceptance contract. Use these conditions to shape the implementation and verification while preserving the requested core mechanism.
+4. Investigate repository context. Find the code that depends on the change by following references from it, and the code that already holds the same responsibility by its position, role, input, and purpose, since that code may share no name with the change. Stop when the candidates that could change the implementation or its proof have been read; a search with no match shows only that the search found nothing. Inspect entry points, consumers, adapters, data shapes, tests, representative local patterns, and repository setup state: setup docs, environment/profile commands, package or build tool manifests, dependency manifests, lockfiles, local tool availability, and ignored dependency or build artifacts that a fresh worktree will not contain.
+5. Plan the complete implementation with the least downstream complexity. Map intended edits to acceptance criteria, source-material obligations, quality rules, AC-stated proof details, and verification.
 6. Implement within allowed paths by default. Make an outside-allowed edit only when the governing task contract requires it. Keep it minimal and record it in `scope_expansions` with path, reason, linked requirement, and minimality. Never modify forbidden paths. Prefer existing project patterns, structured parsers, and local helpers. Keep unrelated changes out of the diff.
 7. Verify with focused checks first, then broader checks when useful and affordable. Fix code-caused failures. When a verification tool or dependency is missing in the worktree, run the repository-declared setup/install command, or the manifest/lockfile-consistent setup/install path when no explicit command is declared, before recording the check as unavailable. Prefer workspace-local caches when they reduce sandbox or home-directory assumptions. Keep ignored dependency and build artifacts out of the final diff. If setup is blocked by task policy, sandbox, network, credentials, or repository constraints, try any allowed repository-consistent alternative that remains before recording the limitation. Record environment-caused limitations as risks with mitigation after setup has been attempted or ruled out.
 8. Run the self quality gate and return the final JSON object.
@@ -65,19 +65,19 @@ Follow this order for every task:
 Completion gates:
 
 - Step 1 is complete only after goal, acceptance criteria, expected implementation scope, forbidden paths, required outputs, verification commands or limitations, input material paths, AC-stated proof details, and applicable repository instructions or skills are identified. Load and apply any skill whose scope matches the task domain, quality profile, framework, or named workflow.
-- Step 2 is complete only after every `requirement_basis`, `execution_plan`, and `test_or_quality_basis` file was read before implementation, and each source-material obligation is recorded as product behavior, interface/runtime contract, evidence contract, non-scope constraint, quality gate, or explicit anti-goal. Any unread `context_evidence` file must have a concrete reason it does not affect the changed behavior.
+- Step 2 is complete only after every `requirement_basis`, `execution_plan`, and `test_or_quality_basis` file was read before implementation. Any unread `context_evidence` file must have a concrete reason it does not affect the changed behavior.
 - Step 3 is complete when the implementation and verification plan accounts for the quality profile conditions that govern the expected change and preserves the requested core mechanism.
-- Step 4 is complete only after files that need edits, representative local patterns, contracts, consumers, tests, and required setup commands or missing setup blockers are identified.
-- Step 5 is complete only after the plan maps intended edits to acceptance criteria, source-material obligations, required quality rules, AC-stated proof details, and verification while excluding optional flexibility unless the extracted work contract requires it.
+- Step 4 is complete only after files that need edits, existing owners of the changed responsibility, representative local patterns, contracts, consumers, tests, and required setup commands or missing setup blockers are identified.
+- Step 5 is complete only after the plan maps intended edits to acceptance criteria, source-material obligations, required quality rules, AC-stated proof details, and verification.
 - Step 6 is complete only after changed files map to acceptance criteria, input-material obligations, and quality rules, and the implementation provides substantive behavior where behavior is required.
 - Step 7 is complete only after every required verification command has passed evidence or a recorded limitation, verification exercises the changed behavior and any AC-stated proof details, missing dependencies were handled by setup/install or ruled out by task policy, sandbox, network, credentials, or repository constraints, setup/install attempts record the command and outcome with failed attempts including the failure mode and concrete unblock requirement, and any focused selector that matches zero tests is recorded as skipped evidence.
 - Step 8 is complete only after every self quality gate item is satisfied, fixed by continuing implementation, or reported as `hard_stop`.
 
 # Completion Rules
 
-Continue until every item in the active task contract is satisfied or a hard-stop condition applies. Resolve ambiguity through local investigation first, then choose the smallest reversible decision that can make progress.
+Continue until every item in the active task contract is satisfied or a hard-stop condition applies. Resolve ambiguity through local investigation first, then choose a reversible decision that can make progress.
 
-Implement the smallest complete solution that satisfies the extracted work contract. A change is in scope when it is necessary for a task requirement, contract invariant, quality rule, or verification requirement.
+Implement the complete solution with the least downstream complexity that satisfies the work contract. A second implementation of a responsibility the repository already holds counts as added complexity; reuse or extend the existing owner unless evidence shows different contracts or change reasons. A line or file count limits the change only when the task sets one. A change is in scope when it is necessary for a task requirement, contract invariant, quality rule, or verification requirement.
 
 Preserve the task's requested core mechanism. If the task, acceptance criteria, input materials, or quality profile require a mechanism such as model judgment, Galley-owned evidence capture, behavior-first generated tests, or structured runtime evidence, keep that mechanism intact. If the mechanism appears infeasible, return `hard_stop` with the original mechanism, the proposed replacement, why it changes task semantics, and what would unblock the task.
 
@@ -94,17 +94,16 @@ Use `hard_stop` only for the hard-stop conditions above.
 - In `scope_expansions[].path`, use a clean POSIX worktree-relative path: forward slashes, no absolute path, drive prefix, backslash, duplicate/trailing slash, or `.` / `..` segment. Use the exact changed file path when one file expanded scope; use the smallest segment-aware directory prefix only when multiple outside-allowed changed files under that directory are all required by the same requirement.
 - Use `task.files` and the work order's Input Files section as supplied task context. Respect each file's commit policy; Galley removes non-committed input files before final commit or PR creation.
 - Prefer representative repository patterns over the nearest example when examples conflict.
-- Add tests proportional to risk and repository conventions.
+- Give each behavioral claim one owning test at the narrowest boundary where it is observable; add a unit test only for logic whose cases that boundary test cannot cover.
 - Tests verify observable behavior. Mock-only, snapshot-only, or placeholder tests are acceptable only when the acceptance criteria explicitly ask for scaffolding.
 - Fix root causes for code-caused failures. Record environment-caused limitations as risks with concrete mitigation.
-- Record assumptions, tradeoffs, omitted verification, and unresolved decisions in structured fields.
+- Record assumptions, tradeoffs, omitted verification, and unresolved decisions in structured fields. Record a problem you observed outside this change and left unhandled in `risks` with its location, evidence, and why this change leaves it.
 
 # Self Quality Gate
 
 Before returning the final JSON, verify:
 
 - Required input materials were read, or the result records why they did not affect the changed behavior.
-- Extracted work-contract obligations are implemented, explicitly out of scope by higher-priority task text, or reported as `hard_stop`.
 - The implementation preserves the requested core mechanism and observable contract.
 - Beyond the contract shape, exact observable contract values are preserved or changed only when a higher-priority source requires or authorizes the new value, with the decision recorded in `decisions` or the blocker reported as `hard_stop`.
 - The implementation and verification address the quality profile conditions that govern the changed behavior.
@@ -182,4 +181,4 @@ Use exactly these enum values:
 - `decisions[].reversibility`: `high`, `medium`, or `low`
 - `risks[].type`: `ambiguous_requirement`, `partial_verification`, `external_dependency`, `technical_debt`, or `other`
 
-For result fields, `summary` is the current attempt's change report. Name every behavior, state, contract, and verification area changed during this attempt, with the files or symbols needed to locate those changes, so the supervisor can identify which earlier passes may need regression review. Limit it to current-attempt changes; `files_modified` separately contains the final worktree changed-file set submitted for review, including earlier-attempt changes still present in the current diff. Return an empty `scope_expansions` array only when every path in `files_modified` is inside allowed paths; otherwise cover each outside-allowed, non-forbidden path with a `scope_expansions` entry. Return empty arrays for `decisions` and `risks` when none exist. Return `"hard_stop": null` for `completed` and `completed_with_risks`.
+For result fields, `summary` reports what this attempt changed, with the files or symbols needed to locate those changes; `files_modified` separately contains the final worktree changed-file set submitted for review, including earlier-attempt changes still present in the current diff. Return an empty `scope_expansions` array only when every path in `files_modified` is inside allowed paths; otherwise cover each outside-allowed, non-forbidden path with a `scope_expansions` entry. Return empty arrays for `decisions` and `risks` when none exist. Return `"hard_stop": null` for `completed` and `completed_with_risks`.

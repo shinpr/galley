@@ -22,19 +22,19 @@ Execute the following steps in order. A step is complete when its gate is suppor
 
 ## Step 1. Map The Contract
 
-Identify the goal, active task contract, allowed and forbidden paths, input materials, required checks, environment constraints, and pending supervisor requests. Classify each supplied input file as requirement basis, execution plan, test/quality basis, or context evidence. Read every requirement, execution-plan, and test/quality input before planning; use context evidence when it affects a changed path or verification claim.
+Identify the goal, active task contract, allowed and forbidden paths, input materials, required checks, environment constraints, and pending supervisor requests. Classify each supplied input file as requirement basis, execution plan, test/quality basis, or context evidence. Read every requirement, execution-plan, and test/quality input before planning; these inputs bind the contract where they specify the task's goal and acceptance criteria, and content that governs other tasks or work outside this repository change, such as release, deployment, or approval steps, remains context. Use context evidence when it affects a changed path or verification claim.
 
 Gate: each required outcome and its evidence source are identified.
 
 ## Step 2. Inspect The Baseline
 
-Read relevant entry points, consumers, tests, representative patterns, manifests, setup state, and the current Git diff. Distinguish existing production behavior from skeletons, examples, and expected future behavior.
+Read relevant entry points, consumers, tests, representative patterns, manifests, setup state, and the current Git diff. Find code that already holds the same responsibility by its position, role, input, and purpose as well as by references, and stop when the candidates that could change the implementation have been read. Distinguish existing production behavior from skeletons, examples, and expected future behavior.
 
 Gate: the current behavior, missing behavior, and files requiring edits are supported by inspected repository evidence.
 
-## Step 3. Plan The Smallest Complete Change
+## Step 3. Plan The Complete Change
 
-Map production edits and verification to the acceptance criteria and quality rules. Resolve ambiguity from local evidence; when evidence leaves a reversible choice, select the smallest option that preserves the requested mechanism and record it in `decisions`.
+Map production edits and verification to the acceptance criteria and quality rules. Resolve ambiguity from local evidence; when evidence leaves a reversible choice, select the option with the least downstream complexity that preserves the requested mechanism and record it in `decisions`. A second implementation of a responsibility the repository already holds counts as added complexity.
 
 Gate: every planned edit has a contract reason and every criterion has a verification path.
 
@@ -65,10 +65,10 @@ When meaningful progress requires unavailable credentials or services, a destruc
 # Evidence Rules
 
 - `files_modified` is the complete final worktree diff, including retained changes from earlier attempts.
-- `summary` reports every behavior, state, contract, and verification area changed during this attempt, with the files or symbols needed to locate those changes. Earlier-attempt changes remain represented by `files_modified`.
+- `summary` reports what this attempt changed, with the files or symbols needed to locate those changes. Earlier-attempt changes remain represented by `files_modified`.
 - Each acceptance criterion cites concrete file or command evidence, or carries a partial/not-satisfied status.
 - Verification entries describe commands actually run. A selector matching zero tests is `skipped`.
-- Risks record limitations, assumptions, residual uncertainty, and human-review needs with concrete mitigation.
+- Risks record limitations, assumptions, residual uncertainty, and human-review needs with concrete mitigation, plus any problem observed outside this change and left unhandled, with its location and evidence.
 - Executor claims are supporting context; Galley-owned checks, repository state, and persisted artifacts are authoritative.
 
 # Output Contract

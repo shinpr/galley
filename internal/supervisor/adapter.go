@@ -61,6 +61,7 @@ type AdapterEvidence struct {
 	DiffDirty              bool                  `json:"diff_dirty"`
 	Diff                   string                `json:"diff"`
 	DiffError              string                `json:"diff_error,omitempty"`
+	AttemptChangedFiles    *[]string             `json:"attempt_changed_files,omitempty"`
 	Attempt                int                   `json:"attempt"`
 	AttemptsLeft           int                   `json:"attempts_left"`
 	SourceCWD              string                `json:"source_cwd,omitempty"`
@@ -200,6 +201,7 @@ func NewAdapterRequest(evidence Evidence) AdapterRequest {
 		DiffDirty:              evidence.DiffDirty,
 		Diff:                   evidence.Diff,
 		DiffError:              errorString(evidence.DiffError),
+		AttemptChangedFiles:    evidence.AttemptChangedFiles,
 		Attempt:                evidence.Attempt,
 		AttemptsLeft:           evidence.AttemptsLeft,
 		SourceCWD:              sourceCWD,

@@ -72,7 +72,6 @@ galley task queue ./TASK.yaml --reason "queue for daemon"
 
 - `execution_policy.loop_budget`: non-negative attempt count; `0` means unlimited. Omitted values default to `10`.
 - `execution_policy.timeout_ms`: positive per-attempt timeout in milliseconds.
-- Galley fixes the AFK decision policy at `choose-smallest-reversible`.
 - Destructive-operation, missing-secret, and external-service blockers remain executor results; task YAML has no blocker switches.
 - `executor`: optional. A task that sets `executor.cli` runs with the task's `model` and `effort` exactly as authored; omitted or empty values stay empty and delegate to the selected provider CLI's own defaults, so `environment.yaml` values for another provider never cross into a task-selected CLI. When the task omits `executor.cli`, each `cli`, `model`, and `effort` field resolves from the task, then current `environment.yaml`. Only `cli` has a built-in fallback (`claude`). Environment values remain runtime-only.
 - `executor.cli`: selects `claude`, `codex`, `glm`, `grok`, or `kimi`. GLM and Kimi use the `claude` CLI; Grok uses the logged-in `grok` CLI.

@@ -59,7 +59,7 @@ Executor and supervisor choices are independent. Changing the task executor does
 
 The first supervisor attempt reviews every acceptance criterion before reviewing every configured quality dimension. This ordering keeps task obligations primary while still applying repository-wide standards.
 
-Galley persists verified passes in daemon-owned task state. Later attempts review unfinished items and revisit a verified pass when the executor reports a current-attempt change that may affect it. The next executor receives the active revision work rather than an unstructured history of every earlier review.
+Galley persists verified passes in daemon-owned task state. Later attempts review unfinished items. Galley also records which worktree files each executor attempt created, modified, or deleted (`attempt_changed_files` in the supervisor request), and the supervisor revisits a verified pass only when one of those files can affect it. If Galley cannot record the attempt's changes, the supervisor revisits every verified pass. The next executor receives the active revision work rather than an unstructured history of every earlier review.
 
 A normal requeue preserves review progress when the task direction and review contract remain the same. Galley resets stale passes when the goal, acceptance contract, review policy, source repository, or placed input content changes in a way that invalidates earlier review.
 

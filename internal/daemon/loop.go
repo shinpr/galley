@@ -269,6 +269,7 @@ func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) 
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "galley: task %s attempt %d could not load preflight result: %v\n", req.Loaded.ID, req.Attempt, err)
 	}
+	beforeAttempt, beforeErr := skeletonpreflight.SnapshotWorktreeFiles(ctx, req.Prepared.CWD, req.RunDir, req.Opts.GitBin)
 	outcome, err := runExecutorAttempt(ctx, executorAttemptRequest{Opts: req.Opts, Loaded: effectiveTask, WorkDir: req.Prepared.CWD, BaseSHA: req.Prepared.BaseSHA, AttemptDir: attemptDir, Prompt: req.Prompt})
 	if err != nil {
 		// A review-time staging failure is recorded under a distinct phase
@@ -290,6 +291,13 @@ func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) 
 		appendExecutorInterruptionAttempt(req.Loaded, outcome, attemptDir)
 		return attemptReview{}, &executorInterruptionError{terminal: outcome.Terminal}
 	}
+	var changedFiles *[]string
+	afterAttempt, afterErr := skeletonpreflight.SnapshotWorktreeFiles(ctx, req.Prepared.CWD, req.RunDir, req.Opts.GitBin)
+	if err := errors.Join(beforeErr, afterErr); err != nil {
+		fmt.Fprintf(os.Stderr, "galley: task %s attempt %d sends no attempt_changed_files: %v\n", req.Loaded.ID, req.Attempt, err)
+	} else {
+		changedFiles = attemptChangedFiles(beforeAttempt, afterAttempt)
+	}
 	setupResultEvidence, setupUpdateEvidence := setuppreflight.LoadRunEvidence(req.RunDir, req.RunID)
 	evidence := supervisor.Evidence{
 		Task:                   effectiveTask,
@@ -301,6 +309,7 @@ func runOneSupervisorAttempt(ctx context.Context, req supervisorAttemptRequest) 
 		DiffDirty:              outcome.DiffDirty,
 		Diff:                   outcome.Diff,
 		DiffError:              outcome.DiffErr,
+		AttemptChangedFiles:    changedFiles,
 		Attempt:                req.Attempt,
 		AttemptsLeft:           attemptsLeft(req.Budget, req.Attempt),
 		PreflightResult:        preflightOutputs,

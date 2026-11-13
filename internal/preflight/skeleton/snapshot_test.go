@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -32,7 +33,7 @@ func TestSnapshotPreflightFilesKeepsGitVisibleFilesOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	snap, err := snapshotPreflightFiles(context.Background(), root, "", "")
+	snap, err := SnapshotWorktreeFiles(context.Background(), root, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,11 +63,53 @@ func TestSnapshotPreflightFilesUsesConfiguredGitBinary(t *testing.T) {
 	}
 	t.Setenv("PATH", "")
 
-	snap, err := snapshotPreflightFiles(context.Background(), root, "", gitBin)
+	snap, err := SnapshotWorktreeFiles(context.Background(), root, "", gitBin)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := snap["source.ts"]; !ok {
 		t.Fatal("configured Git binary must enumerate Git-visible files")
+	}
+}
+
+func TestChangedWorktreeFilesReportsCreatedModifiedAndDeletedFilesOnly(t *testing.T) {
+	root := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		if output, err := exec.CommandContext(t.Context(), "git", append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, output)
+		}
+	}
+	write := func(rel, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, rel), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git("init")
+	write("untouched.txt", "base")
+	write("modified.txt", "base")
+	write("deleted.txt", "base")
+	git("add", ".")
+	write("earlier-untracked.txt", "earlier")
+	before, err := SnapshotWorktreeFiles(t.Context(), root, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	write("modified.txt", "changed")
+	write("created.txt", "new")
+	if err := os.Remove(filepath.Join(root, "deleted.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	after, err := SnapshotWorktreeFiles(t.Context(), root, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := ChangedWorktreeFiles(before, after)
+	want := []string{"created.txt", "deleted.txt", "modified.txt"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("changed files = %v, want %v", got, want)
 	}
 }
